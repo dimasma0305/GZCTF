@@ -21,6 +21,22 @@
   *{box-sizing:border-box; margin:0; padding:0}
   html,body{height:100%; overflow:hidden; background:var(--bg); color:var(--ink);
     font-family:"Space Grotesk",system-ui,sans-serif}
+  html.scr-quake{animation:scrQuake 1.4s cubic-bezier(.36,.07,.19,.97)}
+  @keyframes scrQuake{
+    0%,100%{transform:translate3d(0,0,0) rotate(0)}
+    3%{transform:translate3d(-34px,-20px,0) rotate(-1.1deg)}
+    7%{transform:translate3d(32px,24px,0) rotate(.9deg)}
+    12%{transform:translate3d(-40px,14px,0) rotate(-1.3deg)}
+    18%{transform:translate3d(36px,-22px,0) rotate(1.1deg)}
+    25%{transform:translate3d(-28px,22px,0) rotate(-.8deg)}
+    33%{transform:translate3d(24px,-16px,0) rotate(.6deg)}
+    42%{transform:translate3d(-18px,12px,0) rotate(-.4deg)}
+    52%{transform:translate3d(14px,-10px,0)}
+    62%{transform:translate3d(-10px,7px,0)}
+    72%{transform:translate3d(7px,-5px,0)}
+    82%{transform:translate3d(-4px,3px,0)}
+    92%{transform:translate3d(2px,-1px,0)}
+  }
   html.scr-rumble{animation:scrRumble .12s linear infinite}
   @keyframes scrRumble{
     0%,100%{transform:translate3d(0,0,0)}
@@ -343,14 +359,21 @@ function unlockAudio(){
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     // Master chain: gain → compressor → destination (lets layered sounds stay punchy without clipping)
     const master = audioCtx.createGain();
-    master.gain.value = 1.1;
+    master.gain.value = 1.35;
     const comp = audioCtx.createDynamicsCompressor();
-    comp.threshold.value = -10;
+    comp.threshold.value = -12;
     comp.knee.value = 22;
     comp.ratio.value = 6;
     comp.attack.value = 0.002;
     comp.release.value = 0.22;
-    master.connect(comp); comp.connect(audioCtx.destination);
+    // Final brick-wall limiter so peaks never clip
+    const limiter = audioCtx.createDynamicsCompressor();
+    limiter.threshold.value = -1.5;
+    limiter.knee.value = 0;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.001;
+    limiter.release.value = 0.08;
+    master.connect(comp); comp.connect(limiter); limiter.connect(audioCtx.destination);
     masterOut = master;
   } catch(e){}
   toast.classList.add("hidden");
@@ -965,54 +988,69 @@ function fireLaser(x0, y0, x1, y1, color){
     beam.style.filter = `drop-shadow(0 0 12px ${color}) drop-shadow(0 0 28px ${color}) drop-shadow(0 0 64px ${color})`;
     field.appendChild(beam);
 
-    // reveal beam from source to target over 120ms (ultra-fast strike)
+    // reveal beam from source to target — slightly slower so the strike reads
     const len = Math.hypot(x1-x0, y1-y0);
     beam.style.strokeDasharray = `${len} ${len}`;
     beam.style.strokeDashoffset = `${len}`;
     glow.style.strokeDasharray = `${len} ${len}`;
     glow.style.strokeDashoffset = `${len}`;
     beam.animate([{strokeDashoffset:len},{strokeDashoffset:0}],
-      {duration:110, easing:"cubic-bezier(.2,.8,.1,1)", fill:"forwards"});
+      {duration:170, easing:"cubic-bezier(.2,.8,.1,1)", fill:"forwards"});
     glow.animate([{strokeDashoffset:len},{strokeDashoffset:0}],
-      {duration:110, easing:"cubic-bezier(.2,.8,.1,1)", fill:"forwards"}).onfinish = ()=>{
-      // 3. IMPACT — flash, shake, shatter, burst
-      flashScreen(color);
-      shakeScreen();
-      shatterAt(x1, y1, color);
-      impactBurst(x1, y1, color, "fb");
-      playShatter();
+      {duration:170, easing:"cubic-bezier(.2,.8,.1,1)", fill:"forwards"}).onfinish = ()=>{
+      // 2b. BEAM SUSTAIN — 220ms of pulsing thickening beam before the world breaks
+      beam.animate([
+        {strokeWidth:8},{strokeWidth:16, offset:0.3},
+        {strokeWidth:12, offset:0.6},{strokeWidth:22}
+      ], {duration:220, easing:"ease-in", fill:"forwards"});
+      glow.animate([
+        {strokeWidth:22, opacity:0.65},{strokeWidth:44, opacity:0.85, offset:0.5},{strokeWidth:56, opacity:1}
+      ], {duration:220, easing:"ease-in", fill:"forwards"});
 
-      beam.animate([{opacity:1},{opacity:0}],
-        {duration:520, easing:"ease-out", fill:"forwards"}).onfinish = ()=>beam.remove();
-      glow.animate([{opacity:0.65},{opacity:0}],
-        {duration:520, easing:"ease-out", fill:"forwards"}).onfinish = ()=>glow.remove();
-
-      // 4. AFTERMATH — lingering red wash + 2 aftershocks + final cleanup
-      const aftermath = document.createElement("div");
-      Object.assign(aftermath.style, {
-        position:"fixed", inset:"0", zIndex:4, pointerEvents:"none",
-        background:"radial-gradient(ellipse at center, transparent 30%, rgba(255,42,42,.35) 90%)",
-        mixBlendMode:"screen", opacity:"0.85"
-      });
-      document.body.appendChild(aftermath);
-      aftermath.animate([{opacity:0.85},{opacity:0}],
-        {duration:2800, easing:"ease-out", fill:"forwards"}).onfinish = ()=>aftermath.remove();
-
-      // Aftershock 1 at 900ms (smaller shake + deep sub boom)
       setTimeout(()=>{
-        const el = document.documentElement;
-        el.classList.remove("scr-shake"); void el.offsetWidth; el.classList.add("scr-shake");
-        setTimeout(()=>el.classList.remove("scr-shake"), 500);
-        playAftershock(0.8);
-      }, 900);
+        // ========= THE IMPACT =========
+        whiteOutScreen();             // full-screen pure WHITE flash — sensory shock
+        flashScreen(color);           // colored wash underneath
+        quakeScreen();                // VIOLENT shake (30px magnitude)
+        shatterAt(x1, y1, color);
+        megaShockwaves(x1, y1, color);
+        hqPunch();
+        debrisChunks(x1, y1, color);
+        impactBurst(x1, y1, color, "fb");
+        playShatter();
+        playBigImpact();
 
-      // Aftershock 2 at 2000ms (weaker)
-      setTimeout(()=>{
-        const el = document.documentElement;
-        el.classList.remove("scr-shake"); void el.offsetWidth; el.classList.add("scr-shake");
-        setTimeout(()=>el.classList.remove("scr-shake"), 400);
-        playAftershock(0.45);
-      }, 2000);
+        // Beam snaps + fades fast (the "recoil")
+        beam.animate([{opacity:1,strokeWidth:22},{opacity:0,strokeWidth:2}],
+          {duration:360, easing:"ease-out", fill:"forwards"}).onfinish = ()=>beam.remove();
+        glow.animate([{opacity:1},{opacity:0}],
+          {duration:360, easing:"ease-out", fill:"forwards"}).onfinish = ()=>glow.remove();
+
+        // 4. AFTERMATH — lingering red wash + 2 aftershocks
+        const aftermath = document.createElement("div");
+        Object.assign(aftermath.style, {
+          position:"fixed", inset:"0", zIndex:4, pointerEvents:"none",
+          background:"radial-gradient(ellipse at center, transparent 30%, rgba(255,42,42,.35) 90%)",
+          mixBlendMode:"screen", opacity:"0.85"
+        });
+        document.body.appendChild(aftermath);
+        aftermath.animate([{opacity:0.85},{opacity:0}],
+          {duration:2800, easing:"ease-out", fill:"forwards"}).onfinish = ()=>aftermath.remove();
+
+        setTimeout(()=>{
+          const el = document.documentElement;
+          el.classList.remove("scr-shake"); void el.offsetWidth; el.classList.add("scr-shake");
+          setTimeout(()=>el.classList.remove("scr-shake"), 500);
+          playAftershock(0.8);
+        }, 900);
+
+        setTimeout(()=>{
+          const el = document.documentElement;
+          el.classList.remove("scr-shake"); void el.offsetWidth; el.classList.add("scr-shake");
+          setTimeout(()=>el.classList.remove("scr-shake"), 400);
+          playAftershock(0.45);
+        }, 2000);
+      }, 220);
     };
   }, CHARGE_MS);
 }
@@ -1047,6 +1085,100 @@ function playAftershock(vol){
     src.connect(lp); lp.connect(ng); ng.connect(out);
     src.start(t0);
   } catch(e){}
+}
+
+function whiteOutScreen(){
+  // Pure white full-screen flash — highest z so it covers everything
+  const w = document.createElement("div");
+  Object.assign(w.style, {
+    position:"fixed", inset:"0", zIndex:90, pointerEvents:"none",
+    background:"#ffffff", opacity:"0"
+  });
+  document.body.appendChild(w);
+  w.animate([
+    {opacity:0, offset:0},
+    {opacity:1, offset:0.03},
+    {opacity:1, offset:0.22},
+    {opacity:0.55, offset:0.45},
+    {opacity:0.18, offset:0.75},
+    {opacity:0, offset:1}
+  ], {duration:700, easing:"cubic-bezier(.3,0,.2,1)", fill:"forwards"}).onfinish = ()=>w.remove();
+}
+
+function quakeScreen(){
+  const el = document.documentElement;
+  el.classList.remove("scr-shake"); el.classList.remove("scr-quake"); void el.offsetWidth;
+  el.classList.add("scr-quake");
+  setTimeout(()=>el.classList.remove("scr-quake"), 1450);
+}
+
+function megaShockwaves(x, y, color){
+  const maxR = Math.hypot(window.innerWidth, window.innerHeight);
+  for (let i=0;i<5;i++){
+    const ring = document.createElementNS(SVG_NS, "circle");
+    ring.setAttribute("cx", x); ring.setAttribute("cy", y);
+    ring.setAttribute("r", 6);
+    ring.setAttribute("fill", "none");
+    ring.setAttribute("stroke", i === 0 ? "#ffffff" : color);
+    const w0 = 5 - i*0.7;
+    ring.setAttribute("stroke-width", w0);
+    ring.style.filter = `drop-shadow(0 0 18px ${color}) drop-shadow(0 0 40px ${color})`;
+    field.appendChild(ring);
+    ring.animate([
+      {r:6, strokeOpacity:1, strokeWidth:w0},
+      {r:maxR*0.75, strokeOpacity:0, strokeWidth:0.3}
+    ], {duration: 1400 - i*90, delay: i*70, easing:"cubic-bezier(.1,.8,.3,1)", fill:"forwards"})
+      .onfinish = ()=>ring.remove();
+  }
+}
+
+function hqPunch(){
+  const hq = document.getElementById("hq");
+  if (!hq) return;
+  const base = "translate(-50%,-50%)";
+  hq.animate([
+    {transform:`${base} scale(1)`},
+    {transform:`${base} scale(0.72) rotate(-3deg)`, offset:0.08},
+    {transform:`${base} scale(1.28) rotate(2deg)`, offset:0.22},
+    {transform:`${base} scale(0.9) rotate(-1deg)`, offset:0.4},
+    {transform:`${base} scale(1.12)`, offset:0.6},
+    {transform:`${base} scale(0.96)`, offset:0.8},
+    {transform:`${base} scale(1)`}
+  ], {duration:1100, easing:"cubic-bezier(.3,1.4,.5,1)", fill:"forwards"});
+}
+
+function debrisChunks(x, y, color){
+  const chunks = 34;
+  for (let i=0;i<chunks;i++){
+    const ang = (i/chunks)*Math.PI*2 + (Math.random()-0.5)*0.45;
+    const speed = 220 + Math.random()*520;
+    const lifetime = 900 + Math.random()*700;
+    const rot = (Math.random()-0.5)*900;
+
+    const poly = document.createElementNS(SVG_NS, "polygon");
+    const baseR = 3 + Math.random()*5;
+    const pts = [];
+    const sides = 3 + Math.floor(Math.random()*3);
+    for (let s=0;s<sides;s++){
+      const a = (s/sides)*Math.PI*2;
+      const rr = baseR*(0.55 + Math.random()*0.55);
+      pts.push(`${Math.cos(a)*rr},${Math.sin(a)*rr}`);
+    }
+    poly.setAttribute("points", pts.join(" "));
+    poly.setAttribute("fill", Math.random() > 0.3 ? color : "#ffffff");
+    poly.style.filter = `drop-shadow(0 0 6px ${color})`;
+    poly.setAttribute("transform", `translate(${x},${y}) rotate(0)`);
+    field.appendChild(poly);
+
+    const endX = x + Math.cos(ang)*speed;
+    const endY = y + Math.sin(ang)*speed + Math.random()*60;  // slight gravity
+    poly.animate([
+      {transform:`translate(${x},${y}) rotate(0)`, opacity:1},
+      {transform:`translate(${(x+endX)/2},${(y+endY)/2 - 30}) rotate(${rot*0.5}deg)`, opacity:0.9, offset:0.5},
+      {transform:`translate(${endX},${endY}) rotate(${rot}deg)`, opacity:0}
+    ], {duration:lifetime, easing:"cubic-bezier(.3,.7,.5,1)", fill:"forwards"})
+      .onfinish = ()=>poly.remove();
+  }
 }
 
 function flashScreen(color){
@@ -1126,6 +1258,109 @@ function shatterAt(x, y, color){
     {duration:700, easing:"ease-out", fill:"forwards"}).onfinish = ()=>hub.remove();
 
   setTimeout(()=>svg.remove(), 2600);
+}
+
+/* ============================================================
+   Cinematic impact boom: initial crack + 4-layer sub drop + saturated
+   body + metallic clang + long rumble tail + transient click.
+   Layered with playShatter() for maximum punch.
+   ============================================================ */
+function playBigImpact(){
+  if (!audioCtx) return;
+  const t0 = audioCtx.currentTime;
+  const sr = audioCtx.sampleRate;
+  const out = audioOut();
+
+  // 1. TRANSIENT CLICK — sharp square attack (gunshot crack)
+  const click = audioCtx.createOscillator();
+  const clickG = audioCtx.createGain();
+  click.type = "square";
+  click.frequency.setValueAtTime(320, t0);
+  click.frequency.exponentialRampToValueAtTime(55, t0 + 0.035);
+  clickG.gain.setValueAtTime(1.2, t0);
+  clickG.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.05);
+  click.connect(clickG); clickG.connect(out);
+  click.start(t0); click.stop(t0 + 0.06);
+
+  // 2. HIGH-FREQ CRACK NOISE — 8ms brilliant noise spike
+  try {
+    const clen = Math.floor(sr * 0.025);
+    const cbuf = audioCtx.createBuffer(1, clen, sr);
+    const cd = cbuf.getChannelData(0);
+    for (let i=0;i<clen;i++) cd[i] = (Math.random()*2-1) * Math.pow(1-i/clen, 1.8);
+    const cs = audioCtx.createBufferSource(); cs.buffer = cbuf;
+    const chp = audioCtx.createBiquadFilter();
+    chp.type = "highpass"; chp.frequency.value = 3500;
+    const cg = audioCtx.createGain(); cg.gain.value = 1.3;
+    cs.connect(chp); chp.connect(cg); cg.connect(out);
+    cs.start(t0);
+  } catch(e){}
+
+  // 3. 4-LAYER SUB DROP — stacked pitch-falling sines (the FELT low end)
+  [[140,22],[100,18],[70,15],[45,12]].forEach(([f0,f1], idx)=>{
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = "sine";
+    o.frequency.setValueAtTime(f0, t0);
+    o.frequency.exponentialRampToValueAtTime(f1, t0 + 0.9);
+    const vol = 1.0 - idx*0.08;
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(vol, t0 + 0.004);
+    g.gain.linearRampToValueAtTime(vol*0.6, t0 + 0.35);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.4);
+    o.connect(g); g.connect(out);
+    o.start(t0); o.stop(t0 + 1.5);
+  });
+
+  // 4. SATURATED BODY — sawtooth dropping 260→38 through a tanh waveshaper
+  const body = audioCtx.createOscillator();
+  const bg = audioCtx.createGain();
+  body.type = "sawtooth";
+  body.frequency.setValueAtTime(260, t0);
+  body.frequency.exponentialRampToValueAtTime(38, t0 + 0.55);
+  bg.gain.setValueAtTime(0, t0);
+  bg.gain.linearRampToValueAtTime(0.9, t0 + 0.006);
+  bg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.95);
+  const shaper = audioCtx.createWaveShaper();
+  const curve = new Float32Array(4096);
+  for (let i=0;i<4096;i++){
+    const x = (i/4095)*2 - 1;
+    curve[i] = Math.tanh(x * 4);                 // soft saturation
+  }
+  shaper.curve = curve; shaper.oversample = "4x";
+  body.connect(bg); bg.connect(shaper); shaper.connect(out);
+  body.start(t0); body.stop(t0 + 1.0);
+
+  // 5. METALLIC CLANG — two detuned triangles briefly
+  [180, 233].forEach(f => {
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = "triangle";
+    o.frequency.value = f;
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(0.4, t0 + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.42);
+    o.connect(g); g.connect(out);
+    o.start(t0); o.stop(t0 + 0.45);
+  });
+
+  // 6. LONG RUMBLE TAIL — lowpass noise sweeping down over 1.8s
+  try {
+    const tlen = Math.floor(sr * 2.0);
+    const tbuf = audioCtx.createBuffer(1, tlen, sr);
+    const td = tbuf.getChannelData(0);
+    for (let i=0;i<tlen;i++) td[i] = (Math.random()*2-1) * Math.pow(1-i/tlen, 1.3);
+    const ts = audioCtx.createBufferSource(); ts.buffer = tbuf;
+    const tlp = audioCtx.createBiquadFilter();
+    tlp.type = "lowpass"; tlp.Q.value = 1.5;
+    tlp.frequency.setValueAtTime(900, t0);
+    tlp.frequency.exponentialRampToValueAtTime(70, t0 + 1.6);
+    const tg = audioCtx.createGain();
+    tg.gain.setValueAtTime(1.2, t0);
+    tg.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.9);
+    ts.connect(tlp); tlp.connect(tg); tg.connect(out);
+    ts.start(t0);
+  } catch(e){}
 }
 
 function playLaser(chargeSec){
