@@ -199,8 +199,8 @@
 
   /* First blood — radial wash (center) + stencil strip (top) */
   .fbanner{position:fixed; inset:0; z-index:40; pointer-events:none; opacity:0}
-  .fbanner.on{animation:fbanner 2.6s ease-out forwards}
-  @keyframes fbanner{0%{opacity:0}15%{opacity:1}80%{opacity:1}100%{opacity:0}}
+  .fbanner.on{animation:fbanner 10s ease-out forwards}
+  @keyframes fbanner{0%{opacity:0}3%{opacity:1}92%{opacity:1}100%{opacity:0}}
   .fbanner .bg{position:absolute; inset:0; background:radial-gradient(circle at center,rgba(255,42,42,.45),rgba(255,42,42,.05) 55%,transparent 80%)}
   .fbanner .strip{
     position:absolute; left:50%; top:calc(var(--header-h) + 12px); transform:translateX(-50%);
@@ -208,12 +208,12 @@
     font-family:"JetBrains Mono",monospace; font-weight:700; text-transform:uppercase;
     border:2px solid #0b0b11;
     box-shadow:0 0 40px rgba(255,42,42,.75), 0 0 80px rgba(255,42,42,.35);
-    animation:fstrip 2.6s ease-out both;
+    animation:fstrip 10s ease-out both;
   }
   @keyframes fstrip{
     0%{transform:translate(-50%,-140%); opacity:0}
-    8%{transform:translate(-50%,0); opacity:1}
-    82%{transform:translate(-50%,0); opacity:1}
+    3%{transform:translate(-50%,0); opacity:1}
+    92%{transform:translate(-50%,0); opacity:1}
     100%{transform:translate(-50%,-140%); opacity:0}
   }
   .fbanner .strip .tag{
@@ -740,7 +740,7 @@ function impactBurst(x, y, color, type){
    First-blood LASER: charge-up → beam → screen shake + shatter.
    ============================================================ */
 function fireLaser(x0, y0, x1, y1, color){
-  const CHARGE_MS = 2800;   // dread-build: long + slow
+  const CHARGE_MS = 7000;   // dread-build: 7s charge + ~3s aftermath = ~10s total
   playLaser(CHARGE_MS/1000);
 
   const cleanup = [];
@@ -815,25 +815,23 @@ function fireLaser(x0, y0, x1, y1, color){
     ], {duration: CHARGE_MS - delay, delay, easing:"cubic-bezier(.4,0,.2,1)", fill:"forwards"});
   }
 
-  // D. Orbiting particles getting sucked in — 44 of them
-  for (let i=0;i<44;i++){
-    setTimeout(()=>{
-      const ang = Math.random()*Math.PI*2;
-      const dist = 90 + Math.random()*160;
-      const sx = x0 + Math.cos(ang)*dist, sy = y0 + Math.sin(ang)*dist;
-      const sp = document.createElementNS(SVG_NS, "circle");
-      sp.setAttribute("cx", sx); sp.setAttribute("cy", sy);
-      sp.setAttribute("r", 1.4 + Math.random()*1.8);
-      sp.setAttribute("fill", color);
-      sp.style.filter = `drop-shadow(0 0 6px ${color})`;
-      field.appendChild(sp);
-      sp.animate([
-        {cx:sx, cy:sy, opacity:0.9},
-        {cx:x0+Math.cos(ang)*12, cy:y0+Math.sin(ang)*12, opacity:0.2}
-      ], {duration: 420 + Math.random()*280, easing:"cubic-bezier(.55,0,.9,1)", fill:"forwards"})
-        .onfinish = ()=>sp.remove();
-    }, i * (CHARGE_MS/50));
-  }
+  // D. Orbiting particles getting sucked in — continuous emission
+  const particleTimer = setInterval(()=>{
+    const ang = Math.random()*Math.PI*2;
+    const dist = 100 + Math.random()*200;
+    const sx = x0 + Math.cos(ang)*dist, sy = y0 + Math.sin(ang)*dist;
+    const sp = document.createElementNS(SVG_NS, "circle");
+    sp.setAttribute("cx", sx); sp.setAttribute("cy", sy);
+    sp.setAttribute("r", 1.4 + Math.random()*1.8);
+    sp.setAttribute("fill", color);
+    sp.style.filter = `drop-shadow(0 0 6px ${color})`;
+    field.appendChild(sp);
+    sp.animate([
+      {cx:sx, cy:sy, opacity:0.9},
+      {cx:x0+Math.cos(ang)*12, cy:y0+Math.sin(ang)*12, opacity:0.2}
+    ], {duration: 500 + Math.random()*360, easing:"cubic-bezier(.55,0,.9,1)", fill:"forwards"})
+      .onfinish = ()=>sp.remove();
+  }, 90);
 
   // E. Crackle arcs — intensifies as charge nears completion
   const arcStart = performance.now();
@@ -887,14 +885,65 @@ function fireLaser(x0, y0, x1, y1, color){
   };
   scheduleWarn();
 
-  // G. Pre-impact rumble — starts at 55% of charge and gradually escalates
+  // G. Pre-impact rumble — starts at 72% of charge (last ~2s)
   setTimeout(()=>{
     const el = document.documentElement;
     if (!el.classList.contains("scr-shake")) el.classList.add("scr-rumble");
-  }, Math.floor(CHARGE_MS * 0.55));
+  }, Math.floor(CHARGE_MS * 0.72));
+
+  // H. INCOMING warning banner — slides in at 30% of charge, pulses until impact
+  setTimeout(()=>{
+    const warn = document.createElement("div");
+    Object.assign(warn.style, {
+      position:"fixed", left:"50%", top:"38%", transform:"translate(-50%,-50%)",
+      zIndex:45, pointerEvents:"none",
+      padding:"14px 32px",
+      background:"rgba(255,42,42,.15)",
+      border:"2px solid #ff2a2a",
+      color:"#ff2a2a",
+      fontFamily:'"JetBrains Mono",monospace', fontWeight:"700",
+      fontSize:"clamp(14px, 2vw, 20px)", letterSpacing:".3em", textTransform:"uppercase",
+      textShadow:"0 0 16px #ff2a2a",
+      boxShadow:"0 0 40px rgba(255,42,42,.5), inset 0 0 30px rgba(255,42,42,.25)",
+      opacity:"0"
+    });
+    warn.innerHTML = "▼&nbsp;&nbsp;INCOMING STRIKE&nbsp;&nbsp;▼";
+    document.body.appendChild(warn);
+    cleanup.push(warn);
+    warn.animate([
+      {opacity:0, transform:"translate(-50%,-50%) scale(.7)"},
+      {opacity:1, transform:"translate(-50%,-50%) scale(1)", offset:0.1},
+      {opacity:0.6, transform:"translate(-50%,-50%) scale(1)", offset:0.2},
+      {opacity:1, transform:"translate(-50%,-50%) scale(1.04)", offset:0.35},
+      {opacity:0.6, transform:"translate(-50%,-50%) scale(1)", offset:0.5},
+      {opacity:1, transform:"translate(-50%,-50%) scale(1.08)", offset:0.7},
+      {opacity:0.4, transform:"translate(-50%,-50%) scale(1)", offset:0.85},
+      {opacity:1, transform:"translate(-50%,-50%) scale(1.15)", offset:0.95},
+      {opacity:0, transform:"translate(-50%,-50%) scale(1.4)"}
+    ], {duration: CHARGE_MS * 0.7, fill:"forwards", easing:"ease-out"});
+  }, Math.floor(CHARGE_MS * 0.3));
+
+  // I. Horizontal warning scan bars sweeping top→bottom (3x)
+  for (let i=0;i<3;i++){
+    setTimeout(()=>{
+      const bar = document.createElement("div");
+      Object.assign(bar.style, {
+        position:"fixed", left:"0", right:"0", top:"-50px",
+        height:"50px", zIndex:6, pointerEvents:"none",
+        background:"linear-gradient(to bottom, transparent, rgba(255,42,42,.55), transparent)",
+        boxShadow:"0 0 50px rgba(255,42,42,.7)",
+        opacity:"0.85"
+      });
+      document.body.appendChild(bar);
+      bar.animate([
+        {top:"-50px"}, {top: window.innerHeight+"px"}
+      ], {duration: 900 - i*150, easing:"linear", fill:"forwards"}).onfinish = ()=>bar.remove();
+    }, 1200 + i*1600);
+  }
 
   setTimeout(()=>{
     clearInterval(arcTimer);
+    clearInterval(particleTimer);
     cleanup.forEach(el => el.remove());
     document.documentElement.classList.remove("scr-rumble");
 
@@ -937,8 +986,67 @@ function fireLaser(x0, y0, x1, y1, color){
         {duration:520, easing:"ease-out", fill:"forwards"}).onfinish = ()=>beam.remove();
       glow.animate([{opacity:0.65},{opacity:0}],
         {duration:520, easing:"ease-out", fill:"forwards"}).onfinish = ()=>glow.remove();
+
+      // 4. AFTERMATH — lingering red wash + 2 aftershocks + final cleanup
+      const aftermath = document.createElement("div");
+      Object.assign(aftermath.style, {
+        position:"fixed", inset:"0", zIndex:4, pointerEvents:"none",
+        background:"radial-gradient(ellipse at center, transparent 30%, rgba(255,42,42,.35) 90%)",
+        mixBlendMode:"screen", opacity:"0.85"
+      });
+      document.body.appendChild(aftermath);
+      aftermath.animate([{opacity:0.85},{opacity:0}],
+        {duration:2800, easing:"ease-out", fill:"forwards"}).onfinish = ()=>aftermath.remove();
+
+      // Aftershock 1 at 900ms (smaller shake + deep sub boom)
+      setTimeout(()=>{
+        const el = document.documentElement;
+        el.classList.remove("scr-shake"); void el.offsetWidth; el.classList.add("scr-shake");
+        setTimeout(()=>el.classList.remove("scr-shake"), 500);
+        playAftershock(0.8);
+      }, 900);
+
+      // Aftershock 2 at 2000ms (weaker)
+      setTimeout(()=>{
+        const el = document.documentElement;
+        el.classList.remove("scr-shake"); void el.offsetWidth; el.classList.add("scr-shake");
+        setTimeout(()=>el.classList.remove("scr-shake"), 400);
+        playAftershock(0.45);
+      }, 2000);
     };
   }, CHARGE_MS);
+}
+
+function playAftershock(vol){
+  if (!audioCtx) return;
+  const t0 = audioCtx.currentTime;
+  const out = audioOut();
+  // Sub boom
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = "sine";
+  o.frequency.setValueAtTime(70, t0);
+  o.frequency.exponentialRampToValueAtTime(28, t0 + 0.3);
+  g.gain.setValueAtTime(0, t0);
+  g.gain.linearRampToValueAtTime(vol, t0 + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.45);
+  o.connect(g); g.connect(out);
+  o.start(t0); o.stop(t0 + 0.5);
+  // Low rumble noise
+  try {
+    const sr = audioCtx.sampleRate;
+    const blen = Math.floor(sr * 0.4);
+    const buf = audioCtx.createBuffer(1, blen, sr);
+    const data = buf.getChannelData(0);
+    for (let i=0;i<blen;i++) data[i] = (Math.random()*2-1) * Math.pow(1-i/blen, 1.8);
+    const src = audioCtx.createBufferSource(); src.buffer = buf;
+    const lp = audioCtx.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=180;
+    const ng = audioCtx.createGain();
+    ng.gain.setValueAtTime(vol*0.6, t0);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.4);
+    src.connect(lp); lp.connect(ng); ng.connect(out);
+    src.start(t0);
+  } catch(e){}
 }
 
 function flashScreen(color){
@@ -1123,6 +1231,35 @@ function playLaser(chargeSec){
     ns.connect(bp); bp.connect(ng); ng.connect(out);
     ns.start(t0);
   } catch(e){}
+
+  // ════════ ALARM SIREN — rising-falling beeps during last 45% (incoming warning) ════════
+  // Beeps accelerate: start every 0.5s → every 0.12s
+  const sirenStart = t0 + C*0.55;
+  let beepTime = sirenStart;
+  let beepIdx = 0;
+  while (beepTime < t0 + C - 0.1){
+    const progress = (beepTime - sirenStart) / (C*0.45);
+    const beepDur = 0.12;
+    const beep = audioCtx.createOscillator();
+    const bg = audioCtx.createGain();
+    beep.type = "sawtooth";
+    const bf0 = 700 + progress*400;
+    const bf1 = 1100 + progress*800;
+    beep.frequency.setValueAtTime(bf0, beepTime);
+    beep.frequency.linearRampToValueAtTime(bf1, beepTime + beepDur*0.5);
+    beep.frequency.linearRampToValueAtTime(bf0, beepTime + beepDur);
+    const bvol = 0.18 + progress*0.28;
+    bg.gain.setValueAtTime(0, beepTime);
+    bg.gain.linearRampToValueAtTime(bvol, beepTime + 0.01);
+    bg.gain.linearRampToValueAtTime(bvol, beepTime + beepDur - 0.02);
+    bg.gain.exponentialRampToValueAtTime(0.0001, beepTime + beepDur);
+    beep.connect(bg); bg.connect(out);
+    beep.start(beepTime); beep.stop(beepTime + beepDur + 0.02);
+    // Interval shrinks from 500ms to 120ms
+    const interval = 0.5 - progress*0.38;
+    beepTime += interval;
+    beepIdx++;
+  }
 
   // ════════ DREAD THUNKS — 5 bassy hits during charge, build anticipation ════════
   // Timing: 0.10, 0.28, 0.50, 0.72, 0.88 of C
