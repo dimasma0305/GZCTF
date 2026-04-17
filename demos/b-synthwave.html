@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Demo B · Synthwave</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg1:#120027; --bg2:#3a004c; --horizon:#ff2ec0; --sun:#ff8a00;
+    --pink:#ff2ec0; --cyan:#00f0ff; --orange:#ff8a00; --white:#fff3fb;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg1);color:var(--white);font-family:"Rajdhani",system-ui,sans-serif}
+  body{
+    background:
+      radial-gradient(ellipse 80% 55% at 50% 42%, rgba(255,46,192,.55), transparent 70%),
+      linear-gradient(to bottom, #090016 0%, #1b0038 35%, #3a004c 52%, #120027 55%, #090015 100%);
+  }
+
+  /* sun behind HQ */
+  .sun{
+    position:fixed; left:50%; top:40%; transform:translate(-50%,-50%);
+    width:480px; height:480px; border-radius:50%;
+    background:linear-gradient(to bottom, var(--sun) 0%, var(--pink) 50%, transparent 80%);
+    filter:blur(2px); z-index:1;
+  }
+  .sun::before{
+    content:""; position:absolute; inset:0;
+    background:
+      repeating-linear-gradient(to bottom, transparent 0 30px, rgba(0,0,0,.6) 30px 36px);
+    mask:linear-gradient(to bottom, transparent 40%, black 50%, black 95%, transparent);
+    -webkit-mask:linear-gradient(to bottom, transparent 40%, black 50%, black 95%, transparent);
+  }
+
+  /* grid floor perspective */
+  .floor{
+    position:fixed; left:0; right:0; bottom:0; height:50vh; z-index:2;
+    perspective:460px; overflow:hidden;
+  }
+  .floor::before{
+    content:""; position:absolute; inset:0;
+    background-image:
+      linear-gradient(rgba(255,46,192,.65) 2px, transparent 2px),
+      linear-gradient(90deg, rgba(255,46,192,.65) 2px, transparent 2px);
+    background-size:64px 64px;
+    transform:rotateX(62deg) translateZ(-10px);
+    transform-origin:top;
+    animation:floorScroll 3.5s linear infinite;
+  }
+  @keyframes floorScroll{to{background-position:0 64px, 64px 0}}
+  .floor::after{
+    content:""; position:absolute; left:0; right:0; top:0; height:80px;
+    background:linear-gradient(to bottom, var(--bg1), transparent);
+  }
+
+  /* scanlines */
+  body::after{content:""; position:fixed; inset:0; pointer-events:none; z-index:50;
+    background:repeating-linear-gradient(to bottom, transparent 0 3px, rgba(0,0,0,.15) 3px 4px)}
+
+  .title-bar{
+    position:fixed; top:20px; left:0; right:0; text-align:center; z-index:30;
+    font-family:"Orbitron",sans-serif; font-weight:500; font-size:13px; letter-spacing:.55em;
+    color:var(--cyan); text-shadow:0 0 12px var(--cyan);
+  }
+
+  /* HQ */
+  .hq{
+    position:fixed; left:50%; top:40%; transform:translate(-50%,-50%);
+    z-index:12; text-align:center; pointer-events:none;
+  }
+  .hq h1{
+    margin:0; font-family:"Orbitron",sans-serif; font-weight:900; font-size:120px;
+    letter-spacing:.04em; line-height:.95;
+    color:var(--white);
+    text-shadow:
+      -3px 0 0 rgba(255,46,192,.85),
+      3px 0 0 rgba(0,240,255,.85),
+      0 0 28px rgba(255,46,192,.7),
+      0 0 60px rgba(0,240,255,.5);
+  }
+  .hq h2{
+    margin:10px 0 0; font-family:"Orbitron",sans-serif; font-weight:500; font-size:22px;
+    letter-spacing:.5em; color:var(--pink);
+    text-shadow:0 0 14px var(--pink);
+  }
+  .hq .under{margin:22px auto 0; width:200px; height:3px; background:linear-gradient(to right,transparent,var(--cyan),transparent); box-shadow:0 0 18px var(--cyan)}
+
+  /* teams */
+  .team{
+    position:absolute; transform:translate(-50%,-50%);
+    color:var(--cyan); font-family:"Rajdhani",sans-serif; font-weight:700;
+    font-size:14px; letter-spacing:.15em; text-transform:uppercase;
+    text-shadow:0 0 6px var(--cyan), 0 1px 0 var(--pink);
+    text-align:center;
+  }
+  .team .dot{width:14px; height:14px; border-radius:50%; background:var(--pink); box-shadow:0 0 12px var(--pink); margin:0 auto 6px}
+  .team.outline{color:var(--white); text-shadow:0 0 4px var(--cyan), -1px 0 var(--pink)}
+
+  /* leaderboard bottom-left */
+  .lb{
+    position:fixed; left:24px; bottom:24px; z-index:20;
+    width:280px; padding:18px 20px;
+    background:linear-gradient(135deg, rgba(255,46,192,.15), rgba(0,240,255,.08));
+    border:2px solid var(--pink); box-shadow:0 0 30px rgba(255,46,192,.4), inset 0 0 30px rgba(255,46,192,.1);
+  }
+  .lb h3{margin:0 0 14px; font-family:"Orbitron",sans-serif; font-size:11px; letter-spacing:.45em; color:var(--cyan); text-shadow:0 0 10px var(--cyan)}
+  .lb .row{display:grid; grid-template-columns:36px 1fr auto; padding:6px 0; font-family:"Rajdhani",sans-serif; font-weight:700; border-bottom:1px solid rgba(255,46,192,.25); font-size:15px; letter-spacing:.05em}
+  .lb .row:last-child{border-bottom:0}
+  .lb .rk{color:var(--orange); text-shadow:0 0 8px var(--orange); font-family:"Orbitron",sans-serif; font-weight:900}
+  .lb .row:nth-child(2) .rk{font-size:22px}
+  .lb .nm{color:var(--white)}
+  .lb .sc{color:var(--cyan); text-shadow:0 0 6px var(--cyan); font-family:"Orbitron",sans-serif}
+
+  /* ticker bottom */
+  .ticker{
+    position:fixed; left:0; right:0; bottom:0; height:42px; z-index:30;
+    background:linear-gradient(to right, rgba(255,46,192,.9), rgba(255,138,0,.9));
+    overflow:hidden; display:flex; align-items:center;
+    font-family:"Orbitron",sans-serif; font-weight:500; font-size:12px; letter-spacing:.35em;
+    color:#100017;
+  }
+  .ticker .label{padding:0 18px; background:#100017; color:var(--cyan); height:100%; display:flex; align-items:center; text-shadow:0 0 8px var(--cyan)}
+  .ticker .scroll{white-space:nowrap; animation:scroll 40s linear infinite; padding-left:40px}
+  @keyframes scroll{from{transform:translateX(100%)}to{transform:translateX(-100%)}}
+
+  /* attacker + particles */
+  svg.field{position:fixed; inset:0; width:100%; height:100%; z-index:15; pointer-events:none}
+  .attacker{position:absolute; transform:translate(-50%,-50%); pointer-events:none; z-index:18; animation:popinB .25s cubic-bezier(.34,1.56,.64,1), fadeoutB .5s ease-in 2.5s forwards; text-align:center}
+  @keyframes popinB{from{transform:translate(-50%,-50%) scale(0) rotate(-30deg)}}
+  @keyframes fadeoutB{to{opacity:0}}
+  .attacker .avatar{
+    width:70px; height:70px; border-radius:50%; margin:0 auto;
+    background:linear-gradient(135deg, var(--pink), var(--cyan));
+    display:flex; align-items:center; justify-content:center; font-size:32px;
+    box-shadow:0 0 30px currentColor, inset 0 0 18px rgba(0,0,0,.4);
+    border:3px solid currentColor;
+  }
+  .attacker .lbl{margin-top:8px; font-family:"Orbitron",sans-serif; font-weight:700; font-size:12px; letter-spacing:.15em; text-transform:uppercase; text-shadow:0 0 8px currentColor}
+  .attacker .chall{margin-top:2px; font-family:"Rajdhani",sans-serif; font-weight:500; font-size:11px; letter-spacing:.1em; opacity:.85}
+  .attacker .ring{position:absolute; inset:-20px; border:3px solid currentColor; border-radius:50%; animation:ringOutB .8s ease-out forwards}
+  @keyframes ringOutB{to{transform:scale(2.5); opacity:0}}
+
+  /* first blood */
+  .fbanner{position:fixed; inset:0; z-index:60; pointer-events:none; opacity:0; display:flex; align-items:center; justify-content:center}
+  .fbanner.on{animation:fbB 3s ease-out forwards}
+  @keyframes fbB{0%{opacity:0}10%{opacity:1}85%{opacity:1}100%{opacity:0}}
+  .fbanner::before{content:""; position:absolute; inset:0; background:repeating-linear-gradient(45deg, rgba(255,46,192,.35) 0 40px, rgba(0,240,255,.3) 40px 80px); mix-blend-mode:screen}
+  .fbanner .tag{position:relative; background:#0a0013; border:4px solid var(--pink); padding:30px 60px; text-align:center; box-shadow:0 0 80px var(--pink), 0 0 120px var(--cyan)}
+  .fbanner h1{margin:0; font-family:"Orbitron",sans-serif; font-weight:900; font-size:64px; letter-spacing:.12em;
+    color:var(--white); text-shadow:-4px 0 var(--pink), 4px 0 var(--cyan), 0 0 30px var(--pink)}
+  .fbanner p{margin:8px 0 0; font-family:"Orbitron",sans-serif; font-weight:500; font-size:18px; letter-spacing:.45em; color:var(--cyan); text-shadow:0 0 10px var(--cyan)}
+</style>
+</head>
+<body>
+<div class="sun"></div>
+<div class="floor"></div>
+
+<div class="title-bar">C · J · 2 · 0 · 2 · 5 &nbsp;//&nbsp; PELAJAR · FINALS &nbsp;//&nbsp; LIVE</div>
+
+<div class="hq">
+  <h1>CJ2025</h1>
+  <h2>PELAJAR · FINALS</h2>
+  <div class="under"></div>
+</div>
+
+<div class="lb">
+  <h3>LEADERBOARD</h3>
+  <div id="rows"></div>
+</div>
+
+<div class="ticker">
+  <div class="label">LIVE</div>
+  <div class="scroll">ROUND 02 //////// T-23:45 //////// 47 TEAMS ONLINE //////// BIJI BY ROOT-SKSD (+500) //////// BABU-FORMAT SOLVED BY BINARY-SHOCK //////// WHITE-NIGHTS FIRST BLOOD: NULLBYTE-ID //////// ALL SYSTEMS NOMINAL</div>
+</div>
+
+<svg class="field" id="field"></svg>
+
+<div class="fbanner" id="fbanner">
+  <div class="tag">
+    <h1>FIRST BLOOD</h1>
+    <p id="fbtick">PWN · BABU-FORMAT · ROOT-SKSD</p>
+  </div>
+</div>
+
+<script>
+const TEAMS = [
+  ["ROOT-SKSD",4200],["BINARY-SHOCK",3980],["NULLBYTE-ID",3740],
+  ["SEGFAULT",3500],["CTRL-Z",3200],["0X4D4",2900],["HEAPOVERFLOW",2710],
+  ["BLUEHAWKS",2580],["SHELL-STORM",2410],["KERNEL-PANIC",2280]
+];
+const CHALLS=[["PWN","BABU-FORMAT"],["WEB","BIJI"],["WEB","WHITE-NIGHTS"],["CRYPTO","VIRTUOSO"],["FORENSICS","BAD-OPSEC"]];
+const rows = document.getElementById("rows"), field=document.getElementById("field"), fb=document.getElementById("fbanner");
+rows.innerHTML = TEAMS.slice(0,5).map((t,i)=>`<div class="row"><span class="rk">${String(i+1).padStart(2,"0")}</span><span class="nm">${t[0]}</span><span class="sc">${t[1]}</span></div>`).join("");
+
+const cx = ()=>window.innerWidth/2;
+const cy = ()=>window.innerHeight*0.4;
+
+// scatter teams radial around HQ
+function placeTeams(){
+  const n=10;
+  TEAMS.slice(0,n).forEach((t,i)=>{
+    const a = (i/n)*Math.PI*2 - Math.PI/2;
+    const r = Math.min(window.innerWidth,window.innerHeight)*0.36;
+    const x=cx()+r*Math.cos(a), y=cy()+r*Math.sin(a);
+    const el=document.createElement("div"); el.className="team"; el.dataset.team=t[0];
+    el.style.left=x+"px"; el.style.top=y+"px";
+    el.innerHTML=`<div class="dot"></div>${t[0]}`;
+    document.body.appendChild(el);
+  });
+}
+placeTeams();
+
+function colorFor(type){return type==="fb"?"#ffd34a":type==="ok"?"#00f0ff":type==="amber"?"#ff8a00":"#ff6262"}
+function spawnAttacker(evt, src){
+  const color = colorFor(evt.type);
+  const a=document.createElement("div");
+  a.className="attacker"; a.style.color=color;
+  a.style.left=src.x+"px"; a.style.top=src.y+"px";
+  a.innerHTML=`<div class="ring"></div><div class="avatar">⚡</div><div class="lbl">${evt.team}</div><div class="chall">${evt.chall[0]}/${evt.chall[1]}</div>`;
+  document.body.appendChild(a);
+  setTimeout(()=>a.remove(),3000);
+  for(let i=0;i<8;i++) setTimeout(()=>laser(src.x,src.y,cx(),cy(),color), i*160);
+}
+function laser(x0,y0,x1,y1,color){
+  // laser beam with bloom
+  const g = document.createElementNS("http://www.w3.org/2000/svg","g");
+  const filter = `<filter id="b${Math.random().toString(36).slice(2,6)}"><feGaussianBlur stdDeviation="4"/></filter>`;
+  const line = document.createElementNS("http://www.w3.org/2000/svg","line");
+  line.setAttribute("x1",x0); line.setAttribute("y1",y0); line.setAttribute("x2",x0); line.setAttribute("y2",y0);
+  line.setAttribute("stroke",color); line.setAttribute("stroke-width","3"); line.setAttribute("stroke-linecap","round");
+  line.style.filter="drop-shadow(0 0 6px "+color+") drop-shadow(0 0 14px "+color+")";
+  field.appendChild(line);
+  const anim = line.animate(
+    [{attributes:"x2:"+x0+"; y2:"+y0},{}],
+    {duration:500}
+  );
+  line.animate([{},{}], {duration:50});
+  // use manual animation via requestAnimationFrame
+  const start=performance.now();
+  function step(now){
+    const t = Math.min(1,(now-start)/520);
+    const cx = x0 + (x1-x0)*t, cy = y0 + (y1-y0)*t;
+    line.setAttribute("x2",cx); line.setAttribute("y2",cy);
+    if(t<1) requestAnimationFrame(step);
+    else setTimeout(()=>line.remove(),150);
+  }
+  requestAnimationFrame(step);
+}
+
+function triggerFB(evt){
+  fb.classList.remove("on"); void fb.offsetWidth; fb.classList.add("on");
+  document.getElementById("fbtick").textContent = `${evt.chall[0]} · ${evt.chall[1]} · ${evt.team}`;
+}
+
+let tick=0;
+function next(){
+  const team = TEAMS[Math.floor(Math.random()*TEAMS.length)][0];
+  const chall = CHALLS[Math.floor(Math.random()*CHALLS.length)];
+  const roll = Math.random();
+  const type = tick%7===0?"fb":roll<0.6?"ok":roll<0.8?"amber":"bad";
+  const node = document.querySelector(`.team[data-team="${team}"]`);
+  const src = node ? (()=>{const r=node.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}})() : {x:Math.random()*window.innerWidth,y:Math.random()*window.innerHeight*0.7};
+  spawnAttacker({team,chall,type}, src);
+  if(type==="fb") triggerFB({team,chall});
+  tick++;
+  setTimeout(next, 1200 + Math.random()*1200);
+}
+setTimeout(next, 500);
+</script>
+</body>
+</html>

@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>Demo C · Pahlawan / Cyber-Jawara</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;700&family=Bebas+Neue&family=Inter:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --indigo:#0b1a3a; --indigo2:#14265a; --ink:#e8d9a5;
+    --gold:#d4af37; --ruby:#c8102e; --brass:#b8894a; --cream:#f2e6c8;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--indigo);color:var(--ink);font-family:"Inter",system-ui,sans-serif}
+
+  /* batik-like pattern background (geometric diamonds) */
+  body{
+    background:
+      radial-gradient(ellipse at 50% 30%, rgba(212,175,55,.08), transparent 60%),
+      linear-gradient(180deg, #0b1a3a 0%, #09122a 100%);
+    position:relative;
+  }
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:1;
+    background-image:
+      repeating-linear-gradient(45deg, rgba(212,175,55,.05) 0 2px, transparent 2px 40px),
+      repeating-linear-gradient(-45deg, rgba(212,175,55,.05) 0 2px, transparent 2px 40px);
+  }
+  body::after{content:""; position:fixed; inset:0; pointer-events:none; z-index:55;
+    background:radial-gradient(circle at center, transparent 40%, rgba(0,0,0,.5) 100%)}
+
+  /* decorative border corners */
+  .corner{position:fixed; width:140px; height:140px; border:2px solid var(--gold); z-index:20; opacity:.7}
+  .corner.tl{top:24px; left:24px; border-right:none; border-bottom:none}
+  .corner.tr{top:24px; right:24px; border-left:none; border-bottom:none}
+  .corner.bl{bottom:24px; left:24px; border-right:none; border-top:none}
+  .corner.br{bottom:24px; right:24px; border-left:none; border-top:none}
+  .corner::before,.corner::after{content:""; position:absolute; background:var(--gold); width:10px; height:10px; border-radius:50%}
+  .corner.tl::before{top:-6px; left:-6px}
+  .corner.tl::after{top:26px; left:26px; background:var(--ruby)}
+  .corner.tr::before{top:-6px; right:-6px}
+  .corner.tr::after{top:26px; right:26px; background:var(--ruby)}
+  .corner.bl::before{bottom:-6px; left:-6px}
+  .corner.bl::after{bottom:26px; left:26px; background:var(--ruby)}
+  .corner.br::before{bottom:-6px; right:-6px}
+  .corner.br::after{bottom:26px; right:26px; background:var(--ruby)}
+
+  /* header */
+  .header{position:fixed; top:30px; left:0; right:0; text-align:center; z-index:25;
+    font-family:"Bebas Neue",sans-serif; font-size:16px; letter-spacing:.6em; color:var(--gold)}
+  .header span{color:var(--cream); margin:0 18px}
+
+  /* HQ */
+  .hq{
+    position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
+    z-index:15; text-align:center; pointer-events:none;
+  }
+  .hq .crest{
+    width:380px; height:380px; position:relative;
+    display:flex; align-items:center; justify-content:center; flex-direction:column;
+  }
+  .hq .crest::before,.hq .crest::after{
+    content:""; position:absolute; border:3px solid var(--gold); border-radius:50%;
+    box-shadow:0 0 40px rgba(212,175,55,.35);
+  }
+  .hq .crest::before{inset:0}
+  .hq .crest::after{inset:18px; border-color:var(--ruby); border-style:dashed}
+  .hq .garuda{
+    position:absolute; inset:-20px;
+    background:conic-gradient(from 0deg, transparent 0 10deg, var(--gold) 10deg 15deg, transparent 15deg 30deg,
+      var(--gold) 30deg 35deg, transparent 35deg 60deg, var(--gold) 60deg 65deg, transparent 65deg);
+    -webkit-mask:radial-gradient(circle, transparent 48%, black 50%, black 58%, transparent 60%);
+            mask:radial-gradient(circle, transparent 48%, black 50%, black 58%, transparent 60%);
+    animation:crestSpin 80s linear infinite; opacity:.6;
+  }
+  @keyframes crestSpin{to{transform:rotate(360deg)}}
+  .hq h1{
+    margin:0; font-family:"Cormorant Garamond",serif; font-weight:700;
+    font-size:68px; line-height:1; color:var(--cream); letter-spacing:.05em;
+    text-shadow:0 0 18px rgba(212,175,55,.5);
+  }
+  .hq h2{
+    margin:14px 0 0; font-family:"Bebas Neue",sans-serif; font-size:22px; letter-spacing:.5em;
+    color:var(--gold);
+  }
+  .hq .divider{margin:18px auto 0; width:180px; height:1px; background:linear-gradient(to right, transparent, var(--gold), transparent)}
+  .hq .motto{margin-top:12px; font-family:"Cormorant Garamond",serif; font-style:italic; font-size:16px; letter-spacing:.12em; color:var(--brass)}
+
+  /* teams arranged radially */
+  .team{
+    position:absolute; transform:translate(-50%,-50%); z-index:10;
+    text-align:center; color:var(--cream); font-family:"Inter",sans-serif; font-weight:700; font-size:12.5px; letter-spacing:.12em; text-transform:uppercase;
+  }
+  .team .seal{
+    width:36px; height:36px; margin:0 auto 4px;
+    background:var(--indigo2); border:2px solid var(--gold);
+    border-radius:50%; display:flex; align-items:center; justify-content:center;
+    font-family:"Cormorant Garamond",serif; font-weight:700; color:var(--gold);
+    box-shadow:0 0 12px rgba(212,175,55,.35);
+  }
+
+  /* top-5 panel */
+  .panel{
+    position:fixed; top:96px; right:40px; width:320px; z-index:22;
+    background:rgba(11,26,58,.75); border:2px solid var(--gold); padding:22px 22px 18px;
+    box-shadow:0 0 25px rgba(212,175,55,.25), inset 0 0 20px rgba(212,175,55,.08);
+  }
+  .panel::before{content:""; position:absolute; inset:6px; border:1px solid var(--ruby); pointer-events:none}
+  .panel h3{margin:0 0 16px; font-family:"Bebas Neue",sans-serif; font-size:13px; letter-spacing:.5em; color:var(--gold); text-align:center}
+  .panel .row{display:grid; grid-template-columns:48px 1fr auto; align-items:center; padding:9px 0; border-bottom:1px dotted var(--brass); font-family:"Inter",sans-serif}
+  .panel .row:last-child{border-bottom:none}
+  .panel .rk{font-family:"Cormorant Garamond",serif; font-weight:700; font-size:28px; color:var(--gold); line-height:1; text-align:center}
+  .panel .row:nth-child(2) .rk{color:var(--ruby)}
+  .panel .nm{font-weight:700; text-transform:uppercase; font-size:13px; letter-spacing:.08em; color:var(--cream)}
+  .panel .sc{font-family:"Cormorant Garamond",serif; font-weight:700; font-size:18px; color:var(--gold)}
+
+  /* bottom chronicle */
+  .chronicle{
+    position:fixed; bottom:40px; left:40px; width:360px; z-index:22;
+    background:rgba(11,26,58,.75); border:2px solid var(--gold); padding:22px 22px 18px;
+    box-shadow:0 0 25px rgba(212,175,55,.25);
+    max-height:260px; overflow:hidden;
+  }
+  .chronicle::before{content:""; position:absolute; inset:6px; border:1px solid var(--ruby); pointer-events:none}
+  .chronicle h3{margin:0 0 14px; font-family:"Bebas Neue",sans-serif; font-size:12px; letter-spacing:.5em; color:var(--gold); text-align:center}
+  .chronicle .line{font-family:"Cormorant Garamond",serif; font-style:italic; font-size:14px; color:var(--cream); padding:5px 0; border-bottom:1px dotted rgba(184,137,74,.35); line-height:1.5}
+  .chronicle .line b{font-style:normal; font-family:"Inter",sans-serif; font-weight:700; text-transform:uppercase; letter-spacing:.1em; font-size:12px}
+  .chronicle .line.fb b{color:var(--ruby)}
+  .chronicle .line.ok b{color:var(--gold)}
+
+  /* attacker sprite */
+  svg.field{position:fixed; inset:0; width:100%; height:100%; z-index:12; pointer-events:none}
+  .attacker{position:absolute; transform:translate(-50%,-50%); pointer-events:none; z-index:18; animation:popinC .25s cubic-bezier(.34,1.56,.64,1), fadeoutC .8s ease-in 2.2s forwards; text-align:center}
+  @keyframes popinC{from{transform:translate(-50%,-50%) scale(0)}}
+  @keyframes fadeoutC{to{opacity:0}}
+  .attacker .avatar{
+    width:60px; height:60px; border-radius:50%; margin:0 auto;
+    background:radial-gradient(circle at 30% 30%, var(--indigo2), #060d22);
+    border:3px solid currentColor; display:flex; align-items:center; justify-content:center;
+    font-size:28px; color:var(--cream);
+    box-shadow:0 0 22px currentColor, inset 0 0 8px rgba(0,0,0,.5);
+  }
+  .attacker .lbl{margin-top:8px; font-family:"Inter",sans-serif; font-weight:700; font-size:11.5px; letter-spacing:.12em; text-transform:uppercase; color:currentColor}
+  .attacker .chall{margin-top:2px; font-family:"Cormorant Garamond",serif; font-style:italic; font-size:12px; color:var(--brass)}
+  .attacker .ring{position:absolute; inset:-30px; border:2px solid currentColor; border-radius:50%; animation:ringOutC .8s ease-out forwards}
+  @keyframes ringOutC{to{transform:scale(2.2); opacity:0}}
+
+  /* first blood = golden rays */
+  .fbanner{position:fixed; inset:0; z-index:60; pointer-events:none; opacity:0; display:flex; align-items:center; justify-content:center}
+  .fbanner.on{animation:fbC 3s ease-out forwards}
+  @keyframes fbC{0%{opacity:0}15%{opacity:1}85%{opacity:1}100%{opacity:0}}
+  .fbanner::before{
+    content:""; position:absolute; inset:0;
+    background:
+      radial-gradient(circle at center, rgba(212,175,55,.5), transparent 60%),
+      conic-gradient(from 0deg, transparent 0 10deg, rgba(212,175,55,.35) 10deg 15deg, transparent 15deg 30deg,
+        rgba(212,175,55,.35) 30deg 35deg, transparent 35deg 60deg);
+    animation:raysSpin 8s linear infinite;
+  }
+  @keyframes raysSpin{to{transform:rotate(360deg)}}
+  .fbanner .plate{position:relative; background:var(--indigo); border:4px double var(--gold); padding:30px 60px; text-align:center; box-shadow:0 0 80px var(--gold)}
+  .fbanner h1{margin:0; font-family:"Cormorant Garamond",serif; font-weight:700; font-size:64px; letter-spacing:.1em; color:var(--ruby); text-shadow:0 0 30px rgba(200,16,46,.6)}
+  .fbanner p{margin:10px 0 0; font-family:"Bebas Neue",sans-serif; font-size:18px; letter-spacing:.5em; color:var(--gold)}
+</style>
+</head>
+<body>
+<div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
+
+<div class="header">CJ<span>·</span>2025<span>—</span>PELAJAR<span>·</span>FINALS<span>—</span>LIVE</div>
+
+<div class="hq">
+  <div class="crest">
+    <div class="garuda"></div>
+    <h1>CJ 2025</h1>
+    <h2>PELAJAR · FINALS</h2>
+    <div class="divider"></div>
+    <div class="motto">— Pahlawan Siber —</div>
+  </div>
+</div>
+
+<div class="panel">
+  <h3>— PAPAN NILAI —</h3>
+  <div id="rows"></div>
+</div>
+
+<div class="chronicle">
+  <h3>— CATATAN PERISTIWA —</h3>
+  <div id="chron"></div>
+</div>
+
+<svg class="field" id="field"></svg>
+
+<div class="fbanner" id="fbanner">
+  <div class="plate">
+    <h1>DARAH PERTAMA</h1>
+    <p id="fbtick">PWN · BABU-FORMAT · ROOT-SKSD</p>
+  </div>
+</div>
+
+<script>
+const TEAMS=[
+  ["ROOT-SKSD",4200],["BINARY-SHOCK",3980],["NULLBYTE-ID",3740],["SEGFAULT",3500],["CTRL-Z",3200],
+  ["0X4D4",2900],["HEAPOVERFLOW",2710],["BLUEHAWKS",2580],["SHELL-STORM",2410],["KERNEL-PANIC",2280]
+];
+const CHALLS=[["PWN","BABU-FORMAT"],["WEB","BIJI"],["WEB","WHITE-NIGHTS"],["CRYPTO","VIRTUOSO"],["FORENSICS","BAD-OPSEC"]];
+const rows=document.getElementById("rows"), chron=document.getElementById("chron"), field=document.getElementById("field"), fb=document.getElementById("fbanner");
+rows.innerHTML = TEAMS.slice(0,5).map((t,i)=>`<div class="row"><span class="rk">${["I","II","III","IV","V"][i]}</span><span class="nm">${t[0]}</span><span class="sc">${t[1]}</span></div>`).join("");
+
+const cx=()=>window.innerWidth/2, cy=()=>window.innerHeight/2;
+
+function placeTeams(){
+  const n=10;
+  TEAMS.slice(0,n).forEach((t,i)=>{
+    const a=(i/n)*Math.PI*2 - Math.PI/2;
+    const r=Math.min(window.innerWidth,window.innerHeight)*0.4;
+    const x=cx()+r*Math.cos(a), y=cy()+r*Math.sin(a);
+    const el=document.createElement("div"); el.className="team"; el.dataset.team=t[0];
+    el.style.left=x+"px"; el.style.top=y+"px";
+    el.innerHTML=`<div class="seal">${t[0][0]}</div>${t[0]}`;
+    document.body.appendChild(el);
+  });
+}
+placeTeams();
+
+function colorFor(t){return t==="fb"?"#d4af37":t==="ok":"#f2e6c8";}
+// fix above - simpler
+function colorForType(t){return t==="fb"?"#d4af37":t==="ok"?"#f2e6c8":t==="amber"?"#b8894a":"#c8102e"}
+
+function addChron(evt){
+  const line=document.createElement("div");
+  line.className="line " + (evt.type==="fb"?"fb":"ok");
+  const prefix = evt.type==="fb"?"⚔ Darah pertama":evt.type==="ok"?"◈ Berhasil menyelesaikan":"✗ Gagal";
+  line.innerHTML = `<b>${evt.team}</b> ${prefix} <em>${evt.chall[0]} — ${evt.chall[1]}</em>`;
+  chron.insertBefore(line, chron.firstChild);
+  while(chron.children.length>6) chron.removeChild(chron.lastChild);
+}
+
+function spawnAttacker(evt, src){
+  const color=colorForType(evt.type);
+  const a=document.createElement("div");
+  a.className="attacker"; a.style.color=color;
+  a.style.left=src.x+"px"; a.style.top=src.y+"px";
+  const glyph = evt.type==="fb"?"⚔":evt.type==="ok"?"◈":"✗";
+  a.innerHTML=`<div class="ring"></div><div class="avatar">${glyph}</div><div class="lbl">${evt.team}</div><div class="chall">${evt.chall[0]} · ${evt.chall[1]}</div>`;
+  document.body.appendChild(a);
+  setTimeout(()=>a.remove(),3000);
+  for(let i=0;i<8;i++) setTimeout(()=>fire(src.x,src.y,cx(),cy(),color), i*180);
+}
+function fire(x0,y0,x1,y1,color){
+  const mid={x:(x0+x1)/2+(Math.random()-0.5)*140, y:(y0+y1)/2+(Math.random()-0.5)*100};
+  const p=document.createElementNS("http://www.w3.org/2000/svg","path");
+  p.setAttribute("d",`M ${x0} ${y0} Q ${mid.x} ${mid.y} ${x1} ${y1}`);
+  p.setAttribute("fill","none"); p.setAttribute("stroke",color); p.setAttribute("stroke-width","2"); p.setAttribute("stroke-linecap","round");
+  p.style.filter=`drop-shadow(0 0 6px ${color})`;
+  field.appendChild(p);
+  const len=p.getTotalLength();
+  p.style.strokeDasharray=`${len*0.1} ${len}`;
+  p.style.strokeDashoffset=len;
+  p.animate([{strokeDashoffset:len},{strokeDashoffset:-len*0.1}],{duration:1100,easing:"cubic-bezier(.3,.6,.4,1)"}).onfinish=()=>p.remove();
+}
+function triggerFB(evt){
+  fb.classList.remove("on"); void fb.offsetWidth; fb.classList.add("on");
+  document.getElementById("fbtick").textContent=`${evt.chall[0]} · ${evt.chall[1]} · ${evt.team}`;
+}
+
+let tick=0;
+function next(){
+  const team=TEAMS[Math.floor(Math.random()*TEAMS.length)][0];
+  const chall=CHALLS[Math.floor(Math.random()*CHALLS.length)];
+  const roll=Math.random();
+  const type=tick%7===0?"fb":roll<0.6?"ok":roll<0.8?"amber":"bad";
+  const evt={team,chall,type};
+  const node=document.querySelector(`.team[data-team="${team}"]`);
+  const src=node?(()=>{const r=node.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})():{x:Math.random()*window.innerWidth,y:Math.random()*window.innerHeight};
+  addChron(evt);
+  spawnAttacker(evt,src);
+  if(type==="fb") triggerFB(evt);
+  tick++;
+  setTimeout(next, 1300+Math.random()*1200);
+}
+setTimeout(next, 600);
+</script>
+</body>
+</html>

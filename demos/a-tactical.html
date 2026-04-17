@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Demo A · Tactical Ops HUD</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#060609; --panel:#0c0d12; --grid:#14161f;
+    --red:#ff2a2a; --green:#3ae85c; --amber:#f4b619; --gold:#ffd34a;
+    --ink:#d7dbe4; --muted:#6b7183;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font-family:"Space Grotesk",system-ui,sans-serif}
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:100;
+    background:repeating-linear-gradient(to bottom,transparent 0 2px,rgba(255,255,255,.03) 2px 3px);
+  }
+  body::after{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:99;
+    background-image:
+      linear-gradient(var(--grid) 1px,transparent 1px),
+      linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+    background-size:48px 48px; opacity:.35;
+  }
+  .mono{font-family:"JetBrains Mono",monospace}
+  .header{
+    position:fixed; top:12px; left:12px; right:12px; z-index:20;
+    display:flex; justify-content:space-between; align-items:center;
+    font-family:"JetBrains Mono",monospace; font-size:11px; color:var(--muted);
+    letter-spacing:.22em; text-transform:uppercase;
+  }
+  .header .marker{color:var(--red)}
+  .header .live{color:var(--green); display:inline-flex; align-items:center; gap:6px}
+  .live .dot{width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 12px var(--green); animation:pulse 1.2s infinite}
+  @keyframes pulse{50%{opacity:.4}}
+  .bracket{position:absolute; width:20px; height:20px; border:2px solid var(--red)}
+  .bracket.tl{top:-1px; left:-1px; border-right:none; border-bottom:none}
+  .bracket.tr{top:-1px; right:-1px; border-left:none; border-bottom:none}
+  .bracket.bl{bottom:-1px; left:-1px; border-right:none; border-top:none}
+  .bracket.br{bottom:-1px; right:-1px; border-left:none; border-top:none}
+
+  /* LEFT: terminal feed */
+  .feed{
+    position:fixed; left:18px; top:60px; bottom:120px; width:360px; z-index:10;
+    background:rgba(12,13,18,.78); backdrop-filter:blur(6px);
+    padding:18px 20px 14px; overflow:hidden;
+  }
+  .feed .title{font-family:"JetBrains Mono",monospace; font-size:10px; letter-spacing:.25em; color:var(--red); margin-bottom:14px}
+  .feed .line{font-family:"JetBrains Mono",monospace; font-size:12.5px; line-height:1.55; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .feed .t{color:var(--muted)}
+  .feed .ok{color:var(--green)}
+  .feed .fb{color:var(--red); font-weight:700}
+  .feed .amb{color:var(--amber)}
+  .feed .bad{color:#ff6262; opacity:.55}
+  .cursor{display:inline-block; width:8px; height:14px; background:var(--green); vertical-align:-2px; animation:blink 1s steps(2,start) infinite; margin-left:2px}
+  @keyframes blink{50%{opacity:0}}
+
+  /* RIGHT: scoreboard */
+  .board{
+    position:fixed; right:18px; top:60px; width:320px; z-index:10;
+    background:rgba(12,13,18,.78); backdrop-filter:blur(6px); padding:18px 20px 14px;
+  }
+  .board .title{font-family:"JetBrains Mono",monospace; font-size:10px; letter-spacing:.25em; color:var(--amber); margin-bottom:14px; display:flex; justify-content:space-between}
+  .row{display:grid; grid-template-columns:40px 1fr auto; align-items:baseline; padding:7px 0; border-bottom:1px dashed #20232d}
+  .row:last-child{border-bottom:none}
+  .rank{font-family:"JetBrains Mono",monospace; font-weight:700; font-size:22px; color:var(--gold); line-height:1}
+  .row:nth-child(1) .rank{color:var(--gold); text-shadow:0 0 20px rgba(255,211,74,.6)}
+  .name{font-weight:700; text-transform:uppercase; letter-spacing:.08em; font-size:13px}
+  .score{font-family:"JetBrains Mono",monospace; font-weight:500; color:var(--muted)}
+
+  /* CENTER-RIGHT theater */
+  .theater{position:fixed; inset:0; z-index:5; pointer-events:none}
+  .hq{
+    position:absolute; left:56%; top:50%; transform:translate(-50%,-50%);
+    display:flex; flex-direction:column; align-items:center; gap:4px;
+  }
+  .hq .hex{
+    width:320px; height:360px; position:relative;
+    clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);
+    background:radial-gradient(circle at center,rgba(255,42,42,.08),transparent 70%);
+    border:2px solid rgba(255,42,42,.35);
+    display:flex; align-items:center; justify-content:center; flex-direction:column;
+    padding:30px; animation:hexBreathe 2.2s ease-in-out infinite;
+  }
+  @keyframes hexBreathe{50%{border-color:rgba(255,42,42,.75); filter:drop-shadow(0 0 28px rgba(255,42,42,.4))}}
+  .hq .tag{font-family:"JetBrains Mono",monospace; font-size:11px; letter-spacing:.35em; color:var(--amber); opacity:.85; margin-bottom:8px}
+  .hq .title{
+    font-family:"JetBrains Mono",monospace; font-size:28px; font-weight:700; text-transform:uppercase;
+    letter-spacing:.12em; color:var(--gold); text-align:center; line-height:1.15;
+    text-shadow:0 0 24px rgba(255,211,74,.55);
+  }
+  .hq .sub{font-family:"JetBrains Mono",monospace; font-size:10px; letter-spacing:.45em; color:var(--muted); margin-top:12px}
+  .ring{position:absolute; inset:-30px; border:1px dashed rgba(255,42,42,.25); border-radius:50%; animation:spin 40s linear infinite}
+  .ring.r2{inset:-70px; border-color:rgba(255,211,74,.18); animation:spin 60s linear infinite reverse}
+  .ring.r3{inset:-110px; border-color:rgba(58,232,92,.1); animation:spin 90s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* teams around left half */
+  .team-node{position:absolute; color:var(--ink); font-family:"JetBrains Mono",monospace; font-size:11px; letter-spacing:.08em; text-transform:uppercase; transform:translate(-50%,-50%); text-align:center}
+  .team-node .dot{width:12px; height:12px; border-radius:50%; background:var(--muted); margin:0 auto 6px; box-shadow:0 0 6px currentColor}
+
+  /* attacker + particles */
+  .attacker{position:absolute; transform:translate(-50%,-50%); pointer-events:none; z-index:15; animation:popin .2s cubic-bezier(.34,1.56,.64,1), fadeout .6s ease-in 2.4s forwards}
+  @keyframes popin{from{transform:translate(-50%,-50%) scale(0)}}
+  @keyframes fadeout{to{opacity:0; transform:translate(-50%,-50%) scale(.8)}}
+  .attacker .glow{width:56px; height:56px; border-radius:50%; border:2px solid currentColor; box-shadow:0 0 40px currentColor; margin:0 auto; display:flex; align-items:center; justify-content:center; font-size:22px}
+  .attacker .lbl{margin-top:6px; font-family:"JetBrains Mono",monospace; font-size:11px; white-space:nowrap; text-align:center}
+  .attacker .lbl b{display:block; font-size:12px; letter-spacing:.1em; text-transform:uppercase}
+  .attacker .pulse{position:absolute; inset:-40px; border:2px solid currentColor; border-radius:50%; animation:ringOut .6s ease-out forwards; opacity:.8}
+  @keyframes ringOut{to{transform:scale(2.5); opacity:0}}
+  svg.field{position:fixed; inset:0; width:100%; height:100%; z-index:12; pointer-events:none}
+
+  /* first blood overlay */
+  .fbanner{position:fixed; inset:0; z-index:40; pointer-events:none; display:flex; align-items:center; justify-content:center; opacity:0}
+  .fbanner.on{animation:fbanner 2.6s ease-out forwards}
+  @keyframes fbanner{0%{opacity:0} 15%{opacity:1} 80%{opacity:1} 100%{opacity:0}}
+  .fbanner .bg{position:absolute; inset:0; background:radial-gradient(circle at center,rgba(255,42,42,.45),rgba(255,42,42,.05) 55%,transparent 80%)}
+  .fbanner .box{
+    position:relative; background:var(--red); color:#0b0b11; padding:28px 48px;
+    font-family:"JetBrains Mono",monospace; font-weight:700; font-size:48px;
+    letter-spacing:.12em; text-transform:uppercase; border:4px solid #0b0b11;
+    box-shadow:0 0 80px var(--red);
+  }
+  .fbanner .tick{font-size:14px; letter-spacing:.3em; color:var(--amber); margin-top:10px; text-align:center}
+
+  /* screen shake during FB */
+  .shake{animation:shake .6s cubic-bezier(.36,.07,.19,.97) both}
+  @keyframes shake{10%,90%{transform:translate3d(-1px,0,0)}20%,80%{transform:translate3d(2px,0,0)}30%,50%,70%{transform:translate3d(-4px,0,0)}40%,60%{transform:translate3d(4px,0,0)}}
+</style>
+</head>
+<body>
+<div class="header">
+  <span><span class="marker">▙</span>&nbsp;CJ2025 :: PELAJAR · FINALS //// TACTICAL-OPS </span>
+  <span><span class="live"><span class="dot"></span>LIVE FEED</span> &nbsp;//&nbsp; T-23:45 &nbsp;//&nbsp; ROUND 02 &nbsp;//&nbsp; 14:32:17 UTC</span>
+</div>
+
+<div class="feed">
+  <div class="bracket tl"></div><div class="bracket tr"></div><div class="bracket bl"></div><div class="bracket br"></div>
+  <div class="title">// EVENT STREAM ///</div>
+  <div id="feed-lines"></div>
+  <div class="line t">$ gzctf.watch() <span class="cursor"></span></div>
+</div>
+
+<div class="board">
+  <div class="bracket tl"></div><div class="bracket tr"></div><div class="bracket bl"></div><div class="bracket br"></div>
+  <div class="title"><span>// SCOREBOARD</span><span>TOP 5</span></div>
+  <div id="board-rows"></div>
+</div>
+
+<div class="theater">
+  <div class="hq" id="hq">
+    <div class="ring"></div><div class="ring r2"></div><div class="ring r3"></div>
+    <div class="hex">
+      <div class="tag">// TARGET ACQUIRED</div>
+      <div class="title">CJ2025<br>PELAJAR · FINALS</div>
+      <div class="sub">OPS · CONTROL · HQ</div>
+    </div>
+  </div>
+</div>
+
+<svg class="field" id="field"></svg>
+
+<div class="fbanner" id="fbanner">
+  <div class="bg"></div>
+  <div class="box">
+    <div>!! FIRST BLOOD !!</div>
+    <div class="tick" id="fbtick">PWN / BABU-FORMAT · ROOT-SKSD</div>
+  </div>
+</div>
+
+<script>
+const TEAMS = [
+  ["ROOT-SKSD", 4200], ["BINARY-SHOCK", 3980], ["NULLBYTE-ID", 3740],
+  ["SEGFAULT", 3500], ["CTRL-Z", 3200], ["0X4D4", 2900], ["HEAPOVERFLOW", 2710],
+  ["BLUEHAWKS", 2580], ["SHELL-STORM", 2410], ["KERNEL-PANIC", 2280],
+];
+const CHALLS = [
+  ["PWN","BABU-FORMAT"],["WEB","BIJI"],["WEB","WHITE-NIGHTS"],
+  ["CRYPTO","VIRTUOSO"],["FORENSICS","BAD-OPSEC"],["REVERSE","LATENT-KINGDOM"],
+];
+const feed = document.getElementById("feed-lines");
+const board = document.getElementById("board-rows");
+const field = document.getElementById("field");
+const hq = document.getElementById("hq");
+const fb = document.getElementById("fbanner");
+
+// render scoreboard
+function renderBoard(){
+  board.innerHTML = TEAMS.slice(0,5).map((t,i)=>`
+    <div class="row"><span class="rank">${String(i+1).padStart(2,"0")}</span>
+    <span class="name">${t[0]}</span>
+    <span class="score mono">${t[1]}</span></div>`).join("");
+}
+renderBoard();
+
+// team nodes arranged on LEFT half (not around HQ - asymmetric)
+function placeTeams(){
+  const cx = window.innerWidth*0.25, cy = window.innerHeight*0.5;
+  TEAMS.slice(0,10).forEach((t,i)=>{
+    const angle = (i/10)*Math.PI*2 - Math.PI/2;
+    const r = Math.min(window.innerWidth,window.innerHeight)*0.28;
+    const x = cx + r*Math.cos(angle), y = cy + r*Math.sin(angle);
+    const el = document.createElement("div");
+    el.className="team-node"; el.dataset.team=t[0];
+    el.style.left=x+"px"; el.style.top=y+"px";
+    el.innerHTML=`<div class="dot"></div>${t[0]}`;
+    document.body.appendChild(el);
+  });
+}
+placeTeams();
+
+// feed
+function addFeed(evt){
+  const time = new Date().toTimeString().slice(0,8);
+  const cls = evt.type==="fb"?"fb":evt.type==="ok"?"ok":evt.type==="amber"?"amb":"bad";
+  const prefix = evt.type==="fb"?"!! FIRST-BLOOD !! ":evt.type==="ok"?"[ SOLVE  ] ":evt.type==="amber"?"[ 2-BLOOD] ":"[ MISS   ] ";
+  const line = document.createElement("div");
+  line.className="line";
+  line.innerHTML=`<span class="t">${time}</span> <span class="${cls}">${prefix}${evt.team} :: ${evt.chall[0]}/${evt.chall[1]}</span>`;
+  feed.insertBefore(line, feed.firstChild);
+  while(feed.children.length>18) feed.removeChild(feed.lastChild);
+}
+
+function hqCenter(){
+  const r = hq.getBoundingClientRect();
+  return {x: r.left + r.width/2, y: r.top + r.height/2};
+}
+
+function spawnAttacker(evt, sourceXY){
+  const color = evt.type==="fb"?"#ffd34a":evt.type==="ok"?"#3ae85c":evt.type==="amber"?"#f4b619":"#ff6262";
+  const a = document.createElement("div");
+  a.className="attacker"; a.style.color=color;
+  a.style.left=sourceXY.x+"px"; a.style.top=sourceXY.y+"px";
+  a.innerHTML=`<div class="pulse"></div><div class="glow">◉</div><div class="lbl"><b>${evt.team}</b>${evt.chall[0]}/${evt.chall[1]}</div>`;
+  document.body.appendChild(a);
+  setTimeout(()=>a.remove(),3000);
+  // burst particles
+  const tgt = hqCenter();
+  for(let i=0;i<8;i++){
+    setTimeout(()=>fireParticle(sourceXY.x, sourceXY.y, tgt.x, tgt.y, color), i*180);
+  }
+}
+function fireParticle(x0,y0,x1,y1,color){
+  const mid = {x:(x0+x1)/2+(Math.random()-0.5)*160, y:(y0+y1)/2+(Math.random()-0.5)*120};
+  const p = document.createElementNS("http://www.w3.org/2000/svg","path");
+  const d = `M ${x0} ${y0} Q ${mid.x} ${mid.y} ${x1} ${y1}`;
+  p.setAttribute("d", d); p.setAttribute("fill","none"); p.setAttribute("stroke",color); p.setAttribute("stroke-width","2.2"); p.setAttribute("stroke-linecap","round");
+  field.appendChild(p);
+  const len = p.getTotalLength();
+  p.style.strokeDasharray = `${len*0.12} ${len}`;
+  p.style.strokeDashoffset = `${len}`;
+  p.animate([{strokeDashoffset:len},{strokeDashoffset:-len*0.15}],{duration:1100,easing:"cubic-bezier(.3,.6,.4,1)"}).onfinish=()=>p.remove();
+}
+
+function triggerFirstBlood(evt){
+  fb.classList.remove("on"); void fb.offsetWidth; fb.classList.add("on");
+  document.getElementById("fbtick").textContent = `${evt.chall[0]} / ${evt.chall[1]} · ${evt.team}`;
+  hq.classList.remove("shake"); void hq.offsetWidth; hq.classList.add("shake");
+}
+
+// event loop
+let tick=0;
+function next(){
+  const team = TEAMS[Math.floor(Math.random()*TEAMS.length)][0];
+  const chall = CHALLS[Math.floor(Math.random()*CHALLS.length)];
+  const roll = Math.random();
+  const type = tick%7===0?"fb":roll<0.6?"ok":roll<0.8?"amber":"bad";
+  const evt = {team,chall,type};
+  addFeed(evt);
+  // find source: team node if exists else random
+  const node = document.querySelector(`.team-node[data-team="${team}"]`);
+  let source;
+  if(node){
+    const r = node.getBoundingClientRect();
+    source = {x:r.left+r.width/2, y:r.top+r.height/2};
+  } else {
+    source = {x:Math.random()*window.innerWidth*0.5 + 50, y:Math.random()*window.innerHeight*0.9 + 50};
+  }
+  spawnAttacker(evt, source);
+  if(type==="fb") triggerFirstBlood(evt);
+  tick++;
+  setTimeout(next, 1400 + Math.random()*1200);
+}
+setTimeout(next, 800);
+
+// countdown
+let secs = 23*60+45;
+setInterval(()=>{
+  secs--; if(secs<0) secs = 0;
+  const h=document.querySelector(".header span:last-child");
+  const m=Math.floor(secs/60), s=secs%60;
+  h.innerHTML = h.innerHTML.replace(/T-\d+:\d+/, `T-${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`);
+  h.innerHTML = h.innerHTML.replace(/\d+:\d+:\d+ UTC/, new Date().toUTCString().slice(17,25)+" UTC");
+},1000);
+</script>
+</body>
+</html>
