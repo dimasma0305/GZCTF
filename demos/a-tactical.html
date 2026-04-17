@@ -205,7 +205,7 @@
   @keyframes hitRow{50%{background:rgba(255,211,74,.4)}}
 
   /* ===== Attacker sprites + particles ===== */
-  svg.field{position:fixed; inset:0; width:100vw; height:100vh; z-index:12; pointer-events:none; contain:layout style paint; will-change:transform; transform:translateZ(0)}
+  canvas.field{position:fixed; inset:0; width:100vw; height:100vh; z-index:12; pointer-events:none; contain:layout style paint; will-change:transform; transform:translateZ(0)}
   .attacker{position:absolute; transform:translate(-50%,-50%); pointer-events:none; z-index:16;
     animation:popin .22s cubic-bezier(.34,1.56,.64,1), fadeout .6s ease-in 2.4s forwards}
   @keyframes popin{from{transform:translate(-50%,-50%) scale(0)}}
@@ -309,7 +309,7 @@
   </div>
 </div>
 
-<svg class="field" id="field"></svg>
+<canvas class="field" id="field"></canvas>
 
 <div class="fbanner" id="fbanner">
   <div class="bg"></div>
@@ -617,10 +617,56 @@ function clampToPlay(x, y){
 }
 
 /* ============================================================
-   Attacker + particles
+   CANVAS FIELD + ENTITY SYSTEM
+   ----------------------------------------------------------------
+   Single <canvas> drives every bullet / particle / shockwave /
+   debris / laser element.  Each visual is an "entity" with
+   update(now)->bool (alive) and render(ctx, now).  One rAF loop
+   clears + renders all entities using additive blend ("lighter")
+   for natural neon-glow compositing.
    ============================================================ */
-const field = document.getElementById("field");
+const canvas = document.getElementById("field");
+const ctx = canvas.getContext("2d", { alpha: true });
+let __dpr = 1;
+function resizeCanvas(){
+  __dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width  = Math.floor(window.innerWidth  * __dpr);
+  canvas.height = Math.floor(window.innerHeight * __dpr);
+  canvas.style.width  = window.innerWidth  + "px";
+  canvas.style.height = window.innerHeight + "px";
+  ctx.setTransform(__dpr, 0, 0, __dpr, 0, 0);
+}
+resizeCanvas();
+window.addEventListener("resize", resizeCanvas);
+
+const entities = [];
+function addEnt(e){ entities.push(e); return e; }
+
+// shatterAt still uses SVG (isolated overlay) so we need the namespace
 const SVG_NS = "http://www.w3.org/2000/svg";
+
+(function renderLoop(){
+  function tick(){
+    const w = window.innerWidth, h = window.innerHeight;
+    ctx.clearRect(0, 0, w, h);
+    ctx.globalCompositeOperation = "lighter";
+    const now = performance.now();
+    for (let i = entities.length - 1; i >= 0; i--){
+      const e = entities[i];
+      if (e.update(now) === false) entities.splice(i, 1);
+      else e.render(ctx, now);
+    }
+    ctx.globalCompositeOperation = "source-over";
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+})();
+
+// Cubic bezier point (actually quadratic, since we use Q curves)
+function bezPt(t, x0, y0, mx, my, x1, y1){
+  const mt = 1 - t;
+  return [mt*mt*x0 + 2*mt*t*mx + t*t*x1, mt*mt*y0 + 2*mt*t*my + t*t*y1];
+}
 
 function spawnAttacker(evt, src){
   const color = evt.type==="fb"?"#ffd34a":evt.type==="ok"?"#3ae85c":evt.type==="amber"?"#f4b619":"#ff6262";
@@ -645,144 +691,156 @@ function spawnAttacker(evt, src){
    on a quadratic bezier path → impact burst + shockwave (+ sparks on FB).
    ============================================================ */
 function fireBullet(x0, y0, x1, y1, color, type){
-  // Curve: arcing bezier with jitter so many bullets spread visually
   const dx = x1 - x0, dy = y1 - y0;
-  const dist = Math.hypot(dx, dy);
-  const nrmX = -dy / dist, nrmY = dx / dist;    // perpendicular unit vector
+  const dist = Math.hypot(dx, dy) || 1;
+  const nrmX = -dy / dist, nrmY = dx / dist;
   const jitter = (Math.random() - 0.5) * 140;
-  const midX = (x0 + x1)/2 + nrmX*jitter + (Math.random()-0.5)*40;
-  const midY = (y0 + y1)/2 + nrmY*jitter + (Math.random()-0.5)*40;
+  const mx = (x0 + x1)/2 + nrmX*jitter + (Math.random()-0.5)*40;
+  const my = (y0 + y1)/2 + nrmY*jitter + (Math.random()-0.5)*40;
 
-  const fat   = type === "fb";
-  const soft  = type === "bad";
+  const fat = type === "fb", soft = type === "bad";
   const thick = fat ? 4 : soft ? 1.4 : 2.6;
-  const dur   = fat ? 950 : 1050;
+  const dur = fat ? 950 : 1050;
   const headR = fat ? 6 : soft ? 2.5 : 4.5;
+  const tailFrac = fat ? 0.26 : 0.18;
 
-  // --- muzzle flash (quick radial pop at source) ---
   if (!soft) muzzleFlash(x0, y0, color, fat);
 
-  // --- path + gradient tail ---
-  const path = document.createElementNS(SVG_NS, "path");
-  const d = `M ${x0} ${y0} Q ${midX} ${midY} ${x1} ${y1}`;
-  path.setAttribute("d", d);
-  path.setAttribute("fill", "none");
-  path.setAttribute("stroke", color);
-  path.setAttribute("stroke-width", thick);
-  path.setAttribute("stroke-linecap", "round");
-  path.style.filter = `drop-shadow(0 0 ${fat?16:8}px ${color})`;
-  path.style.opacity = soft ? 0.55 : 1;
-  field.appendChild(path);
-
-  const len = path.getTotalLength();
-  const tailLen = len * (fat ? 0.26 : 0.18);
-  path.style.strokeDasharray = `${tailLen} ${len}`;
-  path.style.strokeDashoffset = `${len}`;
-
-  // --- bright hot-core head (white nucleus over colored glow) ---
-  let head = null, core = null;
-  if (!soft){
-    head = document.createElementNS(SVG_NS, "circle");
-    head.setAttribute("r", headR);
-    head.setAttribute("fill", color);
-    head.style.filter = `drop-shadow(0 0 ${fat?22:14}px ${color})`;
-    field.appendChild(head);
-
-    core = document.createElementNS(SVG_NS, "circle");
-    core.setAttribute("r", headR * 0.55);
-    core.setAttribute("fill", "#ffffff");
-    field.appendChild(core);
-  }
-
   const start = performance.now();
-  function step(now){
-    const t = Math.min(1, (now - start)/dur);
-    const e = 1 - Math.pow(1 - t, 2);     // ease-out
-    path.style.strokeDashoffset = len - e*(len + tailLen);
-    if (head){
-      const p = path.getPointAtLength(Math.min(len, e*len));
-      head.setAttribute("cx", p.x); head.setAttribute("cy", p.y);
-      core.setAttribute("cx", p.x); core.setAttribute("cy", p.y);
+  let fired = false;
+  addEnt({
+    update(now){
+      const t = (now - start) / dur;
+      if (t >= 1){
+        if (!fired){ fired = true; if (!soft) impactBurst(x1, y1, color, type); }
+        return false;
+      }
+      return true;
+    },
+    render(ctx, now){
+      const t = (now - start) / dur;
+      const e = 1 - (1 - t)*(1 - t);
+      const [hx, hy] = bezPt(e, x0, y0, mx, my, x1, y1);
+      const tailStart = Math.max(0, e - tailFrac);
+
+      ctx.globalAlpha = soft ? 0.55 : 1;
+      ctx.lineCap = "round";
+      ctx.lineWidth = thick;
+      ctx.strokeStyle = color;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = fat ? 14 : 8;
+      ctx.beginPath();
+      const SAMPLES = 8;
+      for (let s = 0; s <= SAMPLES; s++){
+        const tt = tailStart + (s/SAMPLES) * (e - tailStart);
+        const [px, py] = bezPt(tt, x0, y0, mx, my, x1, y1);
+        if (s === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+
+      if (!soft){
+        ctx.shadowBlur = fat ? 18 : 12;
+        ctx.fillStyle = color;
+        ctx.beginPath(); ctx.arc(hx, hy, headR, 0, Math.PI*2); ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = "#fff";
+        ctx.beginPath(); ctx.arc(hx, hy, headR * 0.55, 0, Math.PI*2); ctx.fill();
+      }
+      ctx.globalAlpha = 1; ctx.shadowBlur = 0;
     }
-    if (t < 1) requestAnimationFrame(step);
-    else {
-      if (head){ head.remove(); core.remove(); }
-      impactBurst(x1, y1, color, type);
-      path.animate([{opacity:path.style.opacity||1},{opacity:0}],
-        {duration: soft?160:240, fill:"forwards"}).onfinish = ()=>path.remove();
-    }
-  }
-  requestAnimationFrame(step);
+  });
 }
 
 function muzzleFlash(x, y, color, big){
-  const f = document.createElementNS(SVG_NS, "circle");
-  f.setAttribute("cx", x); f.setAttribute("cy", y);
-  f.setAttribute("r", big?5:3);
-  f.setAttribute("fill", color);
-  f.style.filter = `drop-shadow(0 0 18px ${color})`;
-  field.appendChild(f);
-  f.animate(
-    [{r: big?5:3, opacity:1}, {r: big?22:14, opacity:0}],
-    {duration:260, easing:"ease-out", fill:"forwards"}
-  ).onfinish = ()=>f.remove();
-
-  // small center nova
-  const nova = document.createElementNS(SVG_NS, "circle");
-  nova.setAttribute("cx", x); nova.setAttribute("cy", y);
-  nova.setAttribute("r", 2); nova.setAttribute("fill", "#fff");
-  field.appendChild(nova);
-  nova.animate([{r:2,opacity:1},{r:big?10:6,opacity:0}],
-    {duration:180,easing:"ease-out",fill:"forwards"}).onfinish = ()=>nova.remove();
+  const start = performance.now();
+  addEnt({
+    update(now){ return now - start < 260; },
+    render(ctx, now){
+      const t = (now - start) / 260;
+      ctx.globalAlpha = 1 - t;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(x, y, big ? (5 + 17*t) : (3 + 11*t), 0, Math.PI*2);
+      ctx.fill();
+      ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+    }
+  });
+  addEnt({
+    update(now){ return now - start < 180; },
+    render(ctx, now){
+      const t = (now - start) / 180;
+      ctx.globalAlpha = 1 - t;
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.arc(x, y, 2 + t * (big ? 8 : 4), 0, Math.PI*2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+  });
 }
 
 function impactBurst(x, y, color, type){
   const big = type === "fb";
-  const soft = type === "bad";
-  if (soft) return;      // wrong answers don't hit
+  if (type === "bad") return;
 
-  // Shockwave ring
-  const ring = document.createElementNS(SVG_NS, "circle");
-  ring.setAttribute("cx", x); ring.setAttribute("cy", y);
-  ring.setAttribute("r", 3);
-  ring.setAttribute("fill", "none");
-  ring.setAttribute("stroke", color);
-  ring.setAttribute("stroke-width", big?3:2);
-  ring.style.filter = `drop-shadow(0 0 12px ${color})`;
-  field.appendChild(ring);
-  ring.animate(
-    [{r:3, strokeOpacity:1, strokeWidth:big?3:2},
-     {r:big?80:45, strokeOpacity:0, strokeWidth:0.4}],
-    {duration: big?650:450, easing:"ease-out", fill:"forwards"}
-  ).onfinish = ()=>ring.remove();
-
-  // Bright flash core
-  const flash = document.createElementNS(SVG_NS, "circle");
-  flash.setAttribute("cx", x); flash.setAttribute("cy", y);
-  flash.setAttribute("r", big?10:6);
-  flash.setAttribute("fill", "#ffffff");
-  flash.style.filter = `drop-shadow(0 0 ${big?42:22}px ${color})`;
-  field.appendChild(flash);
-  flash.animate([{r:big?10:6,opacity:1},{r:big?22:14,opacity:0}],
-    {duration: big?380:260, easing:"ease-out", fill:"forwards"}).onfinish = ()=>flash.remove();
-
-  // First-blood extras: 8 diagonal sparks
+  const start = performance.now();
+  const ringDur = big ? 650 : 450;
+  const ringMax = big ? 80 : 45;
+  addEnt({
+    update(now){ return now - start < ringDur; },
+    render(ctx, now){
+      const t = (now - start) / ringDur;
+      const e = 1 - (1 - t)*(1 - t);
+      ctx.globalAlpha = 1 - t;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = (big ? 3 : 2) * (1 - t*0.87);
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.arc(x, y, 3 + e * ringMax, 0, Math.PI*2);
+      ctx.stroke();
+      ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+    }
+  });
+  const flashDur = big ? 380 : 260;
+  addEnt({
+    update(now){ return now - start < flashDur; },
+    render(ctx, now){
+      const t = (now - start) / flashDur;
+      ctx.globalAlpha = 1 - t;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = big ? 32 : 18;
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.arc(x, y, (big ? 10 : 6) + t * (big ? 12 : 8), 0, Math.PI*2);
+      ctx.fill();
+      ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+    }
+  });
   if (big){
-    for(let i=0;i<8;i++){
+    for (let i = 0; i < 8; i++){
       const ang = (i/8)*Math.PI*2 + Math.random()*0.3;
-      const len = 26 + Math.random()*18;
-      const sp = document.createElementNS(SVG_NS,"line");
-      sp.setAttribute("x1", x); sp.setAttribute("y1", y);
-      sp.setAttribute("x2", x + Math.cos(ang)*2); sp.setAttribute("y2", y + Math.sin(ang)*2);
-      sp.setAttribute("stroke", color);
-      sp.setAttribute("stroke-width", 2.5);
-      sp.setAttribute("stroke-linecap","round");
-      sp.style.filter = `drop-shadow(0 0 6px ${color})`;
-      field.appendChild(sp);
-      sp.animate([
-        {x2: x + Math.cos(ang)*2,    y2: y + Math.sin(ang)*2,    opacity:1, strokeWidth:2.5},
-        {x2: x + Math.cos(ang)*len,  y2: y + Math.sin(ang)*len,  opacity:0, strokeWidth:0.6}
-      ],{duration:520, easing:"ease-out", fill:"forwards"}).onfinish = ()=>sp.remove();
+      const maxLen = 26 + Math.random()*18;
+      addEnt({
+        update(now){ return now - start < 520; },
+        render(ctx, now){
+          const t = (now - start) / 520;
+          const e = 1 - (1 - t)*(1 - t);
+          ctx.globalAlpha = 1 - t;
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 2.5 * (1 - t*0.76);
+          ctx.lineCap = "round";
+          ctx.shadowColor = color;
+          ctx.shadowBlur = 6;
+          ctx.beginPath();
+          ctx.moveTo(x + Math.cos(ang)*2, y + Math.sin(ang)*2);
+          ctx.lineTo(x + Math.cos(ang)*(2 + e*maxLen), y + Math.sin(ang)*(2 + e*maxLen));
+          ctx.stroke();
+          ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+        }
+      });
     }
   }
 }
@@ -795,16 +853,9 @@ function fireLaser(x0, y0, x1, y1, color){
   playLaser(CHARGE_MS/1000);
 
   const cleanup = [];
-  const add = (el) => { field.appendChild(el); cleanup.push(el); return el; };
-  const mkCircle = (r, stroke, fill, opacity=1) => {
-    const c = document.createElementNS(SVG_NS, "circle");
-    c.setAttribute("cx", x0); c.setAttribute("cy", y0);
-    c.setAttribute("r", r);
-    if (fill) c.setAttribute("fill", fill); else c.setAttribute("fill", "none");
-    if (stroke) { c.setAttribute("stroke", stroke); c.setAttribute("stroke-width", 2); }
-    c.style.opacity = opacity;
-    return c;
-  };
+  const chargeStart = performance.now();
+  // Entities die when `alive` flips false — we flip it at cleanup time
+  const chargeAlive = {v: true};
 
   // DANGER VIGNETTE — whole screen edges bleed red, intensifying
   const vignette = document.createElement("div");
@@ -834,109 +885,174 @@ function fireLaser(x0, y0, x1, y1, color){
   dim.animate([{opacity:0},{opacity:1}],
     {duration: CHARGE_MS, fill:"forwards", easing:"cubic-bezier(.5,0,.9,1)"});
 
-  // A. Heartbeat core — grows in throbs, not a smooth ramp (feels alive)
-  const core = add(mkCircle(2, null, "#fff"));
-  core.style.filter = `drop-shadow(0 0 28px ${color})`;
-  core.animate([
-    {r:2, opacity:0.8},
-    {r:5, opacity:0.95, offset:0.07},   {r:3.5, opacity:0.75, offset:0.12},
-    {r:9, opacity:1,    offset:0.22},   {r:7, opacity:0.85, offset:0.27},
-    {r:14, opacity:1,   offset:0.42},   {r:12, opacity:0.9, offset:0.48},
-    {r:22, opacity:1,   offset:0.65},   {r:19, opacity:0.9, offset:0.72},
-    {r:32, opacity:1,   offset:0.87},
-    {r:46, opacity:1}
-  ], {duration: CHARGE_MS, easing:"cubic-bezier(.6,.05,.3,1)", fill:"forwards"});
-
-  // B. Halo
-  const halo = add(mkCircle(4, null, color, 0.5));
-  halo.style.filter = `drop-shadow(0 0 24px ${color})`;
-  halo.animate([{r:4,opacity:0.3},{r:70,opacity:0.8}],
-    {duration: CHARGE_MS, easing:"ease-in", fill:"forwards"});
-
-  // C. Six collapsing rings (staggered) — dread of convergence
-  for (let i=0;i<6;i++){
-    const ring = add(mkCircle(0, color, null));
-    ring.style.filter = `drop-shadow(0 0 12px ${color})`;
-    const startR = 140 + i*34;
-    const delay = i * 240;
-    ring.animate([
-      {r:startR, strokeOpacity:0, strokeWidth:1.2},
-      {r:startR*0.75, strokeOpacity:0.9, strokeWidth:2.8, offset:0.25},
-      {r:10, strokeOpacity:1, strokeWidth:4.5}
-    ], {duration: CHARGE_MS - delay, delay, easing:"cubic-bezier(.4,0,.2,1)", fill:"forwards"});
-  }
-
-  // D. Orbiting particles getting sucked in — continuous emission (skipped when FPS low)
-  const particleTimer = setInterval(()=>{
-    if (window.__LOW_FPS) return;
-    const ang = Math.random()*Math.PI*2;
-    const dist = 100 + Math.random()*200;
-    const sx = x0 + Math.cos(ang)*dist, sy = y0 + Math.sin(ang)*dist;
-    const sp = document.createElementNS(SVG_NS, "circle");
-    sp.setAttribute("cx", sx); sp.setAttribute("cy", sy);
-    sp.setAttribute("r", 1.4 + Math.random()*1.8);
-    sp.setAttribute("fill", color);
-    sp.style.filter = `drop-shadow(0 0 6px ${color})`;
-    field.appendChild(sp);
-    sp.animate([
-      {cx:sx, cy:sy, opacity:0.9},
-      {cx:x0+Math.cos(ang)*12, cy:y0+Math.sin(ang)*12, opacity:0.2}
-    ], {duration: 500 + Math.random()*360, easing:"cubic-bezier(.55,0,.9,1)", fill:"forwards"})
-      .onfinish = ()=>sp.remove();
-  }, 140);   // was 90 — fewer particle spawns
-
-  // E. Crackle arcs — intensifies as charge nears completion (throttled for perf)
-  const arcStart = performance.now();
-  const arcTimer = setInterval(()=>{
-    if (window.__LOW_FPS) return;
-    const frac = Math.min(1, (performance.now() - arcStart)/CHARGE_MS);
-    const spokes = 1 + Math.floor(frac * 3);       // max 4 spokes (was 7)
-    const reach = 20 + frac*120;
-    for (let i=0;i<spokes;i++){
-      const ang = Math.random()*Math.PI*2;
-      const len = reach * (0.6 + Math.random()*0.8);
-      let d = `M ${x0} ${y0}`;
-      let cx = x0, cy = y0, a = ang;
-      const segs = 3 + Math.floor(frac*2);
-      for (let s=0;s<segs;s++){
-        a += (Math.random()-0.5)*1.3;
-        cx += Math.cos(a)*(len/segs); cy += Math.sin(a)*(len/segs);
-        d += ` L ${cx} ${cy}`;
+  // A. Heartbeat core + B. Halo + C. 6 collapsing rings
+  // (one entity renders all charge visuals centered at (x0,y0) per frame)
+  const coreFrames = [[0,2],[0.07,5],[0.12,3.5],[0.22,9],[0.27,7],[0.42,14],[0.48,12],[0.65,22],[0.72,19],[0.87,32],[1,46]];
+  const coreAlpha  = [[0,0.8],[0.07,0.95],[0.12,0.75],[0.22,1],[0.27,0.85],[0.42,1],[0.48,0.9],[0.65,1],[0.72,0.9],[0.87,1],[1,1]];
+  const interp1 = (t, kf) => {
+    for (let i = 0; i < kf.length - 1; i++){
+      if (t <= kf[i+1][0]){
+        const u = (t - kf[i][0]) / (kf[i+1][0] - kf[i][0]);
+        return kf[i][1] + u * (kf[i+1][1] - kf[i][1]);
       }
-      const p = document.createElementNS(SVG_NS, "path");
-      p.setAttribute("d", d); p.setAttribute("fill", "none");
-      p.setAttribute("stroke", "#fff"); p.setAttribute("stroke-width", 1 + frac*1.2);
-      p.style.filter = `drop-shadow(0 0 9px ${color})`;
-      field.appendChild(p);
-      p.animate([{opacity:1},{opacity:0}],{duration:160, fill:"forwards"})
-        .onfinish = ()=>p.remove();
     }
-  }, 130);   // was 70 — halved DOM churn
-
-  // F. TARGET WARNING PULSES — red rings pulsing OUT from the HQ target,
-  //    interval shrinks exponentially — feels like an incoming missile warning
-  const targetWarnStart = performance.now();
-  const scheduleWarn = () => {
-    const elapsed = performance.now() - targetWarnStart;
-    if (elapsed >= CHARGE_MS - 60) return;
-    const frac = elapsed / CHARGE_MS;
-    // interval 480ms → 70ms
-    const nextIn = 480 - frac*410;
-    const ring = document.createElementNS(SVG_NS, "circle");
-    ring.setAttribute("cx", x1); ring.setAttribute("cy", y1);
-    ring.setAttribute("r", 20);
-    ring.setAttribute("fill", "none");
-    ring.setAttribute("stroke", "#ff2a2a");
-    ring.setAttribute("stroke-width", 2.5);
-    ring.style.filter = "drop-shadow(0 0 15px #ff2a2a)";
-    field.appendChild(ring);
-    ring.animate([
-      {r:20, strokeOpacity:1, strokeWidth:3},
-      {r:140, strokeOpacity:0, strokeWidth:0.5}
-    ], {duration: 560, easing:"ease-out", fill:"forwards"}).onfinish = ()=>ring.remove();
-    setTimeout(scheduleWarn, nextIn);
+    return kf[kf.length-1][1];
   };
-  scheduleWarn();
+  addEnt({
+    update(now){ return chargeAlive.v && (now - chargeStart) < CHARGE_MS; },
+    render(ctx, now){
+      const t = Math.min(1, (now - chargeStart) / CHARGE_MS);
+      // Halo
+      const haloR = 4 + 66 * t;
+      const haloA = 0.3 + 0.5 * t;
+      ctx.globalAlpha = haloA;
+      ctx.shadowColor = color; ctx.shadowBlur = 24;
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(x0, y0, haloR, 0, Math.PI*2); ctx.fill();
+      // 6 collapsing rings
+      for (let i = 0; i < 6; i++){
+        const delay = i * 240;
+        const lt = (now - chargeStart - delay) / (CHARGE_MS - delay);
+        if (lt < 0 || lt >= 1) continue;
+        const startR = 140 + i*34;
+        let r, opa, w;
+        if (lt < 0.25){
+          const u = lt / 0.25;
+          r = startR + (startR*0.75 - startR) * u;
+          opa = u * 0.9;
+          w = 1.2 + u * 1.6;
+        } else {
+          const u = (lt - 0.25) / 0.75;
+          r = startR*0.75 + (10 - startR*0.75) * u;
+          opa = 0.9 + u * 0.1;
+          w = 2.8 + u * 1.7;
+        }
+        ctx.globalAlpha = opa;
+        ctx.lineWidth = w;
+        ctx.strokeStyle = color;
+        ctx.shadowBlur = 12;
+        ctx.beginPath(); ctx.arc(x0, y0, r, 0, Math.PI*2); ctx.stroke();
+      }
+      // Core (heartbeat)
+      const cr = interp1(t, coreFrames);
+      const ca = interp1(t, coreAlpha);
+      ctx.globalAlpha = ca;
+      ctx.shadowColor = color; ctx.shadowBlur = 26;
+      ctx.fillStyle = "#fff";
+      ctx.beginPath(); ctx.arc(x0, y0, cr, 0, Math.PI*2); ctx.fill();
+      ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+    }
+  });
+
+  // D. Orbiting particles — spawner entity emits inward-flying particles
+  addEnt({
+    lastSpawn: 0,
+    update(now){
+      if (!chargeAlive.v || (now - chargeStart) >= CHARGE_MS) return false;
+      if (window.__LOW_FPS) return true;
+      if (now - this.lastSpawn < 140) return true;
+      this.lastSpawn = now;
+      const ang = Math.random()*Math.PI*2;
+      const dist = 100 + Math.random()*200;
+      const sx = x0 + Math.cos(ang)*dist, sy = y0 + Math.sin(ang)*dist;
+      const ex = x0 + Math.cos(ang)*12, ey = y0 + Math.sin(ang)*12;
+      const dur = 500 + Math.random()*360;
+      const r = 1.4 + Math.random()*1.8;
+      const pStart = now;
+      addEnt({
+        update(now2){ return now2 - pStart < dur; },
+        render(ctx, now2){
+          const t = (now2 - pStart) / dur;
+          const e = 1 - (1 - t)*(1 - t)*(1 - t);
+          const px = sx + (ex - sx) * e, py = sy + (ey - sy) * e;
+          ctx.globalAlpha = 0.9 - t * 0.7;
+          ctx.shadowColor = color; ctx.shadowBlur = 6;
+          ctx.fillStyle = color;
+          ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI*2); ctx.fill();
+          ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+        }
+      });
+      return true;
+    },
+    render(){}
+  });
+
+  // E. Crackle arc spokes — spawner entity emits flickering lines
+  addEnt({
+    lastSpawn: 0,
+    update(now){
+      if (!chargeAlive.v || (now - chargeStart) >= CHARGE_MS) return false;
+      if (window.__LOW_FPS) return true;
+      if (now - this.lastSpawn < 130) return true;
+      this.lastSpawn = now;
+      const frac = (now - chargeStart) / CHARGE_MS;
+      const spokes = 1 + Math.floor(frac * 3);
+      const reach = 20 + frac*120;
+      for (let i = 0; i < spokes; i++){
+        const baseAng = Math.random()*Math.PI*2;
+        const len = reach * (0.6 + Math.random()*0.8);
+        const segs = 3 + Math.floor(frac*2);
+        const pts = [[x0, y0]];
+        let cx = x0, cy = y0, a = baseAng;
+        for (let s = 0; s < segs; s++){
+          a += (Math.random()-0.5)*1.3;
+          cx += Math.cos(a)*(len/segs); cy += Math.sin(a)*(len/segs);
+          pts.push([cx, cy]);
+        }
+        const sStart = now;
+        const lw = 1 + frac*1.2;
+        addEnt({
+          update(now2){ return now2 - sStart < 160; },
+          render(ctx, now2){
+            const t = (now2 - sStart) / 160;
+            ctx.globalAlpha = 1 - t;
+            ctx.strokeStyle = "#fff";
+            ctx.lineWidth = lw;
+            ctx.shadowColor = color; ctx.shadowBlur = 9;
+            ctx.beginPath();
+            for (let k = 0; k < pts.length; k++){
+              if (k === 0) ctx.moveTo(pts[k][0], pts[k][1]);
+              else ctx.lineTo(pts[k][0], pts[k][1]);
+            }
+            ctx.stroke();
+            ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+          }
+        });
+      }
+      return true;
+    },
+    render(){}
+  });
+
+  // F. TARGET WARNING PULSES — red rings expanding from the target
+  //    (interval shrinks exponentially as impact nears)
+  addEnt({
+    lastSpawn: 0,
+    update(now){
+      if (!chargeAlive.v || (now - chargeStart) >= CHARGE_MS - 60) return false;
+      const frac = (now - chargeStart) / CHARGE_MS;
+      const interval = 480 - frac*410;
+      if (now - this.lastSpawn < interval) return true;
+      this.lastSpawn = now;
+      const pStart = now;
+      addEnt({
+        update(now2){ return now2 - pStart < 560; },
+        render(ctx, now2){
+          const t = (now2 - pStart) / 560;
+          const e = 1 - (1 - t)*(1 - t);
+          const r = 20 + e * 120;
+          ctx.globalAlpha = 1 - t;
+          ctx.strokeStyle = "#ff2a2a";
+          ctx.lineWidth = 3 - e * 2.5;
+          ctx.shadowColor = "#ff2a2a"; ctx.shadowBlur = 15;
+          ctx.beginPath(); ctx.arc(x1, y1, r, 0, Math.PI*2); ctx.stroke();
+          ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+        }
+      });
+      return true;
+    },
+    render(){}
+  });
 
   // G. Pre-impact rumble — starts at 72% of charge (last ~2s)
   setTimeout(()=>{
@@ -995,93 +1111,105 @@ function fireLaser(x0, y0, x1, y1, color){
   }
 
   setTimeout(()=>{
-    clearInterval(arcTimer);
-    clearInterval(particleTimer);
+    chargeAlive.v = false;                       // charge entities die on next frame
     cleanup.forEach(el => el.remove());
     document.documentElement.classList.remove("scr-rumble");
 
-    // 2. THE BEAM — outer glow + inner white core
-    const glow = document.createElementNS(SVG_NS, "line");
-    glow.setAttribute("x1", x0); glow.setAttribute("y1", y0);
-    glow.setAttribute("x2", x1); glow.setAttribute("y2", y1);
-    glow.setAttribute("stroke", color); glow.setAttribute("stroke-width", 22);
-    glow.setAttribute("stroke-linecap", "round");
-    glow.style.opacity = 0.65;
-    glow.style.filter = `drop-shadow(0 0 28px ${color})`;
-    field.appendChild(glow);
-
-    const beam = document.createElementNS(SVG_NS, "line");
-    beam.setAttribute("x1", x0); beam.setAttribute("y1", y0);
-    beam.setAttribute("x2", x1); beam.setAttribute("y2", y1);
-    beam.setAttribute("stroke", "#ffffff"); beam.setAttribute("stroke-width", 8);
-    beam.setAttribute("stroke-linecap", "round");
-    beam.style.filter = `drop-shadow(0 0 36px ${color})`;
-    field.appendChild(beam);
-
-    // reveal beam from source to target — slightly slower so the strike reads
+    // 2. THE BEAM — single canvas entity with 3 phases (reveal → sustain → fade)
+    const REVEAL = 170, SUSTAIN = 220, FADE = 360;
+    const TOTAL = REVEAL + SUSTAIN + FADE;
+    const beamStart = performance.now();
     const len = Math.hypot(x1-x0, y1-y0);
-    beam.style.strokeDasharray = `${len} ${len}`;
-    beam.style.strokeDashoffset = `${len}`;
-    glow.style.strokeDasharray = `${len} ${len}`;
-    glow.style.strokeDashoffset = `${len}`;
-    beam.animate([{strokeDashoffset:len},{strokeDashoffset:0}],
-      {duration:170, easing:"cubic-bezier(.2,.8,.1,1)", fill:"forwards"});
-    glow.animate([{strokeDashoffset:len},{strokeDashoffset:0}],
-      {duration:170, easing:"cubic-bezier(.2,.8,.1,1)", fill:"forwards"}).onfinish = ()=>{
-      // 2b. BEAM SUSTAIN — 220ms of pulsing thickening beam before the world breaks
-      beam.animate([
-        {strokeWidth:8},{strokeWidth:16, offset:0.3},
-        {strokeWidth:12, offset:0.6},{strokeWidth:22}
-      ], {duration:220, easing:"ease-in", fill:"forwards"});
-      glow.animate([
-        {strokeWidth:22, opacity:0.65},{strokeWidth:44, opacity:0.85, offset:0.5},{strokeWidth:56, opacity:1}
-      ], {duration:220, easing:"ease-in", fill:"forwards"});
+
+    addEnt({
+      update(now){ return now - beamStart < TOTAL; },
+      render(ctx, now){
+        const el = now - beamStart;
+        // Phase 1 — reveal from src to target
+        let revealFrac = 1, thick = 8, glowThick = 22, glowAlpha = 0.65, beamAlpha = 1;
+        if (el < REVEAL){
+          const t = el / REVEAL;
+          revealFrac = 1 - Math.pow(1 - t, 2.5);
+        } else if (el < REVEAL + SUSTAIN){
+          // Phase 2 — sustain (thickening pulse)
+          const t = (el - REVEAL) / SUSTAIN;
+          // beam width: 8 → 16 at 30% → 12 at 60% → 22
+          if (t < 0.3)       thick = 8 + (16 - 8) * (t/0.3);
+          else if (t < 0.6)  thick = 16 + (12 - 16) * ((t-0.3)/0.3);
+          else               thick = 12 + (22 - 12) * ((t-0.6)/0.4);
+          // glow width/alpha: 22/0.65 → 44/0.85 → 56/1
+          if (t < 0.5){
+            glowThick = 22 + (44 - 22) * (t/0.5);
+            glowAlpha = 0.65 + (0.85 - 0.65) * (t/0.5);
+          } else {
+            glowThick = 44 + (56 - 44) * ((t-0.5)/0.5);
+            glowAlpha = 0.85 + (1 - 0.85) * ((t-0.5)/0.5);
+          }
+        } else {
+          // Phase 3 — fade (recoil)
+          const t = (el - REVEAL - SUSTAIN) / FADE;
+          thick = 22 + (2 - 22) * t;
+          beamAlpha = 1 - t;
+          glowAlpha = 1 - t;
+          glowThick = 56;
+        }
+        // End coord along reveal
+        const ex = x0 + (x1 - x0) * revealFrac;
+        const ey = y0 + (y1 - y0) * revealFrac;
+        // Outer glow
+        ctx.globalAlpha = glowAlpha;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = glowThick;
+        ctx.lineCap = "round";
+        ctx.shadowColor = color; ctx.shadowBlur = 24;
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(ex, ey); ctx.stroke();
+        // Inner core (white)
+        ctx.globalAlpha = beamAlpha;
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = thick;
+        ctx.shadowColor = color; ctx.shadowBlur = 30;
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(ex, ey); ctx.stroke();
+        ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+      }
+    });
+
+    // Impact fires at REVEAL + SUSTAIN; aftermath + aftershocks spawn from here
+    setTimeout(()=>{
+      whiteOutScreen();
+      flashScreen(color);
+      quakeScreen();
+      shatterAt(x1, y1, color);
+      megaShockwaves(x1, y1, color);
+      hqPunch();
+      debrisChunks(x1, y1, color);
+      impactBurst(x1, y1, color, "fb");
+      playShatter();
+      playBigImpact();
+
+      // Aftermath wash
+      const aftermath = document.createElement("div");
+      Object.assign(aftermath.style, {
+        position:"fixed", inset:"0", zIndex:4, pointerEvents:"none",
+        background:"radial-gradient(ellipse at center, transparent 30%, rgba(255,42,42,.35) 90%)",
+        mixBlendMode:"screen", opacity:"0.85"
+      });
+      document.body.appendChild(aftermath);
+      aftermath.animate([{opacity:0.85},{opacity:0}],
+        {duration:2800, easing:"ease-out", fill:"forwards"}).onfinish = ()=>aftermath.remove();
 
       setTimeout(()=>{
-        // ========= THE IMPACT =========
-        whiteOutScreen();             // full-screen pure WHITE flash — sensory shock
-        flashScreen(color);           // colored wash underneath
-        quakeScreen();                // VIOLENT shake (30px magnitude)
-        shatterAt(x1, y1, color);
-        megaShockwaves(x1, y1, color);
-        hqPunch();
-        debrisChunks(x1, y1, color);
-        impactBurst(x1, y1, color, "fb");
-        playShatter();
-        playBigImpact();
-
-        // Beam snaps + fades fast (the "recoil")
-        beam.animate([{opacity:1,strokeWidth:22},{opacity:0,strokeWidth:2}],
-          {duration:360, easing:"ease-out", fill:"forwards"}).onfinish = ()=>beam.remove();
-        glow.animate([{opacity:1},{opacity:0}],
-          {duration:360, easing:"ease-out", fill:"forwards"}).onfinish = ()=>glow.remove();
-
-        // 4. AFTERMATH — lingering red wash + 2 aftershocks
-        const aftermath = document.createElement("div");
-        Object.assign(aftermath.style, {
-          position:"fixed", inset:"0", zIndex:4, pointerEvents:"none",
-          background:"radial-gradient(ellipse at center, transparent 30%, rgba(255,42,42,.35) 90%)",
-          mixBlendMode:"screen", opacity:"0.85"
-        });
-        document.body.appendChild(aftermath);
-        aftermath.animate([{opacity:0.85},{opacity:0}],
-          {duration:2800, easing:"ease-out", fill:"forwards"}).onfinish = ()=>aftermath.remove();
-
-        setTimeout(()=>{
-          const el = document.documentElement;
-          el.classList.remove("scr-shake"); void el.offsetWidth; el.classList.add("scr-shake");
-          setTimeout(()=>el.classList.remove("scr-shake"), 500);
-          playAftershock(0.8);
-        }, 900);
-
-        setTimeout(()=>{
-          const el = document.documentElement;
-          el.classList.remove("scr-shake"); void el.offsetWidth; el.classList.add("scr-shake");
-          setTimeout(()=>el.classList.remove("scr-shake"), 400);
-          playAftershock(0.45);
-        }, 2000);
-      }, 220);
-    };
+        const el = document.documentElement;
+        el.classList.remove("scr-shake"); void el.offsetWidth; el.classList.add("scr-shake");
+        setTimeout(()=>el.classList.remove("scr-shake"), 500);
+        playAftershock(0.8);
+      }, 900);
+      setTimeout(()=>{
+        const el = document.documentElement;
+        el.classList.remove("scr-shake"); void el.offsetWidth; el.classList.add("scr-shake");
+        setTimeout(()=>el.classList.remove("scr-shake"), 400);
+        playAftershock(0.45);
+      }, 2000);
+    }, REVEAL + SUSTAIN);
   }, CHARGE_MS);
 }
 
@@ -1144,21 +1272,27 @@ function quakeScreen(){
 
 function megaShockwaves(x, y, color){
   const maxR = Math.hypot(window.innerWidth, window.innerHeight);
-  for (let i=0;i<5;i++){
-    const ring = document.createElementNS(SVG_NS, "circle");
-    ring.setAttribute("cx", x); ring.setAttribute("cy", y);
-    ring.setAttribute("r", 6);
-    ring.setAttribute("fill", "none");
-    ring.setAttribute("stroke", i === 0 ? "#ffffff" : color);
+  for (let i = 0; i < 5; i++){
     const w0 = 5 - i*0.7;
-    ring.setAttribute("stroke-width", w0);
-    ring.style.filter = `drop-shadow(0 0 28px ${color})`;
-    field.appendChild(ring);
-    ring.animate([
-      {r:6, strokeOpacity:1, strokeWidth:w0},
-      {r:maxR*0.75, strokeOpacity:0, strokeWidth:0.3}
-    ], {duration: 1400 - i*90, delay: i*70, easing:"cubic-bezier(.1,.8,.3,1)", fill:"forwards"})
-      .onfinish = ()=>ring.remove();
+    const dur = 1400 - i*90;
+    const delay = i * 70;
+    const stroke = i === 0 ? "#ffffff" : color;
+    const start = performance.now() + delay;
+    addEnt({
+      update(now){ return now - start < dur; },
+      render(ctx, now){
+        if (now < start) return;
+        const t = (now - start) / dur;
+        const e = 1 - Math.pow(1 - t, 3.5);
+        const r = 6 + e * (maxR*0.75 - 6);
+        ctx.globalAlpha = 1 - t;
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = w0 + (0.3 - w0) * t;
+        ctx.shadowColor = color; ctx.shadowBlur = 24;
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.stroke();
+        ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+      }
+    });
   }
 }
 
@@ -1178,36 +1312,51 @@ function hqPunch(){
 }
 
 function debrisChunks(x, y, color){
-  const chunks = 22;     // was 34
-  for (let i=0;i<chunks;i++){
+  const chunks = 22;
+  for (let i = 0; i < chunks; i++){
     const ang = (i/chunks)*Math.PI*2 + (Math.random()-0.5)*0.45;
     const speed = 220 + Math.random()*520;
     const lifetime = 900 + Math.random()*700;
-    const rot = (Math.random()-0.5)*900;
-
-    const poly = document.createElementNS(SVG_NS, "polygon");
+    const rot = (Math.random()-0.5)*Math.PI*5;   // radians total
     const baseR = 3 + Math.random()*5;
-    const pts = [];
     const sides = 3 + Math.floor(Math.random()*3);
-    for (let s=0;s<sides;s++){
+    const pts = [];
+    for (let s = 0; s < sides; s++){
       const a = (s/sides)*Math.PI*2;
       const rr = baseR*(0.55 + Math.random()*0.55);
-      pts.push(`${Math.cos(a)*rr},${Math.sin(a)*rr}`);
+      pts.push([Math.cos(a)*rr, Math.sin(a)*rr]);
     }
-    poly.setAttribute("points", pts.join(" "));
-    poly.setAttribute("fill", Math.random() > 0.3 ? color : "#ffffff");
-    poly.style.filter = `drop-shadow(0 0 6px ${color})`;
-    poly.setAttribute("transform", `translate(${x},${y}) rotate(0)`);
-    field.appendChild(poly);
-
+    const fillColor = Math.random() > 0.3 ? color : "#ffffff";
     const endX = x + Math.cos(ang)*speed;
-    const endY = y + Math.sin(ang)*speed + Math.random()*60;  // slight gravity
-    poly.animate([
-      {transform:`translate(${x},${y}) rotate(0)`, opacity:1},
-      {transform:`translate(${(x+endX)/2},${(y+endY)/2 - 30}) rotate(${rot*0.5}deg)`, opacity:0.9, offset:0.5},
-      {transform:`translate(${endX},${endY}) rotate(${rot}deg)`, opacity:0}
-    ], {duration:lifetime, easing:"cubic-bezier(.3,.7,.5,1)", fill:"forwards"})
-      .onfinish = ()=>poly.remove();
+    const endY = y + Math.sin(ang)*speed + Math.random()*60;
+    const midX = (x+endX)/2, midY = (y+endY)/2 - 30;
+    const start = performance.now();
+    addEnt({
+      update(now){ return now - start < lifetime; },
+      render(ctx, now){
+        const t = (now - start) / lifetime;
+        const e = 1 - Math.pow(1 - t, 2.5);
+        // quadratic arc for gravity
+        const mt = 1 - e;
+        const px = mt*mt*x + 2*mt*e*midX + e*e*endX;
+        const py = mt*mt*y + 2*mt*e*midY + e*e*endY;
+        const r = rot * e;
+        ctx.globalAlpha = 1 - t;
+        ctx.shadowColor = color; ctx.shadowBlur = 6;
+        ctx.fillStyle = fillColor;
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(r);
+        ctx.beginPath();
+        for (let s = 0; s < pts.length; s++){
+          if (s === 0) ctx.moveTo(pts[s][0], pts[s][1]);
+          else ctx.lineTo(pts[s][0], pts[s][1]);
+        }
+        ctx.closePath(); ctx.fill();
+        ctx.restore();
+        ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+      }
+    });
   }
 }
 
