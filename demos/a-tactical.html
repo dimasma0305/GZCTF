@@ -9,146 +9,189 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#060609; --panel:#0c0d12; --grid:#14161f;
+    --bg:#060609;
     --red:#ff2a2a; --green:#3ae85c; --amber:#f4b619; --gold:#ffd34a;
-    --ink:#d7dbe4; --muted:#6b7183;
+    --ink:#d7dbe4; --muted:#6b7183; --grid:#14161f;
+
+    /* Layout slots (overridden per viewport in JS) */
+    --header-h:46px; --footer-h:40px;
+    --feed-w:360px;  --board-w:300px;
+    --gutter:18px;
   }
-  *{box-sizing:border-box}
-  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font-family:"Space Grotesk",system-ui,sans-serif}
-  body::before{
-    content:""; position:fixed; inset:0; pointer-events:none; z-index:100;
-    background:repeating-linear-gradient(to bottom,transparent 0 2px,rgba(255,255,255,.03) 2px 3px);
-  }
-  body::after{
-    content:""; position:fixed; inset:0; pointer-events:none; z-index:99;
-    background-image:
-      linear-gradient(var(--grid) 1px,transparent 1px),
-      linear-gradient(90deg,var(--grid) 1px,transparent 1px);
-    background-size:48px 48px; opacity:.35;
-  }
-  .mono{font-family:"JetBrains Mono",monospace}
+  *{box-sizing:border-box; margin:0; padding:0}
+  html,body{height:100%; overflow:hidden; background:var(--bg); color:var(--ink);
+    font-family:"Space Grotesk",system-ui,sans-serif}
+
+  /* Scanlines + grid as fixed backdrop */
+  body::before{content:""; position:fixed; inset:0; pointer-events:none; z-index:1;
+    background:repeating-linear-gradient(to bottom,transparent 0 2px,rgba(255,255,255,.03) 2px 3px)}
+  body::after{content:""; position:fixed; inset:0; pointer-events:none; z-index:1;
+    background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+    background-size:48px 48px; opacity:.28}
+
+  /* ===== Layout slots ===== */
   .header{
-    position:fixed; top:12px; left:12px; right:12px; z-index:20;
-    display:flex; justify-content:space-between; align-items:center;
+    position:fixed; top:0; left:0; right:0; height:var(--header-h); z-index:30;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0 var(--gutter);
     font-family:"JetBrains Mono",monospace; font-size:11px; color:var(--muted);
     letter-spacing:.22em; text-transform:uppercase;
+    background:linear-gradient(to bottom, rgba(12,13,18,.9), rgba(12,13,18,.5));
+    border-bottom:1px solid rgba(255,42,42,.3);
   }
   .header .marker{color:var(--red)}
   .header .live{color:var(--green); display:inline-flex; align-items:center; gap:6px}
   .live .dot{width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 12px var(--green); animation:pulse 1.2s infinite}
   @keyframes pulse{50%{opacity:.4}}
-  .bracket{position:absolute; width:20px; height:20px; border:2px solid var(--red)}
+
+  .footer{
+    position:fixed; bottom:0; left:0; right:0; height:var(--footer-h); z-index:30;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0 var(--gutter);
+    font-family:"JetBrains Mono",monospace; font-size:10.5px; color:var(--muted);
+    letter-spacing:.22em; text-transform:uppercase;
+    background:linear-gradient(to top, rgba(12,13,18,.9), rgba(12,13,18,.5));
+    border-top:1px solid rgba(255,211,74,.2);
+  }
+
+  /* Bracket-corner decoration for panels */
+  .bracket{position:absolute; width:16px; height:16px; border:2px solid var(--red)}
   .bracket.tl{top:-1px; left:-1px; border-right:none; border-bottom:none}
   .bracket.tr{top:-1px; right:-1px; border-left:none; border-bottom:none}
   .bracket.bl{bottom:-1px; left:-1px; border-right:none; border-top:none}
   .bracket.br{bottom:-1px; right:-1px; border-left:none; border-top:none}
 
-  /* LEFT: terminal feed */
   .feed{
-    position:fixed; left:18px; top:60px; bottom:120px; width:360px; z-index:10;
-    background:rgba(12,13,18,.78); backdrop-filter:blur(6px);
-    padding:18px 20px 14px; overflow:hidden;
+    position:fixed; left:var(--gutter); top:calc(var(--header-h) + var(--gutter));
+    bottom:calc(var(--footer-h) + var(--gutter)); width:var(--feed-w); z-index:20;
+    background:rgba(12,13,18,.82); backdrop-filter:blur(6px);
+    padding:16px 18px 14px; overflow:hidden;
   }
-  .feed .title{font-family:"JetBrains Mono",monospace; font-size:10px; letter-spacing:.25em; color:var(--red); margin-bottom:14px}
-  .feed .line{font-family:"JetBrains Mono",monospace; font-size:12.5px; line-height:1.55; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .feed .h{font-family:"JetBrains Mono",monospace; font-size:10px; letter-spacing:.25em; color:var(--red); margin-bottom:12px}
+  .feed .line{font-family:"JetBrains Mono",monospace; font-size:12px; line-height:1.5; margin-bottom:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
   .feed .t{color:var(--muted)}
   .feed .ok{color:var(--green)}
   .feed .fb{color:var(--red); font-weight:700}
   .feed .amb{color:var(--amber)}
   .feed .bad{color:#ff6262; opacity:.55}
-  .cursor{display:inline-block; width:8px; height:14px; background:var(--green); vertical-align:-2px; animation:blink 1s steps(2,start) infinite; margin-left:2px}
+  .cursor{display:inline-block; width:7px; height:12px; background:var(--green); vertical-align:-1px; animation:blink 1s steps(2,start) infinite; margin-left:2px}
   @keyframes blink{50%{opacity:0}}
 
-  /* RIGHT: scoreboard */
   .board{
-    position:fixed; right:18px; top:60px; width:320px; z-index:10;
-    background:rgba(12,13,18,.78); backdrop-filter:blur(6px); padding:18px 20px 14px;
+    position:fixed; right:var(--gutter); top:calc(var(--header-h) + var(--gutter));
+    width:var(--board-w); z-index:20;
+    background:rgba(12,13,18,.82); backdrop-filter:blur(6px);
+    padding:16px 18px 14px;
   }
-  .board .title{font-family:"JetBrains Mono",monospace; font-size:10px; letter-spacing:.25em; color:var(--amber); margin-bottom:14px; display:flex; justify-content:space-between}
-  .row{display:grid; grid-template-columns:40px 1fr auto; align-items:baseline; padding:7px 0; border-bottom:1px dashed #20232d}
-  .row:last-child{border-bottom:none}
-  .rank{font-family:"JetBrains Mono",monospace; font-weight:700; font-size:22px; color:var(--gold); line-height:1}
-  .row:nth-child(1) .rank{color:var(--gold); text-shadow:0 0 20px rgba(255,211,74,.6)}
-  .name{font-weight:700; text-transform:uppercase; letter-spacing:.08em; font-size:13px}
-  .score{font-family:"JetBrains Mono",monospace; font-weight:500; color:var(--muted)}
+  .board .h{font-family:"JetBrains Mono",monospace; font-size:10px; letter-spacing:.25em; color:var(--amber); margin-bottom:12px; display:flex; justify-content:space-between}
+  .board .row{display:grid; grid-template-columns:32px 1fr auto; align-items:baseline; padding:6px 0; border-bottom:1px dashed #20232d; gap:8px}
+  .board .row:last-child{border-bottom:none}
+  .rank{font-family:"JetBrains Mono",monospace; font-weight:700; font-size:20px; color:var(--gold); line-height:1; text-align:right}
+  .board .row:nth-child(2) .rank{text-shadow:0 0 14px rgba(255,211,74,.6)}
+  .name{font-weight:700; text-transform:uppercase; letter-spacing:.07em; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .score{font-family:"JetBrains Mono",monospace; font-weight:500; color:var(--muted); font-size:11.5px}
 
-  /* CENTER-RIGHT theater */
-  .theater{position:fixed; inset:0; z-index:5; pointer-events:none}
-  .hq{
-    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-    display:flex; flex-direction:column; align-items:center; gap:4px;
+  /* Stats panel below scoreboard */
+  .stats{
+    position:fixed; right:var(--gutter);
+    width:var(--board-w); z-index:20;
+    background:rgba(12,13,18,.72); backdrop-filter:blur(6px);
+    padding:12px 18px;
   }
-  .hq .hex{
-    width:320px; height:360px; position:relative;
+  .stats .h{font-family:"JetBrains Mono",monospace; font-size:10px; letter-spacing:.25em; color:var(--green); margin-bottom:8px}
+  .stats .kv{display:flex; justify-content:space-between; padding:3px 0;
+    font-family:"JetBrains Mono",monospace; font-size:11px}
+  .stats .k{color:var(--muted); letter-spacing:.1em}
+  .stats .v{color:var(--ink); font-weight:700}
+
+  /* ===== Theater (play area) ===== */
+  .theater{position:fixed; z-index:5; pointer-events:none}
+  .hq{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); display:flex; flex-direction:column; align-items:center}
+  .hex{
+    width:var(--hq-size,280px); height:calc(var(--hq-size,280px) * 1.12); position:relative;
     clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);
-    background:radial-gradient(circle at center,rgba(255,42,42,.08),transparent 70%);
-    border:2px solid rgba(255,42,42,.35);
+    background:radial-gradient(circle at center,rgba(255,42,42,.1),transparent 70%);
     display:flex; align-items:center; justify-content:center; flex-direction:column;
-    padding:30px; animation:hexBreathe 2.2s ease-in-out infinite;
+    padding:30px;
   }
-  @keyframes hexBreathe{50%{border-color:rgba(255,42,42,.75); filter:drop-shadow(0 0 28px rgba(255,42,42,.4))}}
-  .hq .tag{font-family:"JetBrains Mono",monospace; font-size:11px; letter-spacing:.35em; color:var(--amber); opacity:.85; margin-bottom:8px}
+  .hex::before{
+    content:""; position:absolute; inset:0; clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);
+    background:linear-gradient(135deg, rgba(255,42,42,.4), rgba(255,42,42,.15));
+    padding:2px;
+    mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite:exclude; -webkit-mask-composite:xor;
+    animation:hexBreathe 2.2s ease-in-out infinite;
+  }
+  @keyframes hexBreathe{50%{opacity:.6}}
+  .hq .tag{font-family:"JetBrains Mono",monospace; font-size:10px; letter-spacing:.35em; color:var(--amber); opacity:.85; margin-bottom:4px}
   .hq .title{
-    font-family:"JetBrains Mono",monospace; font-size:28px; font-weight:700; text-transform:uppercase;
+    font-family:"JetBrains Mono",monospace; font-size:24px; font-weight:700; text-transform:uppercase;
     letter-spacing:.12em; color:var(--gold); text-align:center; line-height:1.15;
-    text-shadow:0 0 24px rgba(255,211,74,.55);
+    text-shadow:0 0 22px rgba(255,211,74,.55);
   }
-  .hq .sub{font-family:"JetBrains Mono",monospace; font-size:10px; letter-spacing:.45em; color:var(--muted); margin-top:12px}
-  .ring{position:absolute; inset:-30px; border:1px dashed rgba(255,42,42,.25); border-radius:50%; animation:spin 40s linear infinite}
-  .ring.r2{inset:-70px; border-color:rgba(255,211,74,.18); animation:spin 60s linear infinite reverse}
-  .ring.r3{inset:-110px; border-color:rgba(58,232,92,.1); animation:spin 90s linear infinite}
-  @keyframes spin{to{transform:rotate(360deg)}}
+  .hq .sub{font-family:"JetBrains Mono",monospace; font-size:9.5px; letter-spacing:.4em; color:var(--muted); margin-top:10px}
 
-  /* teams around left half */
-  .team-node{position:absolute; color:var(--ink); font-family:"JetBrains Mono",monospace; font-size:11px; letter-spacing:.08em; text-transform:uppercase; transform:translate(-50%,-50%); text-align:center}
-  .team-node .dot{width:12px; height:12px; border-radius:50%; background:var(--muted); margin:0 auto 6px; box-shadow:0 0 6px currentColor}
-  .team-node.no-label{font-size:0}
-  .team-node.no-label .dot{width:8px; height:8px; margin-bottom:0; background:var(--red); opacity:.45}
+  .ring-deco{position:absolute; left:50%; top:50%; border:1px dashed rgba(255,42,42,.22); border-radius:50%; transform:translate(-50%,-50%); pointer-events:none}
+  .ring-deco.spin{animation:spin 40s linear infinite}
+  .ring-deco.spin-rev{animation:spin 70s linear infinite reverse; border-color:rgba(255,211,74,.15)}
+  @keyframes spin{to{transform:translate(-50%,-50%) rotate(360deg)}}
 
-  /* Rank column for >80 teams mode */
+  /* ===== Team nodes (all absolute to .theater) ===== */
+  .team-node{position:absolute; color:var(--ink); font-family:"JetBrains Mono",monospace; font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; transform:translate(-50%,-50%); display:flex; align-items:center; gap:6px; white-space:nowrap; pointer-events:none}
+  .team-node .dot{width:10px; height:10px; border-radius:50%; background:var(--muted); box-shadow:0 0 6px currentColor; flex-shrink:0}
+  .team-node.right{flex-direction:row-reverse}
+  .team-node.left .name-tag{text-align:left}
+  .team-node.right .name-tag{text-align:right}
+  .team-node.minimal{gap:0}
+  .team-node.minimal .name-tag{display:none}
+  .team-node.minimal .dot{width:8px; height:8px; background:var(--red); opacity:.5}
+
+  /* Rank column for active-only mode */
   #rank-col{
-    position:fixed; left:400px; top:60px; bottom:120px; width:260px; z-index:10;
+    position:fixed; z-index:18;
     background:rgba(12,13,18,.78); backdrop-filter:blur(6px);
-    padding:16px 18px; overflow:hidden;
+    padding:14px 16px; overflow:hidden;
     font-family:"JetBrains Mono",monospace;
   }
-  #rank-col .title{font-size:10px; letter-spacing:.25em; color:var(--green); margin-bottom:14px}
-  #rank-col .rank-row{display:grid; grid-template-columns:32px 1fr; font-size:12px; padding:4px 0; border-bottom:1px dashed #1c1f2a}
+  #rank-col .h{font-size:10px; letter-spacing:.25em; color:var(--green); margin-bottom:10px}
+  #rank-col .rank-row{display:grid; grid-template-columns:28px 1fr; gap:6px; font-size:11.5px; padding:3px 0; border-bottom:1px dashed #1c1f2a}
   #rank-col .rank-row .rk{color:var(--gold); font-weight:700}
-  #rank-col .rank-row .nm{color:var(--ink); letter-spacing:.08em; text-transform:uppercase; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-  #rank-col .rank-row.hit{background:rgba(255,211,74,.12); animation:hitRow .8s ease-out}
-  @keyframes hitRow{50%{background:rgba(255,211,74,.35)}}
+  #rank-col .rank-row .nm{color:var(--ink); letter-spacing:.06em; text-transform:uppercase; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  #rank-col .rank-row.hit{background:rgba(255,211,74,.15); animation:hitRow .8s ease-out}
+  @keyframes hitRow{50%{background:rgba(255,211,74,.4)}}
 
-  /* attacker + particles */
-  .attacker{position:absolute; transform:translate(-50%,-50%); pointer-events:none; z-index:15; animation:popin .2s cubic-bezier(.34,1.56,.64,1), fadeout .6s ease-in 2.4s forwards}
+  /* ===== Attacker sprites + particles ===== */
+  svg.field{position:fixed; inset:0; width:100vw; height:100vh; z-index:12; pointer-events:none}
+  .attacker{position:absolute; transform:translate(-50%,-50%); pointer-events:none; z-index:16;
+    animation:popin .22s cubic-bezier(.34,1.56,.64,1), fadeout .6s ease-in 2.4s forwards}
   @keyframes popin{from{transform:translate(-50%,-50%) scale(0)}}
   @keyframes fadeout{to{opacity:0; transform:translate(-50%,-50%) scale(.8)}}
-  .attacker .glow{width:56px; height:56px; border-radius:50%; border:2px solid currentColor; box-shadow:0 0 40px currentColor; margin:0 auto; display:flex; align-items:center; justify-content:center; font-size:22px}
-  .attacker .lbl{margin-top:6px; font-family:"JetBrains Mono",monospace; font-size:11px; white-space:nowrap; text-align:center}
-  .attacker .lbl b{display:block; font-size:12px; letter-spacing:.1em; text-transform:uppercase}
-  .attacker .pulse{position:absolute; inset:-40px; border:2px solid currentColor; border-radius:50%; animation:ringOut .6s ease-out forwards; opacity:.8}
-  @keyframes ringOut{to{transform:scale(2.5); opacity:0}}
-  svg.field{position:fixed; inset:0; width:100%; height:100%; z-index:12; pointer-events:none}
+  .attacker .glow{width:48px; height:48px; border-radius:50%; border:2px solid currentColor;
+    box-shadow:0 0 28px currentColor; margin:0 auto; display:flex; align-items:center; justify-content:center; font-size:22px;
+    background:radial-gradient(circle at 30% 30%, rgba(255,255,255,.1), rgba(0,0,0,.4))}
+  .attacker .lbl{margin-top:5px; font-family:"JetBrains Mono",monospace; font-size:10.5px; white-space:nowrap; text-align:center; max-width:200px; overflow:hidden; text-overflow:ellipsis}
+  .attacker .lbl b{display:block; font-size:11.5px; letter-spacing:.08em; text-transform:uppercase}
+  .attacker .pulse{position:absolute; inset:-30px; border:2px solid currentColor; border-radius:50%; animation:ringOut .6s ease-out forwards; opacity:.7}
+  @keyframes ringOut{to{transform:scale(2.6); opacity:0}}
 
-  /* first blood overlay */
+  /* First blood full-screen */
   .fbanner{position:fixed; inset:0; z-index:40; pointer-events:none; display:flex; align-items:center; justify-content:center; opacity:0}
   .fbanner.on{animation:fbanner 2.6s ease-out forwards}
-  @keyframes fbanner{0%{opacity:0} 15%{opacity:1} 80%{opacity:1} 100%{opacity:0}}
+  @keyframes fbanner{0%{opacity:0}15%{opacity:1}80%{opacity:1}100%{opacity:0}}
   .fbanner .bg{position:absolute; inset:0; background:radial-gradient(circle at center,rgba(255,42,42,.45),rgba(255,42,42,.05) 55%,transparent 80%)}
   .fbanner .box{
-    position:relative; background:var(--red); color:#0b0b11; padding:28px 48px;
-    font-family:"JetBrains Mono",monospace; font-weight:700; font-size:48px;
+    position:relative; background:var(--red); color:#0b0b11; padding:24px 40px;
+    font-family:"JetBrains Mono",monospace; font-weight:700; font-size:clamp(28px, 4vw, 44px);
     letter-spacing:.12em; text-transform:uppercase; border:4px solid #0b0b11;
-    box-shadow:0 0 80px var(--red);
+    box-shadow:0 0 80px var(--red); text-align:center;
   }
-  .fbanner .tick{font-size:14px; letter-spacing:.3em; color:var(--amber); margin-top:10px; text-align:center}
-
-  /* screen shake during FB */
+  .fbanner .tick{font-size:13px; letter-spacing:.3em; color:var(--amber); margin-top:8px}
   .shake{animation:shake .6s cubic-bezier(.36,.07,.19,.97) both}
   @keyframes shake{10%,90%{transform:translate3d(-1px,0,0)}20%,80%{transform:translate3d(2px,0,0)}30%,50%,70%{transform:translate3d(-4px,0,0)}40%,60%{transform:translate3d(4px,0,0)}}
 
   .sound-toast{
-    position:fixed; top:18px; left:50%; transform:translateX(-50%); z-index:200;
+    position:fixed; top:calc(var(--header-h) + 14px); left:50%; transform:translateX(-50%); z-index:200;
     background:var(--amber); color:#0b0b11; padding:10px 22px;
     font-family:"JetBrains Mono",monospace; font-weight:700; font-size:12px;
     letter-spacing:.2em; text-transform:uppercase; cursor:pointer;
@@ -160,9 +203,15 @@
 </style>
 </head>
 <body>
+
 <div class="header">
-  <span><span class="marker">▙</span>&nbsp;CJ2025 :: PELAJAR · FINALS //// TACTICAL-OPS </span>
-  <span><span class="live"><span class="dot"></span>LIVE FEED</span> &nbsp;//&nbsp; T-23:45 &nbsp;//&nbsp; ROUND 02 &nbsp;//&nbsp; 14:32:17 UTC</span>
+  <span><span class="marker">▙</span>&nbsp;CJ2025 :: <span id="event-label">PELAJAR · FINALS</span> //// TACTICAL-OPS</span>
+  <span><span class="live"><span class="dot"></span>LIVE</span> &nbsp;//&nbsp; <span id="countdown">T-23:45</span> &nbsp;//&nbsp; ROUND 02 &nbsp;//&nbsp; <span id="clock">00:00:00 UTC</span></span>
+</div>
+
+<div class="footer">
+  <span>SIGNAL NOMINAL &nbsp;//&nbsp; <span id="team-count">0</span> TEAMS &nbsp;//&nbsp; <span id="evt-count">0</span> EVENTS</span>
+  <span>GZCTF ATTACK-STREAM // PUBLIC // v1.0</span>
 </div>
 
 <div class="sound-toast" id="sound-toast">▶ CLICK TO ENABLE SOUND</div>
@@ -170,23 +219,31 @@
 
 <div class="feed">
   <div class="bracket tl"></div><div class="bracket tr"></div><div class="bracket bl"></div><div class="bracket br"></div>
-  <div class="title">// EVENT STREAM ///</div>
+  <div class="h">// EVENT STREAM</div>
   <div id="feed-lines"></div>
   <div class="line t">$ gzctf.watch() <span class="cursor"></span></div>
 </div>
 
 <div class="board">
   <div class="bracket tl"></div><div class="bracket tr"></div><div class="bracket bl"></div><div class="bracket br"></div>
-  <div class="title"><span>// SCOREBOARD</span><span>TOP 5</span></div>
+  <div class="h"><span>// SCOREBOARD</span><span>TOP 5</span></div>
   <div id="board-rows"></div>
 </div>
 
-<div class="theater">
+<div class="stats" id="stats">
+  <div class="h">// STATS</div>
+  <div class="kv"><span class="k">ATK_RATE</span><span class="v" id="atk-rate">0/min</span></div>
+  <div class="kv"><span class="k">1ST_BLOOD</span><span class="v" id="fb-count">0</span></div>
+  <div class="kv"><span class="k">PEAK_RANK</span><span class="v" id="peak-rank">—</span></div>
+</div>
+
+<div class="theater" id="theater">
+  <div class="ring-deco spin" id="ring1"></div>
+  <div class="ring-deco spin-rev" id="ring2"></div>
   <div class="hq" id="hq">
-    <div class="ring"></div><div class="ring r2"></div><div class="ring r3"></div>
-    <div class="hex">
-      <div class="tag">// TARGET ACQUIRED</div>
-      <div class="title">CJ2025<br>PELAJAR · FINALS</div>
+    <div class="hex" id="hex">
+      <div class="tag">// TARGET</div>
+      <div class="title" id="hq-title">CJ2025<br>PELAJAR · FINALS</div>
       <div class="sub">OPS · CONTROL · HQ</div>
     </div>
   </div>
@@ -203,14 +260,17 @@
 </div>
 
 <script>
-// Team count can be overridden with `?n=<count>` query param.
-// Try ?n=10 / 30 / 80 / 150 to preview different scale modes.
+/* ============================================================
+   State
+   ============================================================ */
 const N = Math.max(3, parseInt(new URLSearchParams(location.search).get("n") || "10"));
+const CHALLS = [
+  ["PWN","BABU-FORMAT"],["WEB","BIJI"],["WEB","WHITE-NIGHTS"],
+  ["CRYPTO","VIRTUOSO"],["FORENSICS","BAD-OPSEC"],["REVERSE","LATENT-KINGDOM"],
+];
 function genTeams(n){
-  const base = [
-    "ROOT-SKSD","BINARY-SHOCK","NULLBYTE-ID","SEGFAULT","CTRL-Z","0X4D4",
-    "HEAPOVERFLOW","BLUEHAWKS","SHELL-STORM","KERNEL-PANIC",
-  ];
+  const base = ["ROOT-SKSD","BINARY-SHOCK","NULLBYTE-ID","SEGFAULT","CTRL-Z","0X4D4",
+    "HEAPOVERFLOW","BLUEHAWKS","SHELL-STORM","KERNEL-PANIC"];
   const arr = [];
   for (let i=0;i<n;i++){
     const name = i < base.length ? base[i] : `TEAM-${String(i+1).padStart(3,"0")}`;
@@ -219,75 +279,163 @@ function genTeams(n){
   return arr;
 }
 const TEAMS = genTeams(N);
-const CHALLS = [
-  ["PWN","BABU-FORMAT"],["WEB","BIJI"],["WEB","WHITE-NIGHTS"],
-  ["CRYPTO","VIRTUOSO"],["FORENSICS","BAD-OPSEC"],["REVERSE","LATENT-KINGDOM"],
-];
-const feed = document.getElementById("feed-lines");
-const board = document.getElementById("board-rows");
-const field = document.getElementById("field");
-const hq = document.getElementById("hq");
-const fb = document.getElementById("fbanner");
+document.getElementById("team-count").textContent = N;
 
-// render scoreboard
-function renderBoard(){
-  board.innerHTML = TEAMS.slice(0,5).map((t,i)=>`
-    <div class="row"><span class="rank">${String(i+1).padStart(2,"0")}</span>
-    <span class="name">${t[0]}</span>
-    <span class="score mono">${t[1]}</span></div>`).join("");
+let evtCount = 0, fbCount = 0;
+const atkTimestamps = [];
+let audioEnabled = false;
+let audioCtx = null;
+let lastSoundAt = 0;
+let lastPewAt = 0;
+
+/* ============================================================
+   Audio
+   ============================================================ */
+const audio = document.getElementById("fb-audio");
+const toast = document.getElementById("sound-toast");
+function unlockAudio(){
+  if (audioEnabled) return;
+  audioEnabled = true;
+  audio.volume = 0;
+  audio.play().then(()=>{ audio.pause(); audio.currentTime=0; audio.volume=0.85; }).catch(()=>{});
+  try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){}
+  toast.classList.add("hidden");
 }
-renderBoard();
+window.addEventListener("click", unlockAudio);
+window.addEventListener("keydown", unlockAudio);
 
-// Adaptive layout:
-//   n <= 30  → single ring around HQ (full labels)
-//   n <= 80  → dual concentric ring (inner 12 labelled, outer dots only)
-//   n >  80  → active-only: persistent top-20 column right-of-feed, the
-//              rest spawn at random positions ONLY when they fire
-//              (matches the cjctfdanim reference approach).
-function placeTeams(){
-  document.querySelectorAll(".team-node").forEach(n=>n.remove());
-  const cx = window.innerWidth/2, cy = window.innerHeight/2;
+function playPew(type){
+  if (!audioCtx) return;
+  const now = performance.now();
+  if (now - lastPewAt < 40) return;
+  lastPewAt = now;
+  const t0 = audioCtx.currentTime;
+  const dur = 0.09;
+  const f0 = type==="fb"?1600 : type==="ok"?1200 : type==="amber"?1400 : 500;
+  const f1 = type==="fb"?400  : type==="ok"?320  : type==="amber"?360  : 180;
+  const vol = type==="bad"?0.22 : type==="fb"?0.42 : 0.32;
+  const osc = audioCtx.createOscillator();
+  const sub = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type="square"; sub.type="sawtooth";
+  osc.frequency.setValueAtTime(f0, t0);
+  osc.frequency.exponentialRampToValueAtTime(f1, t0+dur);
+  sub.frequency.setValueAtTime(f0*0.5, t0);
+  sub.frequency.exponentialRampToValueAtTime(f1*0.5, t0+dur);
+  gain.gain.setValueAtTime(0, t0);
+  gain.gain.linearRampToValueAtTime(vol, t0+0.005);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+  osc.connect(gain); sub.connect(gain); gain.connect(audioCtx.destination);
+  osc.start(t0); sub.start(t0);
+  osc.stop(t0+dur+0.02); sub.stop(t0+dur+0.02);
+}
+
+/* ============================================================
+   Layout computation
+   ============================================================ */
+// Returns {cx, cy, rx, ry, hqSize, mode, labelThreshold}
+function computeLayout(){
+  const w = window.innerWidth, h = window.innerHeight;
+
+  // Scale panel widths to viewport: wider = more room for panels
+  const feedW = Math.min(Math.max(w*0.19, 240), 360);
+  const boardW = Math.min(Math.max(w*0.16, 220), 300);
+  const headerH = 46, footerH = 40, gutter = 18, pad = 20;
+  document.documentElement.style.setProperty('--feed-w', feedW+'px');
+  document.documentElement.style.setProperty('--board-w', boardW+'px');
+
+  // Position stats panel below scoreboard
+  const boardRowsHeight = 6 * 32 + 36; // ~252
+  const statsTop = headerH + gutter + boardRowsHeight + 10;
+  document.getElementById("stats").style.top = statsTop + "px";
+
+  // Play area rectangle (inside the panels + header/footer)
+  const px0 = gutter + feedW + pad;               // left edge of play area
+  const px1 = w - gutter - boardW - pad;          // right edge
+  const py0 = headerH + pad;                      // top edge
+  const py1 = h - footerH - pad;                  // bottom edge
+
+  const pw = px1 - px0, ph = py1 - py0;
+  const cx = (px0 + px1)/2, cy = (py0 + py1)/2;
+
+  // HQ size scales with play area
+  const hqSize = Math.min(280, Math.max(160, Math.min(pw, ph) * 0.28));
+  document.documentElement.style.setProperty('--hq-size', hqSize+'px');
+
+  // Ring is elliptical, fitting the play area with margin for labels/sprite
+  const labelMargin = 60;
+  const hqHalf = hqSize * 0.6; // hex vertical extent slightly more than width
+  const rx = Math.max(120, pw/2 - labelMargin);
+  const ry = Math.max(120, ph/2 - labelMargin);
+  const rMin = hqHalf + 30;
+  const rxFinal = Math.max(rMin, rx);
+  const ryFinal = Math.max(rMin, ry);
+
+  // Mode selection based on team count
   const n = TEAMS.length;
-  const minDim = Math.min(window.innerWidth, window.innerHeight);
+  let mode;
+  if (n <= 24)       mode = "ring";
+  else if (n <= 70)  mode = "dual";
+  else               mode = "active";
 
-  if (n <= 30) {
-    const r = minDim * 0.38;
-    TEAMS.forEach((t,i)=>{
-      const a = (i/n)*Math.PI*2 - Math.PI/2;
-      place(t[0], cx + r*Math.cos(a), cy + r*Math.sin(a), /*label*/true);
-    });
-  } else if (n <= 80) {
-    const rIn = minDim * 0.28, rOut = minDim * 0.44;
-    const inner = TEAMS.slice(0,12), outer = TEAMS.slice(12);
-    inner.forEach((t,i)=>{
-      const a = (i/inner.length)*Math.PI*2 - Math.PI/2;
-      place(t[0], cx + rIn*Math.cos(a), cy + rIn*Math.sin(a), true);
-    });
-    outer.forEach((t,i)=>{
-      const a = (i/outer.length)*Math.PI*2 - Math.PI/2;
-      place(t[0], cx + rOut*Math.cos(a), cy + rOut*Math.sin(a), false);
-    });
-  } else {
-    // Active-only: no static team nodes. Top-20 lives in a dedicated rank
-    // column next to the feed; everyone else is anonymous until they fire.
-    buildRankColumn();
-  }
+  // Label density check: circumference / n vs label width budget
+  // Estimated ellipse perimeter via Ramanujan
+  const perim = Math.PI * (3*(rxFinal+ryFinal) - Math.sqrt((3*rxFinal+ryFinal)*(rxFinal+3*ryFinal)));
+  const labelThreshold = 70; // px arc per team minimum for labels
+  const showLabels = (perim / n) >= labelThreshold;
+
+  return { cx, cy, rx:rxFinal, ry:ryFinal, hqSize, mode, showLabels, px0, px1, py0, py1, pw, ph };
 }
-function place(name, x, y, label){
+
+/* ============================================================
+   Build team nodes per mode
+   ============================================================ */
+function clearTeamNodes(){
+  document.querySelectorAll(".team-node").forEach(n=>n.remove());
+  const rc = document.getElementById("rank-col"); if (rc) rc.remove();
+}
+function placeNode(name, x, y, labelled){
   const el = document.createElement("div");
-  el.className = "team-node" + (label?"":" no-label");
+  el.className = "team-node" + (labelled ? (x < window.innerWidth/2 ? " left" : " right") : " minimal");
   el.dataset.team = name;
   el.style.left=x+"px"; el.style.top=y+"px";
-  el.innerHTML = `<div class="dot"></div>${label?name:""}`;
+  el.innerHTML = `<span class="dot"></span><span class="name-tag">${name}</span>`;
   document.body.appendChild(el);
 }
 
-function buildRankColumn(){
-  let col = document.getElementById("rank-col");
-  if (col) col.remove();
-  col = document.createElement("div");
+function buildRing(L){
+  const n = TEAMS.length;
+  TEAMS.forEach((t,i)=>{
+    // Angles distributed, starting at top
+    const a = (i/n)*Math.PI*2 - Math.PI/2;
+    const x = L.cx + L.rx*Math.cos(a);
+    const y = L.cy + L.ry*Math.sin(a);
+    placeNode(t[0], x, y, L.showLabels);
+  });
+}
+function buildDual(L){
+  const innerCount = Math.min(12, TEAMS.length);
+  const inner = TEAMS.slice(0, innerCount);
+  const outer = TEAMS.slice(innerCount);
+  const rxI = L.rx * 0.6, ryI = L.ry * 0.6;
+  inner.forEach((t,i)=>{
+    const a = (i/inner.length)*Math.PI*2 - Math.PI/2;
+    placeNode(t[0], L.cx + rxI*Math.cos(a), L.cy + ryI*Math.sin(a), true);
+  });
+  outer.forEach((t,i)=>{
+    const a = (i/outer.length)*Math.PI*2 - Math.PI/2;
+    placeNode(t[0], L.cx + L.rx*Math.cos(a), L.cy + L.ry*Math.sin(a), false);
+  });
+}
+function buildActiveOnly(L){
+  // Rank column stuck to the left play edge (next to feed)
+  const col = document.createElement("div");
   col.id = "rank-col";
-  col.innerHTML = `<div class="title">// ACTIVE · TOP 20</div>`;
+  col.style.left = L.px0 + "px";
+  col.style.top = L.py0 + "px";
+  col.style.bottom = (window.innerHeight - L.py1) + "px";
+  col.style.width = Math.min(240, L.pw*0.22) + "px";
+  col.innerHTML = `<div class="h">// ACTIVE · TOP 20 (of ${TEAMS.length})</div>`;
   TEAMS.slice(0,20).forEach((t,i)=>{
     const row = document.createElement("div");
     row.className = "rank-row"; row.dataset.team = t[0];
@@ -296,14 +444,45 @@ function buildRankColumn(){
   });
   document.body.appendChild(col);
 }
-placeTeams();
-window.addEventListener("resize", placeTeams);
 
-// feed
+let LAYOUT = null;
+function rebuildLayout(){
+  clearTeamNodes();
+  LAYOUT = computeLayout();
+  updateRingDecoSize(LAYOUT);
+  if (LAYOUT.mode === "ring") buildRing(LAYOUT);
+  else if (LAYOUT.mode === "dual") buildDual(LAYOUT);
+  else buildActiveOnly(LAYOUT);
+}
+function updateRingDecoSize(L){
+  const mk = (el, sx, sy) => {
+    el.style.width = (sx*2) + "px"; el.style.height = (sy*2) + "px";
+    el.style.left = L.cx + "px"; el.style.top = L.cy + "px";
+    el.style.borderRadius = "50%"; // ellipses via width/height
+  };
+  mk(document.getElementById("ring1"), L.rx*0.75, L.ry*0.75);
+  mk(document.getElementById("ring2"), L.rx, L.ry);
+}
+
+/* ============================================================
+   Render helpers
+   ============================================================ */
+// Scoreboard rendering
+const board = document.getElementById("board-rows");
+function renderBoard(){
+  board.innerHTML = TEAMS.slice(0,5).map((t,i)=>`
+    <div class="row"><span class="rank">${String(i+1).padStart(2,"0")}</span>
+    <span class="name">${t[0]}</span>
+    <span class="score mono">${t[1]}</span></div>`).join("");
+}
+renderBoard();
+
+// Feed rendering
+const feed = document.getElementById("feed-lines");
 function addFeed(evt){
   const time = new Date().toTimeString().slice(0,8);
   const cls = evt.type==="fb"?"fb":evt.type==="ok"?"ok":evt.type==="amber"?"amb":"bad";
-  const prefix = evt.type==="fb"?"!! FIRST-BLOOD !! ":evt.type==="ok"?"[ SOLVE  ] ":evt.type==="amber"?"[ 2-BLOOD] ":"[ MISS   ] ";
+  const prefix = evt.type==="fb"?"!! 1st-BLOOD !! ":evt.type==="ok"?"[ SOLVE  ] ":evt.type==="amber"?"[ N-BLOOD] ":"[ MISS   ] ";
   const line = document.createElement("div");
   line.className="line";
   line.innerHTML=`<span class="t">${time}</span> <span class="${cls}">${prefix}${evt.team} :: ${evt.chall[0]}/${evt.chall[1]}</span>`;
@@ -312,156 +491,129 @@ function addFeed(evt){
 }
 
 function hqCenter(){
-  const r = hq.getBoundingClientRect();
+  const r = document.getElementById("hex").getBoundingClientRect();
   return {x: r.left + r.width/2, y: r.top + r.height/2};
 }
 
-function spawnAttacker(evt, sourceXY){
+function clampToPlay(x, y){
+  if (!LAYOUT) return {x, y};
+  const pad = 40;
+  return {
+    x: Math.min(LAYOUT.px1 - pad, Math.max(LAYOUT.px0 + pad, x)),
+    y: Math.min(LAYOUT.py1 - pad, Math.max(LAYOUT.py0 + pad, y)),
+  };
+}
+
+/* ============================================================
+   Attacker + particles
+   ============================================================ */
+const field = document.getElementById("field");
+function spawnAttacker(evt, src){
   const color = evt.type==="fb"?"#ffd34a":evt.type==="ok"?"#3ae85c":evt.type==="amber"?"#f4b619":"#ff6262";
   const a = document.createElement("div");
   a.className="attacker"; a.style.color=color;
-  a.style.left=sourceXY.x+"px"; a.style.top=sourceXY.y+"px";
+  a.style.left=src.x+"px"; a.style.top=src.y+"px";
   a.innerHTML=`<div class="pulse"></div><div class="glow">◉</div><div class="lbl"><b>${evt.team}</b>${evt.chall[0]}/${evt.chall[1]}</div>`;
   document.body.appendChild(a);
   setTimeout(()=>a.remove(),3000);
-  // burst particles (each plays a tiny pew)
   const tgt = hqCenter();
   for(let i=0;i<8;i++){
-    setTimeout(()=>{
-      fireParticle(sourceXY.x, sourceXY.y, tgt.x, tgt.y, color);
-      playPew(evt.type);
-    }, i*180);
+    setTimeout(()=>{ fireParticle(src.x, src.y, tgt.x, tgt.y, color); playPew(evt.type); }, i*180);
   }
 }
 function fireParticle(x0,y0,x1,y1,color){
-  const mid = {x:(x0+x1)/2+(Math.random()-0.5)*160, y:(y0+y1)/2+(Math.random()-0.5)*120};
+  const mid = {x:(x0+x1)/2+(Math.random()-0.5)*140, y:(y0+y1)/2+(Math.random()-0.5)*100};
   const p = document.createElementNS("http://www.w3.org/2000/svg","path");
-  const d = `M ${x0} ${y0} Q ${mid.x} ${mid.y} ${x1} ${y1}`;
-  p.setAttribute("d", d); p.setAttribute("fill","none"); p.setAttribute("stroke",color); p.setAttribute("stroke-width","2.2"); p.setAttribute("stroke-linecap","round");
+  p.setAttribute("d", `M ${x0} ${y0} Q ${mid.x} ${mid.y} ${x1} ${y1}`);
+  p.setAttribute("fill","none"); p.setAttribute("stroke",color);
+  p.setAttribute("stroke-width","2.2"); p.setAttribute("stroke-linecap","round");
+  p.style.filter = `drop-shadow(0 0 6px ${color})`;
   field.appendChild(p);
   const len = p.getTotalLength();
   p.style.strokeDasharray = `${len*0.12} ${len}`;
   p.style.strokeDashoffset = `${len}`;
-  p.animate([{strokeDashoffset:len},{strokeDashoffset:-len*0.15}],{duration:1100,easing:"cubic-bezier(.3,.6,.4,1)"}).onfinish=()=>p.remove();
-}
-
-// Audio unlock (browsers block autoplay until user gesture)
-const audio = document.getElementById("fb-audio");
-const toast = document.getElementById("sound-toast");
-let audioEnabled = false;
-let lastSoundAt = 0;
-let audioCtx = null;
-let lastPewAt = 0;
-
-function unlockAudio(){
-  if (audioEnabled) return;
-  audioEnabled = true;
-  audio.volume = 0;
-  audio.play().then(()=>{ audio.pause(); audio.currentTime = 0; audio.volume = 0.85; }).catch(()=>{});
-  try {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  } catch(e){}
-  toast.classList.add("hidden");
-}
-window.addEventListener("click", unlockAudio, { once:false });
-window.addEventListener("keydown", unlockAudio, { once:false });
-
-// Short synthesized "pew" per particle — frequency sweep with exp decay.
-// Rate-limited to 40 ms min spacing so 8-particle bursts don't mask each other.
-function playPew(type){
-  if (!audioCtx) return;
-  const now = performance.now();
-  if (now - lastPewAt < 40) return;
-  lastPewAt = now;
-  const t0 = audioCtx.currentTime;
-  const dur = 0.09;
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  // Tone per event type: FB=higher & louder, Normal=mid, Unaccepted=dull low
-  const f0 = type==="fb" ? 1600 : type==="ok" ? 1200 : type==="amber" ? 1400 : 500;
-  const f1 = type==="fb" ? 400 : type==="ok" ? 320 : type==="amber" ? 360 : 180;
-  const vol = type==="bad" ? 0.22 : type==="fb" ? 0.42 : 0.32;
-  // Two-oscillator stack for more body: square lead + detuned saw sub.
-  osc.type = "square";
-  osc.frequency.setValueAtTime(f0, t0);
-  osc.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
-  const sub = audioCtx.createOscillator();
-  sub.type = "sawtooth";
-  sub.frequency.setValueAtTime(f0 * 0.5, t0);
-  sub.frequency.exponentialRampToValueAtTime(f1 * 0.5, t0 + dur);
-  // Quick attack → exp decay
-  gain.gain.setValueAtTime(0, t0);
-  gain.gain.linearRampToValueAtTime(vol, t0 + 0.005);
-  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  osc.connect(gain);
-  sub.connect(gain);
-  gain.connect(audioCtx.destination);
-  osc.start(t0); sub.start(t0);
-  osc.stop(t0 + dur + 0.02); sub.stop(t0 + dur + 0.02);
+  p.animate([{strokeDashoffset:len},{strokeDashoffset:-len*0.15}],
+    {duration:1100, easing:"cubic-bezier(.3,.6,.4,1)"}).onfinish=()=>p.remove();
 }
 
 function triggerFirstBlood(evt){
+  const fb = document.getElementById("fbanner");
   fb.classList.remove("on"); void fb.offsetWidth; fb.classList.add("on");
   document.getElementById("fbtick").textContent = `${evt.chall[0]} / ${evt.chall[1]} · ${evt.team}`;
-  hq.classList.remove("shake"); void hq.offsetWidth; hq.classList.add("shake");
-  // Play stinger (rate-limited to 1 per 1.5s)
+  const hex = document.getElementById("hex");
+  hex.classList.remove("shake"); void hex.offsetWidth; hex.classList.add("shake");
+  fbCount++;
+  document.getElementById("fb-count").textContent = fbCount;
   const now = performance.now();
   if (audioEnabled && now - lastSoundAt > 1500) {
-    lastSoundAt = now;
-    audio.currentTime = 0;
-    audio.play().catch(()=>{});
+    lastSoundAt = now; audio.currentTime = 0; audio.play().catch(()=>{});
   }
 }
 
-// event loop
-let tick=0;
+/* ============================================================
+   Source resolver (with panel-clamped fallback)
+   ============================================================ */
+function resolveSource(teamName){
+  // ring/dual node?
+  const node = document.querySelector(`.team-node[data-team="${teamName}"]`);
+  if (node){
+    const r = node.getBoundingClientRect();
+    return {x: r.left + r.width/2, y: r.top + r.height/2};
+  }
+  // rank-column row?
+  const row = document.querySelector(`#rank-col .rank-row[data-team="${teamName}"]`);
+  if (row){
+    const r = row.getBoundingClientRect();
+    row.classList.remove("hit"); void row.offsetWidth; row.classList.add("hit");
+    return {x: r.right + 10, y: r.top + r.height/2};
+  }
+  // random inside play area, avoiding HQ zone
+  if (!LAYOUT) return {x: window.innerWidth/2, y: 100};
+  for (let tries=0; tries<30; tries++){
+    const x = LAYOUT.px0 + 30 + Math.random()*(LAYOUT.pw - 60);
+    const y = LAYOUT.py0 + 30 + Math.random()*(LAYOUT.ph - 60);
+    // avoid HQ rect ±150
+    if (Math.abs(x - LAYOUT.cx) > LAYOUT.hqSize*0.6 ||
+        Math.abs(y - LAYOUT.cy) > LAYOUT.hqSize*0.7) return {x, y};
+  }
+  return clampToPlay(LAYOUT.cx - 200, LAYOUT.py0 + 100);
+}
+
+/* ============================================================
+   Event loop
+   ============================================================ */
 function next(){
   const team = TEAMS[Math.floor(Math.random()*TEAMS.length)][0];
   const chall = CHALLS[Math.floor(Math.random()*CHALLS.length)];
   const roll = Math.random();
-  const type = tick%7===0?"fb":roll<0.6?"ok":roll<0.8?"amber":"bad";
-  const evt = {team,chall,type};
+  const type = evtCount%7===0 ? "fb" : roll<0.6?"ok" : roll<0.8?"amber" : "bad";
+  const evt = {team, chall, type};
   addFeed(evt);
-  // Find source origin: radar ring node > rank-column row > random.
-  const node = document.querySelector(`.team-node[data-team="${team}"]`);
-  const rankRow = document.querySelector(`#rank-col .rank-row[data-team="${team}"]`);
-  let source;
-  if(node){
-    const r = node.getBoundingClientRect();
-    source = {x:r.left+r.width/2, y:r.top+r.height/2};
-  } else if(rankRow){
-    const r = rankRow.getBoundingClientRect();
-    source = {x:r.right - 4, y:r.top+r.height/2};
-    rankRow.classList.remove("hit"); void rankRow.offsetWidth; rankRow.classList.add("hit");
-  } else {
-    // Random off-HQ point avoiding the side panels + ~200px around HQ.
-    const hq = hqCenter();
-    const bandLeft = 420, bandRight = window.innerWidth - 360;
-    for (let tries=0; tries<30; tries++){
-      const x = bandLeft + Math.random()*(bandRight-bandLeft);
-      const y = 90 + Math.random()*(window.innerHeight - 180);
-      if (Math.abs(x - hq.x) > 200 || Math.abs(y - hq.y) > 180) {
-        source = {x, y}; break;
-      }
-    }
-    if (!source) source = {x: bandLeft + 50, y: 120};
-  }
-  spawnAttacker(evt, source);
-  if(type==="fb") triggerFirstBlood(evt);
-  tick++;
-  setTimeout(next, 1400 + Math.random()*1200);
+  const src = clampToPlay(...Object.values(resolveSource(team)));
+  spawnAttacker(evt, src);
+  if (type==="fb") triggerFirstBlood(evt);
+  evtCount++;
+  document.getElementById("evt-count").textContent = evtCount;
+  atkTimestamps.push(Date.now());
+  while (atkTimestamps[0] < Date.now() - 60000) atkTimestamps.shift();
+  document.getElementById("atk-rate").textContent = `${atkTimestamps.length}/min`;
+  setTimeout(next, 1300 + Math.random()*900);
 }
-setTimeout(next, 800);
+setTimeout(next, 700);
 
-// countdown
+/* ============================================================
+   Countdown + clock
+   ============================================================ */
 let secs = 23*60+45;
 setInterval(()=>{
-  secs--; if(secs<0) secs = 0;
-  const h=document.querySelector(".header span:last-child");
-  const m=Math.floor(secs/60), s=secs%60;
-  h.innerHTML = h.innerHTML.replace(/T-\d+:\d+/, `T-${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`);
-  h.innerHTML = h.innerHTML.replace(/\d+:\d+:\d+ UTC/, new Date().toUTCString().slice(17,25)+" UTC");
-},1000);
+  if (secs>0) secs--;
+  const m = Math.floor(secs/60), s = secs%60;
+  document.getElementById("countdown").textContent = `T-${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+  document.getElementById("clock").textContent = new Date().toISOString().slice(11,19) + " UTC";
+}, 1000);
+
+rebuildLayout();
+window.addEventListener("resize", rebuildLayout);
 </script>
 </body>
 </html>
