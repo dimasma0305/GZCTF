@@ -130,6 +130,17 @@
   /* screen shake during FB */
   .shake{animation:shake .6s cubic-bezier(.36,.07,.19,.97) both}
   @keyframes shake{10%,90%{transform:translate3d(-1px,0,0)}20%,80%{transform:translate3d(2px,0,0)}30%,50%,70%{transform:translate3d(-4px,0,0)}40%,60%{transform:translate3d(4px,0,0)}}
+
+  .sound-toast{
+    position:fixed; top:18px; left:50%; transform:translateX(-50%); z-index:200;
+    background:var(--amber); color:#0b0b11; padding:10px 22px;
+    font-family:"JetBrains Mono",monospace; font-weight:700; font-size:12px;
+    letter-spacing:.2em; text-transform:uppercase; cursor:pointer;
+    box-shadow:0 0 30px rgba(244,182,25,.6);
+    animation:toastPulse 1.6s ease-in-out infinite;
+  }
+  .sound-toast.hidden{display:none}
+  @keyframes toastPulse{50%{box-shadow:0 0 50px rgba(244,182,25,.9)}}
 </style>
 </head>
 <body>
@@ -137,6 +148,9 @@
   <span><span class="marker">▙</span>&nbsp;CJ2025 :: PELAJAR · FINALS //// TACTICAL-OPS </span>
   <span><span class="live"><span class="dot"></span>LIVE FEED</span> &nbsp;//&nbsp; T-23:45 &nbsp;//&nbsp; ROUND 02 &nbsp;//&nbsp; 14:32:17 UTC</span>
 </div>
+
+<div class="sound-toast" id="sound-toast">▶ CLICK TO ENABLE SOUND</div>
+<audio id="fb-audio" src="https://raw.githubusercontent.com/0x4m4/first-strike-alert/main/static/sounds/blood.mp3" preload="auto"></audio>
 
 <div class="feed">
   <div class="bracket tl"></div><div class="bracket tr"></div><div class="bracket bl"></div><div class="bracket br"></div>
@@ -265,10 +279,32 @@ function fireParticle(x0,y0,x1,y1,color){
   p.animate([{strokeDashoffset:len},{strokeDashoffset:-len*0.15}],{duration:1100,easing:"cubic-bezier(.3,.6,.4,1)"}).onfinish=()=>p.remove();
 }
 
+// Audio unlock (browsers block autoplay until user gesture)
+const audio = document.getElementById("fb-audio");
+const toast = document.getElementById("sound-toast");
+let audioEnabled = false;
+let lastSoundAt = 0;
+function unlockAudio(){
+  if (audioEnabled) return;
+  audioEnabled = true;
+  audio.volume = 0;
+  audio.play().then(()=>{ audio.pause(); audio.currentTime = 0; audio.volume = 0.85; }).catch(()=>{});
+  toast.classList.add("hidden");
+}
+window.addEventListener("click", unlockAudio, { once:false });
+window.addEventListener("keydown", unlockAudio, { once:false });
+
 function triggerFirstBlood(evt){
   fb.classList.remove("on"); void fb.offsetWidth; fb.classList.add("on");
   document.getElementById("fbtick").textContent = `${evt.chall[0]} / ${evt.chall[1]} · ${evt.team}`;
   hq.classList.remove("shake"); void hq.offsetWidth; hq.classList.add("shake");
+  // Play stinger (rate-limited to 1 per 1.5s)
+  const now = performance.now();
+  if (audioEnabled && now - lastSoundAt > 1500) {
+    lastSoundAt = now;
+    audio.currentTime = 0;
+    audio.play().catch(()=>{});
+  }
 }
 
 // event loop
