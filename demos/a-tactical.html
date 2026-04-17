@@ -21,6 +21,7 @@
   *{box-sizing:border-box; margin:0; padding:0}
   html,body{height:100%; overflow:hidden; background:var(--bg); color:var(--ink);
     font-family:"Space Grotesk",system-ui,sans-serif}
+  html.scr-quake,html.scr-shake,html.scr-rumble{will-change:transform}
   html.scr-quake{animation:scrQuake 1.4s cubic-bezier(.36,.07,.19,.97)}
   @keyframes scrQuake{
     0%,100%{transform:translate3d(0,0,0) rotate(0)}
@@ -102,8 +103,9 @@
   .feed{
     position:fixed; left:var(--gutter); top:calc(var(--header-h) + var(--gutter));
     bottom:calc(var(--footer-h) + var(--gutter)); width:var(--feed-w); z-index:20;
-    background:rgba(12,13,18,.82); backdrop-filter:blur(6px);
+    background:rgba(12,13,18,.94);
     padding:16px 18px 14px; overflow:hidden;
+    contain:layout style paint;
   }
   .feed .h{font-family:"JetBrains Mono",monospace; font-size:10px; letter-spacing:.25em; color:var(--red); margin-bottom:12px}
   .feed .line{font-family:"JetBrains Mono",monospace; font-size:12px; line-height:1.5; margin-bottom:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
@@ -118,8 +120,9 @@
   .board{
     position:fixed; right:var(--gutter); top:calc(var(--header-h) + var(--gutter));
     width:var(--board-w); z-index:20;
-    background:rgba(12,13,18,.82); backdrop-filter:blur(6px);
+    background:rgba(12,13,18,.94);
     padding:16px 18px 14px;
+    contain:layout style paint;
   }
   .board .h{font-family:"JetBrains Mono",monospace; font-size:10px; letter-spacing:.25em; color:var(--amber); margin-bottom:12px; display:flex; justify-content:space-between}
   .board .row{display:grid; grid-template-columns:32px 1fr auto; align-items:baseline; padding:6px 0; border-bottom:1px dashed #20232d; gap:8px}
@@ -133,8 +136,9 @@
   .stats{
     position:fixed; right:var(--gutter);
     width:var(--board-w); z-index:20;
-    background:rgba(12,13,18,.72); backdrop-filter:blur(6px);
+    background:rgba(12,13,18,.92);
     padding:12px 18px;
+    contain:layout style paint;
   }
   .stats .h{font-family:"JetBrains Mono",monospace; font-size:10px; letter-spacing:.25em; color:var(--green); margin-bottom:8px}
   .stats .kv{display:flex; justify-content:space-between; padding:3px 0;
@@ -188,9 +192,10 @@
   /* Rank column for active-only mode */
   #rank-col{
     position:fixed; z-index:18;
-    background:rgba(12,13,18,.78); backdrop-filter:blur(6px);
+    background:rgba(12,13,18,.94);
     padding:14px 16px; overflow:hidden;
     font-family:"JetBrains Mono",monospace;
+    contain:layout style paint;
   }
   #rank-col .h{font-size:10px; letter-spacing:.25em; color:var(--green); margin-bottom:10px}
   #rank-col .rank-row{display:grid; grid-template-columns:28px 1fr; gap:6px; font-size:11.5px; padding:3px 0; border-bottom:1px dashed #1c1f2a}
@@ -200,7 +205,7 @@
   @keyframes hitRow{50%{background:rgba(255,211,74,.4)}}
 
   /* ===== Attacker sprites + particles ===== */
-  svg.field{position:fixed; inset:0; width:100vw; height:100vh; z-index:12; pointer-events:none}
+  svg.field{position:fixed; inset:0; width:100vw; height:100vh; z-index:12; pointer-events:none; contain:layout style paint; will-change:transform; transform:translateZ(0)}
   .attacker{position:absolute; transform:translate(-50%,-50%); pointer-events:none; z-index:16;
     animation:popin .22s cubic-bezier(.34,1.56,.64,1), fadeout .6s ease-in 2.4s forwards}
   @keyframes popin{from{transform:translate(-50%,-50%) scale(0)}}
@@ -265,7 +270,7 @@
 </div>
 
 <div class="footer">
-  <span>SIGNAL NOMINAL &nbsp;//&nbsp; <span id="team-count">0</span> TEAMS &nbsp;//&nbsp; <span id="evt-count">0</span> EVENTS</span>
+  <span>SIGNAL NOMINAL &nbsp;//&nbsp; <span id="team-count">0</span> TEAMS &nbsp;//&nbsp; <span id="evt-count">0</span> EVENTS &nbsp;//&nbsp; <span id="fps-readout">-- FPS</span></span>
   <span>GZCTF ATTACK-STREAM // PUBLIC // v1.0</span>
 </div>
 
@@ -338,6 +343,29 @@ document.getElementById("team-count").textContent = N;
 
 let evtCount = 0, fbCount = 0;
 const atkTimestamps = [];
+
+/* ============================================================
+   Simple FPS monitor + adaptive quality flag.
+   Sets window.__FPS (rolling avg) and window.__LOW_FPS if avg < 45.
+   Visual code can inspect __LOW_FPS to skip non-essential spawns.
+   ============================================================ */
+(function fpsMonitor(){
+  let last = performance.now(), frames = 0, acc = 0;
+  window.__FPS = 60; window.__LOW_FPS = false;
+  function tick(now){
+    frames++;
+    acc += now - last; last = now;
+    if (acc >= 500){
+      window.__FPS = Math.round((frames*1000)/acc);
+      window.__LOW_FPS = window.__FPS < 45;
+      const el = document.getElementById("fps-readout");
+      if (el) el.textContent = window.__FPS + " FPS";
+      frames = 0; acc = 0;
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+})();
 let audioEnabled = false;
 let audioCtx = null;
 let masterOut = null;
@@ -642,7 +670,7 @@ function fireBullet(x0, y0, x1, y1, color, type){
   path.setAttribute("stroke", color);
   path.setAttribute("stroke-width", thick);
   path.setAttribute("stroke-linecap", "round");
-  path.style.filter = `drop-shadow(0 0 ${fat?10:5}px ${color}) drop-shadow(0 0 ${fat?20:10}px ${color})`;
+  path.style.filter = `drop-shadow(0 0 ${fat?16:8}px ${color})`;
   path.style.opacity = soft ? 0.55 : 1;
   field.appendChild(path);
 
@@ -657,7 +685,7 @@ function fireBullet(x0, y0, x1, y1, color, type){
     head = document.createElementNS(SVG_NS, "circle");
     head.setAttribute("r", headR);
     head.setAttribute("fill", color);
-    head.style.filter = `drop-shadow(0 0 10px ${color}) drop-shadow(0 0 ${fat?30:18}px ${color})`;
+    head.style.filter = `drop-shadow(0 0 ${fat?22:14}px ${color})`;
     field.appendChild(head);
 
     core = document.createElementNS(SVG_NS, "circle");
@@ -692,7 +720,7 @@ function muzzleFlash(x, y, color, big){
   f.setAttribute("cx", x); f.setAttribute("cy", y);
   f.setAttribute("r", big?5:3);
   f.setAttribute("fill", color);
-  f.style.filter = `drop-shadow(0 0 12px ${color}) drop-shadow(0 0 24px ${color})`;
+  f.style.filter = `drop-shadow(0 0 18px ${color})`;
   field.appendChild(f);
   f.animate(
     [{r: big?5:3, opacity:1}, {r: big?22:14, opacity:0}],
@@ -733,7 +761,7 @@ function impactBurst(x, y, color, type){
   flash.setAttribute("cx", x); flash.setAttribute("cy", y);
   flash.setAttribute("r", big?10:6);
   flash.setAttribute("fill", "#ffffff");
-  flash.style.filter = `drop-shadow(0 0 ${big?28:16}px ${color}) drop-shadow(0 0 ${big?56:32}px ${color})`;
+  flash.style.filter = `drop-shadow(0 0 ${big?42:22}px ${color})`;
   field.appendChild(flash);
   flash.animate([{r:big?10:6,opacity:1},{r:big?22:14,opacity:0}],
     {duration: big?380:260, easing:"ease-out", fill:"forwards"}).onfinish = ()=>flash.remove();
@@ -808,7 +836,7 @@ function fireLaser(x0, y0, x1, y1, color){
 
   // A. Heartbeat core — grows in throbs, not a smooth ramp (feels alive)
   const core = add(mkCircle(2, null, "#fff"));
-  core.style.filter = `drop-shadow(0 0 14px ${color}) drop-shadow(0 0 40px ${color})`;
+  core.style.filter = `drop-shadow(0 0 28px ${color})`;
   core.animate([
     {r:2, opacity:0.8},
     {r:5, opacity:0.95, offset:0.07},   {r:3.5, opacity:0.75, offset:0.12},
@@ -838,8 +866,9 @@ function fireLaser(x0, y0, x1, y1, color){
     ], {duration: CHARGE_MS - delay, delay, easing:"cubic-bezier(.4,0,.2,1)", fill:"forwards"});
   }
 
-  // D. Orbiting particles getting sucked in — continuous emission
+  // D. Orbiting particles getting sucked in — continuous emission (skipped when FPS low)
   const particleTimer = setInterval(()=>{
+    if (window.__LOW_FPS) return;
     const ang = Math.random()*Math.PI*2;
     const dist = 100 + Math.random()*200;
     const sx = x0 + Math.cos(ang)*dist, sy = y0 + Math.sin(ang)*dist;
@@ -854,13 +883,14 @@ function fireLaser(x0, y0, x1, y1, color){
       {cx:x0+Math.cos(ang)*12, cy:y0+Math.sin(ang)*12, opacity:0.2}
     ], {duration: 500 + Math.random()*360, easing:"cubic-bezier(.55,0,.9,1)", fill:"forwards"})
       .onfinish = ()=>sp.remove();
-  }, 90);
+  }, 140);   // was 90 — fewer particle spawns
 
-  // E. Crackle arcs — intensifies as charge nears completion
+  // E. Crackle arcs — intensifies as charge nears completion (throttled for perf)
   const arcStart = performance.now();
   const arcTimer = setInterval(()=>{
+    if (window.__LOW_FPS) return;
     const frac = Math.min(1, (performance.now() - arcStart)/CHARGE_MS);
-    const spokes = 1 + Math.floor(frac * 5) + Math.floor(Math.random()*2);
+    const spokes = 1 + Math.floor(frac * 3);       // max 4 spokes (was 7)
     const reach = 20 + frac*120;
     for (let i=0;i<spokes;i++){
       const ang = Math.random()*Math.PI*2;
@@ -876,12 +906,12 @@ function fireLaser(x0, y0, x1, y1, color){
       const p = document.createElementNS(SVG_NS, "path");
       p.setAttribute("d", d); p.setAttribute("fill", "none");
       p.setAttribute("stroke", "#fff"); p.setAttribute("stroke-width", 1 + frac*1.2);
-      p.style.filter = `drop-shadow(0 0 5px ${color}) drop-shadow(0 0 12px ${color})`;
+      p.style.filter = `drop-shadow(0 0 9px ${color})`;
       field.appendChild(p);
       p.animate([{opacity:1},{opacity:0}],{duration:160, fill:"forwards"})
         .onfinish = ()=>p.remove();
     }
-  }, 70);
+  }, 130);   // was 70 — halved DOM churn
 
   // F. TARGET WARNING PULSES — red rings pulsing OUT from the HQ target,
   //    interval shrinks exponentially — feels like an incoming missile warning
@@ -898,7 +928,7 @@ function fireLaser(x0, y0, x1, y1, color){
     ring.setAttribute("fill", "none");
     ring.setAttribute("stroke", "#ff2a2a");
     ring.setAttribute("stroke-width", 2.5);
-    ring.style.filter = "drop-shadow(0 0 10px #ff2a2a) drop-shadow(0 0 20px #ff2a2a)";
+    ring.style.filter = "drop-shadow(0 0 15px #ff2a2a)";
     field.appendChild(ring);
     ring.animate([
       {r:20, strokeOpacity:1, strokeWidth:3},
@@ -977,7 +1007,7 @@ function fireLaser(x0, y0, x1, y1, color){
     glow.setAttribute("stroke", color); glow.setAttribute("stroke-width", 22);
     glow.setAttribute("stroke-linecap", "round");
     glow.style.opacity = 0.65;
-    glow.style.filter = `drop-shadow(0 0 18px ${color}) drop-shadow(0 0 40px ${color})`;
+    glow.style.filter = `drop-shadow(0 0 28px ${color})`;
     field.appendChild(glow);
 
     const beam = document.createElementNS(SVG_NS, "line");
@@ -985,7 +1015,7 @@ function fireLaser(x0, y0, x1, y1, color){
     beam.setAttribute("x2", x1); beam.setAttribute("y2", y1);
     beam.setAttribute("stroke", "#ffffff"); beam.setAttribute("stroke-width", 8);
     beam.setAttribute("stroke-linecap", "round");
-    beam.style.filter = `drop-shadow(0 0 12px ${color}) drop-shadow(0 0 28px ${color}) drop-shadow(0 0 64px ${color})`;
+    beam.style.filter = `drop-shadow(0 0 36px ${color})`;
     field.appendChild(beam);
 
     // reveal beam from source to target — slightly slower so the strike reads
@@ -1122,7 +1152,7 @@ function megaShockwaves(x, y, color){
     ring.setAttribute("stroke", i === 0 ? "#ffffff" : color);
     const w0 = 5 - i*0.7;
     ring.setAttribute("stroke-width", w0);
-    ring.style.filter = `drop-shadow(0 0 18px ${color}) drop-shadow(0 0 40px ${color})`;
+    ring.style.filter = `drop-shadow(0 0 28px ${color})`;
     field.appendChild(ring);
     ring.animate([
       {r:6, strokeOpacity:1, strokeWidth:w0},
@@ -1148,7 +1178,7 @@ function hqPunch(){
 }
 
 function debrisChunks(x, y, color){
-  const chunks = 34;
+  const chunks = 22;     // was 34
   for (let i=0;i<chunks;i++){
     const ang = (i/chunks)*Math.PI*2 + (Math.random()-0.5)*0.45;
     const speed = 220 + Math.random()*520;
@@ -1206,7 +1236,7 @@ function shatterAt(x, y, color){
   svg.setAttribute("viewBox", `0 0 ${window.innerWidth} ${window.innerHeight}`);
   document.body.appendChild(svg);
 
-  const n = 14 + Math.floor(Math.random()*5);
+  const n = 10 + Math.floor(Math.random()*3);   // was 14-19
   const diag = Math.hypot(window.innerWidth, window.innerHeight);
   for (let i=0;i<n;i++){
     const baseAng = (i/n)*Math.PI*2 + (Math.random()-0.5)*0.35;
@@ -1235,7 +1265,7 @@ function shatterAt(x, y, color){
     p.setAttribute("stroke-width", 1.6 + Math.random()*1.1);
     p.setAttribute("stroke-linecap", "round");
     p.setAttribute("stroke-linejoin", "miter");
-    p.style.filter = `drop-shadow(0 0 4px ${color}) drop-shadow(0 0 10px ${color})`;
+    p.style.filter = `drop-shadow(0 0 8px ${color})`;
     svg.appendChild(p);
     const total = p.getTotalLength();
     p.style.strokeDasharray = total;
@@ -1252,7 +1282,7 @@ function shatterAt(x, y, color){
   const hub = document.createElementNS(SVG_NS, "circle");
   hub.setAttribute("cx", x); hub.setAttribute("cy", y); hub.setAttribute("r", 4);
   hub.setAttribute("fill", "#fff");
-  hub.style.filter = `drop-shadow(0 0 12px ${color}) drop-shadow(0 0 30px ${color})`;
+  hub.style.filter = `drop-shadow(0 0 20px ${color})`;
   svg.appendChild(hub);
   hub.animate([{r:4, opacity:1},{r:40, opacity:0}],
     {duration:700, easing:"ease-out", fill:"forwards"}).onfinish = ()=>hub.remove();
