@@ -349,27 +349,34 @@ function computeLayout(){
   const statsTop = headerH + gutter + boardRowsHeight + 10;
   document.getElementById("stats").style.top = statsTop + "px";
 
-  // Play area rectangle (inside the panels + header/footer)
-  const px0 = gutter + feedW + pad;               // left edge of play area
-  const px1 = w - gutter - boardW - pad;          // right edge
-  const py0 = headerH + pad;                      // top edge
-  const py1 = h - footerH - pad;                  // bottom edge
-
+  // Outer safe-zone rectangle (used for clamping + random-spawns)
+  const px0 = gutter + feedW + pad;
+  const px1 = w - gutter - boardW - pad;
+  const py0 = headerH + pad;
+  const py1 = h - footerH - pad;
   const pw = px1 - px0, ph = py1 - py0;
-  const cx = (px0 + px1)/2, cy = (py0 + py1)/2;
 
-  // HQ size scales with play area
+  // HQ anchored to VIEWPORT center (symmetric title presentation);
+  // panels are asymmetric so the play-area rectangle center is not viewport
+  // center, but we pin HQ to the viewport anyway and size the ring to the
+  // worst-case half-width/half-height so teams never collide with panels.
+  const cx = w/2, cy = h/2;
+
+  // HQ size scales with the narrower dimension of available space
   const hqSize = Math.min(280, Math.max(160, Math.min(pw, ph) * 0.28));
   document.documentElement.style.setProperty('--hq-size', hqSize+'px');
 
-  // Ring is elliptical, fitting the play area with margin for labels/sprite
+  // Ring ellipse must fit on BOTH sides of viewport-centered HQ:
+  //   rx limit = min(distance from cx to left safe edge, distance to right edge)
+  //   ry limit = min(distance from cy to top safe edge, distance to bottom edge)
   const labelMargin = 60;
-  const hqHalf = hqSize * 0.6; // hex vertical extent slightly more than width
-  const rx = Math.max(120, pw/2 - labelMargin);
-  const ry = Math.max(120, ph/2 - labelMargin);
-  const rMin = hqHalf + 30;
-  const rxFinal = Math.max(rMin, rx);
-  const ryFinal = Math.max(rMin, ry);
+  const hqHalfV = hqSize * 0.6;
+  const hqHalfH = hqSize * 0.5;
+  const rxRoom = Math.min(cx - px0, px1 - cx) - labelMargin;
+  const ryRoom = Math.min(cy - py0, py1 - cy) - labelMargin;
+  const rMin = Math.max(hqHalfV, hqHalfH) + 40;
+  const rxFinal = Math.max(rMin, Math.min(rxRoom, Math.max(rMin, pw*0.45)));
+  const ryFinal = Math.max(rMin, Math.min(ryRoom, Math.max(rMin, ph*0.45)));
 
   // Mode selection based on team count
   const n = TEAMS.length;
