@@ -102,6 +102,22 @@
   /* teams around left half */
   .team-node{position:absolute; color:var(--ink); font-family:"JetBrains Mono",monospace; font-size:11px; letter-spacing:.08em; text-transform:uppercase; transform:translate(-50%,-50%); text-align:center}
   .team-node .dot{width:12px; height:12px; border-radius:50%; background:var(--muted); margin:0 auto 6px; box-shadow:0 0 6px currentColor}
+  .team-node.no-label{font-size:0}
+  .team-node.no-label .dot{width:8px; height:8px; margin-bottom:0; background:var(--red); opacity:.45}
+
+  /* Rank column for >80 teams mode */
+  #rank-col{
+    position:fixed; left:400px; top:60px; bottom:120px; width:260px; z-index:10;
+    background:rgba(12,13,18,.78); backdrop-filter:blur(6px);
+    padding:16px 18px; overflow:hidden;
+    font-family:"JetBrains Mono",monospace;
+  }
+  #rank-col .title{font-size:10px; letter-spacing:.25em; color:var(--green); margin-bottom:14px}
+  #rank-col .rank-row{display:grid; grid-template-columns:32px 1fr; font-size:12px; padding:4px 0; border-bottom:1px dashed #1c1f2a}
+  #rank-col .rank-row .rk{color:var(--gold); font-weight:700}
+  #rank-col .rank-row .nm{color:var(--ink); letter-spacing:.08em; text-transform:uppercase; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  #rank-col .rank-row.hit{background:rgba(255,211,74,.12); animation:hitRow .8s ease-out}
+  @keyframes hitRow{50%{background:rgba(255,211,74,.35)}}
 
   /* attacker + particles */
   .attacker{position:absolute; transform:translate(-50%,-50%); pointer-events:none; z-index:15; animation:popin .2s cubic-bezier(.34,1.56,.64,1), fadeout .6s ease-in 2.4s forwards}
@@ -187,11 +203,22 @@
 </div>
 
 <script>
-const TEAMS = [
-  ["ROOT-SKSD", 4200], ["BINARY-SHOCK", 3980], ["NULLBYTE-ID", 3740],
-  ["SEGFAULT", 3500], ["CTRL-Z", 3200], ["0X4D4", 2900], ["HEAPOVERFLOW", 2710],
-  ["BLUEHAWKS", 2580], ["SHELL-STORM", 2410], ["KERNEL-PANIC", 2280],
-];
+// Team count can be overridden with `?n=<count>` query param.
+// Try ?n=10 / 30 / 80 / 150 to preview different scale modes.
+const N = Math.max(3, parseInt(new URLSearchParams(location.search).get("n") || "10"));
+function genTeams(n){
+  const base = [
+    "ROOT-SKSD","BINARY-SHOCK","NULLBYTE-ID","SEGFAULT","CTRL-Z","0X4D4",
+    "HEAPOVERFLOW","BLUEHAWKS","SHELL-STORM","KERNEL-PANIC",
+  ];
+  const arr = [];
+  for (let i=0;i<n;i++){
+    const name = i < base.length ? base[i] : `TEAM-${String(i+1).padStart(3,"0")}`;
+    arr.push([name, 5000 - i*40 - Math.floor(Math.random()*30)]);
+  }
+  return arr;
+}
+const TEAMS = genTeams(N);
 const CHALLS = [
   ["PWN","BABU-FORMAT"],["WEB","BIJI"],["WEB","WHITE-NIGHTS"],
   ["CRYPTO","VIRTUOSO"],["FORENSICS","BAD-OPSEC"],["REVERSE","LATENT-KINGDOM"],
@@ -211,30 +238,66 @@ function renderBoard(){
 }
 renderBoard();
 
-// team nodes arranged radially around HQ (full circle).
-// The feed panel on the left and the scoreboard on the right float as
-// overlays on top of the ring — they provide the asymmetric chrome without
-// stealing the ring's real estate.
+// Adaptive layout:
+//   n <= 30  → single ring around HQ (full labels)
+//   n <= 80  → dual concentric ring (inner 12 labelled, outer dots only)
+//   n >  80  → active-only: persistent top-20 column right-of-feed, the
+//              rest spawn at random positions ONLY when they fire
+//              (matches the cjctfdanim reference approach).
 function placeTeams(){
+  document.querySelectorAll(".team-node").forEach(n=>n.remove());
   const cx = window.innerWidth/2, cy = window.innerHeight/2;
   const n = TEAMS.length;
-  TEAMS.forEach((t,i)=>{
-    const angle = (i/n)*Math.PI*2 - Math.PI/2;
-    // Keep the ring just outside the HQ hex but well inside the side panels.
-    const r = Math.min(window.innerWidth, window.innerHeight) * 0.38;
-    const x = cx + r*Math.cos(angle), y = cy + r*Math.sin(angle);
-    const el = document.createElement("div");
-    el.className="team-node"; el.dataset.team=t[0];
-    el.style.left=x+"px"; el.style.top=y+"px";
-    el.innerHTML=`<div class="dot"></div>${t[0]}`;
-    document.body.appendChild(el);
+  const minDim = Math.min(window.innerWidth, window.innerHeight);
+
+  if (n <= 30) {
+    const r = minDim * 0.38;
+    TEAMS.forEach((t,i)=>{
+      const a = (i/n)*Math.PI*2 - Math.PI/2;
+      place(t[0], cx + r*Math.cos(a), cy + r*Math.sin(a), /*label*/true);
+    });
+  } else if (n <= 80) {
+    const rIn = minDim * 0.28, rOut = minDim * 0.44;
+    const inner = TEAMS.slice(0,12), outer = TEAMS.slice(12);
+    inner.forEach((t,i)=>{
+      const a = (i/inner.length)*Math.PI*2 - Math.PI/2;
+      place(t[0], cx + rIn*Math.cos(a), cy + rIn*Math.sin(a), true);
+    });
+    outer.forEach((t,i)=>{
+      const a = (i/outer.length)*Math.PI*2 - Math.PI/2;
+      place(t[0], cx + rOut*Math.cos(a), cy + rOut*Math.sin(a), false);
+    });
+  } else {
+    // Active-only: no static team nodes. Top-20 lives in a dedicated rank
+    // column next to the feed; everyone else is anonymous until they fire.
+    buildRankColumn();
+  }
+}
+function place(name, x, y, label){
+  const el = document.createElement("div");
+  el.className = "team-node" + (label?"":" no-label");
+  el.dataset.team = name;
+  el.style.left=x+"px"; el.style.top=y+"px";
+  el.innerHTML = `<div class="dot"></div>${label?name:""}`;
+  document.body.appendChild(el);
+}
+
+function buildRankColumn(){
+  let col = document.getElementById("rank-col");
+  if (col) col.remove();
+  col = document.createElement("div");
+  col.id = "rank-col";
+  col.innerHTML = `<div class="title">// ACTIVE · TOP 20</div>`;
+  TEAMS.slice(0,20).forEach((t,i)=>{
+    const row = document.createElement("div");
+    row.className = "rank-row"; row.dataset.team = t[0];
+    row.innerHTML = `<span class="rk">${String(i+1).padStart(2,"0")}</span><span class="nm">${t[0]}</span>`;
+    col.appendChild(row);
   });
+  document.body.appendChild(col);
 }
 placeTeams();
-window.addEventListener("resize", ()=>{
-  document.querySelectorAll(".team-node").forEach(n=>n.remove());
-  placeTeams();
-});
+window.addEventListener("resize", placeTeams);
 
 // feed
 function addFeed(evt){
@@ -359,14 +422,29 @@ function next(){
   const type = tick%7===0?"fb":roll<0.6?"ok":roll<0.8?"amber":"bad";
   const evt = {team,chall,type};
   addFeed(evt);
-  // find source: team node if exists else random
+  // Find source origin: radar ring node > rank-column row > random.
   const node = document.querySelector(`.team-node[data-team="${team}"]`);
+  const rankRow = document.querySelector(`#rank-col .rank-row[data-team="${team}"]`);
   let source;
   if(node){
     const r = node.getBoundingClientRect();
     source = {x:r.left+r.width/2, y:r.top+r.height/2};
+  } else if(rankRow){
+    const r = rankRow.getBoundingClientRect();
+    source = {x:r.right - 4, y:r.top+r.height/2};
+    rankRow.classList.remove("hit"); void rankRow.offsetWidth; rankRow.classList.add("hit");
   } else {
-    source = {x:Math.random()*window.innerWidth*0.5 + 50, y:Math.random()*window.innerHeight*0.9 + 50};
+    // Random off-HQ point avoiding the side panels + ~200px around HQ.
+    const hq = hqCenter();
+    const bandLeft = 420, bandRight = window.innerWidth - 360;
+    for (let tries=0; tries<30; tries++){
+      const x = bandLeft + Math.random()*(bandRight-bandLeft);
+      const y = 90 + Math.random()*(window.innerHeight - 180);
+      if (Math.abs(x - hq.x) > 200 || Math.abs(y - hq.y) > 180) {
+        source = {x, y}; break;
+      }
+    }
+    if (!source) source = {x: bandLeft + 50, y: 120};
   }
   spawnAttacker(evt, source);
   if(type==="fb") triggerFirstBlood(evt);
