@@ -317,15 +317,24 @@ function playPew(type){
   // Tone per event type: FB=higher & louder, Normal=mid, Unaccepted=dull low
   const f0 = type==="fb" ? 1600 : type==="ok" ? 1200 : type==="amber" ? 1400 : 500;
   const f1 = type==="fb" ? 400 : type==="ok" ? 320 : type==="amber" ? 360 : 180;
-  const vol = type==="bad" ? 0.04 : 0.08;
+  const vol = type==="bad" ? 0.22 : type==="fb" ? 0.42 : 0.32;
+  // Two-oscillator stack for more body: square lead + detuned saw sub.
   osc.type = "square";
   osc.frequency.setValueAtTime(f0, t0);
   osc.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
-  gain.gain.setValueAtTime(vol, t0);
+  const sub = audioCtx.createOscillator();
+  sub.type = "sawtooth";
+  sub.frequency.setValueAtTime(f0 * 0.5, t0);
+  sub.frequency.exponentialRampToValueAtTime(f1 * 0.5, t0 + dur);
+  // Quick attack → exp decay
+  gain.gain.setValueAtTime(0, t0);
+  gain.gain.linearRampToValueAtTime(vol, t0 + 0.005);
   gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  osc.connect(gain).connect(audioCtx.destination);
-  osc.start(t0);
-  osc.stop(t0 + dur + 0.02);
+  osc.connect(gain);
+  sub.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(t0); sub.start(t0);
+  osc.stop(t0 + dur + 0.02); sub.stop(t0 + dur + 0.02);
 }
 
 function triggerFirstBlood(evt){
