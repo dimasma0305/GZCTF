@@ -515,6 +515,8 @@ function clampToPlay(x, y){
    Attacker + particles
    ============================================================ */
 const field = document.getElementById("field");
+const SVG_NS = "http://www.w3.org/2000/svg";
+
 function spawnAttacker(evt, src){
   const color = evt.type==="fb"?"#ffd34a":evt.type==="ok"?"#3ae85c":evt.type==="amber"?"#f4b619":"#ff6262";
   const a = document.createElement("div");
@@ -525,22 +527,155 @@ function spawnAttacker(evt, src){
   setTimeout(()=>a.remove(),3000);
   const tgt = hqCenter();
   for(let i=0;i<8;i++){
-    setTimeout(()=>{ fireParticle(src.x, src.y, tgt.x, tgt.y, color); playPew(evt.type); }, i*180);
+    setTimeout(()=>{ fireBullet(src.x, src.y, tgt.x, tgt.y, color, evt.type); playPew(evt.type); }, i*180);
   }
 }
-function fireParticle(x0,y0,x1,y1,color){
-  const mid = {x:(x0+x1)/2+(Math.random()-0.5)*140, y:(y0+y1)/2+(Math.random()-0.5)*100};
-  const p = document.createElementNS("http://www.w3.org/2000/svg","path");
-  p.setAttribute("d", `M ${x0} ${y0} Q ${mid.x} ${mid.y} ${x1} ${y1}`);
-  p.setAttribute("fill","none"); p.setAttribute("stroke",color);
-  p.setAttribute("stroke-width","2.2"); p.setAttribute("stroke-linecap","round");
-  p.style.filter = `drop-shadow(0 0 6px ${color})`;
-  field.appendChild(p);
-  const len = p.getTotalLength();
-  p.style.strokeDasharray = `${len*0.12} ${len}`;
-  p.style.strokeDashoffset = `${len}`;
-  p.animate([{strokeDashoffset:len},{strokeDashoffset:-len*0.15}],
-    {duration:1100, easing:"cubic-bezier(.3,.6,.4,1)"}).onfinish=()=>p.remove();
+
+/* ============================================================
+   Bullet model (v2): muzzle flash → hot tracer head + glowing tail
+   on a quadratic bezier path → impact burst + shockwave (+ sparks on FB).
+   ============================================================ */
+function fireBullet(x0, y0, x1, y1, color, type){
+  // Curve: arcing bezier with jitter so many bullets spread visually
+  const dx = x1 - x0, dy = y1 - y0;
+  const dist = Math.hypot(dx, dy);
+  const nrmX = -dy / dist, nrmY = dx / dist;    // perpendicular unit vector
+  const jitter = (Math.random() - 0.5) * 140;
+  const midX = (x0 + x1)/2 + nrmX*jitter + (Math.random()-0.5)*40;
+  const midY = (y0 + y1)/2 + nrmY*jitter + (Math.random()-0.5)*40;
+
+  const fat   = type === "fb";
+  const soft  = type === "bad";
+  const thick = fat ? 4 : soft ? 1.4 : 2.6;
+  const dur   = fat ? 950 : 1050;
+  const headR = fat ? 6 : soft ? 2.5 : 4.5;
+
+  // --- muzzle flash (quick radial pop at source) ---
+  if (!soft) muzzleFlash(x0, y0, color, fat);
+
+  // --- path + gradient tail ---
+  const path = document.createElementNS(SVG_NS, "path");
+  const d = `M ${x0} ${y0} Q ${midX} ${midY} ${x1} ${y1}`;
+  path.setAttribute("d", d);
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", color);
+  path.setAttribute("stroke-width", thick);
+  path.setAttribute("stroke-linecap", "round");
+  path.style.filter = `drop-shadow(0 0 ${fat?10:5}px ${color}) drop-shadow(0 0 ${fat?20:10}px ${color})`;
+  path.style.opacity = soft ? 0.55 : 1;
+  field.appendChild(path);
+
+  const len = path.getTotalLength();
+  const tailLen = len * (fat ? 0.26 : 0.18);
+  path.style.strokeDasharray = `${tailLen} ${len}`;
+  path.style.strokeDashoffset = `${len}`;
+
+  // --- bright hot-core head (white nucleus over colored glow) ---
+  let head = null, core = null;
+  if (!soft){
+    head = document.createElementNS(SVG_NS, "circle");
+    head.setAttribute("r", headR);
+    head.setAttribute("fill", color);
+    head.style.filter = `drop-shadow(0 0 10px ${color}) drop-shadow(0 0 ${fat?30:18}px ${color})`;
+    field.appendChild(head);
+
+    core = document.createElementNS(SVG_NS, "circle");
+    core.setAttribute("r", headR * 0.55);
+    core.setAttribute("fill", "#ffffff");
+    field.appendChild(core);
+  }
+
+  const start = performance.now();
+  function step(now){
+    const t = Math.min(1, (now - start)/dur);
+    const e = 1 - Math.pow(1 - t, 2);     // ease-out
+    path.style.strokeDashoffset = len - e*(len + tailLen);
+    if (head){
+      const p = path.getPointAtLength(Math.min(len, e*len));
+      head.setAttribute("cx", p.x); head.setAttribute("cy", p.y);
+      core.setAttribute("cx", p.x); core.setAttribute("cy", p.y);
+    }
+    if (t < 1) requestAnimationFrame(step);
+    else {
+      if (head){ head.remove(); core.remove(); }
+      impactBurst(x1, y1, color, type);
+      path.animate([{opacity:path.style.opacity||1},{opacity:0}],
+        {duration: soft?160:240, fill:"forwards"}).onfinish = ()=>path.remove();
+    }
+  }
+  requestAnimationFrame(step);
+}
+
+function muzzleFlash(x, y, color, big){
+  const f = document.createElementNS(SVG_NS, "circle");
+  f.setAttribute("cx", x); f.setAttribute("cy", y);
+  f.setAttribute("r", big?5:3);
+  f.setAttribute("fill", color);
+  f.style.filter = `drop-shadow(0 0 12px ${color}) drop-shadow(0 0 24px ${color})`;
+  field.appendChild(f);
+  f.animate(
+    [{r: big?5:3, opacity:1}, {r: big?22:14, opacity:0}],
+    {duration:260, easing:"ease-out", fill:"forwards"}
+  ).onfinish = ()=>f.remove();
+
+  // small center nova
+  const nova = document.createElementNS(SVG_NS, "circle");
+  nova.setAttribute("cx", x); nova.setAttribute("cy", y);
+  nova.setAttribute("r", 2); nova.setAttribute("fill", "#fff");
+  field.appendChild(nova);
+  nova.animate([{r:2,opacity:1},{r:big?10:6,opacity:0}],
+    {duration:180,easing:"ease-out",fill:"forwards"}).onfinish = ()=>nova.remove();
+}
+
+function impactBurst(x, y, color, type){
+  const big = type === "fb";
+  const soft = type === "bad";
+  if (soft) return;      // wrong answers don't hit
+
+  // Shockwave ring
+  const ring = document.createElementNS(SVG_NS, "circle");
+  ring.setAttribute("cx", x); ring.setAttribute("cy", y);
+  ring.setAttribute("r", 3);
+  ring.setAttribute("fill", "none");
+  ring.setAttribute("stroke", color);
+  ring.setAttribute("stroke-width", big?3:2);
+  ring.style.filter = `drop-shadow(0 0 12px ${color})`;
+  field.appendChild(ring);
+  ring.animate(
+    [{r:3, strokeOpacity:1, strokeWidth:big?3:2},
+     {r:big?80:45, strokeOpacity:0, strokeWidth:0.4}],
+    {duration: big?650:450, easing:"ease-out", fill:"forwards"}
+  ).onfinish = ()=>ring.remove();
+
+  // Bright flash core
+  const flash = document.createElementNS(SVG_NS, "circle");
+  flash.setAttribute("cx", x); flash.setAttribute("cy", y);
+  flash.setAttribute("r", big?10:6);
+  flash.setAttribute("fill", "#ffffff");
+  flash.style.filter = `drop-shadow(0 0 ${big?28:16}px ${color}) drop-shadow(0 0 ${big?56:32}px ${color})`;
+  field.appendChild(flash);
+  flash.animate([{r:big?10:6,opacity:1},{r:big?22:14,opacity:0}],
+    {duration: big?380:260, easing:"ease-out", fill:"forwards"}).onfinish = ()=>flash.remove();
+
+  // First-blood extras: 8 diagonal sparks
+  if (big){
+    for(let i=0;i<8;i++){
+      const ang = (i/8)*Math.PI*2 + Math.random()*0.3;
+      const len = 26 + Math.random()*18;
+      const sp = document.createElementNS(SVG_NS,"line");
+      sp.setAttribute("x1", x); sp.setAttribute("y1", y);
+      sp.setAttribute("x2", x + Math.cos(ang)*2); sp.setAttribute("y2", y + Math.sin(ang)*2);
+      sp.setAttribute("stroke", color);
+      sp.setAttribute("stroke-width", 2.5);
+      sp.setAttribute("stroke-linecap","round");
+      sp.style.filter = `drop-shadow(0 0 6px ${color})`;
+      field.appendChild(sp);
+      sp.animate([
+        {x2: x + Math.cos(ang)*2,    y2: y + Math.sin(ang)*2,    opacity:1, strokeWidth:2.5},
+        {x2: x + Math.cos(ang)*len,  y2: y + Math.sin(ang)*len,  opacity:0, strokeWidth:0.6}
+      ],{duration:520, easing:"ease-out", fill:"forwards"}).onfinish = ()=>sp.remove();
+    }
+  }
 }
 
 function triggerFirstBlood(evt){
