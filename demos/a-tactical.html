@@ -21,6 +21,21 @@
   *{box-sizing:border-box; margin:0; padding:0}
   html,body{height:100%; overflow:hidden; background:var(--bg); color:var(--ink);
     font-family:"Space Grotesk",system-ui,sans-serif}
+  html.scr-shake{animation:scrShake .9s cubic-bezier(.36,.07,.19,.97)}
+  @keyframes scrShake{
+    0%,100%{transform:translate3d(0,0,0)}
+    5%{transform:translate3d(-14px,-6px,0) rotate(-.3deg)}
+    12%{transform:translate3d(12px,8px,0) rotate(.25deg)}
+    20%{transform:translate3d(-18px,4px,0) rotate(-.35deg)}
+    28%{transform:translate3d(16px,-10px,0) rotate(.2deg)}
+    36%{transform:translate3d(-12px,10px,0)}
+    45%{transform:translate3d(10px,-6px,0)}
+    55%{transform:translate3d(-8px,5px,0)}
+    65%{transform:translate3d(6px,-4px,0)}
+    75%{transform:translate3d(-4px,2px,0)}
+    85%{transform:translate3d(3px,-2px,0)}
+    95%{transform:translate3d(-1px,1px,0)}
+  }
 
   /* Scanlines + grid as fixed backdrop */
   body::before{content:""; position:fixed; inset:0; pointer-events:none; z-index:1;
@@ -526,8 +541,12 @@ function spawnAttacker(evt, src){
   document.body.appendChild(a);
   setTimeout(()=>a.remove(),3000);
   const tgt = hqCenter();
-  for(let i=0;i<8;i++){
-    setTimeout(()=>{ fireBullet(src.x, src.y, tgt.x, tgt.y, color, evt.type); playPew(evt.type); }, i*180);
+  if (evt.type === "fb"){
+    fireLaser(src.x, src.y, tgt.x, tgt.y, color);
+  } else {
+    for(let i=0;i<8;i++){
+      setTimeout(()=>{ fireBullet(src.x, src.y, tgt.x, tgt.y, color, evt.type); playPew(evt.type); }, i*180);
+    }
   }
 }
 
@@ -676,6 +695,210 @@ function impactBurst(x, y, color, type){
       ],{duration:520, easing:"ease-out", fill:"forwards"}).onfinish = ()=>sp.remove();
     }
   }
+}
+
+/* ============================================================
+   First-blood LASER: charge-up → beam → screen shake + shatter.
+   ============================================================ */
+function fireLaser(x0, y0, x1, y1, color){
+  playLaser();
+
+  // 1. Charge-up orb at source
+  const charge = document.createElementNS(SVG_NS, "circle");
+  charge.setAttribute("cx", x0); charge.setAttribute("cy", y0);
+  charge.setAttribute("r", 3); charge.setAttribute("fill", "#fff");
+  charge.style.filter = `drop-shadow(0 0 8px ${color}) drop-shadow(0 0 24px ${color})`;
+  field.appendChild(charge);
+  const chargeRing = document.createElementNS(SVG_NS, "circle");
+  chargeRing.setAttribute("cx", x0); chargeRing.setAttribute("cy", y0);
+  chargeRing.setAttribute("r", 30); chargeRing.setAttribute("fill", "none");
+  chargeRing.setAttribute("stroke", color); chargeRing.setAttribute("stroke-width", 2);
+  chargeRing.style.filter = `drop-shadow(0 0 10px ${color})`;
+  chargeRing.style.opacity = 0;
+  field.appendChild(chargeRing);
+
+  charge.animate([{r:3,opacity:0.8},{r:22,opacity:1}],
+    {duration:260, easing:"ease-in", fill:"forwards"});
+  chargeRing.animate([{r:30, opacity:0.8},{r:4, opacity:1}],
+    {duration:260, easing:"ease-in", fill:"forwards"}).onfinish = ()=>{
+    charge.remove(); chargeRing.remove();
+
+    // 2. THE BEAM — outer glow + inner white core
+    const glow = document.createElementNS(SVG_NS, "line");
+    glow.setAttribute("x1", x0); glow.setAttribute("y1", y0);
+    glow.setAttribute("x2", x1); glow.setAttribute("y2", y1);
+    glow.setAttribute("stroke", color); glow.setAttribute("stroke-width", 22);
+    glow.setAttribute("stroke-linecap", "round");
+    glow.style.opacity = 0.65;
+    glow.style.filter = `drop-shadow(0 0 18px ${color}) drop-shadow(0 0 40px ${color})`;
+    field.appendChild(glow);
+
+    const beam = document.createElementNS(SVG_NS, "line");
+    beam.setAttribute("x1", x0); beam.setAttribute("y1", y0);
+    beam.setAttribute("x2", x1); beam.setAttribute("y2", y1);
+    beam.setAttribute("stroke", "#ffffff"); beam.setAttribute("stroke-width", 8);
+    beam.setAttribute("stroke-linecap", "round");
+    beam.style.filter = `drop-shadow(0 0 12px ${color}) drop-shadow(0 0 28px ${color}) drop-shadow(0 0 64px ${color})`;
+    field.appendChild(beam);
+
+    // reveal beam from source to target over 120ms (ultra-fast strike)
+    const len = Math.hypot(x1-x0, y1-y0);
+    beam.style.strokeDasharray = `${len} ${len}`;
+    beam.style.strokeDashoffset = `${len}`;
+    glow.style.strokeDasharray = `${len} ${len}`;
+    glow.style.strokeDashoffset = `${len}`;
+    beam.animate([{strokeDashoffset:len},{strokeDashoffset:0}],
+      {duration:110, easing:"cubic-bezier(.2,.8,.1,1)", fill:"forwards"});
+    glow.animate([{strokeDashoffset:len},{strokeDashoffset:0}],
+      {duration:110, easing:"cubic-bezier(.2,.8,.1,1)", fill:"forwards"}).onfinish = ()=>{
+      // 3. IMPACT — flash, shake, shatter, burst
+      flashScreen(color);
+      shakeScreen();
+      shatterAt(x1, y1, color);
+      impactBurst(x1, y1, color, "fb");
+
+      beam.animate([{opacity:1},{opacity:0}],
+        {duration:520, easing:"ease-out", fill:"forwards"}).onfinish = ()=>beam.remove();
+      glow.animate([{opacity:0.65},{opacity:0}],
+        {duration:520, easing:"ease-out", fill:"forwards"}).onfinish = ()=>glow.remove();
+    };
+  };
+}
+
+function flashScreen(color){
+  const f = document.createElement("div");
+  Object.assign(f.style, {
+    position:"fixed", inset:"0", zIndex:55, pointerEvents:"none",
+    background:`radial-gradient(circle at center, rgba(255,255,255,.9), ${color} 28%, rgba(255,42,42,.35) 55%, transparent 78%)`,
+    mixBlendMode:"screen", opacity:"0"
+  });
+  document.body.appendChild(f);
+  f.animate([{opacity:0},{opacity:1,offset:0.1},{opacity:0.55,offset:0.3},{opacity:0}],
+    {duration:520, easing:"ease-out", fill:"forwards"}).onfinish = ()=>f.remove();
+}
+
+function shakeScreen(){
+  const el = document.documentElement;
+  el.classList.remove("scr-shake"); void el.offsetWidth; el.classList.add("scr-shake");
+  setTimeout(()=>el.classList.remove("scr-shake"), 950);
+}
+
+function shatterAt(x, y, color){
+  const svg = document.createElementNS(SVG_NS, "svg");
+  Object.assign(svg.style, {position:"fixed", inset:"0", width:"100vw", height:"100vh",
+    pointerEvents:"none", zIndex:58});
+  svg.setAttribute("viewBox", `0 0 ${window.innerWidth} ${window.innerHeight}`);
+  document.body.appendChild(svg);
+
+  const n = 14 + Math.floor(Math.random()*5);
+  const diag = Math.hypot(window.innerWidth, window.innerHeight);
+  for (let i=0;i<n;i++){
+    const baseAng = (i/n)*Math.PI*2 + (Math.random()-0.5)*0.35;
+    const reach = diag * (0.35 + Math.random()*0.4);
+    let d = `M ${x} ${y}`;
+    let cx = x, cy = y, ang = baseAng;
+    const segs = 4 + Math.floor(Math.random()*3);
+    const segLen = reach / segs;
+    for (let s=0;s<segs;s++){
+      ang += (Math.random()-0.5) * 0.55;
+      cx += Math.cos(ang)*segLen;
+      cy += Math.sin(ang)*segLen;
+      d += ` L ${cx} ${cy}`;
+      // jagged branch
+      if (Math.random() < 0.55){
+        const bang = ang + (Math.random()>0.5?1:-1) * (0.7 + Math.random()*0.6);
+        const bl = 40 + Math.random()*90;
+        const bx = cx + Math.cos(bang)*bl, by = cy + Math.sin(bang)*bl;
+        d += ` M ${cx} ${cy} L ${bx} ${by} M ${cx} ${cy}`;
+      }
+    }
+    const p = document.createElementNS(SVG_NS, "path");
+    p.setAttribute("d", d);
+    p.setAttribute("fill", "none");
+    p.setAttribute("stroke", "#ffffff");
+    p.setAttribute("stroke-width", 1.6 + Math.random()*1.1);
+    p.setAttribute("stroke-linecap", "round");
+    p.setAttribute("stroke-linejoin", "miter");
+    p.style.filter = `drop-shadow(0 0 4px ${color}) drop-shadow(0 0 10px ${color})`;
+    svg.appendChild(p);
+    const total = p.getTotalLength();
+    p.style.strokeDasharray = total;
+    p.style.strokeDashoffset = total;
+    p.animate([
+      {strokeDashoffset: total, opacity: 1},
+      {strokeDashoffset: 0, opacity: 1, offset: 0.18},
+      {strokeDashoffset: 0, opacity: 0.9, offset: 0.7},
+      {strokeDashoffset: 0, opacity: 0}
+    ], {duration: 2400, easing:"cubic-bezier(.2,.8,.2,1)", fill:"forwards"});
+  }
+
+  // center crack hub — concentric crack polygon
+  const hub = document.createElementNS(SVG_NS, "circle");
+  hub.setAttribute("cx", x); hub.setAttribute("cy", y); hub.setAttribute("r", 4);
+  hub.setAttribute("fill", "#fff");
+  hub.style.filter = `drop-shadow(0 0 12px ${color}) drop-shadow(0 0 30px ${color})`;
+  svg.appendChild(hub);
+  hub.animate([{r:4, opacity:1},{r:40, opacity:0}],
+    {duration:700, easing:"ease-out", fill:"forwards"}).onfinish = ()=>hub.remove();
+
+  setTimeout(()=>svg.remove(), 2600);
+}
+
+function playLaser(){
+  if (!audioCtx) return;
+  const t0 = audioCtx.currentTime;
+
+  // Rising charge whine (0 → 260ms)
+  const whine = audioCtx.createOscillator();
+  const wg = audioCtx.createGain();
+  whine.type = "sawtooth";
+  whine.frequency.setValueAtTime(180, t0);
+  whine.frequency.exponentialRampToValueAtTime(2200, t0 + 0.26);
+  wg.gain.setValueAtTime(0, t0);
+  wg.gain.linearRampToValueAtTime(0.18, t0 + 0.05);
+  wg.gain.linearRampToValueAtTime(0.34, t0 + 0.26);
+  wg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.30);
+  whine.connect(wg); wg.connect(audioCtx.destination);
+  whine.start(t0); whine.stop(t0 + 0.31);
+
+  // Beam discharge (square + saw) at 260ms
+  const b0 = t0 + 0.26;
+  const beam = audioCtx.createOscillator();
+  const beamG = audioCtx.createGain();
+  beam.type = "square";
+  beam.frequency.setValueAtTime(2600, b0);
+  beam.frequency.exponentialRampToValueAtTime(320, b0 + 0.5);
+  beamG.gain.setValueAtTime(0, b0);
+  beamG.gain.linearRampToValueAtTime(0.42, b0 + 0.02);
+  beamG.gain.exponentialRampToValueAtTime(0.0001, b0 + 0.55);
+  beam.connect(beamG); beamG.connect(audioCtx.destination);
+  beam.start(b0); beam.stop(b0 + 0.6);
+
+  // Sub boom (sine, 60Hz)
+  const sub = audioCtx.createOscillator();
+  const sg = audioCtx.createGain();
+  sub.type = "sine";
+  sub.frequency.setValueAtTime(90, b0);
+  sub.frequency.exponentialRampToValueAtTime(38, b0 + 0.55);
+  sg.gain.setValueAtTime(0, b0);
+  sg.gain.linearRampToValueAtTime(0.55, b0 + 0.03);
+  sg.gain.exponentialRampToValueAtTime(0.0001, b0 + 0.62);
+  sub.connect(sg); sg.connect(audioCtx.destination);
+  sub.start(b0); sub.stop(b0 + 0.64);
+
+  // Noise shatter burst
+  try {
+    const buf = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * 0.35), audioCtx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i=0;i<data.length;i++) data[i] = (Math.random()*2 - 1) * Math.pow(1 - i/data.length, 1.8);
+    const noise = audioCtx.createBufferSource();
+    noise.buffer = buf;
+    const ng = audioCtx.createGain();
+    ng.gain.setValueAtTime(0.28, b0);
+    ng.gain.exponentialRampToValueAtTime(0.0001, b0 + 0.45);
+    noise.connect(ng); ng.connect(audioCtx.destination);
+    noise.start(b0);
+  } catch(e){}
 }
 
 function triggerFirstBlood(evt){
