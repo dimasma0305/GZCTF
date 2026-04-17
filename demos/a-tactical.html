@@ -261,10 +261,13 @@ function spawnAttacker(evt, sourceXY){
   a.innerHTML=`<div class="pulse"></div><div class="glow">◉</div><div class="lbl"><b>${evt.team}</b>${evt.chall[0]}/${evt.chall[1]}</div>`;
   document.body.appendChild(a);
   setTimeout(()=>a.remove(),3000);
-  // burst particles
+  // burst particles (each plays a tiny pew)
   const tgt = hqCenter();
   for(let i=0;i<8;i++){
-    setTimeout(()=>fireParticle(sourceXY.x, sourceXY.y, tgt.x, tgt.y, color), i*180);
+    setTimeout(()=>{
+      fireParticle(sourceXY.x, sourceXY.y, tgt.x, tgt.y, color);
+      playPew(evt.type);
+    }, i*180);
   }
 }
 function fireParticle(x0,y0,x1,y1,color){
@@ -284,15 +287,46 @@ const audio = document.getElementById("fb-audio");
 const toast = document.getElementById("sound-toast");
 let audioEnabled = false;
 let lastSoundAt = 0;
+let audioCtx = null;
+let lastPewAt = 0;
+
 function unlockAudio(){
   if (audioEnabled) return;
   audioEnabled = true;
   audio.volume = 0;
   audio.play().then(()=>{ audio.pause(); audio.currentTime = 0; audio.volume = 0.85; }).catch(()=>{});
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  } catch(e){}
   toast.classList.add("hidden");
 }
 window.addEventListener("click", unlockAudio, { once:false });
 window.addEventListener("keydown", unlockAudio, { once:false });
+
+// Short synthesized "pew" per particle — frequency sweep with exp decay.
+// Rate-limited to 40 ms min spacing so 8-particle bursts don't mask each other.
+function playPew(type){
+  if (!audioCtx) return;
+  const now = performance.now();
+  if (now - lastPewAt < 40) return;
+  lastPewAt = now;
+  const t0 = audioCtx.currentTime;
+  const dur = 0.09;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  // Tone per event type: FB=higher & louder, Normal=mid, Unaccepted=dull low
+  const f0 = type==="fb" ? 1600 : type==="ok" ? 1200 : type==="amber" ? 1400 : 500;
+  const f1 = type==="fb" ? 400 : type==="ok" ? 320 : type==="amber" ? 360 : 180;
+  const vol = type==="bad" ? 0.04 : 0.08;
+  osc.type = "square";
+  osc.frequency.setValueAtTime(f0, t0);
+  osc.frequency.exponentialRampToValueAtTime(f1, t0 + dur);
+  gain.gain.setValueAtTime(vol, t0);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(gain).connect(audioCtx.destination);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.02);
+}
 
 function triggerFirstBlood(evt){
   fb.classList.remove("on"); void fb.offsetWidth; fb.classList.add("on");
