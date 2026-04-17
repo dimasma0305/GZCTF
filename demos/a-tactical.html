@@ -773,6 +773,7 @@ function fireLaser(x0, y0, x1, y1, color){
       shakeScreen();
       shatterAt(x1, y1, color);
       impactBurst(x1, y1, color, "fb");
+      playShatter();
 
       beam.animate([{opacity:1},{opacity:0}],
         {duration:520, easing:"ease-out", fill:"forwards"}).onfinish = ()=>beam.remove();
@@ -878,43 +879,98 @@ function playLaser(){
   whine.connect(wg); wg.connect(audioCtx.destination);
   whine.start(t0); whine.stop(t0 + 0.31);
 
-  // Beam discharge (square + saw) at 260ms
+  // Beam discharge (square) at 260ms — short, makes room for shatter
   const b0 = t0 + 0.26;
   const beam = audioCtx.createOscillator();
   const beamG = audioCtx.createGain();
   beam.type = "square";
   beam.frequency.setValueAtTime(2600, b0);
-  beam.frequency.exponentialRampToValueAtTime(320, b0 + 0.5);
+  beam.frequency.exponentialRampToValueAtTime(600, b0 + 0.18);
   beamG.gain.setValueAtTime(0, b0);
-  beamG.gain.linearRampToValueAtTime(0.42, b0 + 0.02);
-  beamG.gain.exponentialRampToValueAtTime(0.0001, b0 + 0.55);
+  beamG.gain.linearRampToValueAtTime(0.40, b0 + 0.02);
+  beamG.gain.exponentialRampToValueAtTime(0.0001, b0 + 0.20);
   beam.connect(beamG); beamG.connect(audioCtx.destination);
-  beam.start(b0); beam.stop(b0 + 0.6);
+  beam.start(b0); beam.stop(b0 + 0.22);
+}
 
-  // Sub boom (sine, 60Hz)
-  const sub = audioCtx.createOscillator();
-  const sg = audioCtx.createGain();
-  sub.type = "sine";
-  sub.frequency.setValueAtTime(90, b0);
-  sub.frequency.exponentialRampToValueAtTime(38, b0 + 0.55);
-  sg.gain.setValueAtTime(0, b0);
-  sg.gain.linearRampToValueAtTime(0.55, b0 + 0.03);
-  sg.gain.exponentialRampToValueAtTime(0.0001, b0 + 0.62);
-  sub.connect(sg); sg.connect(audioCtx.destination);
-  sub.start(b0); sub.stop(b0 + 0.64);
+/* ============================================================
+   Impact audio: low thud (shake) + glass shatter burst + rolling
+   crackle pops (cracks extending outward).  Timed to sync with
+   laser impact (fireLaser calls this at the beam-arrival moment).
+   ============================================================ */
+function playShatter(){
+  if (!audioCtx) return;
+  const t0 = audioCtx.currentTime;
+  const sr = audioCtx.sampleRate;
 
-  // Noise shatter burst
+  // --- THUD: 120Hz → 35Hz sine punch (shake audio) ---
+  const thud = audioCtx.createOscillator();
+  const thudG = audioCtx.createGain();
+  thud.type = "sine";
+  thud.frequency.setValueAtTime(120, t0);
+  thud.frequency.exponentialRampToValueAtTime(35, t0 + 0.28);
+  thudG.gain.setValueAtTime(0, t0);
+  thudG.gain.linearRampToValueAtTime(0.9, t0 + 0.008);
+  thudG.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.55);
+  thud.connect(thudG); thudG.connect(audioCtx.destination);
+  thud.start(t0); thud.stop(t0 + 0.6);
+
+  // --- THUD TRANSIENT: click at t=0 for punchy attack ---
+  const click = audioCtx.createOscillator();
+  const clickG = audioCtx.createGain();
+  click.type = "square";
+  click.frequency.setValueAtTime(180, t0);
+  clickG.gain.setValueAtTime(0.5, t0);
+  clickG.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.03);
+  click.connect(clickG); clickG.connect(audioCtx.destination);
+  click.start(t0); click.stop(t0 + 0.04);
+
+  // --- GLASS SHATTER BURST: high-passed noise, bright fast decay ---
   try {
-    const buf = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * 0.35), audioCtx.sampleRate);
+    const blen = Math.floor(sr * 0.5);
+    const buf = audioCtx.createBuffer(1, blen, sr);
     const data = buf.getChannelData(0);
-    for (let i=0;i<data.length;i++) data[i] = (Math.random()*2 - 1) * Math.pow(1 - i/data.length, 1.8);
-    const noise = audioCtx.createBufferSource();
-    noise.buffer = buf;
+    for (let i=0;i<blen;i++){
+      const e = Math.pow(1 - i/blen, 2.4);
+      data[i] = (Math.random()*2 - 1) * e;
+    }
+    const src = audioCtx.createBufferSource();
+    src.buffer = buf;
+    const hp = audioCtx.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.setValueAtTime(2200, t0);
+    hp.frequency.exponentialRampToValueAtTime(4500, t0 + 0.35);
     const ng = audioCtx.createGain();
-    ng.gain.setValueAtTime(0.28, b0);
-    ng.gain.exponentialRampToValueAtTime(0.0001, b0 + 0.45);
-    noise.connect(ng); ng.connect(audioCtx.destination);
-    noise.start(b0);
+    ng.gain.setValueAtTime(0.42, t0);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.5);
+    src.connect(hp); hp.connect(ng); ng.connect(audioCtx.destination);
+    src.start(t0);
+  } catch(e){}
+
+  // --- ROLLING CRACKLE POPS: short bandpassed noise bursts over 600ms ---
+  try {
+    for (let i=0;i<14;i++){
+      const delay = 0.04 + i * 0.035 + Math.random()*0.03;
+      const popStart = t0 + delay;
+      const plen = Math.floor(sr * 0.05);
+      const pbuf = audioCtx.createBuffer(1, plen, sr);
+      const pd = pbuf.getChannelData(0);
+      for (let j=0;j<plen;j++){
+        const e = Math.pow(1 - j/plen, 3);
+        pd[j] = (Math.random()*2 - 1) * e;
+      }
+      const ps = audioCtx.createBufferSource();
+      ps.buffer = pbuf;
+      const bp = audioCtx.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.value = 1800 + Math.random()*2600;
+      bp.Q.value = 4 + Math.random()*6;
+      const pg = audioCtx.createGain();
+      pg.gain.setValueAtTime(0.22 + Math.random()*0.12, popStart);
+      pg.gain.exponentialRampToValueAtTime(0.0001, popStart + 0.06);
+      ps.connect(bp); bp.connect(pg); pg.connect(audioCtx.destination);
+      ps.start(popStart);
+    }
   } catch(e){}
 }
 
