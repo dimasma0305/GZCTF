@@ -640,27 +640,67 @@ resizeCanvas();
 window.addEventListener("resize", resizeCanvas);
 
 const entities = [];
-function addEnt(e){ entities.push(e); return e; }
+let __rafRunning = false;
+function addEnt(e){
+  entities.push(e);
+  if (!__rafRunning){ __rafRunning = true; requestAnimationFrame(__tick); }
+  return e;
+}
+function __tick(){
+  const w = window.innerWidth, h = window.innerHeight;
+  ctx.clearRect(0, 0, w, h);
+  if (entities.length === 0){ __rafRunning = false; return; }
+  ctx.globalCompositeOperation = "lighter";
+  const now = performance.now();
+  for (let i = entities.length - 1; i >= 0; i--){
+    const e = entities[i];
+    if (e.update(now) === false) entities.splice(i, 1);
+    else e.render(ctx, now);
+  }
+  ctx.globalCompositeOperation = "source-over";
+  requestAnimationFrame(__tick);
+}
 
 // shatterAt still uses SVG (isolated overlay) so we need the namespace
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-(function renderLoop(){
-  function tick(){
-    const w = window.innerWidth, h = window.innerHeight;
-    ctx.clearRect(0, 0, w, h);
-    ctx.globalCompositeOperation = "lighter";
-    const now = performance.now();
-    for (let i = entities.length - 1; i >= 0; i--){
-      const e = entities[i];
-      if (e.update(now) === false) entities.splice(i, 1);
-      else e.render(ctx, now);
-    }
-    ctx.globalCompositeOperation = "source-over";
-    requestAnimationFrame(tick);
-  }
-  requestAnimationFrame(tick);
-})();
+/* --- Pre-rendered glow sprite cache ---------------------------
+   shadowBlur on canvas is GPU-expensive, especially combined with
+   globalCompositeOperation="lighter".  Instead we build a single
+   radial-gradient texture per colour once, then blit it with
+   drawImage for every bullet head / particle / flash.  Under
+   additive blending this reads as a true glow at ~zero cost.
+--------------------------------------------------------------- */
+const GLOW_CACHE = new Map();
+function hexToRgb(hex){
+  let h = hex.replace("#","");
+  if (h.length === 3) h = h.split("").map(c => c+c).join("");
+  const n = parseInt(h, 16);
+  return [(n>>16)&255, (n>>8)&255, n&255];
+}
+function glowSprite(color){
+  let s = GLOW_CACHE.get(color);
+  if (s) return s;
+  const size = 128;
+  const [r,g,b] = hexToRgb(color);
+  s = document.createElement("canvas");
+  s.width = s.height = size;
+  const gc = s.getContext("2d");
+  const grad = gc.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+  grad.addColorStop(0,    `rgba(${r},${g},${b},1)`);
+  grad.addColorStop(0.18, `rgba(${r},${g},${b},0.85)`);
+  grad.addColorStop(0.45, `rgba(${r},${g},${b},0.35)`);
+  grad.addColorStop(1,    `rgba(${r},${g},${b},0)`);
+  gc.fillStyle = grad;
+  gc.fillRect(0, 0, size, size);
+  GLOW_CACHE.set(color, s);
+  return s;
+}
+function drawGlow(ctx, color, x, y, r){
+  const sp = glowSprite(color);
+  ctx.drawImage(sp, x - r, y - r, r*2, r*2);
+}
+
 
 // Cubic bezier point (actually quadratic, since we use Q curves)
 function bezPt(t, x0, y0, mx, my, x1, y1){
@@ -725,10 +765,10 @@ function fireBullet(x0, y0, x1, y1, color, type){
 
       ctx.globalAlpha = soft ? 0.55 : 1;
       ctx.lineCap = "round";
-      ctx.lineWidth = thick;
       ctx.strokeStyle = color;
-      ctx.shadowColor = color;
-      ctx.shadowBlur = fat ? 14 : 8;
+      // Stacked strokes fake a tight glow under additive blend
+      ctx.lineWidth = thick * (fat ? 2.6 : 2.2);
+      ctx.globalAlpha = (soft ? 0.55 : 1) * 0.25;
       ctx.beginPath();
       const SAMPLES = 8;
       for (let s = 0; s <= SAMPLES; s++){
@@ -737,16 +777,17 @@ function fireBullet(x0, y0, x1, y1, color, type){
         if (s === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
       }
       ctx.stroke();
+      ctx.lineWidth = thick;
+      ctx.globalAlpha = soft ? 0.55 : 1;
+      ctx.stroke();
 
       if (!soft){
-        ctx.shadowBlur = fat ? 18 : 12;
-        ctx.fillStyle = color;
-        ctx.beginPath(); ctx.arc(hx, hy, headR, 0, Math.PI*2); ctx.fill();
-        ctx.shadowBlur = 0;
+        drawGlow(ctx, color, hx, hy, headR * (fat ? 4 : 3));
+        ctx.globalAlpha = 1;
         ctx.fillStyle = "#fff";
         ctx.beginPath(); ctx.arc(hx, hy, headR * 0.55, 0, Math.PI*2); ctx.fill();
       }
-      ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
     }
   });
 }
@@ -758,13 +799,9 @@ function muzzleFlash(x, y, color, big){
     render(ctx, now){
       const t = (now - start) / 260;
       ctx.globalAlpha = 1 - t;
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 12;
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.arc(x, y, big ? (5 + 17*t) : (3 + 11*t), 0, Math.PI*2);
-      ctx.fill();
-      ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+      const r = big ? (14 + 26*t) : (10 + 18*t);
+      drawGlow(ctx, color, x, y, r);
+      ctx.globalAlpha = 1;
     }
   });
   addEnt({
@@ -796,12 +833,10 @@ function impactBurst(x, y, color, type){
       ctx.globalAlpha = 1 - t;
       ctx.strokeStyle = color;
       ctx.lineWidth = (big ? 3 : 2) * (1 - t*0.87);
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 12;
       ctx.beginPath();
       ctx.arc(x, y, 3 + e * ringMax, 0, Math.PI*2);
       ctx.stroke();
-      ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
     }
   });
   const flashDur = big ? 380 : 260;
@@ -810,13 +845,14 @@ function impactBurst(x, y, color, type){
     render(ctx, now){
       const t = (now - start) / flashDur;
       ctx.globalAlpha = 1 - t;
-      ctx.shadowColor = color;
-      ctx.shadowBlur = big ? 32 : 18;
+      const r = (big ? 30 : 18) + t * (big ? 16 : 10);
+      drawGlow(ctx, color, x, y, r);
+      // bright white core
       ctx.fillStyle = "#fff";
       ctx.beginPath();
-      ctx.arc(x, y, (big ? 10 : 6) + t * (big ? 12 : 8), 0, Math.PI*2);
+      ctx.arc(x, y, (big ? 4 : 2.5) * (1 - t*0.6), 0, Math.PI*2);
       ctx.fill();
-      ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
     }
   });
   if (big){
@@ -832,13 +868,11 @@ function impactBurst(x, y, color, type){
           ctx.strokeStyle = color;
           ctx.lineWidth = 2.5 * (1 - t*0.76);
           ctx.lineCap = "round";
-          ctx.shadowColor = color;
-          ctx.shadowBlur = 6;
           ctx.beginPath();
           ctx.moveTo(x + Math.cos(ang)*2, y + Math.sin(ang)*2);
           ctx.lineTo(x + Math.cos(ang)*(2 + e*maxLen), y + Math.sin(ang)*(2 + e*maxLen));
           ctx.stroke();
-          ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+          ctx.globalAlpha = 1;
         }
       });
     }
@@ -902,14 +936,12 @@ function fireLaser(x0, y0, x1, y1, color){
     update(now){ return chargeAlive.v && (now - chargeStart) < CHARGE_MS; },
     render(ctx, now){
       const t = Math.min(1, (now - chargeStart) / CHARGE_MS);
-      // Halo
-      const haloR = 4 + 66 * t;
-      const haloA = 0.3 + 0.5 * t;
-      ctx.globalAlpha = haloA;
-      ctx.shadowColor = color; ctx.shadowBlur = 24;
-      ctx.fillStyle = color;
-      ctx.beginPath(); ctx.arc(x0, y0, haloR, 0, Math.PI*2); ctx.fill();
-      // 6 collapsing rings
+      // Halo — cheap gradient sprite blit
+      const haloR = (4 + 66 * t) * 3;
+      ctx.globalAlpha = 0.3 + 0.5 * t;
+      drawGlow(ctx, color, x0, y0, haloR);
+      // 6 collapsing rings — plain strokes (glow comes from additive blend)
+      ctx.strokeStyle = color;
       for (let i = 0; i < 6; i++){
         const delay = i * 240;
         const lt = (now - chargeStart - delay) / (CHARGE_MS - delay);
@@ -929,18 +961,16 @@ function fireLaser(x0, y0, x1, y1, color){
         }
         ctx.globalAlpha = opa;
         ctx.lineWidth = w;
-        ctx.strokeStyle = color;
-        ctx.shadowBlur = 12;
         ctx.beginPath(); ctx.arc(x0, y0, r, 0, Math.PI*2); ctx.stroke();
       }
-      // Core (heartbeat)
+      // Core (heartbeat) — glow sprite for the halo, small white disc on top
       const cr = interp1(t, coreFrames);
       const ca = interp1(t, coreAlpha);
       ctx.globalAlpha = ca;
-      ctx.shadowColor = color; ctx.shadowBlur = 26;
+      drawGlow(ctx, color, x0, y0, cr * 2.8);
       ctx.fillStyle = "#fff";
       ctx.beginPath(); ctx.arc(x0, y0, cr, 0, Math.PI*2); ctx.fill();
-      ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
     }
   });
 
@@ -966,10 +996,8 @@ function fireLaser(x0, y0, x1, y1, color){
           const e = 1 - (1 - t)*(1 - t)*(1 - t);
           const px = sx + (ex - sx) * e, py = sy + (ey - sy) * e;
           ctx.globalAlpha = 0.9 - t * 0.7;
-          ctx.shadowColor = color; ctx.shadowBlur = 6;
-          ctx.fillStyle = color;
-          ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI*2); ctx.fill();
-          ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+          drawGlow(ctx, color, px, py, r * 3.5);
+          ctx.globalAlpha = 1;
         }
       });
       return true;
@@ -1008,14 +1036,13 @@ function fireLaser(x0, y0, x1, y1, color){
             ctx.globalAlpha = 1 - t;
             ctx.strokeStyle = "#fff";
             ctx.lineWidth = lw;
-            ctx.shadowColor = color; ctx.shadowBlur = 9;
             ctx.beginPath();
             for (let k = 0; k < pts.length; k++){
               if (k === 0) ctx.moveTo(pts[k][0], pts[k][1]);
               else ctx.lineTo(pts[k][0], pts[k][1]);
             }
             ctx.stroke();
-            ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+            ctx.globalAlpha = 1;
           }
         });
       }
@@ -1044,9 +1071,8 @@ function fireLaser(x0, y0, x1, y1, color){
           ctx.globalAlpha = 1 - t;
           ctx.strokeStyle = "#ff2a2a";
           ctx.lineWidth = 3 - e * 2.5;
-          ctx.shadowColor = "#ff2a2a"; ctx.shadowBlur = 15;
           ctx.beginPath(); ctx.arc(x1, y1, r, 0, Math.PI*2); ctx.stroke();
-          ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+          ctx.globalAlpha = 1;
         }
       });
       return true;
@@ -1156,20 +1182,21 @@ function fireLaser(x0, y0, x1, y1, color){
         // End coord along reveal
         const ex = x0 + (x1 - x0) * revealFrac;
         const ey = y0 + (y1 - y0) * revealFrac;
-        // Outer glow
-        ctx.globalAlpha = glowAlpha;
-        ctx.strokeStyle = color;
-        ctx.lineWidth = glowThick;
         ctx.lineCap = "round";
-        ctx.shadowColor = color; ctx.shadowBlur = 24;
+        // Fake glow with 3 stacked strokes (additive blend sums to a glow gradient)
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = glowAlpha * 0.3;
+        ctx.lineWidth = glowThick * 2;
         ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(ex, ey); ctx.stroke();
-        // Inner core (white)
+        ctx.globalAlpha = glowAlpha * 0.7;
+        ctx.lineWidth = glowThick;
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(ex, ey); ctx.stroke();
+        // Inner white core
         ctx.globalAlpha = beamAlpha;
         ctx.strokeStyle = "#fff";
         ctx.lineWidth = thick;
-        ctx.shadowColor = color; ctx.shadowBlur = 30;
         ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(ex, ey); ctx.stroke();
-        ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1;
       }
     });
 
@@ -1285,12 +1312,15 @@ function megaShockwaves(x, y, color){
         const t = (now - start) / dur;
         const e = 1 - Math.pow(1 - t, 3.5);
         const r = 6 + e * (maxR*0.75 - 6);
+        ctx.globalAlpha = (1 - t) * 0.5;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = (w0 + (0.3 - w0) * t) * 3;
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.stroke();
         ctx.globalAlpha = 1 - t;
         ctx.strokeStyle = stroke;
         ctx.lineWidth = w0 + (0.3 - w0) * t;
-        ctx.shadowColor = color; ctx.shadowBlur = 24;
         ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.stroke();
-        ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1;
       }
     });
   }
@@ -1336,13 +1366,11 @@ function debrisChunks(x, y, color){
       render(ctx, now){
         const t = (now - start) / lifetime;
         const e = 1 - Math.pow(1 - t, 2.5);
-        // quadratic arc for gravity
         const mt = 1 - e;
         const px = mt*mt*x + 2*mt*e*midX + e*e*endX;
         const py = mt*mt*y + 2*mt*e*midY + e*e*endY;
         const r = rot * e;
         ctx.globalAlpha = 1 - t;
-        ctx.shadowColor = color; ctx.shadowBlur = 6;
         ctx.fillStyle = fillColor;
         ctx.save();
         ctx.translate(px, py);
@@ -1354,7 +1382,7 @@ function debrisChunks(x, y, color){
         }
         ctx.closePath(); ctx.fill();
         ctx.restore();
-        ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1;
       }
     });
   }
