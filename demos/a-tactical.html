@@ -627,21 +627,23 @@ function clampToPlay(x, y){
    ============================================================ */
 const canvas = document.getElementById("field");
 const ctx = canvas.getContext("2d", { alpha: true });
-let __dpr = 1;
+// DPR=1 only (retina upscaling would 4x the pixel work for no visual gain
+// on tight hardware). The canvas stretches to viewport via CSS.
 function resizeCanvas(){
-  __dpr = Math.min(window.devicePixelRatio || 1, 2);
-  canvas.width  = Math.floor(window.innerWidth  * __dpr);
-  canvas.height = Math.floor(window.innerHeight * __dpr);
+  canvas.width  = Math.floor(window.innerWidth);
+  canvas.height = Math.floor(window.innerHeight);
   canvas.style.width  = window.innerWidth  + "px";
   canvas.style.height = window.innerHeight + "px";
-  ctx.setTransform(__dpr, 0, 0, __dpr, 0, 0);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 resizeCanvas();
 window.addEventListener("resize", resizeCanvas);
 
 const entities = [];
+const ENT_CAP = 90;       // hard ceiling — drop oldest if we blow past it
 let __rafRunning = false;
 function addEnt(e){
+  if (entities.length >= ENT_CAP) entities.shift();
   entities.push(e);
   if (!__rafRunning){ __rafRunning = true; requestAnimationFrame(__tick); }
   return e;
@@ -650,14 +652,15 @@ function __tick(){
   const w = window.innerWidth, h = window.innerHeight;
   ctx.clearRect(0, 0, w, h);
   if (entities.length === 0){ __rafRunning = false; return; }
-  ctx.globalCompositeOperation = "lighter";
+  // NOTE: no "lighter" composite — it's CPU-rasterized on many
+  // GPUs which destroys frame rate.  Plain source-over with
+  // pre-baked glow sprites still reads as neon on dark bg.
   const now = performance.now();
   for (let i = entities.length - 1; i >= 0; i--){
     const e = entities[i];
     if (e.update(now) === false) entities.splice(i, 1);
     else e.render(ctx, now);
   }
-  ctx.globalCompositeOperation = "source-over";
   requestAnimationFrame(__tick);
 }
 
@@ -681,7 +684,7 @@ function hexToRgb(hex){
 function glowSprite(color){
   let s = GLOW_CACHE.get(color);
   if (s) return s;
-  const size = 128;
+  const size = 64;                              // small texture → cheap blit
   const [r,g,b] = hexToRgb(color);
   s = document.createElement("canvas");
   s.width = s.height = size;
@@ -896,7 +899,7 @@ function fireLaser(x0, y0, x1, y1, color){
   Object.assign(vignette.style, {
     position:"fixed", inset:"0", zIndex:4, pointerEvents:"none",
     background:"radial-gradient(ellipse 70% 70% at center, transparent 40%, rgba(255,42,42,.55) 85%, rgba(255,42,42,.95) 100%)",
-    mixBlendMode:"screen", opacity:"0"
+    opacity:"0", willChange:"opacity"
   });
   document.body.appendChild(vignette);
   cleanup.push(vignette);
@@ -980,7 +983,7 @@ function fireLaser(x0, y0, x1, y1, color){
     update(now){
       if (!chargeAlive.v || (now - chargeStart) >= CHARGE_MS) return false;
       if (window.__LOW_FPS) return true;
-      if (now - this.lastSpawn < 140) return true;
+      if (now - this.lastSpawn < 220) return true;
       this.lastSpawn = now;
       const ang = Math.random()*Math.PI*2;
       const dist = 100 + Math.random()*200;
@@ -1011,10 +1014,10 @@ function fireLaser(x0, y0, x1, y1, color){
     update(now){
       if (!chargeAlive.v || (now - chargeStart) >= CHARGE_MS) return false;
       if (window.__LOW_FPS) return true;
-      if (now - this.lastSpawn < 130) return true;
+      if (now - this.lastSpawn < 220) return true;
       this.lastSpawn = now;
       const frac = (now - chargeStart) / CHARGE_MS;
-      const spokes = 1 + Math.floor(frac * 3);
+      const spokes = 1 + Math.floor(frac * 1.5);    // max 2-3 spokes
       const reach = 20 + frac*120;
       for (let i = 0; i < spokes; i++){
         const baseAng = Math.random()*Math.PI*2;
@@ -1093,14 +1096,12 @@ function fireLaser(x0, y0, x1, y1, color){
       position:"fixed", left:"50%", top:"38%", transform:"translate(-50%,-50%)",
       zIndex:45, pointerEvents:"none",
       padding:"14px 32px",
-      background:"rgba(255,42,42,.15)",
+      background:"#1a0a0a",
       border:"2px solid #ff2a2a",
       color:"#ff2a2a",
       fontFamily:'"JetBrains Mono",monospace', fontWeight:"700",
       fontSize:"clamp(14px, 2vw, 20px)", letterSpacing:".3em", textTransform:"uppercase",
-      textShadow:"0 0 16px #ff2a2a",
-      boxShadow:"0 0 40px rgba(255,42,42,.5), inset 0 0 30px rgba(255,42,42,.25)",
-      opacity:"0"
+      opacity:"0", willChange:"opacity, transform"
     });
     warn.innerHTML = "▼&nbsp;&nbsp;INCOMING STRIKE&nbsp;&nbsp;▼";
     document.body.appendChild(warn);
@@ -1126,8 +1127,7 @@ function fireLaser(x0, y0, x1, y1, color){
         position:"fixed", left:"0", right:"0", top:"-50px",
         height:"50px", zIndex:6, pointerEvents:"none",
         background:"linear-gradient(to bottom, transparent, rgba(255,42,42,.55), transparent)",
-        boxShadow:"0 0 50px rgba(255,42,42,.7)",
-        opacity:"0.85"
+        opacity:"0.85", willChange:"top"
       });
       document.body.appendChild(bar);
       bar.animate([
@@ -1218,7 +1218,7 @@ function fireLaser(x0, y0, x1, y1, color){
       Object.assign(aftermath.style, {
         position:"fixed", inset:"0", zIndex:4, pointerEvents:"none",
         background:"radial-gradient(ellipse at center, transparent 30%, rgba(255,42,42,.35) 90%)",
-        mixBlendMode:"screen", opacity:"0.85"
+        opacity:"0.85"
       });
       document.body.appendChild(aftermath);
       aftermath.animate([{opacity:0.85},{opacity:0}],
@@ -1393,7 +1393,7 @@ function flashScreen(color){
   Object.assign(f.style, {
     position:"fixed", inset:"0", zIndex:55, pointerEvents:"none",
     background:`radial-gradient(circle at center, rgba(255,255,255,.9), ${color} 28%, rgba(255,42,42,.35) 55%, transparent 78%)`,
-    mixBlendMode:"screen", opacity:"0"
+    opacity:"0", willChange:"opacity"
   });
   document.body.appendChild(f);
   f.animate([{opacity:0},{opacity:1,offset:0.1},{opacity:0.55,offset:0.3},{opacity:0}],
