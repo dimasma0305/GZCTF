@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/pixi.js@8/dist/pixi.min.js"></script>
 <style>
   :root{
     --bg:#060609;
@@ -617,78 +618,57 @@ function clampToPlay(x, y){
 }
 
 /* ============================================================
-   CANVAS FIELD + ENTITY SYSTEM
+   PIXIJS FIELD + ENTITY SYSTEM
    ----------------------------------------------------------------
-   Single <canvas> drives every bullet / particle / shockwave /
-   debris / laser element.  Each visual is an "entity" with
-   update(now)->bool (alive) and render(ctx, now).  One rAF loop
-   clears + renders all entities using additive blend ("lighter")
-   for natural neon-glow compositing.
+   WebGL/WebGPU-driven renderer. Every bullet / particle / ring /
+   beam / debris is a PIXI.Sprite or PIXI.Graphics added to the
+   stage.  Sprites with the same texture + blend mode are batched
+   into a single GPU draw call automatically.  Additive blending
+   (blendMode:"add") uses real GPU hardware blending instead of
+   the CPU rasterization that Canvas 2D "lighter" falls back to.
    ============================================================ */
-const canvas = document.getElementById("field");
-const ctx = canvas.getContext("2d", { alpha: true });
-// DPR=1 only (retina upscaling would 4x the pixel work for no visual gain
-// on tight hardware). The canvas stretches to viewport via CSS.
-function resizeCanvas(){
-  canvas.width  = Math.floor(window.innerWidth);
-  canvas.height = Math.floor(window.innerHeight);
-  canvas.style.width  = window.innerWidth  + "px";
-  canvas.style.height = window.innerHeight + "px";
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-}
-resizeCanvas();
-window.addEventListener("resize", resizeCanvas);
-
+let app = null;          // PIXI.Application — initialized async
+let stage = null;        // shortcut to app.stage
 const entities = [];
-const ENT_CAP = 90;       // hard ceiling — drop oldest if we blow past it
-let __rafRunning = false;
+const ENT_CAP = 400;     // Pixi can easily handle hundreds of entities
+const __pending = [];    // entities queued while Pixi is loading
 function addEnt(e){
-  if (entities.length >= ENT_CAP) entities.shift();
-  entities.push(e);
-  if (!__rafRunning){ __rafRunning = true; requestAnimationFrame(__tick); }
-  return e;
-}
-function __tick(){
-  const w = window.innerWidth, h = window.innerHeight;
-  ctx.clearRect(0, 0, w, h);
-  if (entities.length === 0){ __rafRunning = false; return; }
-  // NOTE: no "lighter" composite — it's CPU-rasterized on many
-  // GPUs which destroys frame rate.  Plain source-over with
-  // pre-baked glow sprites still reads as neon on dark bg.
-  const now = performance.now();
-  for (let i = entities.length - 1; i >= 0; i--){
-    const e = entities[i];
-    if (e.update(now) === false) entities.splice(i, 1);
-    else e.render(ctx, now);
+  if (!app){ __pending.push(e); return e; }
+  if (entities.length >= ENT_CAP){
+    const gone = entities.shift();
+    if (gone.destroy) gone.destroy();
   }
-  requestAnimationFrame(__tick);
+  entities.push(e);
+  return e;
 }
 
 // shatterAt still uses SVG (isolated overlay) so we need the namespace
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-/* --- Pre-rendered glow sprite cache ---------------------------
-   shadowBlur on canvas is GPU-expensive, especially combined with
-   globalCompositeOperation="lighter".  Instead we build a single
-   radial-gradient texture per colour once, then blit it with
-   drawImage for every bullet head / particle / flash.  Under
-   additive blending this reads as a true glow at ~zero cost.
---------------------------------------------------------------- */
-const GLOW_CACHE = new Map();
 function hexToRgb(hex){
   let h = hex.replace("#","");
   if (h.length === 3) h = h.split("").map(c => c+c).join("");
   const n = parseInt(h, 16);
   return [(n>>16)&255, (n>>8)&255, n&255];
 }
-function glowSprite(color){
-  let s = GLOW_CACHE.get(color);
-  if (s) return s;
-  const size = 64;                              // small texture → cheap blit
+function hexToNum(hex){
+  let h = hex.replace("#","");
+  if (h.length === 3) h = h.split("").map(c => c+c).join("");
+  return parseInt(h, 16);
+}
+
+/* --- Pre-baked Pixi textures ------------------------------------
+   Radial-gradient glow + ring outline, one per color.  Sprites
+   re-use the same texture, so Pixi batches their draws.
+---------------------------------------------------------------- */
+const TEX_GLOW = new Map();
+const TEX_DISC = new Map();
+function buildGlowTex(color){
+  const size = 128;
   const [r,g,b] = hexToRgb(color);
-  s = document.createElement("canvas");
-  s.width = s.height = size;
-  const gc = s.getContext("2d");
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const gc = c.getContext("2d");
   const grad = gc.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
   grad.addColorStop(0,    `rgba(${r},${g},${b},1)`);
   grad.addColorStop(0.18, `rgba(${r},${g},${b},0.85)`);
@@ -696,14 +676,87 @@ function glowSprite(color){
   grad.addColorStop(1,    `rgba(${r},${g},${b},0)`);
   gc.fillStyle = grad;
   gc.fillRect(0, 0, size, size);
-  GLOW_CACHE.set(color, s);
-  return s;
+  return PIXI.Texture.from(c);
 }
-function drawGlow(ctx, color, x, y, r){
-  const sp = glowSprite(color);
-  ctx.drawImage(sp, x - r, y - r, r*2, r*2);
+function buildDiscTex(color){
+  const size = 64;
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const gc = c.getContext("2d");
+  gc.fillStyle = color;
+  gc.beginPath(); gc.arc(size/2, size/2, size/2 - 1, 0, Math.PI*2); gc.fill();
+  return PIXI.Texture.from(c);
+}
+function glowTex(color){
+  let t = TEX_GLOW.get(color);
+  if (!t){ t = buildGlowTex(color); TEX_GLOW.set(color, t); }
+  return t;
+}
+function discTex(color){
+  let t = TEX_DISC.get(color);
+  if (!t){ t = buildDiscTex(color); TEX_DISC.set(color, t); }
+  return t;
 }
 
+/* --- Sprite helpers ------------------------------------------ */
+function mkGlowSprite(color, d, blend = "add"){
+  const s = new PIXI.Sprite(glowTex(color));
+  s.anchor.set(0.5);
+  s.width = s.height = d;
+  s.blendMode = blend;
+  stage.addChild(s);
+  return s;
+}
+function mkDiscSprite(color, d){
+  const s = new PIXI.Sprite(discTex(color));
+  s.anchor.set(0.5);
+  s.width = s.height = d;
+  stage.addChild(s);
+  return s;
+}
+function mkGraphics(blend = "add"){
+  const g = new PIXI.Graphics();
+  g.blendMode = blend;
+  stage.addChild(g);
+  return g;
+}
+
+/* --- Async Pixi init ------------------------------------------ */
+async function initPixi(){
+  const fieldEl = document.getElementById("field");
+  app = new PIXI.Application();
+  await app.init({
+    canvas: fieldEl,
+    width: window.innerWidth,
+    height: window.innerHeight,
+    backgroundAlpha: 0,
+    antialias: true,
+    resolution: 1,
+    powerPreference: "high-performance",
+    preference: "webgl"   // force WebGL (WebGPU is too new)
+  });
+  stage = app.stage;
+  window.addEventListener("resize", ()=> app.renderer.resize(window.innerWidth, window.innerHeight));
+
+  // Drain queued entities spawned before init completed
+  for (const e of __pending){
+    if (entities.length >= ENT_CAP){ const gone = entities.shift(); if (gone.destroy) gone.destroy(); }
+    entities.push(e);
+  }
+  __pending.length = 0;
+
+  app.ticker.add(()=>{
+    const now = performance.now();
+    for (let i = entities.length - 1; i >= 0; i--){
+      const e = entities[i];
+      if (e.update(now) === false){
+        if (e.destroy) e.destroy();
+        entities.splice(i, 1);
+      }
+    }
+  });
+}
+initPixi();
 
 // Cubic bezier point (actually quadratic, since we use Q curves)
 function bezPt(t, x0, y0, mx, my, x1, y1){
@@ -746,78 +799,100 @@ function fireBullet(x0, y0, x1, y1, color, type){
   const dur = fat ? 950 : 1050;
   const headR = fat ? 6 : soft ? 2.5 : 4.5;
   const tailFrac = fat ? 0.26 : 0.18;
+  const colorNum = hexToNum(color);
 
   if (!soft) muzzleFlash(x0, y0, color, fat);
 
   const start = performance.now();
-  let fired = false;
+  let fired = false, created = false;
+  let tailG, headSp, coreG;
+
   addEnt({
+    ensureObjects(){
+      if (created || !stage) return;
+      tailG = mkGraphics("add");
+      if (!soft){
+        headSp = mkGlowSprite(color, headR * (fat ? 8 : 6), "add");
+        coreG = new PIXI.Graphics();
+        coreG.circle(0, 0, headR * 0.55).fill(0xffffff);
+        stage.addChild(coreG);
+      }
+      created = true;
+    },
     update(now){
+      this.ensureObjects();
+      if (!created) return true;
       const t = (now - start) / dur;
       if (t >= 1){
         if (!fired){ fired = true; if (!soft) impactBurst(x1, y1, color, type); }
         return false;
       }
-      return true;
-    },
-    render(ctx, now){
-      const t = (now - start) / dur;
       const e = 1 - (1 - t)*(1 - t);
       const [hx, hy] = bezPt(e, x0, y0, mx, my, x1, y1);
       const tailStart = Math.max(0, e - tailFrac);
 
-      ctx.globalAlpha = soft ? 0.55 : 1;
-      ctx.lineCap = "round";
-      ctx.strokeStyle = color;
-      // Stacked strokes fake a tight glow under additive blend
-      ctx.lineWidth = thick * (fat ? 2.6 : 2.2);
-      ctx.globalAlpha = (soft ? 0.55 : 1) * 0.25;
-      ctx.beginPath();
+      // Redraw tail each frame (short bezier segment)
+      tailG.clear();
       const SAMPLES = 8;
+      let first = true;
       for (let s = 0; s <= SAMPLES; s++){
         const tt = tailStart + (s/SAMPLES) * (e - tailStart);
         const [px, py] = bezPt(tt, x0, y0, mx, my, x1, y1);
-        if (s === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        if (first){ tailG.moveTo(px, py); first = false; }
+        else tailG.lineTo(px, py);
       }
-      ctx.stroke();
-      ctx.lineWidth = thick;
-      ctx.globalAlpha = soft ? 0.55 : 1;
-      ctx.stroke();
+      tailG.stroke({ width: thick, color: colorNum, alpha: soft ? 0.55 : 1, cap: "round" });
 
-      if (!soft){
-        drawGlow(ctx, color, hx, hy, headR * (fat ? 4 : 3));
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = "#fff";
-        ctx.beginPath(); ctx.arc(hx, hy, headR * 0.55, 0, Math.PI*2); ctx.fill();
+      if (headSp){
+        headSp.x = hx; headSp.y = hy;
+        coreG.x = hx; coreG.y = hy;
       }
-      ctx.globalAlpha = 1;
+      return true;
+    },
+    destroy(){
+      if (tailG){ stage.removeChild(tailG); tailG.destroy(); }
+      if (headSp){ stage.removeChild(headSp); headSp.destroy(); }
+      if (coreG){ stage.removeChild(coreG); coreG.destroy(); }
     }
   });
 }
 
 function muzzleFlash(x, y, color, big){
   const start = performance.now();
+  let glow = null;
   addEnt({
-    update(now){ return now - start < 260; },
-    render(ctx, now){
+    update(now){
       const t = (now - start) / 260;
-      ctx.globalAlpha = 1 - t;
-      const r = big ? (14 + 26*t) : (10 + 18*t);
-      drawGlow(ctx, color, x, y, r);
-      ctx.globalAlpha = 1;
-    }
+      if (!glow && stage){
+        glow = mkGlowSprite(color, 2, "add");
+        glow.x = x; glow.y = y;
+      }
+      if (t >= 1) return false;
+      if (glow){
+        glow.alpha = 1 - t;
+        const d = (big ? 56 : 40) + t * (big ? 40 : 28);
+        glow.width = glow.height = d;
+      }
+      return true;
+    },
+    destroy(){ if (glow){ stage.removeChild(glow); glow.destroy(); } }
   });
+  let nova = null;
   addEnt({
-    update(now){ return now - start < 180; },
-    render(ctx, now){
+    update(now){
       const t = (now - start) / 180;
-      ctx.globalAlpha = 1 - t;
-      ctx.fillStyle = "#fff";
-      ctx.beginPath();
-      ctx.arc(x, y, 2 + t * (big ? 8 : 4), 0, Math.PI*2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
-    }
+      if (!nova && stage){
+        nova = new PIXI.Graphics();
+        stage.addChild(nova);
+      }
+      if (t >= 1) return false;
+      if (nova){
+        nova.clear();
+        nova.circle(x, y, 2 + t * (big ? 8 : 4)).fill({ color: 0xffffff, alpha: 1 - t });
+      }
+      return true;
+    },
+    destroy(){ if (nova){ stage.removeChild(nova); nova.destroy(); } }
   });
 }
 
@@ -828,55 +903,71 @@ function impactBurst(x, y, color, type){
   const start = performance.now();
   const ringDur = big ? 650 : 450;
   const ringMax = big ? 80 : 45;
+  const colorNum = hexToNum(color);
+  let ringG = null;
   addEnt({
-    update(now){ return now - start < ringDur; },
-    render(ctx, now){
+    update(now){
       const t = (now - start) / ringDur;
-      const e = 1 - (1 - t)*(1 - t);
-      ctx.globalAlpha = 1 - t;
-      ctx.strokeStyle = color;
-      ctx.lineWidth = (big ? 3 : 2) * (1 - t*0.87);
-      ctx.beginPath();
-      ctx.arc(x, y, 3 + e * ringMax, 0, Math.PI*2);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-    }
+      if (!ringG && stage) ringG = mkGraphics("add");
+      if (t >= 1) return false;
+      if (ringG){
+        const e = 1 - (1 - t)*(1 - t);
+        ringG.clear();
+        ringG.circle(x, y, 3 + e * ringMax)
+          .stroke({ width: (big ? 3 : 2) * (1 - t*0.87), color: colorNum, alpha: 1 - t });
+      }
+      return true;
+    },
+    destroy(){ if (ringG){ stage.removeChild(ringG); ringG.destroy(); } }
   });
   const flashDur = big ? 380 : 260;
+  let flashSp = null, flashCore = null;
   addEnt({
-    update(now){ return now - start < flashDur; },
-    render(ctx, now){
+    update(now){
       const t = (now - start) / flashDur;
-      ctx.globalAlpha = 1 - t;
-      const r = (big ? 30 : 18) + t * (big ? 16 : 10);
-      drawGlow(ctx, color, x, y, r);
-      // bright white core
-      ctx.fillStyle = "#fff";
-      ctx.beginPath();
-      ctx.arc(x, y, (big ? 4 : 2.5) * (1 - t*0.6), 0, Math.PI*2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
+      if (!flashSp && stage){
+        flashSp = mkGlowSprite(color, 2, "add");
+        flashSp.x = x; flashSp.y = y;
+        flashCore = new PIXI.Graphics();
+        stage.addChild(flashCore);
+      }
+      if (t >= 1) return false;
+      if (flashSp){
+        flashSp.alpha = 1 - t;
+        const d = (big ? 60 : 36) + t * (big ? 32 : 20);
+        flashSp.width = flashSp.height = d;
+        flashCore.clear();
+        flashCore.circle(x, y, (big ? 4 : 2.5) * (1 - t*0.6))
+          .fill({ color: 0xffffff, alpha: 1 - t });
+      }
+      return true;
+    },
+    destroy(){
+      if (flashSp){ stage.removeChild(flashSp); flashSp.destroy(); }
+      if (flashCore){ stage.removeChild(flashCore); flashCore.destroy(); }
     }
   });
   if (big){
     for (let i = 0; i < 8; i++){
       const ang = (i/8)*Math.PI*2 + Math.random()*0.3;
       const maxLen = 26 + Math.random()*18;
+      let sparkG = null;
       addEnt({
-        update(now){ return now - start < 520; },
-        render(ctx, now){
+        update(now){
           const t = (now - start) / 520;
-          const e = 1 - (1 - t)*(1 - t);
-          ctx.globalAlpha = 1 - t;
-          ctx.strokeStyle = color;
-          ctx.lineWidth = 2.5 * (1 - t*0.76);
-          ctx.lineCap = "round";
-          ctx.beginPath();
-          ctx.moveTo(x + Math.cos(ang)*2, y + Math.sin(ang)*2);
-          ctx.lineTo(x + Math.cos(ang)*(2 + e*maxLen), y + Math.sin(ang)*(2 + e*maxLen));
-          ctx.stroke();
-          ctx.globalAlpha = 1;
-        }
+          if (!sparkG && stage) sparkG = mkGraphics("add");
+          if (t >= 1) return false;
+          if (sparkG){
+            const e = 1 - (1 - t)*(1 - t);
+            const endL = 2 + e * maxLen;
+            sparkG.clear();
+            sparkG.moveTo(x + Math.cos(ang)*2, y + Math.sin(ang)*2);
+            sparkG.lineTo(x + Math.cos(ang)*endL, y + Math.sin(ang)*endL);
+            sparkG.stroke({ width: 2.5 * (1 - t*0.76), color: colorNum, alpha: 1 - t, cap: "round" });
+          }
+          return true;
+        },
+        destroy(){ if (sparkG){ stage.removeChild(sparkG); sparkG.destroy(); } }
       });
     }
   }
@@ -935,19 +1026,34 @@ function fireLaser(x0, y0, x1, y1, color){
     }
     return kf[kf.length-1][1];
   };
+  // A. Charge visuals — halo sprite + core sprite + 6 ring Graphics
+  const colorNum = hexToNum(color);
+  let halo, coreGlow, coreDisc;
+  const ringG = [];
   addEnt({
-    update(now){ return chargeAlive.v && (now - chargeStart) < CHARGE_MS; },
-    render(ctx, now){
+    update(now){
+      if (!chargeAlive.v || (now - chargeStart) >= CHARGE_MS) return false;
+      if (!halo && stage){
+        halo = mkGlowSprite(color, 2, "add");
+        halo.x = x0; halo.y = y0;
+        coreGlow = mkGlowSprite(color, 2, "add");
+        coreGlow.x = x0; coreGlow.y = y0;
+        coreDisc = new PIXI.Graphics();
+        stage.addChild(coreDisc);
+        for (let i = 0; i < 6; i++){ ringG.push(mkGraphics("add")); }
+      }
+      if (!halo) return true;
+
       const t = Math.min(1, (now - chargeStart) / CHARGE_MS);
-      // Halo — cheap gradient sprite blit
       const haloR = (4 + 66 * t) * 3;
-      ctx.globalAlpha = 0.3 + 0.5 * t;
-      drawGlow(ctx, color, x0, y0, haloR);
-      // 6 collapsing rings — plain strokes (glow comes from additive blend)
-      ctx.strokeStyle = color;
+      halo.alpha = 0.3 + 0.5 * t;
+      halo.width = halo.height = haloR * 2;
+
       for (let i = 0; i < 6; i++){
         const delay = i * 240;
         const lt = (now - chargeStart - delay) / (CHARGE_MS - delay);
+        const g = ringG[i];
+        g.clear();
         if (lt < 0 || lt >= 1) continue;
         const startR = 140 + i*34;
         let r, opa, w;
@@ -962,22 +1068,26 @@ function fireLaser(x0, y0, x1, y1, color){
           opa = 0.9 + u * 0.1;
           w = 2.8 + u * 1.7;
         }
-        ctx.globalAlpha = opa;
-        ctx.lineWidth = w;
-        ctx.beginPath(); ctx.arc(x0, y0, r, 0, Math.PI*2); ctx.stroke();
+        g.circle(x0, y0, r).stroke({ width: w, color: colorNum, alpha: opa });
       }
-      // Core (heartbeat) — glow sprite for the halo, small white disc on top
+
       const cr = interp1(t, coreFrames);
       const ca = interp1(t, coreAlpha);
-      ctx.globalAlpha = ca;
-      drawGlow(ctx, color, x0, y0, cr * 2.8);
-      ctx.fillStyle = "#fff";
-      ctx.beginPath(); ctx.arc(x0, y0, cr, 0, Math.PI*2); ctx.fill();
-      ctx.globalAlpha = 1;
+      coreGlow.alpha = ca;
+      coreGlow.width = coreGlow.height = cr * 2.8 * 2;
+      coreDisc.clear();
+      coreDisc.circle(x0, y0, cr).fill({ color: 0xffffff, alpha: ca });
+      return true;
+    },
+    destroy(){
+      if (halo){ stage.removeChild(halo); halo.destroy(); }
+      if (coreGlow){ stage.removeChild(coreGlow); coreGlow.destroy(); }
+      if (coreDisc){ stage.removeChild(coreDisc); coreDisc.destroy(); }
+      for (const g of ringG){ stage.removeChild(g); g.destroy(); }
     }
   });
 
-  // D. Orbiting particles — spawner entity emits inward-flying particles
+  // D. Orbiting particles — spawner emits Sprite-backed particles
   addEnt({
     lastSpawn: 0,
     update(now){
@@ -992,23 +1102,26 @@ function fireLaser(x0, y0, x1, y1, color){
       const dur = 500 + Math.random()*360;
       const r = 1.4 + Math.random()*1.8;
       const pStart = now;
+      const d = r * 3.5 * 2;
+      const sp = mkGlowSprite(color, d, "add");
+      sp.x = sx; sp.y = sy;
       addEnt({
-        update(now2){ return now2 - pStart < dur; },
-        render(ctx, now2){
+        update(now2){
           const t = (now2 - pStart) / dur;
+          if (t >= 1) return false;
           const e = 1 - (1 - t)*(1 - t)*(1 - t);
-          const px = sx + (ex - sx) * e, py = sy + (ey - sy) * e;
-          ctx.globalAlpha = 0.9 - t * 0.7;
-          drawGlow(ctx, color, px, py, r * 3.5);
-          ctx.globalAlpha = 1;
-        }
+          sp.x = sx + (ex - sx) * e;
+          sp.y = sy + (ey - sy) * e;
+          sp.alpha = 0.9 - t * 0.7;
+          return true;
+        },
+        destroy(){ if (sp){ stage.removeChild(sp); sp.destroy(); } }
       });
       return true;
-    },
-    render(){}
+    }
   });
 
-  // E. Crackle arc spokes — spawner entity emits flickering lines
+  // E. Crackle arc spokes — Graphics lines that fade + clear
   addEnt({
     lastSpawn: 0,
     update(now){
@@ -1017,7 +1130,7 @@ function fireLaser(x0, y0, x1, y1, color){
       if (now - this.lastSpawn < 220) return true;
       this.lastSpawn = now;
       const frac = (now - chargeStart) / CHARGE_MS;
-      const spokes = 1 + Math.floor(frac * 1.5);    // max 2-3 spokes
+      const spokes = 1 + Math.floor(frac * 1.5);
       const reach = 20 + frac*120;
       for (let i = 0; i < spokes; i++){
         const baseAng = Math.random()*Math.PI*2;
@@ -1032,30 +1145,25 @@ function fireLaser(x0, y0, x1, y1, color){
         }
         const sStart = now;
         const lw = 1 + frac*1.2;
+        const g = mkGraphics("add");
+        g.moveTo(pts[0][0], pts[0][1]);
+        for (let k = 1; k < pts.length; k++) g.lineTo(pts[k][0], pts[k][1]);
+        g.stroke({ width: lw, color: 0xffffff, alpha: 1 });
         addEnt({
-          update(now2){ return now2 - sStart < 160; },
-          render(ctx, now2){
+          update(now2){
             const t = (now2 - sStart) / 160;
-            ctx.globalAlpha = 1 - t;
-            ctx.strokeStyle = "#fff";
-            ctx.lineWidth = lw;
-            ctx.beginPath();
-            for (let k = 0; k < pts.length; k++){
-              if (k === 0) ctx.moveTo(pts[k][0], pts[k][1]);
-              else ctx.lineTo(pts[k][0], pts[k][1]);
-            }
-            ctx.stroke();
-            ctx.globalAlpha = 1;
-          }
+            if (t >= 1) return false;
+            g.alpha = 1 - t;
+            return true;
+          },
+          destroy(){ stage.removeChild(g); g.destroy(); }
         });
       }
       return true;
-    },
-    render(){}
+    }
   });
 
-  // F. TARGET WARNING PULSES — red rings expanding from the target
-  //    (interval shrinks exponentially as impact nears)
+  // F. TARGET WARNING PULSES — red rings from the target
   addEnt({
     lastSpawn: 0,
     update(now){
@@ -1065,22 +1173,21 @@ function fireLaser(x0, y0, x1, y1, color){
       if (now - this.lastSpawn < interval) return true;
       this.lastSpawn = now;
       const pStart = now;
+      const g = mkGraphics("add");
       addEnt({
-        update(now2){ return now2 - pStart < 560; },
-        render(ctx, now2){
+        update(now2){
           const t = (now2 - pStart) / 560;
+          if (t >= 1) return false;
           const e = 1 - (1 - t)*(1 - t);
           const r = 20 + e * 120;
-          ctx.globalAlpha = 1 - t;
-          ctx.strokeStyle = "#ff2a2a";
-          ctx.lineWidth = 3 - e * 2.5;
-          ctx.beginPath(); ctx.arc(x1, y1, r, 0, Math.PI*2); ctx.stroke();
-          ctx.globalAlpha = 1;
-        }
+          g.clear();
+          g.circle(x1, y1, r).stroke({ width: 3 - e * 2.5, color: 0xff2a2a, alpha: 1 - t });
+          return true;
+        },
+        destroy(){ stage.removeChild(g); g.destroy(); }
       });
       return true;
-    },
-    render(){}
+    }
   });
 
   // G. Pre-impact rumble — starts at 72% of charge (last ~2s)
@@ -1147,23 +1254,23 @@ function fireLaser(x0, y0, x1, y1, color){
     const beamStart = performance.now();
     const len = Math.hypot(x1-x0, y1-y0);
 
+    const beamColorNum = hexToNum(color);
+    const gGlow1 = mkGraphics("add");    // wide colored glow
+    const gGlow2 = mkGraphics("add");    // narrow colored glow
+    const gCore = mkGraphics("add");     // white core
     addEnt({
-      update(now){ return now - beamStart < TOTAL; },
-      render(ctx, now){
+      update(now){
         const el = now - beamStart;
-        // Phase 1 — reveal from src to target
+        if (el >= TOTAL) return false;
+
         let revealFrac = 1, thick = 8, glowThick = 22, glowAlpha = 0.65, beamAlpha = 1;
         if (el < REVEAL){
-          const t = el / REVEAL;
-          revealFrac = 1 - Math.pow(1 - t, 2.5);
+          revealFrac = 1 - Math.pow(1 - el/REVEAL, 2.5);
         } else if (el < REVEAL + SUSTAIN){
-          // Phase 2 — sustain (thickening pulse)
           const t = (el - REVEAL) / SUSTAIN;
-          // beam width: 8 → 16 at 30% → 12 at 60% → 22
           if (t < 0.3)       thick = 8 + (16 - 8) * (t/0.3);
           else if (t < 0.6)  thick = 16 + (12 - 16) * ((t-0.3)/0.3);
           else               thick = 12 + (22 - 12) * ((t-0.6)/0.4);
-          // glow width/alpha: 22/0.65 → 44/0.85 → 56/1
           if (t < 0.5){
             glowThick = 22 + (44 - 22) * (t/0.5);
             glowAlpha = 0.65 + (0.85 - 0.65) * (t/0.5);
@@ -1172,31 +1279,29 @@ function fireLaser(x0, y0, x1, y1, color){
             glowAlpha = 0.85 + (1 - 0.85) * ((t-0.5)/0.5);
           }
         } else {
-          // Phase 3 — fade (recoil)
           const t = (el - REVEAL - SUSTAIN) / FADE;
           thick = 22 + (2 - 22) * t;
           beamAlpha = 1 - t;
           glowAlpha = 1 - t;
           glowThick = 56;
         }
-        // End coord along reveal
         const ex = x0 + (x1 - x0) * revealFrac;
         const ey = y0 + (y1 - y0) * revealFrac;
-        ctx.lineCap = "round";
-        // Fake glow with 3 stacked strokes (additive blend sums to a glow gradient)
-        ctx.strokeStyle = color;
-        ctx.globalAlpha = glowAlpha * 0.3;
-        ctx.lineWidth = glowThick * 2;
-        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(ex, ey); ctx.stroke();
-        ctx.globalAlpha = glowAlpha * 0.7;
-        ctx.lineWidth = glowThick;
-        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(ex, ey); ctx.stroke();
-        // Inner white core
-        ctx.globalAlpha = beamAlpha;
-        ctx.strokeStyle = "#fff";
-        ctx.lineWidth = thick;
-        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(ex, ey); ctx.stroke();
-        ctx.globalAlpha = 1;
+        gGlow1.clear();
+        gGlow1.moveTo(x0, y0).lineTo(ex, ey)
+          .stroke({ width: glowThick * 2, color: beamColorNum, alpha: glowAlpha * 0.3, cap: "round" });
+        gGlow2.clear();
+        gGlow2.moveTo(x0, y0).lineTo(ex, ey)
+          .stroke({ width: glowThick, color: beamColorNum, alpha: glowAlpha * 0.7, cap: "round" });
+        gCore.clear();
+        gCore.moveTo(x0, y0).lineTo(ex, ey)
+          .stroke({ width: thick, color: 0xffffff, alpha: beamAlpha, cap: "round" });
+        return true;
+      },
+      destroy(){
+        stage.removeChild(gGlow1); gGlow1.destroy();
+        stage.removeChild(gGlow2); gGlow2.destroy();
+        stage.removeChild(gCore);  gCore.destroy();
       }
     });
 
@@ -1299,29 +1404,34 @@ function quakeScreen(){
 
 function megaShockwaves(x, y, color){
   const maxR = Math.hypot(window.innerWidth, window.innerHeight);
+  const colorNum = hexToNum(color);
   for (let i = 0; i < 5; i++){
     const w0 = 5 - i*0.7;
     const dur = 1400 - i*90;
     const delay = i * 70;
-    const stroke = i === 0 ? "#ffffff" : color;
+    const strokeNum = i === 0 ? 0xffffff : colorNum;
     const start = performance.now() + delay;
+    let g;
     addEnt({
-      update(now){ return now - start < dur; },
-      render(ctx, now){
-        if (now < start) return;
+      update(now){
+        if (!g && stage) g = mkGraphics("add");
+        if (now < start) return true;
         const t = (now - start) / dur;
-        const e = 1 - Math.pow(1 - t, 3.5);
-        const r = 6 + e * (maxR*0.75 - 6);
-        ctx.globalAlpha = (1 - t) * 0.5;
-        ctx.strokeStyle = color;
-        ctx.lineWidth = (w0 + (0.3 - w0) * t) * 3;
-        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.stroke();
-        ctx.globalAlpha = 1 - t;
-        ctx.strokeStyle = stroke;
-        ctx.lineWidth = w0 + (0.3 - w0) * t;
-        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.stroke();
-        ctx.globalAlpha = 1;
-      }
+        if (t >= 1) return false;
+        if (g){
+          const e = 1 - Math.pow(1 - t, 3.5);
+          const r = 6 + e * (maxR*0.75 - 6);
+          g.clear();
+          g.circle(x, y, r).stroke({
+            width: (w0 + (0.3 - w0) * t) * 3, color: colorNum, alpha: (1 - t) * 0.5
+          });
+          g.circle(x, y, r).stroke({
+            width: w0 + (0.3 - w0) * t, color: strokeNum, alpha: 1 - t
+          });
+        }
+        return true;
+      },
+      destroy(){ if (g){ stage.removeChild(g); g.destroy(); } }
     });
   }
 }
@@ -1343,11 +1453,12 @@ function hqPunch(){
 
 function debrisChunks(x, y, color){
   const chunks = 22;
+  const colorNum = hexToNum(color);
   for (let i = 0; i < chunks; i++){
     const ang = (i/chunks)*Math.PI*2 + (Math.random()-0.5)*0.45;
     const speed = 220 + Math.random()*520;
     const lifetime = 900 + Math.random()*700;
-    const rot = (Math.random()-0.5)*Math.PI*5;   // radians total
+    const rot = (Math.random()-0.5)*Math.PI*5;
     const baseR = 3 + Math.random()*5;
     const sides = 3 + Math.floor(Math.random()*3);
     const pts = [];
@@ -1356,34 +1467,31 @@ function debrisChunks(x, y, color){
       const rr = baseR*(0.55 + Math.random()*0.55);
       pts.push([Math.cos(a)*rr, Math.sin(a)*rr]);
     }
-    const fillColor = Math.random() > 0.3 ? color : "#ffffff";
+    const fillNum = Math.random() > 0.3 ? colorNum : 0xffffff;
     const endX = x + Math.cos(ang)*speed;
     const endY = y + Math.sin(ang)*speed + Math.random()*60;
     const midX = (x+endX)/2, midY = (y+endY)/2 - 30;
     const start = performance.now();
+    // Build the polygon once; animate via transform (pivot, rotation, alpha)
+    const g = new PIXI.Graphics();
+    g.moveTo(pts[0][0], pts[0][1]);
+    for (let s = 1; s < pts.length; s++) g.lineTo(pts[s][0], pts[s][1]);
+    g.closePath().fill({ color: fillNum });
+    if (stage) stage.addChild(g);
     addEnt({
-      update(now){ return now - start < lifetime; },
-      render(ctx, now){
+      update(now){
+        if (!g.parent && stage) stage.addChild(g);
         const t = (now - start) / lifetime;
+        if (t >= 1) return false;
         const e = 1 - Math.pow(1 - t, 2.5);
         const mt = 1 - e;
-        const px = mt*mt*x + 2*mt*e*midX + e*e*endX;
-        const py = mt*mt*y + 2*mt*e*midY + e*e*endY;
-        const r = rot * e;
-        ctx.globalAlpha = 1 - t;
-        ctx.fillStyle = fillColor;
-        ctx.save();
-        ctx.translate(px, py);
-        ctx.rotate(r);
-        ctx.beginPath();
-        for (let s = 0; s < pts.length; s++){
-          if (s === 0) ctx.moveTo(pts[s][0], pts[s][1]);
-          else ctx.lineTo(pts[s][0], pts[s][1]);
-        }
-        ctx.closePath(); ctx.fill();
-        ctx.restore();
-        ctx.globalAlpha = 1;
-      }
+        g.x = mt*mt*x + 2*mt*e*midX + e*e*endX;
+        g.y = mt*mt*y + 2*mt*e*midY + e*e*endY;
+        g.rotation = rot * e;
+        g.alpha = 1 - t;
+        return true;
+      },
+      destroy(){ if (g.parent) stage.removeChild(g); g.destroy(); }
     });
   }
 }
