@@ -56,6 +56,10 @@ jobs:
         working-directory: src
         env:
           GZCTF_INTEGRATION_TEST_MODE: local
+          # Tier 3 push-back tests skip cleanly when these are missing,
+          # so an unset secret is fine on forks / public CI runs.
+          TEST_GH_PAT: ${{ secrets.TEST_GH_PAT }}
+          TEST_GH_REPO: ${{ secrets.TEST_GH_REPO }}
         run: dotnet test GZCTF.Integration.Test/GZCTF.Integration.Test.csproj --no-build
           -c Release --logger "trx;LogFileName=integration-test-results.trx"
           --logger "console;verbosity=detailed" /p:CollectCoverage=true
@@ -138,6 +142,11 @@ jobs:
         working-directory: src
         env:
           GZCTF_INTEGRATION_TEST_MODE: cloud
+          # Tier 3 push-back tests can run in cloud mode too — the
+          # network access is identical. Docker-builder E2E tests skip
+          # in cloud mode (no docker daemon when provider = k3s).
+          TEST_GH_PAT: ${{ secrets.TEST_GH_PAT }}
+          TEST_GH_REPO: ${{ secrets.TEST_GH_REPO }}
         run: dotnet test GZCTF.Integration.Test/GZCTF.Integration.Test.csproj --no-build
           -c Release --logger
           "trx;LogFileName=integration-test-results-cloud.trx" --logger

@@ -386,7 +386,7 @@ public sealed class DockerChallengeImageBuilder(
         }
     }
 
-    private static string HumanBytes(ulong bytes)
+    internal static string HumanBytes(ulong bytes)
     {
         if (bytes < 1024) return $"{bytes}B";
         if (bytes < 1024 * 1024) return $"{bytes / 1024.0:0.#}KB";
@@ -455,7 +455,7 @@ public sealed class DockerChallengeImageBuilder(
             sb.Remove(0, sb.Length - LogTailBytes);
     }
 
-    static string NormalizeSlug(string s)
+    internal static string NormalizeSlug(string s)
     {
         var clean = new StringBuilder(s.Length);
         foreach (var c in s.ToLowerInvariant())
@@ -463,5 +463,25 @@ public sealed class DockerChallengeImageBuilder(
         var slug = clean.ToString().Trim('-');
         while (slug.Contains("--")) slug = slug.Replace("--", "-");
         return slug.Length > 0 ? slug : "challenge";
+    }
+
+    /// <summary>
+    /// Test-only helper: re-uses the same XOR + base64 path as the
+    /// instance-bound <see cref="DecryptPassword"/> so unit tests can
+    /// verify the round-trip without standing up a full instance.
+    /// </summary>
+    internal static string DecryptXorPassword(string? stored, byte[] xorKey)
+    {
+        if (string.IsNullOrEmpty(stored)) return string.Empty;
+        if (xorKey.Length == 0) return stored;
+        try
+        {
+            return System.Text.Encoding.UTF8.GetString(
+                Codec.Xor(Convert.FromBase64String(stored), xorKey));
+        }
+        catch
+        {
+            return stored;
+        }
     }
 }

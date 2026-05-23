@@ -23,6 +23,7 @@
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="xunit.runner.console" />
+    <PackageReference Include="Xunit.SkippableFact" />
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="coverlet.msbuild" />
   </ItemGroup>
