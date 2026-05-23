@@ -70,9 +70,6 @@ container:
   storageLimit: 512
   exposePort: 8011
   enableTrafficCapture: true
-
-scripts:
-  start: cd src && docker build -t {{.slug}} .
 `
 
 const DYNAMIC_DOCKERFILE = `FROM python:3.9-alpine
