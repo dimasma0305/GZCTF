@@ -1,2 +1,8 @@
-onlyBuiltDependencies:
-  - esbuild
+packages:
+  - "."
+
+allowBuilds:
+  esbuild: true
+
+overrides:
+  canvas: "npm:dry-uninstall"
