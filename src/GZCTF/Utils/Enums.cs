@@ -395,33 +395,75 @@ public enum ChallengeType : byte
     /// Dynamic container challenge
     /// Randomly distribute containers, dynamic flag passed in via environment variables
     /// </summary>
-    DynamicContainer = 0b11
+    DynamicContainer = 0b11,
+
+    /// <summary>
+    /// Attack and Defense challenge.
+    /// Each team gets a persistent container per A&amp;D challenge that lives for the
+    /// whole game; teams attack each other's services on a shared network, defend
+    /// their own, and score on attack + defense + SLA per tick.
+    /// Doesn't fit the static/dynamic × attachment/container matrix — handled by
+    /// explicit case in <see cref="ChallengeTypeExtensions"/>.
+    /// </summary>
+    AttackDefense = 0b100
 }
 
 public static class ChallengeTypeExtensions
 {
     extension(ChallengeType type)
     {
+        // AttackDefense is its own beast and doesn't fit the historical 2-bit
+        // (static|dynamic × attachment|container) layout — these helpers handle
+        // it explicitly. By analogy A&D is per-team (dynamic-ish) and uses
+        // containers, so IsDynamic() + IsContainer() both return true for it.
+
         /// <summary>
         /// Is it a static challenge
         /// </summary>
-        public bool IsStatic() => ((byte)type & 0b10) == 0;
+        public bool IsStatic() => type is ChallengeType.StaticAttachment or ChallengeType.StaticContainer;
 
         /// <summary>
-        /// Is it a dynamic challenge
+        /// Is it a dynamic (per-team) challenge — includes A&amp;D
         /// </summary>
-        public bool IsDynamic() => ((byte)type & 0b10) != 0;
+        public bool IsDynamic() => type is ChallengeType.DynamicAttachment or ChallengeType.DynamicContainer
+            or ChallengeType.AttackDefense;
 
         /// <summary>
         /// Is it an attachment challenge
         /// </summary>
-        public bool IsAttachment() => ((byte)type & 0b01) == 0;
+        public bool IsAttachment() => type is ChallengeType.StaticAttachment or ChallengeType.DynamicAttachment;
 
         /// <summary>
-        /// Is it a container challenge
+        /// Is it a container challenge — includes A&amp;D
         /// </summary>
-        public bool IsContainer() => ((byte)type & 0b01) != 0;
+        public bool IsContainer() => type is ChallengeType.StaticContainer or ChallengeType.DynamicContainer
+            or ChallengeType.AttackDefense;
+
+        /// <summary>
+        /// Is it an Attack &amp; Defense challenge
+        /// </summary>
+        public bool IsAttackDefense() => type is ChallengeType.AttackDefense;
     }
+}
+
+/// <summary>
+/// Per-tick result of a checker run against one team's A&amp;D service container.
+/// Compatible with the enochecker3 contract.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<AdCheckStatus>))]
+public enum AdCheckStatus : byte
+{
+    /// <summary>Checker succeeded — flag planted + retrieved.</summary>
+    Ok = 0,
+
+    /// <summary>Service is up but behaving incorrectly (flag mismatch, partial outage, etc.).</summary>
+    Mumble = 1,
+
+    /// <summary>Service didn't respond at all (TCP refused, timeout).</summary>
+    Offline = 2,
+
+    /// <summary>Checker itself failed (bug in checker code, host died).</summary>
+    InternalError = 3
 }
 
 /// <summary>

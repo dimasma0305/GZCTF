@@ -54,6 +54,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) :
     public DbSet<AntiCheatBlock> AntiCheatBlocks { get; set; } = null!;
     public DbSet<ChallengeBuildAudit> ChallengeBuildAudits { get; set; } = null!;
 
+    // Attack & Defense
+    public DbSet<AdTeamService> AdTeamServices { get; set; } = null!;
+    public DbSet<AdTeamSshKey> AdTeamSshKeys { get; set; } = null!;
+    public DbSet<AdRound> AdRounds { get; set; } = null!;
+    public DbSet<AdFlag> AdFlags { get; set; } = null!;
+    public DbSet<AdCheckResult> AdCheckResults { get; set; } = null!;
+    public DbSet<AdAttack> AdAttacks { get; set; } = null!;
+    public DbSet<AdVpnPeer> AdVpnPeers { get; set; } = null!;
+
     private static ValueConverter<T?, string> GetJsonConverter<T>() where T : class, new() =>
         new(
             v => JsonSerializer.Serialize(v ?? new(), JsonOptions),

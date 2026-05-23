@@ -292,4 +292,23 @@ public partial class Game
     public string? EventManifestPath { get; set; }
 
     #endregion Db Relationship
+
+    #region Attack & Defense fields
+    // Nullable — only consulted when the game has any AttackDefense challenge.
+
+    /// <summary>
+    /// Warm-up window in seconds before the first A&amp;D round starts. Default
+    /// 1800 (30 min). Teams get the gap between StartTimeUtc and StartTimeUtc +
+    /// AdWarmupSeconds to SSH in, read code, write initial patches without
+    /// scoring or attacks counting. Industry norm.
+    /// </summary>
+    public int? AdWarmupSeconds { get; set; } = 1800;
+
+    /// <summary>
+    /// How long to retain per-team container snapshots (the tarballs produced
+    /// at game end when <see cref="Challenge.AdAllowSnapshotDownload"/>) before
+    /// the cleanup job expires them. Default 30 days.
+    /// </summary>
+    public int? AdSnapshotRetentionDays { get; set; } = 30;
+    #endregion
 }
