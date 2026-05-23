@@ -96,6 +96,57 @@ Reference them from challenge.yml with:
 The file is shown as a downloadable attachment on the challenge page.
 `
 
+const SOLVER_README = `# Solver
+
+Drop your working solution here so admins (and your future self) can
+verify the challenge still works after edits.
+
+A solver should:
+- Connect to the live service at \`{host}:{port}\` (or read the
+  attachment from \`dist/\`)
+- Reach the flag end-to-end
+- Print it to stdout
+
+Run locally during development against your test container:
+
+    ./solve.py 127.0.0.1 1337
+`
+
+const STATIC_SOLVER = `#!/usr/bin/env python3
+"""Solution for the Static Container challenge.
+Replace the body with your real exploit / interaction logic."""
+import socket, sys
+
+def main(host: str, port: int) -> None:
+    with socket.create_connection((host, port), timeout=5) as s:
+        data = s.recv(4096)
+        print(data.decode(errors='replace'))
+
+if __name__ == '__main__':
+    main(sys.argv[1] if len(sys.argv) > 1 else '127.0.0.1',
+         int(sys.argv[2]) if len(sys.argv) > 2 else 1337)
+`
+
+const DYNAMIC_SOLVER = `#!/usr/bin/env python3
+"""Solution for the Dynamic Container challenge.
+Each team gets a per-instance flag injected via GZCTF_FLAG inside the
+container — your solver must extract it from the running service,
+not from a static file."""
+import socket, sys
+
+def main(host: str, port: int) -> None:
+    with socket.create_connection((host, port), timeout=5) as s:
+        # Replace with your real exploit. The flag is reachable
+        # *inside* the per-team container; this stub just prints
+        # whatever the service emits on connect.
+        data = s.recv(4096)
+        print(data.decode(errors='replace'))
+
+if __name__ == '__main__':
+    main(sys.argv[1] if len(sys.argv) > 1 else '127.0.0.1',
+         int(sys.argv[2]) if len(sys.argv) > 2 else 1337)
+`
+
 const README = `# {{slug}} — GZCTF challenge template
 
 Edit the files in this folder, then zip the whole directory and
@@ -106,6 +157,7 @@ Layout:
   src/Dockerfile      — container build (REQUIRED for *Container types)
   src/                — anything else your container needs
   dist/               — files handed to players (optional)
+  solver/             — your working solution (used by admins to verify)
 `
 
 /**
@@ -119,6 +171,8 @@ export async function buildStaticContainerTemplate(): Promise<Blob> {
   zip.file('src/flag.txt', STATIC_FLAG)
   zip.file('dist/.gitkeep', '')
   zip.file('dist/README.md', DIST_README)
+  zip.file('solver/solve.py', STATIC_SOLVER)
+  zip.file('solver/README.md', SOLVER_README)
   zip.file('README.md', README)
   return zip.generateAsync({ type: 'blob', compression: 'DEFLATE' })
 }
@@ -133,6 +187,8 @@ export async function buildDynamicContainerTemplate(): Promise<Blob> {
   zip.file('src/serve.sh', DYNAMIC_SERVE_SH)
   zip.file('dist/.gitkeep', '')
   zip.file('dist/README.md', DIST_README)
+  zip.file('solver/solve.py', DYNAMIC_SOLVER)
+  zip.file('solver/README.md', SOLVER_README)
   zip.file('README.md', README)
   return zip.generateAsync({ type: 'blob', compression: 'DEFLATE' })
 }

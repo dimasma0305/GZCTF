@@ -141,7 +141,9 @@ const Submit: FC = () => {
 │   ├── Dockerfile      ← platform auto-builds this
 │   ├── serve.sh
 │   └── flag.txt        ← baked into the image (shared flag)
-└── dist/               ← (optional) files handed to players`}
+├── dist/               ← (optional) files handed to players
+└── solver/             ← your working solution (admins verify with this)
+    └── solve.py`}
                         </Code>
                         <Code block style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>
                           {`type: "StaticContainer"
@@ -186,7 +188,9 @@ container:
 ├── src/
 │   ├── Dockerfile      ← reads $GZCTF_FLAG at runtime
 │   └── serve.sh
-└── dist/`}
+├── dist/
+└── solver/             ← your working solution
+    └── solve.py`}
                         </Code>
                         <Code block style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>
                           {`type: "DynamicContainer"
@@ -203,6 +207,7 @@ container:
                         <Text size="xs" c="dimmed">• {t('game.submit.example.tips.visible_ignored')}</Text>
                         <Text size="xs" c="dimmed">• {t('game.submit.example.tips.review_queue')}</Text>
                         <Text size="xs" c="dimmed">• {t('game.submit.example.tips.dynamic_flag_env')}</Text>
+                        <Text size="xs" c="dimmed">• {t('game.submit.example.tips.solver_folder')}</Text>
                         <Text size="xs" c="dimmed">• {t('game.submit.example.tips.size_cap')}</Text>
                       </Stack>
                     </Stack>

@@ -316,6 +316,7 @@
         "review_queue": "Submissions sit in the admin review queue; they are NOT live until approved.",
         "template_image": "containerImage: \"./src/Dockerfile\" tells the platform to build from your Dockerfile. A registry path like \"ghcr.io/...\" is treated as already-published.",
         "dynamic_flag_env": "For Dynamic Container, read the flag from the GZCTF_FLAG env var inside your container — never hard-code it.",
+        "solver_folder": "Put a working solver under solver/ so admins (and your future self) can verify the challenge still works after edits.",
         "size_cap": "Archive must be ≤ 64 MB. Single challenge per archive."
       }
     },
