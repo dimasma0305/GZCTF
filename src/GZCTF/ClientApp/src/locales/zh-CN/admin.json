@@ -430,6 +430,16 @@
         "unsaved": "有未保存的更改",
         "saved": "所有更改已保存"
       },
+      "nav": {
+        "platform": "平台",
+        "account": "用户",
+        "container": "容器",
+        "email": "邮件",
+        "captcha": "验证码",
+        "registry_pull": "拉取凭证",
+        "build_registry": "推送配置",
+        "diagnostics": "诊断"
+      },
       "account": {
         "allow_register": {
           "description": "是否允许用户注册新账户",

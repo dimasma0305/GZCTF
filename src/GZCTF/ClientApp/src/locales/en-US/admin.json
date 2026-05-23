@@ -430,6 +430,16 @@
         "unsaved": "Unsaved changes",
         "saved": "All changes saved"
       },
+      "nav": {
+        "platform": "Platform",
+        "account": "Users",
+        "container": "Containers",
+        "email": "Email",
+        "captcha": "Captcha",
+        "registry_pull": "Pull creds",
+        "build_registry": "Build push",
+        "diagnostics": "Diagnostics"
+      },
       "account": {
         "allow_register": {
           "description": "Allow users to register new accounts",

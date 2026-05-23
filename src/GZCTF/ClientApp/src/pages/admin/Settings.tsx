@@ -336,9 +336,13 @@ const Configs: FC = () => {
                 key={item.key}
                 value={item.key}
                 leftSection={<Icon path={item.icon} size={1} />}
-                rightSection={<StatusBadge status={statuses[item.key]} />}
               >
-                {t(`admin.content.settings.${item.key}.title`)}
+                <Group justify="space-between" wrap="nowrap" gap={4}>
+                  <Text size="sm" truncate>
+                    {t(`admin.content.settings.nav.${item.key}`)}
+                  </Text>
+                  <StatusBadge status={statuses[item.key]} />
+                </Group>
               </Tabs.Tab>
             ))}
           </Tabs.List>
@@ -351,7 +355,7 @@ const Configs: FC = () => {
             <SectionHelp description={t('admin.content.settings.platform.api_encryption.description')} />
           </Group>
           <Divider />
-          <Grid columns={4} align="center">
+          <Grid columns={2} align="center">
             <Grid.Col span={1}>
               <TextInput
                 label={t('admin.content.settings.platform.name.label')}
@@ -448,7 +452,7 @@ const Configs: FC = () => {
                 }}
               />
             </Grid.Col>
-            <Grid.Col span={3}>
+            <Grid.Col span={2}>
               <TextInput
                 label={t('admin.content.settings.platform.footer.label')}
                 description={t('admin.content.settings.platform.footer.description')}
@@ -488,7 +492,7 @@ const Configs: FC = () => {
             <SectionHelp description={t('admin.content.settings.account.unique_ip_per_team_user.description')} />
           </Group>
           <Divider />
-          <SimpleGrid cols={4}>
+          <SimpleGrid cols={{ base: 1, sm: 2, xl: 3 }}>
             <Switch
               checked={accountPolicy?.allowRegister ?? true}
               disabled={disabled}
@@ -616,7 +620,7 @@ const Configs: FC = () => {
             <SectionHelp description={t('admin.content.settings.container.default_lifetime.description')} />
           </Group>
           <Divider />
-          <SimpleGrid cols={4} className={misc.alignCenter}>
+          <SimpleGrid cols={{ base: 1, sm: 2, xl: 3 }} className={misc.alignCenter}>
             <NumberInput
               label={t('admin.content.settings.container.default_lifetime.label')}
               description={t('admin.content.settings.container.default_lifetime.description')}
@@ -946,7 +950,7 @@ const Configs: FC = () => {
             {t('admin.content.settings.registry_pull.description')}
           </Text>
           <Divider />
-          <SimpleGrid cols={3}>
+          <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
             <TextInput
               label={t('admin.content.settings.registry_pull.server.label')}
               description={t('admin.content.settings.registry_pull.server.description')}
