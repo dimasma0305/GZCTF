@@ -661,8 +661,78 @@ public sealed class ChallengeImportService(
     }
 
     /// <summary>
+    /// Hard ceiling on total bytes written to disk by a single archive
+    /// extraction. The upload itself is already capped (64 MB via
+    /// <c>[RequestSizeLimit]</c>), but a malicious .tar.gz with a high
+    /// compression ratio (e.g. sparse zeros) can decompress to many
+    /// gigabytes — enough to fill <c>/tmp</c> and DoS the host. 1 GB is
+    /// well above any legitimate challenge archive (the largest seen so
+    /// far is ~120 MB) but small enough that even a worst-case bomb
+    /// terminates before disk pressure becomes a problem.
+    /// </summary>
+    internal const long MaxExtractedBytes = 1024L * 1024 * 1024;
+
+    /// <summary>
+    /// <see cref="Stream"/> wrapper that forwards writes to an inner
+    /// stream while tracking a shared running total and throwing once
+    /// the cap is exceeded. Used to defuse decompression-bomb archives:
+    /// <see cref="GZipStream"/> + <see cref="ZipArchiveEntry.Open"/> both
+    /// stream uncompressed bytes one chunk at a time, so wrapping the
+    /// destination <see cref="FileStream"/> trips the limit at the point
+    /// the bomb would actually start consuming disk — before the rest of
+    /// the archive is even read.
+    /// </summary>
+    private sealed class LimitedWriteStream(Stream inner, ExtractCounter counter) : Stream
+    {
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => inner.Length;
+        public override long Position { get => inner.Position; set => throw new NotSupportedException(); }
+        public override void Flush() => inner.Flush();
+        public override Task FlushAsync(CancellationToken ct) => inner.FlushAsync(ct);
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            counter.Add(count);
+            inner.Write(buffer, offset, count);
+        }
+
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default)
+        {
+            counter.Add(buffer.Length);
+            await inner.WriteAsync(buffer, ct);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) inner.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
+    /// <summary>Shared mutable counter passed into per-entry wrappers.</summary>
+    private sealed class ExtractCounter
+    {
+        private long _total;
+        public void Add(int bytes)
+        {
+            _total += bytes;
+            if (_total > MaxExtractedBytes)
+                throw new InvalidOperationException(
+                    $"Archive exceeds the {MaxExtractedBytes / (1024 * 1024)} MB extracted-size cap " +
+                    "(likely a decompression bomb).");
+        }
+    }
+
+    /// <summary>
     /// Extracts a gzipped tar stream into <paramref name="workDir"/>,
     /// rejecting any entry whose normalized path escapes the work dir.
+    /// Aborts if the total uncompressed bytes exceed
+    /// <see cref="MaxExtractedBytes"/>.
     /// </summary>
     internal static async Task ExtractTarballStreamAsync(Stream tarGz, string workDir, CancellationToken token)
     {
@@ -670,6 +740,7 @@ public sealed class ChallengeImportService(
         await using var tar = new TarReader(gz);
 
         var canonical = Path.GetFullPath(workDir) + Path.DirectorySeparatorChar;
+        var counter = new ExtractCounter();
 
         while (await tar.GetNextEntryAsync(cancellationToken: token) is { } entry)
         {
@@ -691,8 +762,9 @@ public sealed class ChallengeImportService(
                 case TarEntryType.V7RegularFile:
                     Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
                     await using (var fs = File.Create(dest))
+                    await using (var limited = new LimitedWriteStream(fs, counter))
                         if (entry.DataStream is not null)
-                            await entry.DataStream.CopyToAsync(fs, token);
+                            await entry.DataStream.CopyToAsync(limited, token);
                     break;
                 // SymbolicLink / HardLink / others: deliberately skipped.
             }
@@ -701,12 +773,14 @@ public sealed class ChallengeImportService(
 
     /// <summary>
     /// Extracts a zip stream into <paramref name="workDir"/> with the same
-    /// path-escape guard the tar extractor uses.
+    /// path-escape guard the tar extractor uses, plus the shared
+    /// decompression-bomb cap (<see cref="MaxExtractedBytes"/>).
     /// </summary>
     internal static async Task ExtractZipStreamAsync(Stream zipStream, string workDir, CancellationToken token)
     {
         using var zip = new ZipArchive(zipStream, ZipArchiveMode.Read, leaveOpen: true);
         var canonical = Path.GetFullPath(workDir) + Path.DirectorySeparatorChar;
+        var counter = new ExtractCounter();
 
         foreach (var entry in zip.Entries)
         {
@@ -727,7 +801,8 @@ public sealed class ChallengeImportService(
             Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
             await using var src = entry.Open();
             await using var fs = File.Create(dest);
-            await src.CopyToAsync(fs, token);
+            await using var limited = new LimitedWriteStream(fs, counter);
+            await src.CopyToAsync(limited, token);
         }
     }
 
