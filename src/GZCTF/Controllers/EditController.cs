@@ -1663,16 +1663,166 @@ public class EditController(
     public async Task<IActionResult> ApproveChallenge(
         [FromRoute] int id, [FromRoute] int cId, CancellationToken token)
     {
+        var game = await dbContext.Games.FirstOrDefaultAsync(g => g.Id == id, token);
         var challenge = await dbContext.GameChallenges
+            .Include(c => c.Attachment)
+                .ThenInclude(a => a!.LocalFile)
+            .Include(c => c.Flags)
             .FirstOrDefaultAsync(c => c.GameId == id && c.Id == cId, token);
-        if (challenge is null)
+        if (challenge is null || game is null)
             return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Challenge_NotFound)],
                 StatusCodes.Status404NotFound));
 
         challenge.ReviewStatus = ChallengeReviewStatus.Active;
         challenge.ReviewedAtUtc = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(token);
+
+        // Auto-push approved user-submissions to the game's binding
+        // repo if push-back is enabled. Best-effort fire-and-forget;
+        // approval succeeds even if the push later fails.
+        await TryPushApprovedSubmissionAsync(game, challenge, token);
         return Ok();
+    }
+
+    /// <summary>
+    /// On approve: write the challenge as a fresh entry inside the
+    /// binding repo at <c>{eventDir}/{category}/{slug}/challenge.yml</c>
+    /// (matching the layout existing organizer-authored challenges use)
+    /// plus any local attachment under the same dir. Updates the
+    /// challenge's <see cref="GameChallenge.SourceYamlPath"/> to the
+    /// newly-created path so subsequent admin edits use the correct
+    /// upstream location.
+    ///
+    /// <para>Gates same as <see cref="TryPushBackAsync"/>: game must
+    /// have a <c>RepoBindingId</c>, binding must have
+    /// <c>PushOnEdit = true</c> and a non-empty
+    /// <c>GitHubTokenEncrypted</c>. Without these the approval is
+    /// purely DB-side.</para>
+    /// </summary>
+    private async Task TryPushApprovedSubmissionAsync(GZCTF.Models.Data.Game game,
+        GZCTF.Models.Data.GameChallenge ch, CancellationToken token)
+    {
+        if (game.RepoBindingId is not { } bid) return;
+        if (string.IsNullOrEmpty(game.EventManifestPath)) return;
+
+        var binding = await dbContext.GameRepoBindings.AsNoTracking()
+            .FirstOrDefaultAsync(b => b.Id == bid, token);
+        if (binding is null || !binding.PushOnEdit) return;
+        if (string.IsNullOrEmpty(binding.GitHubTokenEncrypted)) return;
+
+        string plaintext;
+        try
+        {
+            var protector = HttpContext.RequestServices
+                .GetRequiredService<Microsoft.AspNetCore.DataProtection.IDataProtectionProvider>()
+                .CreateProtector(GZCTF.Services.Transfer.GameRepoBindingProtection.Purpose);
+            plaintext = protector.Unprotect(binding.GitHubTokenEncrypted);
+        }
+        catch
+        {
+            logger.LogWarning("PushApprove: failed to decrypt token for binding {Id}", bid);
+            return;
+        }
+
+        if (!GZCTF.Services.Transfer.GitHubLocator.TryParse(
+            binding.RepoUrl, binding.Ref, overrideSubpath: null, out var loc, out _) || loc is null)
+            return;
+
+        // Compute target dir: same shape the binding scanner imports
+        // from. EventManifestPath looks like "final/.gzevent" so the
+        // event dir is everything but the file part.
+        var eventDir = System.IO.Path.GetDirectoryName(game.EventManifestPath)?.Replace('\\', '/') ?? "";
+        var category = ch.Category.ToString();
+        var slug = GZCTF.Services.Container.Build.DockerChallengeImageBuilder.NormalizeSlug(ch.Title);
+        var relDir = string.IsNullOrEmpty(eventDir)
+            ? $"{category}/{slug}"
+            : $"{eventDir}/{category}/{slug}";
+        var yamlRelPath = $"{relDir}/challenge.yml";
+
+        var flagTexts = ch.Type == ChallengeType.DynamicContainer
+            ? Array.Empty<string>()
+            : ch.Flags.Where(f => !string.IsNullOrEmpty(f.Flag)).Select(f => f.Flag).ToArray();
+
+        // Snapshot attachment metadata before the fire-and-forget runs,
+        // because the challenge entity is scoped to the request context.
+        // Blob path mirrors what BlobRepository.cs uses:
+        //   uploads/{Hash[..2]}/{Hash[2..4]}/{Hash}
+        string? attachmentBlobSrcPath = null;
+        string? attachmentRelPath = null;
+        if (ch.Attachment is { Type: GZCTF.Utils.FileType.Local, LocalFile: { } lf })
+        {
+            attachmentBlobSrcPath = GZCTF.Storage.Interface.StoragePath.Combine(
+                GZCTF.Utils.PathHelper.Uploads, lf.Location, lf.Hash);
+            attachmentRelPath = $"{relDir}/{lf.Name}";
+        }
+
+        var commitMsg = $"feat(submit): approve user-submitted challenge {ch.Title}";
+        var scopeFactory = HttpContext.RequestServices.GetRequiredService<IServiceScopeFactory>();
+        var gitSync = HttpContext.RequestServices
+            .GetRequiredService<GZCTF.Services.Transfer.GitRepoSyncService>();
+
+        var chId = ch.Id;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await gitSync.SyncAsync("binding", bid, loc, plaintext, CancellationToken.None);
+
+                var repoDir = System.IO.Path.Combine(
+                    GZCTF.Services.Transfer.GitRepoSyncService.RepoRoot, "binding", bid.ToString());
+                var fullYamlDir = System.IO.Path.Combine(repoDir, relDir);
+                System.IO.Directory.CreateDirectory(fullYamlDir);
+
+                // Write the regenerated yaml.
+                var yaml = GZCTF.Services.Transfer.ChallengeYamlSerializer.Serialize(ch, flagTexts);
+                await System.IO.File.WriteAllTextAsync(
+                    System.IO.Path.Combine(repoDir, yamlRelPath), yaml, CancellationToken.None);
+
+                var pushFiles = new List<string> { yamlRelPath };
+
+                // Copy attachment (best-effort) and include in commit.
+                if (attachmentBlobSrcPath is not null && attachmentRelPath is not null)
+                {
+                    try
+                    {
+                        await using var scope = scopeFactory.CreateAsyncScope();
+                        var blob = scope.ServiceProvider
+                            .GetRequiredService<GZCTF.Storage.Interface.IBlobStorage>();
+                        await using var src = await blob.OpenReadAsync(attachmentBlobSrcPath, CancellationToken.None);
+                        await using var dst = System.IO.File.Create(
+                            System.IO.Path.Combine(repoDir, attachmentRelPath));
+                        await src.CopyToAsync(dst, CancellationToken.None);
+                        pushFiles.Add(attachmentRelPath);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning(ex,
+                            "PushApprove: skipped attachment {Path} (blob read failed)", attachmentRelPath);
+                    }
+                }
+
+                await gitSync.CommitAndPushAsync("binding", bid, loc, plaintext,
+                    pushFiles, commitMsg, ct: CancellationToken.None);
+
+                // Update SourceYamlPath so subsequent admin edits push
+                // back to the same file we just created (instead of
+                // the now-deleted temp-dir relpath the import set).
+                await using var s = scopeFactory.CreateAsyncScope();
+                var db = s.ServiceProvider.GetRequiredService<AppDbContext>();
+                await db.GameChallenges
+                    .Where(c => c.Id == chId)
+                    .ExecuteUpdateAsync(u => u.SetProperty(c => c.SourceYamlPath, yamlRelPath),
+                        CancellationToken.None);
+
+                logger.LogInformation(
+                    "PushApprove: pushed {Yaml} for approved submission {Cid}", yamlRelPath, chId);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex,
+                    "PushApprove: failed for approved submission {Cid} → {Yaml}", chId, yamlRelPath);
+            }
+        });
     }
 
     /// <summary>
