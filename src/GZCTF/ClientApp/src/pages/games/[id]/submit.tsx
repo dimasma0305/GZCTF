@@ -135,23 +135,25 @@ const Submit: FC = () => {
                           </Button>
                         </Group>
                         <Code block style={{ fontSize: 12 }}>
-                          {`my-challenge.zip
+                          {`static-container.zip
 ├── challenge.yml
 ├── src/
-│   ├── Dockerfile      ← platform auto-builds this
-│   ├── serve.sh
-│   └── flag.txt        ← baked into the image (shared flag)
-├── dist/               ← (optional) files handed to players
-└── solver/             ← your working solution (admins verify with this)
-    └── solve.py`}
+│   ├── Dockerfile          ← platform auto-builds this
+│   ├── run.sh
+│   ├── chall.py
+│   ├── flag.txt            ← baked into the image (shared flag)
+│   ├── requirements.txt
+│   └── docker-compose.yml  ← for local testing
+└── solver/
+    └── solve.py            ← your working solver`}
                         </Code>
                         <Code block style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>
                           {`type: "StaticContainer"
 flags:
-  - "flag{shared_among_all_teams}"
+  - "flag{testing}"
 container:
-  containerImage: "./src/Dockerfile"
-  exposePort: 1337`}
+  containerImage: "{{.slug}}:latest"
+  exposePort: 5000`}
                         </Code>
                       </Stack>
 
@@ -183,21 +185,24 @@ container:
                           </Button>
                         </Group>
                         <Code block style={{ fontSize: 12 }}>
-                          {`my-challenge.zip
+                          {`dynamic-container.zip
 ├── challenge.yml
 ├── src/
-│   ├── Dockerfile      ← reads $GZCTF_FLAG at runtime
-│   └── serve.sh
+│   ├── Dockerfile          ← reads $GZCTF_FLAG at runtime
+│   ├── run.sh
+│   ├── chall.py
+│   ├── requirements.txt
+│   └── docker-compose.yml
 ├── dist/
-└── solver/             ← your working solution
+└── solver/
     └── solve.py`}
                         </Code>
                         <Code block style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>
                           {`type: "DynamicContainer"
 container:
-  containerImage: "./src/Dockerfile"
-  exposePort: 1337
-  flagTemplate: "flag{[GUID]}"   # [GUID] is replaced per-team`}
+  containerImage: "{{.slug}}:latest"
+  exposePort: 8011
+  flagTemplate: "FLAG{ini_test_flag_[TEAM_HASH]}"`}
                         </Code>
                       </Stack>
 

@@ -314,8 +314,8 @@
         "value_ignored": "YAML 中的 value 会被忽略，分值由管理员审核后设置。",
         "visible_ignored": "YAML 中的 visible 会被忽略，由管理员决定何时启用。",
         "review_queue": "提交会进入管理员审核队列，审核通过前不会上线。",
-        "template_image": "containerImage: \"./src/Dockerfile\" 表示由平台从 Dockerfile 构建；写仓库路径如 \"ghcr.io/...\" 则视为已发布镜像。",
-        "dynamic_flag_env": "Dynamic Container 中请从容器内的 GZCTF_FLAG 环境变量读取 flag，绝对不要硬编码。",
+        "template_image": "containerImage: \"{{.slug}}:latest\" 是 gzcli 的标准写法，平台会自动从 src/Dockerfile 构建；写仓库路径如 \"ghcr.io/...\" 则视为已发布镜像。",
+        "dynamic_flag_env": "Dynamic Container 中，平台会在每个队伍的容器内设置 GZCTF_FLAG 环境变量，请在 src/run.sh 中引用（模板 run.sh 已示范），绝对不要硬编码 flag。",
         "solver_folder": "将可运行的 solver 放在 solver/ 目录下，方便管理员（以及未来的自己）在题目修改后验证仍然可解。",
         "size_cap": "压缩包不超过 64 MB，每个压缩包仅包含一个题目。"
       }
