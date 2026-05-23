@@ -535,7 +535,13 @@
         "bypass_cert": {
           "label": "跳过 TLS 证书验证",
           "description": "仅在测试自签名 SMTP 时启用。"
-        }
+        },
+        "test_recipient": {
+          "label": "发送测试邮件到",
+          "description": "使用当前表单中的 SMTP 配置发送一封测试邮件，不会保存配置。若密码留空则使用已保存的密码。"
+        },
+        "test_button": "发送测试",
+        "test_success": "已向 {{recipient}} 发送测试邮件，请检查收件箱（以及垃圾邮件文件夹）。"
       },
       "captcha": {
         "title": "验证码",

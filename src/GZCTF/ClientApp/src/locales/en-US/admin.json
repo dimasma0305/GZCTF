@@ -535,7 +535,13 @@
         "bypass_cert": {
           "label": "Bypass TLS certificate verification",
           "description": "Only enable for testing against self-signed SMTP servers."
-        }
+        },
+        "test_recipient": {
+          "label": "Send test email to",
+          "description": "Verifies the SMTP credentials above without saving them. Uses the values currently in the form; if you left the password blank, the currently-stored password is used."
+        },
+        "test_button": "Send test",
+        "test_success": "Test email sent to {{recipient}}. Check the inbox (and the spam folder)."
       },
       "captcha": {
         "title": "Captcha",

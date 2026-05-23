@@ -56,4 +56,17 @@ public interface IMailSender
         IStringLocalizer<Program> localizer,
         IOptionsSnapshot<GlobalConfig> options,
         CancellationToken token = default);
+
+    /// <summary>
+    /// Smoke-test the supplied SMTP configuration by sending a single
+    /// fixed-content message to <paramref name="recipient"/>. Used by
+    /// the "Send test" button in /admin/settings. Does not touch the
+    /// singleton's persisted SmtpClient — every call gets its own
+    /// short-lived connection so an in-progress test doesn't break the
+    /// live mail queue. <paramref name="passwordPlain"/> is the
+    /// already-decrypted SMTP password (the controller resolves it
+    /// from the request body or the stored DB value).
+    /// </summary>
+    public Task<(bool Ok, string? Error)> TestSendAsync(
+        EmailConfig config, string passwordPlain, string recipient, CancellationToken token = default);
 }

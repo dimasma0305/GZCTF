@@ -22,6 +22,7 @@ using GZCTF.Models.Data;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Localization;
 using Microsoft.Extensions.Options;
@@ -243,6 +244,74 @@ public class AdminController(
         }
 
         return Ok();
+    }
+
+    /// <summary>
+    /// Send a test email to verify SMTP configuration
+    /// </summary>
+    /// <remarks>
+    /// Drives the "Send test" button in /admin/settings → Email
+    /// (SMTP). Uses the supplied config (operator-typed, possibly
+    /// unsaved) to send a single plain-text message. Nothing is
+    /// persisted. When the request body's password field is empty,
+    /// the stored DB password is decrypted and used — matching the
+    /// preserve-on-blank shape of the Save flow so the operator can
+    /// test without re-typing a configured password.
+    /// </remarks>
+    /// <response code="200">Test email accepted by the SMTP server</response>
+    /// <response code="400">SMTP rejected the message; error text in the response body</response>
+    /// <response code="401">Unauthorized user</response>
+    /// <response code="403">Forbidden</response>
+    [RequireAdmin]
+    [HttpPost("Email/Test")]
+    [EnableRateLimiting(nameof(RateLimiter.LimitPolicy.Concurrency))]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> TestEmail([FromBody] EmailTestModel model, CancellationToken token)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Model_ValidationFailed)]));
+
+        var mailSender = serviceProvider.GetRequiredService<IMailSender>();
+
+        // Resolve the plaintext SMTP password. If the operator left
+        // the password field blank in the form, the GetConfigs path
+        // had already blanked it for transport — fall back to the
+        // stored DB value and XOR-decrypt it. Otherwise treat the
+        // posted value as fresh plaintext from the operator.
+        var passwordPlain = model.Config.Password;
+        if (string.IsNullOrEmpty(passwordPlain))
+        {
+            var stored = serviceProvider.GetRequiredService<IOptionsSnapshot<EmailConfig>>().Value;
+            var xorKey = configService.GetXorKey();
+            passwordPlain = DecryptStoredPassword(stored.Password, xorKey);
+        }
+
+        var (ok, err) = await mailSender.TestSendAsync(model.Config, passwordPlain, model.Recipient, token);
+        return ok
+            ? Ok()
+            : BadRequest(new RequestResponse(
+                localizer[nameof(Resources.Program.Admin_EmailTestFailed), err ?? string.Empty]));
+    }
+
+    /// <summary>Reverse the XOR + base64 obfuscation written by
+    /// <see cref="UpdateConfigs"/> for password fields. Mirror of the
+    /// helper inside <c>MailSender.DecryptPassword</c> — kept inline
+    /// here so the test endpoint doesn't have to round-trip through
+    /// the singleton just to read its stored password.</summary>
+    private static string DecryptStoredPassword(string? stored, byte[] xorKey)
+    {
+        if (string.IsNullOrEmpty(stored)) return string.Empty;
+        if (xorKey.Length == 0) return stored;
+        try
+        {
+            return Encoding.UTF8.GetString(
+                Codec.Xor(Convert.FromBase64String(stored), xorKey));
+        }
+        catch
+        {
+            return stored;
+        }
     }
 
     /// <summary>

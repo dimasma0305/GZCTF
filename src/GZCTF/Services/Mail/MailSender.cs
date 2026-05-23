@@ -27,14 +27,21 @@ public sealed class MailSender : IMailSender, IDisposable
     private readonly IDisposable? _optionsChangeListener;
     private bool _disposed;
 
+    /// <summary>XOR key used to reverse the obfuscation applied to
+    /// EmailConfig.Password at /admin/settings save time. Captured at
+    /// construction since the singleton can't take a scoped service.</summary>
+    private readonly byte[] _xorKey;
+
     public MailSender(
         IOptions<AccountPolicy> accountPolicy,
         IOptionsMonitor<EmailConfig> optionsMonitor,
+        IConfiguration configuration,
         ILogger<MailSender> logger)
     {
         _logger = logger;
         _options = optionsMonitor.CurrentValue;
         _cancellationToken = _cancellationTokenSource.Token;
+        _xorKey = configuration["XorKey"]?.ToUTF8Bytes() ?? [];
 
         // Live-reload: when /admin/settings writes a new EmailConfig
         // the OptionsMonitor fires; flip the dirty flag and the worker
@@ -88,30 +95,14 @@ public sealed class MailSender : IMailSender, IDisposable
                 return false;
             }
 
-            var client = new SmtpClient();
-            client.AuthenticationMechanisms.Remove("XOAUTH2");
-
-            if (!OperatingSystem.IsWindows())
-                // Some systems may not enable old (non-recommend) ciphers in TLS configuration and lead to failures when
-                // connecting to some SMTP servers, override the default policy to include all ciphers except MD5, SHA1, and NULL
-                client.SslCipherSuitesPolicy = new CipherSuitesPolicy(Enum.GetValues<TlsCipherSuite>()
-                    .Where(cipher =>
-                    {
-                        var cipherName = cipher.ToString();
-                        // Exclude MD5, SHA1, and NULL ciphers for security reasons
-                        return !cipherName.EndsWith("MD5") && !cipherName.EndsWith("SHA") &&
-                               !cipherName.EndsWith("NULL");
-                    }));
-
-            client.ServerCertificateValidationCallback = (_, _, _, errors)
-                => errors is SslPolicyErrors.None || opts.Smtp?.BypassCertVerify is true;
+            var client = BuildSmtpClient(opts);
 
             // Test the connection synchronously here so misconfig is
             // surfaced immediately rather than at first send.
             try
             {
                 client.Connect(opts.Smtp.Host, opts.Smtp.Port);
-                client.Authenticate(opts.UserName, opts.Password);
+                client.Authenticate(opts.UserName, DecryptPassword(opts.Password));
                 client.Disconnect(true);
             }
             catch (Exception e)
@@ -127,6 +118,97 @@ public sealed class MailSender : IMailSender, IDisposable
             _logger.SystemLog(StaticLocalizer[nameof(Resources.Program.MailSender_ConnectedToSmtp),
                 $"{opts.Smtp.Host}:{opts.Smtp.Port}"], TaskStatus.Success, LogLevel.Debug);
             return true;
+        }
+    }
+
+    /// <summary>Construct an SmtpClient pre-configured with the cert
+    /// policy + cipher suites used by every code path in this class.
+    /// Caller owns the lifecycle (Connect / Authenticate / Send /
+    /// Disconnect / Dispose).</summary>
+    private static SmtpClient BuildSmtpClient(EmailConfig opts)
+    {
+        var client = new SmtpClient();
+        client.AuthenticationMechanisms.Remove("XOAUTH2");
+
+        if (!OperatingSystem.IsWindows())
+            // Some systems may not enable old (non-recommend) ciphers in TLS configuration and lead to failures when
+            // connecting to some SMTP servers, override the default policy to include all ciphers except MD5, SHA1, and NULL
+            client.SslCipherSuitesPolicy = new CipherSuitesPolicy(Enum.GetValues<TlsCipherSuite>()
+                .Where(cipher =>
+                {
+                    var cipherName = cipher.ToString();
+                    // Exclude MD5, SHA1, and NULL ciphers for security reasons
+                    return !cipherName.EndsWith("MD5") && !cipherName.EndsWith("SHA") &&
+                           !cipherName.EndsWith("NULL");
+                }));
+
+        client.ServerCertificateValidationCallback = (_, _, _, errors)
+            => errors is SslPolicyErrors.None || opts.Smtp?.BypassCertVerify is true;
+
+        return client;
+    }
+
+    /// <summary>Reverse the XOR + base64 obfuscation applied to
+    /// EmailConfig.Password by <see cref="AdminController.UpdateConfigs"/>.
+    /// Falls back to the raw stored value when XorKey is empty (test envs)
+    /// or when the stored value isn't valid base64 (legacy plaintext from
+    /// before the obfuscation landed).</summary>
+    private string DecryptPassword(string? stored)
+    {
+        if (string.IsNullOrEmpty(stored)) return string.Empty;
+        if (_xorKey.Length == 0) return stored;
+        try
+        {
+            return Encoding.UTF8.GetString(
+                Codec.Xor(Convert.FromBase64String(stored), _xorKey));
+        }
+        catch
+        {
+            return stored;
+        }
+    }
+
+    /// <summary>One-shot SMTP smoke test driven by the
+    /// /admin/settings "Send test" button. Builds a short-lived
+    /// SmtpClient from the supplied config (does NOT touch the
+    /// singleton's <see cref="_smtpClient"/>), sends a single plain-
+    /// text message, and reports the outcome. The caller is
+    /// responsible for resolving the plaintext password — forms
+    /// arrive with operator-typed plaintext; the controller falls
+    /// back to <see cref="DecryptPassword"/> on the stored value
+    /// when the form's password field is blank.</summary>
+    public async Task<(bool Ok, string? Error)> TestSendAsync(
+        EmailConfig config, string passwordPlain, string recipient, CancellationToken token = default)
+    {
+        if (string.IsNullOrWhiteSpace(config.SenderAddress) ||
+            string.IsNullOrWhiteSpace(config.Smtp?.Host) || config.Smtp.Port <= 0)
+            return (false, "SMTP host, port and sender address are required");
+
+        try
+        {
+            using var client = BuildSmtpClient(config);
+            await client.ConnectAsync(config.Smtp.Host, config.Smtp.Port, cancellationToken: token);
+
+            if (!string.IsNullOrEmpty(config.UserName))
+                await client.AuthenticateAsync(config.UserName, passwordPlain, token);
+
+            var senderName = string.IsNullOrWhiteSpace(config.SenderName) ? "GZCTF" : config.SenderName;
+            using var msg = new MimeMessage();
+            msg.From.Add(new MailboxAddress(senderName, config.SenderAddress));
+            msg.To.Add(MailboxAddress.Parse(recipient));
+            msg.Subject = "GZCTF SMTP test";
+            msg.Body = new TextPart(TextFormat.Plain)
+            {
+                Text = "This is a test message sent from /admin/settings. SMTP delivery is working."
+            };
+
+            await client.SendAsync(msg, token);
+            await client.DisconnectAsync(true, token);
+            return (true, null);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
         }
     }
 
@@ -227,7 +309,7 @@ public sealed class MailSender : IMailSender, IDisposable
         try
         {
             await client.ConnectAsync(_options.Smtp.Host, _options.Smtp.Port, cancellationToken: token);
-            await client.AuthenticateAsync(_options.UserName, _options.Password, token);
+            await client.AuthenticateAsync(_options.UserName, DecryptPassword(_options.Password), token);
 
             foreach (var (userName, email, resetLink) in list)
             {
@@ -341,7 +423,7 @@ public sealed class MailSender : IMailSender, IDisposable
                         cancellationToken: _cancellationToken);
 
                 if (!_smtpClient.IsAuthenticated)
-                    await _smtpClient.AuthenticateAsync(_options!.UserName, _options.Password,
+                    await _smtpClient.AuthenticateAsync(_options!.UserName, DecryptPassword(_options.Password),
                         _cancellationToken);
 
                 while (_mailQueue.TryDequeue(out var content))

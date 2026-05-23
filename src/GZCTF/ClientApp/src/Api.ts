@@ -427,6 +427,13 @@ export interface EmailConfig {
   isConfigured?: boolean;
 }
 
+/** Body for POST /api/admin/email/test — drives the "Send test"
+ *  button on /admin/settings → Email. Nothing is persisted server-side. */
+export interface EmailTestModel {
+  config: EmailConfig;
+  recipient: string;
+}
+
 export interface SmtpConfig {
   host?: string;
   port?: number;
@@ -4029,6 +4036,23 @@ export class Api<
       this.request<void, RequestResponse>({
         path: `/api/admin/config`,
         method: "PUT",
+        body: data,
+        type: ContentType.Json,
+        ...params,
+      }),
+
+    /**
+     * @description Send a test email using the supplied SMTP config (does not persist anything). Used by the "Send test" button on /admin/settings → Email.
+     *
+     * @tags Admin
+     * @name AdminTestEmail
+     * @summary Send a test email to verify SMTP configuration
+     * @request POST:/api/admin/email/test
+     */
+    adminTestEmail: (data: EmailTestModel, params: RequestParams = {}) =>
+      this.request<void, RequestResponse>({
+        path: `/api/admin/email/test`,
+        method: "POST",
         body: data,
         type: ContentType.Json,
         ...params,

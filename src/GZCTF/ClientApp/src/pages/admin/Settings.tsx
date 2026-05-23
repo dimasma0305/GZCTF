@@ -25,6 +25,7 @@ import { mdiCheck, mdiContentSaveOutline, mdiRestore, mdiAlert } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import { FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { showNotification } from '@mantine/notifications'
 import { ColorPreview } from '@Components/ColorPreview'
 import { LogoBox } from '@Components/LogoBox'
 import { AdminPage } from '@Components/admin/AdminPage'
@@ -59,6 +60,10 @@ const Configs: FC = () => {
   const [email, setEmail] = useState<EmailConfig | null>()
   const [captcha, setCaptcha] = useState<CaptchaConfig | null>()
   const [registry, setRegistry] = useState<RegistryConfig | null>()
+  // Local-only state for the "Send test email" button — never
+  // persisted, never round-tripped through the Save flow.
+  const [testRecipient, setTestRecipient] = useState('')
+  const [testing, setTesting] = useState(false)
   const [color, setColor] = useState<string | undefined | null>(globalConfig?.customTheme)
   const [logoFile, setLogoFile] = useState<File | null>(null)
 
@@ -97,6 +102,24 @@ const Configs: FC = () => {
       showErrorMsg(e, t)
     } finally {
       setDisabled(false)
+    }
+  }
+
+  const handleSendTest = async () => {
+    if (!email || !testRecipient) return
+    setTesting(true)
+    try {
+      await api.admin.adminTestEmail({ config: email, recipient: testRecipient })
+      showNotification({
+        color: 'teal',
+        title: t('common.label.success'),
+        message: t('admin.content.settings.email.test_success', { recipient: testRecipient }),
+        icon: <Icon path={mdiCheck} size={1} />,
+      })
+    } catch (e) {
+      showErrorMsg(e, t)
+    } finally {
+      setTesting(false)
     }
   }
 
@@ -614,6 +637,28 @@ const Configs: FC = () => {
               })
             }
           />
+          <Group align="flex-end" gap="xs" wrap="nowrap">
+            <TextInput
+              style={{ flex: 1 }}
+              label={t('admin.content.settings.email.test_recipient.label')}
+              description={t('admin.content.settings.email.test_recipient.description')}
+              placeholder="you@example.com"
+              type="email"
+              disabled={disabled || testing}
+              value={testRecipient}
+              onChange={(e) => setTestRecipient(e.currentTarget.value)}
+            />
+            <Button
+              variant="default"
+              loading={testing}
+              disabled={
+                disabled || !testRecipient || !email?.smtp?.host || !email?.senderAddress
+              }
+              onClick={handleSendTest}
+            >
+              {t('admin.content.settings.email.test_button')}
+            </Button>
+          </Group>
         </Stack>
 
         {/* Captcha */}
