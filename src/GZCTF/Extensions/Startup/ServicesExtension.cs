@@ -38,6 +38,11 @@ internal static class ServicesExtension
             builder.AddConfig<HoneypotConfig>();
             builder.AddConfig<FlagEgressConfig>();
             builder.AddConfig<CheatDetectionConfig>();
+            // Registered so /admin/settings can DB-back these
+            // (existing appsettings.json values are still the
+            // initial-load source via the standard ConfigurationRoot).
+            builder.AddConfig<CaptchaConfig>();
+            builder.AddConfig<RegistryConfig>();
 
             builder.Services.Configure<RegistrySet<RegistryConfig>>(builder.Configuration.GetSection("Registries"));
 

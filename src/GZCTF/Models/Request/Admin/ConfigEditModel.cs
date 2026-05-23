@@ -26,4 +26,21 @@ public class ConfigEditModel
     /// Auto-build image-push destination
     /// </summary>
     public BuildRegistryConfig? BuildRegistry { get; set; }
+
+    /// <summary>
+    /// SMTP relay used for email verification / password reset.
+    /// Hot-reloadable via <see cref="MailSender"/>'s OptionsMonitor.
+    /// </summary>
+    public EmailConfig? Email { get; set; }
+
+    /// <summary>
+    /// Captcha provider for login / register flows.
+    /// </summary>
+    public CaptchaConfig? Captcha { get; set; }
+
+    /// <summary>
+    /// Pull credentials for a private image registry. Single-entry —
+    /// covers the common "we host private images on ghcr.io" case.
+    /// </summary>
+    public RegistryConfig? Registry { get; set; }
 }

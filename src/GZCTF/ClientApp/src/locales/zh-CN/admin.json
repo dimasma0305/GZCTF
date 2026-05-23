@@ -504,6 +504,78 @@
           "configured": "（已配置 — 留空以保留）"
         }
       },
+      "email": {
+        "title": "邮件 (SMTP)",
+        "description": "用于邮件验证 + 密码重置的 SMTP 中继。下一次发送时生效，无需重启服务。",
+        "smtp_host": {
+          "label": "SMTP 主机",
+          "description": "SMTP 中继的主机名，例如 smtp.gmail.com"
+        },
+        "smtp_port": {
+          "label": "SMTP 端口",
+          "description": "通常为 587（STARTTLS）或 465（TLS）。"
+        },
+        "sender_address": {
+          "label": "发件人地址",
+          "description": "邮件 From 头展示的地址，必须被 SMTP 中继允许。"
+        },
+        "sender_name": {
+          "label": "发件人名称",
+          "description": "显示名称，留空则使用平台名称。"
+        },
+        "username": {
+          "label": "用户名",
+          "description": "SMTP 中继的认证用户，通常等于发件人地址。"
+        },
+        "password": {
+          "label": "密码",
+          "description": "以 XOR 混淆存储。留空将保留当前值。",
+          "configured": "（已配置 — 留空以保留）"
+        },
+        "bypass_cert": {
+          "label": "跳过 TLS 证书验证",
+          "description": "仅在测试自签名 SMTP 时启用。"
+        }
+      },
+      "captcha": {
+        "title": "验证码",
+        "description": "登录 + 注册时的机器人保护。选 None 即关闭。",
+        "provider": {
+          "label": "提供商",
+          "description": "选择登录 + 注册表单使用的验证方式。",
+          "none": "None（关闭）"
+        },
+        "site_key": {
+          "label": "Site Key",
+          "description": "下发到浏览器的公开密钥。"
+        },
+        "secret_key": {
+          "label": "Secret Key",
+          "description": "服务端校验密钥。以 XOR 混淆存储，留空将保留当前值。",
+          "configured": "（已配置 — 留空以保留）"
+        },
+        "difficulty": {
+          "label": "PoW 难度（前导零位数）",
+          "description": "数值越大，浏览器提交时消耗越多 CPU。范围 8–48。"
+        }
+      },
+      "registry_pull": {
+        "title": "私有镜像仓库拉取凭证",
+        "description": "平台用于从私有镜像仓库拉取题目镜像的凭证（与上方推送用的 Build Registry 是分开的）。",
+        "server": {
+          "label": "服务器",
+          "description": "主机名（不含协议）。如 ghcr.io"
+        },
+        "username": {
+          "label": "用户名",
+          "description": "拉取账号（匿名拉取留空）。"
+        },
+        "password": {
+          "label": "密码 / PAT",
+          "description": "以 XOR 混淆存储。留空将保留当前值。",
+          "configured": "（已配置 — 留空以保留）"
+        }
+      },
       "platform": {
         "api_encryption": {
           "description": "加密部分敏感数据，如用户密码、flag",

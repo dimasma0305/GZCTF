@@ -71,10 +71,11 @@ public class AdminController(
         // always reload, ensure latest
         configService.ReloadConfig();
 
-        // For the build-registry block, blank the obfuscated password
-        // bytes before returning. The UI doesn't need them — it shows a
-        // "(configured)" placeholder via HasPassword and only sends a
-        // value back when the operator intentionally types one.
+        // For sections that carry secrets, blank the obfuscated bytes
+        // before returning. The UI doesn't need them — it shows a
+        // "(configured)" placeholder via HasPassword/HasSecretKey and
+        // only sends a value back when the operator intentionally
+        // types one.
         var buildRegistry = serviceProvider.GetRequiredService<IOptionsSnapshot<BuildRegistryConfig>>().Value;
         var safeBuildRegistry = new BuildRegistryConfig
         {
@@ -85,12 +86,47 @@ public class AdminController(
             Password = buildRegistry.HasPassword ? string.Empty : null,
         };
 
+        var email = serviceProvider.GetRequiredService<IOptionsSnapshot<EmailConfig>>().Value;
+        var safeEmail = new EmailConfig
+        {
+            UserName = email.UserName,
+            Password = email.HasPassword ? string.Empty : string.Empty,
+            SenderAddress = email.SenderAddress,
+            SenderName = email.SenderName,
+            Smtp = email.Smtp is null ? null : new SmtpConfig
+            {
+                Host = email.Smtp.Host,
+                Port = email.Smtp.Port,
+                BypassCertVerify = email.Smtp.BypassCertVerify,
+            },
+        };
+
+        var captcha = serviceProvider.GetRequiredService<IOptionsSnapshot<CaptchaConfig>>().Value;
+        var safeCaptcha = new CaptchaConfig
+        {
+            Provider = captcha.Provider,
+            SiteKey = captcha.SiteKey,
+            SecretKey = captcha.HasSecretKey ? string.Empty : null,
+            HashPow = captcha.HashPow,
+        };
+
+        var registry = serviceProvider.GetRequiredService<IOptionsSnapshot<RegistryConfig>>().Value;
+        var safeRegistry = new RegistryConfig
+        {
+            ServerAddress = registry.ServerAddress,
+            UserName = registry.UserName,
+            Password = registry.HasPassword ? string.Empty : null,
+        };
+
         ConfigEditModel config = new()
         {
             AccountPolicy = serviceProvider.GetRequiredService<IOptionsSnapshot<AccountPolicy>>().Value,
             GlobalConfig = serviceProvider.GetRequiredService<IOptionsSnapshot<GlobalConfig>>().Value,
             ContainerPolicy = serviceProvider.GetRequiredService<IOptionsSnapshot<ContainerPolicy>>().Value,
             BuildRegistry = safeBuildRegistry,
+            Email = safeEmail,
+            Captcha = safeCaptcha,
+            Registry = safeRegistry,
         };
 
         return Ok(config);
@@ -138,6 +174,60 @@ public class AdminController(
                 // profile as the existing RegistryConfig.Password
                 // handling, which never obfuscated either — call out
                 // in the operator docs.
+            }
+        }
+
+        // EmailConfig — same preserve-on-blank + XOR pattern as
+        // BuildRegistry. When the operator leaves the SMTP password
+        // field empty in /admin/settings, keep the stored value.
+        if (model.Email is { } emailModel)
+        {
+            if (string.IsNullOrEmpty(emailModel.Password))
+            {
+                var existing = serviceProvider.GetRequiredService<IOptionsSnapshot<EmailConfig>>().Value;
+                emailModel.Password = existing.Password;
+            }
+            else
+            {
+                var xorKey = configService.GetXorKey();
+                if (xorKey.Length > 0)
+                    emailModel.Password = Convert.ToBase64String(
+                        Codec.Xor(emailModel.Password.ToUTF8Bytes(), xorKey));
+            }
+        }
+
+        // CaptchaConfig — same shape, but the secret is `SecretKey`.
+        // SiteKey is public and saved as-is.
+        if (model.Captcha is { } captchaModel)
+        {
+            if (string.IsNullOrEmpty(captchaModel.SecretKey))
+            {
+                var existing = serviceProvider.GetRequiredService<IOptionsSnapshot<CaptchaConfig>>().Value;
+                captchaModel.SecretKey = existing.SecretKey;
+            }
+            else
+            {
+                var xorKey = configService.GetXorKey();
+                if (xorKey.Length > 0)
+                    captchaModel.SecretKey = Convert.ToBase64String(
+                        Codec.Xor(captchaModel.SecretKey.ToUTF8Bytes(), xorKey));
+            }
+        }
+
+        // RegistryConfig (private-image pull credentials).
+        if (model.Registry is { } registryModel)
+        {
+            if (string.IsNullOrEmpty(registryModel.Password))
+            {
+                var existing = serviceProvider.GetRequiredService<IOptionsSnapshot<RegistryConfig>>().Value;
+                registryModel.Password = existing.Password;
+            }
+            else
+            {
+                var xorKey = configService.GetXorKey();
+                if (xorKey.Length > 0)
+                    registryModel.Password = Convert.ToBase64String(
+                        Codec.Xor(registryModel.Password.ToUTF8Bytes(), xorKey));
             }
         }
 
