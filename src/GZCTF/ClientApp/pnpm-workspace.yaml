@@ -1,2 +1,13 @@
+# pnpm 11+ requires explicit per-package approval to run install scripts.
+# `onlyBuiltDependencies` alone now produces a fatal
+# `ERR_PNPM_IGNORED_BUILDS` if the listed dependency hasn't also been
+# explicitly approved here. esbuild needs to run its postinstall to
+# fetch its platform-specific native binary.
+allowBuilds:
+  esbuild: true
+
 onlyBuiltDependencies:
   - esbuild
+
+overrides:
+  canvas: "npm:dry-uninstall"
