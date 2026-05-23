@@ -195,9 +195,9 @@ provide: "./dist"`}
                         <Code block style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>
                           {`type: "DynamicContainer"
 container:
-  containerImage: "{{.slug}}:latest"
+  flagTemplate: "FLAG{ini_test_flag_[TEAM_HASH]}"
   exposePort: 8011
-  flagTemplate: "FLAG{ini_test_flag_[TEAM_HASH]}"`}
+  # containerImage omitted → platform auto-builds ./src/Dockerfile`}
                         </Code>
                       </Stack>
 

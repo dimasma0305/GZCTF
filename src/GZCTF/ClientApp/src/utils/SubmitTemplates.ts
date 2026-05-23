@@ -64,7 +64,6 @@ provide: "./dist"
 
 container:
   flagTemplate: "FLAG{ini_test_flag_[TEAM_HASH]}"
-  containerImage: "{{.slug}}:latest"
   memoryLimit: 512
   cpuCount: 3
   storageLimit: 512
