@@ -168,8 +168,20 @@ public class BuildRegistryConfig
     /// so the password input can show a "(configured)" placeholder
     /// without echoing the obfuscated bytes back to the operator.
     /// </summary>
+    /// <remarks>
+    /// Writable so <c>AdminController.GetConfigs</c> can set it
+    /// explicitly on its safe-copy response (the safe copy has
+    /// Password blanked for transport, so the computed fallback
+    /// would otherwise always evaluate false). When unset, falls
+    /// back to <c>!string.IsNullOrEmpty(Password)</c>.
+    /// </remarks>
+    private bool? _hasPassword;
     [AutoSaveIgnore]
-    public bool HasPassword => !string.IsNullOrEmpty(Password);
+    public bool HasPassword
+    {
+        get => _hasPassword ?? !string.IsNullOrEmpty(Password);
+        set => _hasPassword = value;
+    }
 
     /// <summary>
     /// True when the registry is wired up enough to attempt a push.
@@ -485,9 +497,16 @@ public class EmailConfig
     public string? SenderName { get; set; } = string.Empty;
     public SmtpConfig? Smtp { get; set; } = new();
 
-    /// <summary>UI surrogate — true when <see cref="Password"/> is set.</summary>
+    /// <summary>UI surrogate — true when <see cref="Password"/> is
+    /// set. Writable so <c>AdminController.GetConfigs</c> can carry
+    /// the real value across the transport-blanked safe copy.</summary>
+    private bool? _hasPassword;
     [AutoSaveIgnore]
-    public bool HasPassword => !string.IsNullOrEmpty(Password);
+    public bool HasPassword
+    {
+        get => _hasPassword ?? !string.IsNullOrEmpty(Password);
+        set => _hasPassword = value;
+    }
 
     /// <summary>UI surrogate — true when the minimum needed to send
     /// mail is present (host + sender address).</summary>
@@ -580,9 +599,15 @@ public class RegistryConfig
     public bool Valid => !string.IsNullOrEmpty(UserName) &&
                          !string.IsNullOrEmpty(Password);
 
-    /// <summary>UI surrogate — true when <see cref="Password"/> is set.</summary>
+    /// <summary>UI surrogate — true when <see cref="Password"/> is
+    /// set. Writable so the safe copy can carry the real value.</summary>
+    private bool? _hasPassword;
     [AutoSaveIgnore]
-    public bool HasPassword => !string.IsNullOrEmpty(Password);
+    public bool HasPassword
+    {
+        get => _hasPassword ?? !string.IsNullOrEmpty(Password);
+        set => _hasPassword = value;
+    }
 
     /// <summary>UI surrogate — server hostname is configured; auth
     /// fields may still be blank (anonymous pulls).</summary>
@@ -629,9 +654,16 @@ public class CaptchaConfig
     public string? SiteKey { get; set; }
     public HashPowConfig HashPow { get; set; } = new();
 
-    /// <summary>UI surrogate — true when <see cref="SecretKey"/> is set.</summary>
+    /// <summary>UI surrogate — true when <see cref="SecretKey"/> is
+    /// set. Writable so the safe copy can carry the real value
+    /// across the transport-blanked response.</summary>
+    private bool? _hasSecretKey;
     [AutoSaveIgnore]
-    public bool HasSecretKey => !string.IsNullOrEmpty(SecretKey);
+    public bool HasSecretKey
+    {
+        get => _hasSecretKey ?? !string.IsNullOrEmpty(SecretKey);
+        set => _hasSecretKey = value;
+    }
 }
 
 #endregion

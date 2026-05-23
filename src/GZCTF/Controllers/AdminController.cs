@@ -77,6 +77,11 @@ public class AdminController(
         // "(configured)" placeholder via HasPassword/HasSecretKey and
         // only sends a value back when the operator intentionally
         // types one.
+        // Safe copies blank the obfuscated secrets for transport but
+        // explicitly populate the HasX surrogates from the source —
+        // the computed fallback on the safe copy would always return
+        // false (its own Password is now empty), so the UI couldn't
+        // tell "no password set" from "password set, just hidden".
         var buildRegistry = serviceProvider.GetRequiredService<IOptionsSnapshot<BuildRegistryConfig>>().Value;
         var safeBuildRegistry = new BuildRegistryConfig
         {
@@ -85,6 +90,7 @@ public class AdminController(
             Namespace = buildRegistry.Namespace,
             Username = buildRegistry.Username,
             Password = buildRegistry.HasPassword ? string.Empty : null,
+            HasPassword = buildRegistry.HasPassword,
         };
 
         var email = serviceProvider.GetRequiredService<IOptionsSnapshot<EmailConfig>>().Value;
@@ -100,6 +106,7 @@ public class AdminController(
                 Port = email.Smtp.Port,
                 BypassCertVerify = email.Smtp.BypassCertVerify,
             },
+            HasPassword = email.HasPassword,
         };
 
         var captcha = serviceProvider.GetRequiredService<IOptionsSnapshot<CaptchaConfig>>().Value;
@@ -109,6 +116,7 @@ public class AdminController(
             SiteKey = captcha.SiteKey,
             SecretKey = captcha.HasSecretKey ? string.Empty : null,
             HashPow = captcha.HashPow,
+            HasSecretKey = captcha.HasSecretKey,
         };
 
         var registry = serviceProvider.GetRequiredService<IOptionsSnapshot<RegistryConfig>>().Value;
@@ -117,6 +125,7 @@ public class AdminController(
             ServerAddress = registry.ServerAddress,
             UserName = registry.UserName,
             Password = registry.HasPassword ? string.Empty : null,
+            HasPassword = registry.HasPassword,
         };
 
         ConfigEditModel config = new()
