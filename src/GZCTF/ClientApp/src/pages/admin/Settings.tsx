@@ -64,6 +64,7 @@ const Configs: FC = () => {
   // persisted, never round-tripped through the Save flow.
   const [testRecipient, setTestRecipient] = useState('')
   const [testing, setTesting] = useState(false)
+  const [testingCaptcha, setTestingCaptcha] = useState(false)
   const [color, setColor] = useState<string | undefined | null>(globalConfig?.customTheme)
   const [logoFile, setLogoFile] = useState<File | null>(null)
 
@@ -120,6 +121,24 @@ const Configs: FC = () => {
       showErrorMsg(e, t)
     } finally {
       setTesting(false)
+    }
+  }
+
+  const handleTestCaptcha = async () => {
+    if (!captcha) return
+    setTestingCaptcha(true)
+    try {
+      await api.admin.adminTestCaptcha({ config: captcha })
+      showNotification({
+        color: 'teal',
+        title: t('common.label.success'),
+        message: t('admin.content.settings.captcha.test_success'),
+        icon: <Icon path={mdiCheck} size={1} />,
+      })
+    } catch (e) {
+      showErrorMsg(e, t)
+    } finally {
+      setTestingCaptcha(false)
     }
   }
 
@@ -720,6 +739,21 @@ const Configs: FC = () => {
                 })
               }
             />
+          )}
+          {captcha?.provider && captcha.provider !== 'None' && (
+            <Group justify="space-between" gap="xs" wrap="nowrap" align="flex-end">
+              <Text size="xs" c="dimmed" style={{ flex: 1 }}>
+                {t('admin.content.settings.captcha.test_description')}
+              </Text>
+              <Button
+                variant="default"
+                loading={testingCaptcha}
+                disabled={disabled}
+                onClick={handleTestCaptcha}
+              >
+                {t('admin.content.settings.captcha.test_button')}
+              </Button>
+            </Group>
           )}
         </Stack>
 

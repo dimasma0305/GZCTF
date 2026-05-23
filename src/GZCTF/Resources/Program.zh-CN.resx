@@ -1088,6 +1088,9 @@
   <data name="Admin_EmailTestFailed" xml:space="preserve">
     <value>SMTP 测试失败：{0}</value>
   </data>
+  <data name="Admin_CaptchaTestFailed" xml:space="preserve">
+    <value>验证码测试失败：{0}</value>
+  </data>
   <data name="MailSender_ConnectedToSmtp" xml:space="preserve">
     <value>成功连接到 SMTP 服务器：{0}</value>
   </data>

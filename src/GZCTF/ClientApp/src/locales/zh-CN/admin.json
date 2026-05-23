@@ -563,7 +563,10 @@
         "difficulty": {
           "label": "PoW 难度（前导零位数）",
           "description": "数值越大，浏览器提交时消耗越多 CPU。范围 8–48。"
-        }
+        },
+        "test_button": "测试",
+        "test_success": "验证码配置已验证。",
+        "test_description": "使用配置的 SecretKey 调用 Cloudflare siteverify，确认其被接受（SiteKey 仅在浏览器端使用，不会被验证）。HashPow 没有可访问的远程端点，仅检查难度数值是否在允许范围。"
       },
       "registry_pull": {
         "title": "私有镜像仓库拉取凭证",

@@ -563,7 +563,10 @@
         "difficulty": {
           "label": "PoW difficulty (leading zero bits)",
           "description": "Higher = more browser CPU on form submit. Clamped 8–48."
-        }
+        },
+        "test_button": "Test",
+        "test_success": "Captcha configuration verified.",
+        "test_description": "Probes Cloudflare's siteverify with the configured SecretKey to confirm it's accepted (the SiteKey is browser-side and isn't checked). HashPow has no remote endpoint — the test just confirms the difficulty value is in range."
       },
       "registry_pull": {
         "title": "Private registry pull credentials",

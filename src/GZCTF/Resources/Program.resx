@@ -1085,6 +1085,9 @@
   <data name="Admin_EmailTestFailed" xml:space="preserve">
     <value>SMTP test failed: {0}</value>
   </data>
+  <data name="Admin_CaptchaTestFailed" xml:space="preserve">
+    <value>Captcha test failed: {0}</value>
+  </data>
   <data name="MailSender_ConnectedToSmtp" xml:space="preserve">
     <value>Successfully connected to SMTP server: {0}</value>
   </data>

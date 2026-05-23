@@ -315,6 +315,112 @@ public class AdminController(
     }
 
     /// <summary>
+    /// Verify captcha configuration
+    /// </summary>
+    /// <remarks>
+    /// Drives the "Test" button on /admin/settings → Captcha. For
+    /// Turnstile, probes Cloudflare's siteverify endpoint with the
+    /// configured SecretKey + a deliberately-bogus response token —
+    /// Cloudflare returns 'invalid-input-response' when the secret
+    /// itself is valid (success), or 'invalid-input-secret' /
+    /// 'missing-input-secret' when the secret is bad (failure). For
+    /// HashPow, returns 200 if the difficulty is in the supported
+    /// range (no remote service to probe). For 'None', returns 400.
+    /// Preserve-on-blank for SecretKey mirrors the Save flow.
+    /// </remarks>
+    /// <response code="200">Captcha config looks valid</response>
+    /// <response code="400">Captcha rejected the configuration; error text in the response body</response>
+    /// <response code="401">Unauthorized user</response>
+    /// <response code="403">Forbidden</response>
+    [RequireAdmin]
+    [HttpPost("Captcha/Test")]
+    [EnableRateLimiting(nameof(RateLimiter.LimitPolicy.Concurrency))]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> TestCaptcha([FromBody] CaptchaTestModel model, CancellationToken token)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Model_ValidationFailed)]));
+
+        switch (model.Config.Provider)
+        {
+            case CaptchaProvider.CloudflareTurnstile:
+                return await TestTurnstile(model.Config, token);
+            case CaptchaProvider.HashPow:
+                // Server-side puzzle solving is the only validation;
+                // the difficulty is the only knob and HashPowConfig
+                // already clamps it to [8, 48] in its property
+                // getter, so the worst the operator can do is set a
+                // value outside that range, which silently snaps to
+                // the bound on read. Nothing to fail.
+                return Ok();
+            case CaptchaProvider.None:
+            default:
+                return BadRequest(new RequestResponse(
+                    localizer[nameof(Resources.Program.Admin_CaptchaTestFailed),
+                        "captcha is disabled — nothing to test"]));
+        }
+    }
+
+    private async Task<IActionResult> TestTurnstile(CaptchaConfig config, CancellationToken token)
+    {
+        // Resolve the plaintext SecretKey. Empty form field → fall
+        // back to the stored DB value and XOR-decrypt. Non-empty →
+        // treat as the operator's typed plaintext.
+        var secretPlain = config.SecretKey;
+        if (string.IsNullOrEmpty(secretPlain))
+        {
+            var stored = serviceProvider.GetRequiredService<IOptionsSnapshot<CaptchaConfig>>().Value;
+            secretPlain = DecryptStoredPassword(stored.SecretKey, configService.GetXorKey());
+        }
+
+        if (string.IsNullOrWhiteSpace(secretPlain))
+            return BadRequest(new RequestResponse(
+                localizer[nameof(Resources.Program.Admin_CaptchaTestFailed), "SecretKey is required"]));
+
+        // Cloudflare siteverify: post the secret with a deliberately
+        // invalid response token. The error codes are how we tell a
+        // bad secret from a good secret + bad token.
+        // https://developers.cloudflare.com/turnstile/get-started/server-side-validation/#error-codes
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        var req = new TurnstileRequestModel
+        {
+            Secret = secretPlain,
+            Response = "test-token-from-admin-settings",
+            RemoteIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? string.Empty
+        };
+
+        try
+        {
+            var resp = await http.PostAsJsonAsync(
+                "https://challenges.cloudflare.com/turnstile/v0/siteverify", req, token);
+            var body = await resp.Content.ReadFromJsonAsync<TurnstileResponseModel>(token);
+
+            if (body is null)
+                return BadRequest(new RequestResponse(
+                    localizer[nameof(Resources.Program.Admin_CaptchaTestFailed),
+                        "Cloudflare returned no body"]));
+
+            // Real success is impossible here (we sent a bogus token).
+            // What we want is: success=false AND the error code points
+            // at the response, not the secret.
+            var bad = body.ErrorCodes
+                .Any(c => c is "invalid-input-secret" or "missing-input-secret" or "bad-request");
+            if (bad)
+                return BadRequest(new RequestResponse(
+                    localizer[nameof(Resources.Program.Admin_CaptchaTestFailed),
+                        $"Cloudflare rejected SecretKey: {string.Join(", ", body.ErrorCodes)}"]));
+
+            return Ok();
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new RequestResponse(
+                localizer[nameof(Resources.Program.Admin_CaptchaTestFailed), ex.Message]));
+        }
+    }
+
+    /// <summary>
     /// Change platform Logo
     /// </summary>
     /// <remarks>

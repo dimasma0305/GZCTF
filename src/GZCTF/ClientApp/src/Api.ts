@@ -434,6 +434,12 @@ export interface EmailTestModel {
   recipient: string;
 }
 
+/** Body for POST /api/admin/captcha/test — drives the "Test" button
+ *  on /admin/settings → Captcha. Nothing is persisted server-side. */
+export interface CaptchaTestModel {
+  config: CaptchaConfig;
+}
+
 export interface SmtpConfig {
   host?: string;
   port?: number;
@@ -4052,6 +4058,23 @@ export class Api<
     adminTestEmail: (data: EmailTestModel, params: RequestParams = {}) =>
       this.request<void, RequestResponse>({
         path: `/api/admin/email/test`,
+        method: "POST",
+        body: data,
+        type: ContentType.Json,
+        ...params,
+      }),
+
+    /**
+     * @description Verify captcha config without persisting it. Probes Cloudflare siteverify for Turnstile, range-checks difficulty for HashPow, refuses for None.
+     *
+     * @tags Admin
+     * @name AdminTestCaptcha
+     * @summary Verify captcha configuration
+     * @request POST:/api/admin/captcha/test
+     */
+    adminTestCaptcha: (data: CaptchaTestModel, params: RequestParams = {}) =>
+      this.request<void, RequestResponse>({
+        path: `/api/admin/captcha/test`,
         method: "POST",
         body: data,
         type: ContentType.Json,

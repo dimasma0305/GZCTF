@@ -1,7 +1,10 @@
 ﻿using System.Security.Cryptography;
+using System.Text;
+using GZCTF.Extensions;
 using GZCTF.Models.Internal;
 using GZCTF.Models.Request.Info;
 using GZCTF.Services.Cache;
+using GZCTF.Utils;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 
@@ -44,9 +47,16 @@ public class CaptchaServiceBase(IOptions<CaptchaConfig>? options) : ICaptchaServ
         Task.FromResult(true);
 }
 
-public sealed class CloudflareTurnstile(IOptions<CaptchaConfig>? options) : CaptchaServiceBase(options)
+public sealed class CloudflareTurnstile(IOptions<CaptchaConfig>? options, IConfiguration configuration)
+    : CaptchaServiceBase(options)
 {
     private readonly HttpClient _httpClient = new();
+
+    /// <summary>XOR key used to reverse the obfuscation written by
+    /// <c>AdminController.UpdateConfigs</c> at /admin/settings save
+    /// time. Captured at construction since the singleton can't take
+    /// a scoped service.</summary>
+    private readonly byte[] _xorKey = configuration["XorKey"]?.ToUTF8Bytes() ?? [];
 
     public override async Task<bool> VerifyAsync(ModelWithCaptcha model, HttpContext context,
         CancellationToken token = default)
@@ -61,7 +71,7 @@ public sealed class CloudflareTurnstile(IOptions<CaptchaConfig>? options) : Capt
 
         TurnstileRequestModel req = new()
         {
-            Secret = Config.SecretKey,
+            Secret = DecryptSecretKey(Config.SecretKey, _xorKey),
             Response = model.Challenge,
             RemoteIp = ip.ToString()
         };
@@ -72,6 +82,25 @@ public sealed class CloudflareTurnstile(IOptions<CaptchaConfig>? options) : Capt
         var res = await result.Content.ReadFromJsonAsync<TurnstileResponseModel>(token);
 
         return res is not null && res.Success;
+    }
+
+    /// <summary>Reverse the XOR + base64 obfuscation applied to
+    /// <see cref="CaptchaConfig.SecretKey"/> at save time. Falls back
+    /// to the raw stored value when XorKey is empty (test envs) or
+    /// the stored value isn't valid base64 (legacy plaintext).</summary>
+    internal static string DecryptSecretKey(string? stored, byte[] xorKey)
+    {
+        if (string.IsNullOrEmpty(stored)) return string.Empty;
+        if (xorKey.Length == 0) return stored;
+        try
+        {
+            return Encoding.UTF8.GetString(
+                Codec.Xor(Convert.FromBase64String(stored), xorKey));
+        }
+        catch
+        {
+            return stored;
+        }
     }
 }
 
