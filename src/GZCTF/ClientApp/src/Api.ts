@@ -440,6 +440,23 @@ export interface CaptchaTestModel {
   config: CaptchaConfig;
 }
 
+/** Body returned by GET /api/admin/MyIp — drives the "Check my IP"
+ *  diagnostic on /admin/settings → Diagnostics. */
+export interface MyIpInfoModel {
+  /** The IP gzctf sees post-ForwardedHeaders middleware. */
+  detectedIp: string;
+  /** Raw TCP source IP of the request (equals detectedIp when no
+   *  proxy rewrite happened). */
+  rawConnectionIp: string;
+  /** Verbatim X-Forwarded-For header value (empty if not sent). */
+  forwardedFor: string;
+  /** True iff the upstream proxy's IP was in TrustedNetworks and
+   *  the X-Forwarded-For rewrite was actually applied. */
+  proxyTrusted: boolean;
+  /** Trusted network CIDRs from the live ForwardedOptions config. */
+  trustedNetworks: string[];
+}
+
 export interface SmtpConfig {
   host?: string;
   port?: number;
@@ -4078,6 +4095,22 @@ export class Api<
         method: "POST",
         body: data,
         type: ContentType.Json,
+        ...params,
+      }),
+
+    /**
+     * @description Diagnose how gzctf is detecting the caller's IP. Returns detected IP, raw conn IP, X-Forwarded-For header, and the active TrustedNetworks list — lets operator verify the upstream proxy is configured correctly.
+     *
+     * @tags Admin
+     * @name AdminMyIp
+     * @summary Diagnose client-IP detection
+     * @request GET:/api/admin/MyIp
+     */
+    adminMyIp: (params: RequestParams = {}) =>
+      this.request<MyIpInfoModel, RequestResponse>({
+        path: `/api/admin/MyIp`,
+        method: "GET",
+        format: "json",
         ...params,
       }),
 

@@ -585,6 +585,18 @@
           "configured": "(configured — leave blank to keep)"
         }
       },
+      "diagnostics": {
+        "title": "Diagnostics",
+        "description": "Verify gzctf is detecting your real client IP. If the detected IP is the proxy's own container IP, X-Forwarded-For is being ignored — every team will appear to share one IP and rate-limits + the 'unique IP per team user' rule will break.",
+        "check_button": "Check my IP",
+        "detected_ip": "Detected client IP",
+        "raw_connection_ip": "Raw connection IP",
+        "forwarded_for": "X-Forwarded-For header",
+        "proxy_trusted_yes": "Proxy trusted — X-Forwarded-For honoured",
+        "proxy_trusted_no": "Proxy NOT trusted — X-Forwarded-For ignored. Check ForwardedOptions.TrustedNetworks in appsettings.json.",
+        "trusted_networks": "Currently trusted networks",
+        "no_header": "(no X-Forwarded-For header sent)"
+      },
       "platform": {
         "api_encryption": {
           "description": "Encrypt sensitive data in some APIs",

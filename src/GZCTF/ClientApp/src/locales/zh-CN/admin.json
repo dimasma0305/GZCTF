@@ -585,6 +585,18 @@
           "configured": "（已配置 — 留空以保留）"
         }
       },
+      "diagnostics": {
+        "title": "诊断",
+        "description": "检查 gzctf 是否能正确识别客户端真实 IP。若检测到的 IP 是反向代理自身容器 IP，说明 X-Forwarded-For 被忽略，所有团队会被视为来自同一 IP，限流和「同队不同 IP」规则都会失效。",
+        "check_button": "检查我的 IP",
+        "detected_ip": "检测到的客户端 IP",
+        "raw_connection_ip": "原始连接 IP",
+        "forwarded_for": "X-Forwarded-For 头",
+        "proxy_trusted_yes": "代理可信 — X-Forwarded-For 已生效",
+        "proxy_trusted_no": "代理不可信 — X-Forwarded-For 已被忽略。请检查 appsettings.json 中 ForwardedOptions.TrustedNetworks 配置。",
+        "trusted_networks": "当前受信任的网络",
+        "no_header": "（未发送 X-Forwarded-For 头）"
+      },
       "platform": {
         "api_encryption": {
           "description": "加密部分敏感数据，如用户密码、flag",

@@ -421,6 +421,59 @@ public class AdminController(
     }
 
     /// <summary>
+    /// Diagnose how gzctf is detecting the caller's IP
+    /// </summary>
+    /// <remarks>
+    /// Drives the "Check my IP" button on /admin/settings →
+    /// Diagnostics. Helps an operator confirm the ForwardedHeaders
+    /// middleware is configured correctly for their upstream proxy
+    /// (traefik / k8s ingress / their own nginx) — if the detected
+    /// IP comes back as the proxy's container IP, X-Forwarded-For
+    /// isn't being honoured (usually a TrustedNetworks problem) and
+    /// every team will appear to share one IP, breaking rate-limits
+    /// and the "unique IP per team user" rule.
+    /// </remarks>
+    /// <response code="200">IP diagnostics</response>
+    /// <response code="401">Unauthorized user</response>
+    /// <response code="403">Forbidden</response>
+    [RequireAdmin]
+    [HttpGet("MyIp")]
+    [ProducesResponseType(typeof(MyIpInfoModel), StatusCodes.Status200OK)]
+    public IActionResult MyIp()
+    {
+        // ForwardedHeaders middleware moves the original raw IP into
+        // HttpContext.Connection.RemoteIpAddress (the "detected" IP)
+        // ONLY when the connection came from a trusted proxy. The
+        // pre-rewrite raw value is stashed in Items["X-Original-For"]
+        // — present iff the middleware actually rewrote the address.
+        var detected = HttpContext.Connection.RemoteIpAddress?.ToString() ?? string.Empty;
+        var originalRaw = HttpContext.Items["X-Original-For"]?.ToString();
+        var headerValue = HttpContext.Request.Headers.TryGetValue("X-Forwarded-For", out var v)
+            ? v.ToString() : string.Empty;
+
+        // ForwardedOptions isn't registered as IOptions<> — only the
+        // .NET ForwardedHeadersOptions is (populated from this wrapper
+        // at startup via ToForwardedHeadersOptions). Read the wrapper
+        // straight from IConfiguration the same way ServicesExtension
+        // does so the operator sees what's actually configured.
+        var cfg = serviceProvider.GetRequiredService<IConfiguration>();
+        var fwd = cfg.GetSection(nameof(ForwardedOptions)).Get<ForwardedOptions>();
+        var trusted = new List<string>();
+        if (fwd?.TrustedNetworks is { } tn) trusted.AddRange(tn);
+        if (fwd?.KnownIPNetworks is { } kn) trusted.AddRange(kn);
+        if (fwd?.KnownNetworks is { } kn2) trusted.AddRange(kn2);
+
+        return Ok(new MyIpInfoModel
+        {
+            DetectedIp = detected,
+            RawConnectionIp = originalRaw ?? detected,
+            ForwardedFor = headerValue,
+            ProxyTrusted = originalRaw is not null,
+            TrustedNetworks = trusted
+        });
+    }
+
+    /// <summary>
     /// Change platform Logo
     /// </summary>
     /// <remarks>

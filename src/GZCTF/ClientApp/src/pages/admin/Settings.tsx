@@ -43,6 +43,7 @@ import api, {
   ContainerPolicy,
   EmailConfig,
   GlobalConfig,
+  MyIpInfoModel,
   RegistryConfig,
 } from '@Api'
 import misc from '@Styles/Misc.module.css'
@@ -65,6 +66,8 @@ const Configs: FC = () => {
   const [testRecipient, setTestRecipient] = useState('')
   const [testing, setTesting] = useState(false)
   const [testingCaptcha, setTestingCaptcha] = useState(false)
+  const [checkingIp, setCheckingIp] = useState(false)
+  const [ipInfo, setIpInfo] = useState<MyIpInfoModel | null>(null)
   const [color, setColor] = useState<string | undefined | null>(globalConfig?.customTheme)
   const [logoFile, setLogoFile] = useState<File | null>(null)
 
@@ -139,6 +142,18 @@ const Configs: FC = () => {
       showErrorMsg(e, t)
     } finally {
       setTestingCaptcha(false)
+    }
+  }
+
+  const handleCheckMyIp = async () => {
+    setCheckingIp(true)
+    try {
+      const { data } = await api.admin.adminMyIp()
+      setIpInfo(data)
+    } catch (e) {
+      showErrorMsg(e, t)
+    } finally {
+      setCheckingIp(false)
     }
   }
 
@@ -795,6 +810,59 @@ const Configs: FC = () => {
               onChange={(e) => setRegistry({ ...registry, password: e.currentTarget.value })}
             />
           </SimpleGrid>
+        </Stack>
+
+        {/* Diagnostics */}
+        <Stack gap="sm">
+          <Title order={2}>{t('admin.content.settings.diagnostics.title')}</Title>
+          <Text size="sm" c="dimmed">
+            {t('admin.content.settings.diagnostics.description')}
+          </Text>
+          <Divider />
+          <Group justify="flex-start">
+            <Button
+              variant="default"
+              loading={checkingIp}
+              disabled={disabled}
+              onClick={handleCheckMyIp}
+            >
+              {t('admin.content.settings.diagnostics.check_button')}
+            </Button>
+          </Group>
+          {ipInfo && (
+            <Stack gap={4}>
+              <Alert
+                color={ipInfo.proxyTrusted ? 'teal' : 'orange'}
+                icon={<Icon path={ipInfo.proxyTrusted ? mdiCheck : mdiAlert} size={1} />}
+                title={
+                  ipInfo.proxyTrusted
+                    ? t('admin.content.settings.diagnostics.proxy_trusted_yes')
+                    : t('admin.content.settings.diagnostics.proxy_trusted_no')
+                }
+              >
+                <Stack gap={2}>
+                  <Text size="sm">
+                    <b>{t('admin.content.settings.diagnostics.detected_ip')}:</b>{' '}
+                    <code>{ipInfo.detectedIp || '—'}</code>
+                  </Text>
+                  <Text size="sm">
+                    <b>{t('admin.content.settings.diagnostics.raw_connection_ip')}:</b>{' '}
+                    <code>{ipInfo.rawConnectionIp || '—'}</code>
+                  </Text>
+                  <Text size="sm">
+                    <b>{t('admin.content.settings.diagnostics.forwarded_for')}:</b>{' '}
+                    <code>
+                      {ipInfo.forwardedFor || t('admin.content.settings.diagnostics.no_header')}
+                    </code>
+                  </Text>
+                  <Text size="sm">
+                    <b>{t('admin.content.settings.diagnostics.trusted_networks')}:</b>{' '}
+                    <code>{ipInfo.trustedNetworks.join(', ') || '—'}</code>
+                  </Text>
+                </Stack>
+              </Alert>
+            </Stack>
+          )}
         </Stack>
       </Stack>
     </AdminPage>
