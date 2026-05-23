@@ -421,6 +421,15 @@
     "markdown_support": "Styling with Markdown is supported",
     "nothing_found": "Nothing found",
     "settings": {
+      "status": {
+        "configured": "configured",
+        "inactive": "off",
+        "attention": "attention"
+      },
+      "save_bar": {
+        "unsaved": "Unsaved changes",
+        "saved": "All changes saved"
+      },
       "account": {
         "allow_register": {
           "description": "Allow users to register new accounts",

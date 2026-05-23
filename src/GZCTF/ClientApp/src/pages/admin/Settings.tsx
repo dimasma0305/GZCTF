@@ -1,29 +1,50 @@
 import { generateColors } from '@mantine/colors-generator'
 import {
+  Affix,
+  Alert,
+  ActionIcon,
+  Badge,
+  Box,
   Button,
   ColorInput,
   Divider,
   FileInput,
   Grid,
   Group,
-  Text,
   InputBase,
+  NavLink,
   NumberInput,
+  Paper,
   PasswordInput,
   Select,
   SimpleGrid,
   Stack,
   Switch,
+  Text,
   TextInput,
+  ThemeIcon,
   Title,
-  useMantineTheme,
-  ActionIcon,
   Tooltip,
-  Alert,
+  useMantineTheme,
 } from '@mantine/core'
-import { mdiCheck, mdiContentSaveOutline, mdiRestore, mdiAlert } from '@mdi/js'
+import {
+  mdiAccountGroupOutline,
+  mdiAlert,
+  mdiCheck,
+  mdiContentSaveOutline,
+  mdiCubeOutline,
+  mdiDotsHorizontal,
+  mdiEmailOutline,
+  mdiHammerWrench,
+  mdiHeartPulse,
+  mdiInformationOutline,
+  mdiPackageVariantClosed,
+  mdiRestore,
+  mdiShieldCheckOutline,
+  mdiViewDashboardOutline,
+} from '@mdi/js'
 import { Icon } from '@mdi/react'
-import { FC, useEffect, useState } from 'react'
+import { FC, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { showNotification } from '@mantine/notifications'
 import { ColorPreview } from '@Components/ColorPreview'
@@ -68,6 +89,21 @@ const Configs: FC = () => {
   const [testingCaptcha, setTestingCaptcha] = useState(false)
   const [checkingIp, setCheckingIp] = useState(false)
   const [ipInfo, setIpInfo] = useState<MyIpInfoModel | null>(null)
+
+  // Sidebar nav + dirty tracking. The snapshot captured on initial
+  // load is the comparison baseline — when any field diverges from
+  // that snapshot, the sticky save bar lights up.
+  type SectionKey =
+    | 'platform'
+    | 'account'
+    | 'container'
+    | 'build_registry'
+    | 'email'
+    | 'captcha'
+    | 'registry_pull'
+    | 'diagnostics'
+  const [activeSection, setActiveSection] = useState<SectionKey>('platform')
+  const initialSnapshotRef = useRef<string | null>(null)
   const [color, setColor] = useState<string | undefined | null>(globalConfig?.customTheme)
   const [logoFile, setLogoFile] = useState<File | null>(null)
 
@@ -86,8 +122,97 @@ const Configs: FC = () => {
       setCaptcha(configs.captcha)
       setRegistry(configs.registry)
       setColor(configs.globalConfig?.customTheme)
+      // Stash baseline for dirty tracking. Identity (referential
+      // equality) isn't enough — the SWR cache may return the same
+      // object instance after a no-op revalidation, but we want the
+      // dirty flag to reset after a save anyway. Stringify wins.
+      initialSnapshotRef.current = JSON.stringify({
+        globalConfig: configs.globalConfig,
+        accountPolicy: configs.accountPolicy,
+        containerPolicy: configs.containerPolicy,
+        buildRegistry: configs.buildRegistry,
+        email: configs.email,
+        captcha: configs.captcha,
+        registry: configs.registry,
+      })
     }
   }, [configs])
+
+  // Recompute the current snapshot on every render — cheap (<10 small
+  // objects) and gets us a fresh dirty flag without per-field plumbing.
+  const currentSnapshot = JSON.stringify({
+    globalConfig: { ...globalConfig, customTheme: color ?? globalConfig?.customTheme },
+    accountPolicy,
+    containerPolicy,
+    buildRegistry,
+    email,
+    captcha,
+    registry,
+  })
+  const dirty = initialSnapshotRef.current !== null && currentSnapshot !== initialSnapshotRef.current
+
+  // Per-section status, surfaced as a coloured badge in the sidebar
+  // so an operator can see at a glance which surfaces are wired up.
+  type SectionStatus = 'configured' | 'inactive' | 'attention'
+  const statuses: Record<SectionKey, SectionStatus> = useMemo(() => {
+    const captchaConfigured =
+      captcha?.provider === 'CloudflareTurnstile'
+        ? !!(captcha?.siteKey && captcha?.hasSecretKey)
+        : captcha?.provider === 'HashPow'
+    return {
+      // Platform always has defaults; never "off"
+      platform: 'configured',
+      // Account is just toggles; surface "attention" when neither
+      // anti-cheat rule is on, to nudge operators
+      account:
+        accountPolicy?.requireUniqueIpPerTeamUser || accountPolicy?.requireUniqueFingerprintPerTeamUser
+          ? 'configured'
+          : 'attention',
+      container: 'configured',
+      build_registry: buildRegistry?.isConfigured ? 'configured' : 'inactive',
+      email: email?.isConfigured ? 'configured' : 'inactive',
+      captcha:
+        captcha?.provider === 'None' || !captcha?.provider
+          ? 'inactive'
+          : captchaConfigured
+            ? 'configured'
+            : 'attention',
+      registry_pull: registry?.isConfigured ? 'configured' : 'inactive',
+      diagnostics: 'configured',
+    }
+  }, [accountPolicy, buildRegistry, email, captcha, registry])
+
+  const navItems: { key: SectionKey; icon: string }[] = [
+    { key: 'platform', icon: mdiViewDashboardOutline },
+    { key: 'account', icon: mdiAccountGroupOutline },
+    { key: 'container', icon: mdiCubeOutline },
+    { key: 'email', icon: mdiEmailOutline },
+    { key: 'captcha', icon: mdiShieldCheckOutline },
+    { key: 'registry_pull', icon: mdiPackageVariantClosed },
+    { key: 'build_registry', icon: mdiHammerWrench },
+    { key: 'diagnostics', icon: mdiHeartPulse },
+  ]
+
+  const StatusBadge: FC<{ status: SectionStatus }> = ({ status }) => {
+    const colorMap: Record<SectionStatus, string> = {
+      configured: 'teal',
+      inactive: 'gray',
+      attention: 'orange',
+    }
+    return (
+      <Badge size="xs" variant="light" color={colorMap[status]}>
+        {t(`admin.content.settings.status.${status}`)}
+      </Badge>
+    )
+  }
+
+  const SectionHelp: FC<{ description: string }> = ({ description }) => (
+    <Tooltip label={description} multiline w={320} withArrow position="right">
+      <ThemeIcon variant="subtle" color="gray" size="sm" style={{ cursor: 'help' }}>
+        <Icon path={mdiInformationOutline} size={0.7} />
+      </ThemeIcon>
+    </Tooltip>
+  )
 
   const updateConfig = async (conf: ConfigEditModel) => {
     setDisabled(true)
@@ -174,41 +299,62 @@ const Configs: FC = () => {
 
   const colors = color && /^#[0-9A-F]{6}$/i.test(color) ? generateColors(color) : theme.colors.brand
 
+  const handleSave = () => {
+    updateConfig({
+      globalConfig: {
+        ...globalConfig,
+        customTheme: color && /^#[0-9A-F]{6}$/i.test(color) ? color : '',
+      },
+      accountPolicy,
+      containerPolicy,
+      buildRegistry,
+      email,
+      captcha,
+      registry,
+    })
+    setSaved(false)
+    setTimeout(() => {
+      setSaved(true)
+    }, 500)
+  }
+
   return (
     <AdminPage isLoading={!configs}>
-      <Button
-        className={misc.fixedButton}
-        __vars={{
-          '--fixed-right': 'calc(0.05 * (100vw - 70px - 2rem) + 1rem)',
-        }}
-        variant="filled"
-        size="md"
-        leftSection={<Icon path={saved ? mdiContentSaveOutline : mdiCheck} size={1} />}
-        onClick={() => {
-          updateConfig({
-            globalConfig: {
-              ...globalConfig,
-              customTheme: color && /^#[0-9A-F]{6}$/i.test(color) ? color : '',
-            },
-            accountPolicy,
-            containerPolicy,
-            buildRegistry,
-            email,
-            captcha,
-            registry,
-          })
-          setSaved(false)
-          setTimeout(() => {
-            setSaved(true)
-          }, 500)
-        }}
-        disabled={!saved || disabled}
-      >
-        {t('admin.button.save')}
-      </Button>
-      <Stack w="100%" gap="md" pb={120}>
+      <Box pb={100}>
+      <Grid>
+        {/* Sidebar nav */}
+        <Grid.Col span={{ base: 12, md: 3 }}>
+          <Paper p="xs" withBorder style={{ position: 'sticky', top: 16 }}>
+            <Stack gap={2}>
+              {navItems.map((item) => (
+                <NavLink
+                  key={item.key}
+                  active={activeSection === item.key}
+                  label={t(`admin.content.settings.${item.key}.title`)}
+                  leftSection={
+                    <ThemeIcon variant="light" size="sm" color={activeSection === item.key ? 'brand' : 'gray'}>
+                      <Icon path={item.icon} size={0.7} />
+                    </ThemeIcon>
+                  }
+                  rightSection={<StatusBadge status={statuses[item.key]} />}
+                  onClick={() => setActiveSection(item.key)}
+                  variant="filled"
+                />
+              ))}
+            </Stack>
+          </Paper>
+        </Grid.Col>
+
+        {/* Content pane */}
+        <Grid.Col span={{ base: 12, md: 9 }}>
+          <Paper p="lg" withBorder>
+            <Stack w="100%" gap="md">
+        {activeSection === 'platform' && (
         <Stack gap="sm">
-          <Title order={2}>{t('admin.content.settings.platform.title')}</Title>
+          <Group justify="space-between">
+            <Title order={2}>{t('admin.content.settings.platform.title')}</Title>
+            <SectionHelp description={t('admin.content.settings.platform.api_encryption.description')} />
+          </Group>
           <Divider />
           <Grid columns={4} align="center">
             <Grid.Col span={1}>
@@ -339,8 +485,13 @@ const Configs: FC = () => {
             </Grid.Col>
           </Grid>
         </Stack>
+        )}
+        {activeSection === 'account' && (
         <Stack gap="sm">
-          <Title order={2}>{t('admin.content.settings.account.title')}</Title>
+          <Group justify="space-between">
+            <Title order={2}>{t('admin.content.settings.account.title')}</Title>
+            <SectionHelp description={t('admin.content.settings.account.unique_ip_per_team_user.description')} />
+          </Group>
           <Divider />
           <SimpleGrid cols={4}>
             <Switch
@@ -462,8 +613,13 @@ const Configs: FC = () => {
             }}
           />
         </Stack>
+        )}
+        {activeSection === 'container' && (
         <Stack gap="sm">
-          <Title order={2}>{t('admin.content.settings.container.title')}</Title>
+          <Group justify="space-between">
+            <Title order={2}>{t('admin.content.settings.container.title')}</Title>
+            <SectionHelp description={t('admin.content.settings.container.default_lifetime.description')} />
+          </Group>
           <Divider />
           <SimpleGrid cols={4} className={misc.alignCenter}>
             <NumberInput
@@ -524,9 +680,13 @@ const Configs: FC = () => {
             />
           </SimpleGrid>
         </Stack>
-
+        )}
+        {activeSection === 'build_registry' && (
         <Stack gap="sm">
-          <Title order={2}>{t('admin.content.settings.build_registry.title')}</Title>
+          <Group justify="space-between">
+            <Title order={2}>{t('admin.content.settings.build_registry.title')}</Title>
+            <SectionHelp description={t('admin.content.settings.build_registry.description')} />
+          </Group>
           <Text size="sm" c="dimmed">
             {t('admin.content.settings.build_registry.description')}
           </Text>
@@ -591,9 +751,13 @@ const Configs: FC = () => {
           )}
         </Stack>
 
-        {/* Email (SMTP) */}
+        )}
+        {activeSection === 'email' && (
         <Stack gap="sm">
-          <Title order={2}>{t('admin.content.settings.email.title')}</Title>
+          <Group justify="space-between">
+            <Title order={2}>{t('admin.content.settings.email.title')}</Title>
+            <SectionHelp description={t('admin.content.settings.email.description')} />
+          </Group>
           <Text size="sm" c="dimmed">
             {t('admin.content.settings.email.description')}
           </Text>
@@ -695,9 +859,13 @@ const Configs: FC = () => {
           </Group>
         </Stack>
 
-        {/* Captcha */}
+        )}
+        {activeSection === 'captcha' && (
         <Stack gap="sm">
-          <Title order={2}>{t('admin.content.settings.captcha.title')}</Title>
+          <Group justify="space-between">
+            <Title order={2}>{t('admin.content.settings.captcha.title')}</Title>
+            <SectionHelp description={t('admin.content.settings.captcha.description')} />
+          </Group>
           <Text size="sm" c="dimmed">
             {t('admin.content.settings.captcha.description')}
           </Text>
@@ -772,9 +940,13 @@ const Configs: FC = () => {
           )}
         </Stack>
 
-        {/* Private registry pull credentials */}
+        )}
+        {activeSection === 'registry_pull' && (
         <Stack gap="sm">
-          <Title order={2}>{t('admin.content.settings.registry_pull.title')}</Title>
+          <Group justify="space-between">
+            <Title order={2}>{t('admin.content.settings.registry_pull.title')}</Title>
+            <SectionHelp description={t('admin.content.settings.registry_pull.description')} />
+          </Group>
           <Text size="sm" c="dimmed">
             {t('admin.content.settings.registry_pull.description')}
           </Text>
@@ -812,9 +984,13 @@ const Configs: FC = () => {
           </SimpleGrid>
         </Stack>
 
-        {/* Diagnostics */}
+        )}
+        {activeSection === 'diagnostics' && (
         <Stack gap="sm">
-          <Title order={2}>{t('admin.content.settings.diagnostics.title')}</Title>
+          <Group justify="space-between">
+            <Title order={2}>{t('admin.content.settings.diagnostics.title')}</Title>
+            <SectionHelp description={t('admin.content.settings.diagnostics.description')} />
+          </Group>
           <Text size="sm" c="dimmed">
             {t('admin.content.settings.diagnostics.description')}
           </Text>
@@ -864,7 +1040,48 @@ const Configs: FC = () => {
             </Stack>
           )}
         </Stack>
-      </Stack>
+        )}
+            </Stack>
+          </Paper>
+        </Grid.Col>
+      </Grid>
+      </Box>
+
+      {/* Sticky save bar — only fires the save flow; dirty
+         tracking lights the indicator when any field diverges
+         from the snapshot captured at first load. */}
+      <Affix position={{ bottom: 16, left: '50%' }} style={{ transform: 'translateX(-50%)', zIndex: 100 }}>
+        <Paper shadow="md" radius="md" p="sm" withBorder>
+          <Group gap="md" align="center">
+            <Group gap={6}>
+              <Box
+                w={8}
+                h={8}
+                style={{
+                  borderRadius: '50%',
+                  background: dirty ? 'var(--mantine-color-orange-5)' : 'var(--mantine-color-teal-5)',
+                }}
+              />
+              <Text size="sm" c={dirty ? 'orange' : 'dimmed'}>
+                {dirty
+                  ? t('admin.content.settings.save_bar.unsaved')
+                  : t('admin.content.settings.save_bar.saved')}
+              </Text>
+            </Group>
+            <Button
+              size="sm"
+              variant="filled"
+              leftSection={
+                <Icon path={!saved ? mdiDotsHorizontal : dirty ? mdiContentSaveOutline : mdiCheck} size={0.9} />
+              }
+              onClick={handleSave}
+              disabled={!saved || disabled || !dirty}
+            >
+              {t('admin.button.save')}
+            </Button>
+          </Group>
+        </Paper>
+      </Affix>
     </AdminPage>
   )
 }

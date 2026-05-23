@@ -421,6 +421,15 @@
     "markdown_support": "支持 Markdown 语法",
     "nothing_found": "什么都没有找到",
     "settings": {
+      "status": {
+        "configured": "已配置",
+        "inactive": "未启用",
+        "attention": "需关注"
+      },
+      "save_bar": {
+        "unsaved": "有未保存的更改",
+        "saved": "所有更改已保存"
+      },
       "account": {
         "allow_register": {
           "description": "是否允许用户注册新账户",
