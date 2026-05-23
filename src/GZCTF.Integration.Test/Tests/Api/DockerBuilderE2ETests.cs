@@ -143,10 +143,6 @@ public class DockerBuilderE2ETests(GZCTFApplicationFactory factory, ITestOutputH
         // namespace so the cleanup pass scoops it.
         var repository = $"gzctf-auto/{game.Id}/{slug}";
         var staleTag = $"{repository}:deadbeef0000";
-        using (var http = new HttpClient(new SocketsHttpHandler())
-        {
-            BaseAddress = new Uri("http://localhost"),
-        })
         using (var docker = new DockerClientConfiguration().CreateClient())
         {
             // Pull alpine first so we have a real image to tag.

@@ -245,7 +245,8 @@ public class GitPushBackEndToEndTests(GZCTFApplicationFactory factory, ITestOutp
             // pusher; corrupting HEAD on disk is the closest deterministic
             // analog. CommitAndPushAsync runs SyncAsync first which does
             // fetch + reset --hard, recovering any local damage.
-            var repoDir = $"/app/repos/binding/{bindingId}";
+            var repoDir = Path.Combine(GZCTF.Services.Transfer.GitRepoSyncService.RepoRoot,
+                "binding", bindingId.ToString());
             if (Directory.Exists(repoDir))
             {
                 // Write a junk file at the yaml's target path that doesn't
