@@ -302,18 +302,21 @@
       "rejected": "File type or size not accepted."
     },
     "example": {
-      "title": "Example archive layout & challenge.yml",
-      "intro": "Pack one directory containing your challenge.yml at the root. dist/ is for files players download; src/ is for the server-side bits the platform builds.",
-      "attachment_title": "Attachment-only challenge",
-      "attachment_desc": "Players just download a file — no server-side container.",
-      "container_title": "Container challenge with Dockerfile",
-      "container_desc": "Platform auto-builds the image from src/Dockerfile and runs it per team.",
+      "title": "Challenge templates",
+      "intro": "Pick the type that matches your challenge and download the template. Edit the files, zip the folder, then upload below.",
+      "static_attachment_title": "Static Attachment",
+      "static_attachment_desc": "Files-only challenge. Players download whatever you put in dist/; flag is matched server-side from the flags: list. Use for crypto, reverse, misc, anything that doesn't need a live server.",
+      "dynamic_container_title": "Dynamic Container",
+      "dynamic_container_desc": "A separate container per team, each with a unique flag injected via the GZCTF_FLAG environment variable. Prevents flag-sharing.",
+      "download_template": "Download template",
       "tips_title": "Notes",
       "tips": {
         "value_ignored": "value: in the YAML is ignored — the admin sets the score after review.",
         "visible_ignored": "visible: in the YAML is ignored — admin chooses when to enable.",
         "review_queue": "Submissions sit in the admin review queue; they are NOT live until approved.",
-        "template_image": "{{.slug}}:latest is fine — if src/Dockerfile exists the platform builds it; otherwise the image is treated as a registry tag.",
+        "template_image": "For container types, omit containerImage entirely — the platform auto-builds ./src/Dockerfile. Only set it if you want to override (e.g. \"ghcr.io/...\" for an already-published image).",
+        "dynamic_flag_env": "For Dynamic Container, the platform sets the GZCTF_FLAG env var inside each team's container. Reference it from src/run.sh (the template's run.sh shows the pattern); never hard-code a flag.",
+        "solver_folder": "Put a working solver under solver/ so admins (and your future self) can verify the challenge still works after edits.",
         "size_cap": "Archive must be ≤ 64 MB. Single challenge per archive."
       }
     },

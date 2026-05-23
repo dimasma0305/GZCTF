@@ -205,6 +205,19 @@ public sealed class ChallengeImportService(
         if (!Enum.TryParse<ChallengeType>(model.Type ?? "", true, out var type))
             return new(OutcomeKind.Skipped, $"Unknown challenge type '{model.Type}'");
 
+        // Shape-check for user-submitted archives (admin imports +
+        // binding scans are trusted and skipped). Surfaces friendly
+        // errors instead of letting a half-broken submission land in
+        // the review queue. See ValidateSubmissionShape for the rules.
+        if (!opts.AutoApprove)
+        {
+            var problems = ValidateSubmissionShape(packageDir, type, model);
+            if (problems.Count > 0)
+                return new(OutcomeKind.Skipped,
+                    "Submission rejected — fix the following and re-upload:\n  - "
+                    + string.Join("\n  - ", problems));
+        }
+
         // Decide what build intent this challenge implies — distinct
         // from "what status should we set right now". We resolve before
         // touching the DB so the persisted state is internally
@@ -326,6 +339,81 @@ public sealed class ChallengeImportService(
                 $"'{model.Name}': Dockerfile not found at '{image}'.");
 
         return new(kind, null);
+    }
+
+    /// <summary>
+    /// Cheap policy check for user-submitted challenge archives. The
+    /// goal is "did the user follow the template?", not security —
+    /// the path-traversal + bomb caps in the extractors do that.
+    /// Surfacing these problems early gives the submitter a clear
+    /// "fix and re-upload" message instead of leaving the admin to
+    /// figure out why their review queue is full of half-built
+    /// challenges.
+    ///
+    /// <para>Rules — all intentionally minimal:</para>
+    /// <list type="bullet">
+    ///   <item>A <c>solver/</c> directory must exist somewhere under
+    ///   the package, with at least one non-empty file. We don't try
+    ///   to RUN it (sandboxing is a separate slice); we just require
+    ///   evidence the author has a working solution to hand to admins
+    ///   for verification.</item>
+    ///   <item>At least one flag source must be declared:
+    ///   <c>flags:</c> for static challenges, <c>flagTemplate:</c> for
+    ///   dynamic ones. A challenge with neither isn't gradable.</item>
+    ///   <item>Container types need either a buildable Dockerfile in
+    ///   the conventional spot (<c>./src/Dockerfile</c> or
+    ///   <c>./Dockerfile</c>) OR an explicit registry image — we
+    ///   reuse <see cref="ResolveBuildIntent"/> for this check.</item>
+    /// </list>
+    ///
+    /// <para>Admin-imported challenges and binding-scanned ones bypass
+    /// this entirely (callers pass <c>AutoApprove: true</c>).</para>
+    /// </summary>
+    internal static IReadOnlyList<string> ValidateSubmissionShape(
+        string packageDir, ChallengeType type, ChallengeYamlModel model)
+    {
+        var problems = new List<string>();
+
+        // 1. solver/ exists with at least one non-empty file.
+        var solverDirs = Directory.EnumerateDirectories(packageDir, "solver", SearchOption.AllDirectories)
+            .ToList();
+        bool hasSolverFiles = false;
+        foreach (var dir in solverDirs)
+        {
+            foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    if (new FileInfo(f).Length > 0) { hasSolverFiles = true; break; }
+                }
+                catch { /* skip unreadable */ }
+            }
+            if (hasSolverFiles) break;
+        }
+        if (!hasSolverFiles)
+            problems.Add("Missing a working solver. Add a non-empty file under solver/ "
+                + "(e.g. solver/solve.py) so admins can verify the challenge.");
+
+        // 2. Flag source declared.
+        var hasStaticFlags = model.Flags is { Count: > 0 }
+            && model.Flags.Any(f => !string.IsNullOrWhiteSpace(f));
+        var hasFlagTemplate =
+            !string.IsNullOrWhiteSpace(model.Container?.FlagTemplate)
+            || !string.IsNullOrWhiteSpace(model.FlagTemplate);
+        if (!hasStaticFlags && !hasFlagTemplate)
+            problems.Add("No flag declared. Add either a `flags:` list (static) "
+                + "or a `flagTemplate:` field under `container:` (dynamic).");
+
+        // 3. Container types need a buildable shape.
+        if (type.IsContainer())
+        {
+            var intent = ResolveBuildIntent(type, model.Container?.ContainerImage?.Trim(), packageDir);
+            if (intent.Kind == BuildIntentKind.MissingDockerfile)
+                problems.Add(intent.Diagnostic
+                    ?? "Container type declared but no Dockerfile found at ./src/Dockerfile or ./Dockerfile.");
+        }
+
+        return problems;
     }
 
     private enum BuildIntentKind { None, NotApplicable, MissingDockerfile, BuildNeeded }
@@ -661,8 +749,78 @@ public sealed class ChallengeImportService(
     }
 
     /// <summary>
+    /// Hard ceiling on total bytes written to disk by a single archive
+    /// extraction. The upload itself is already capped (64 MB via
+    /// <c>[RequestSizeLimit]</c>), but a malicious .tar.gz with a high
+    /// compression ratio (e.g. sparse zeros) can decompress to many
+    /// gigabytes — enough to fill <c>/tmp</c> and DoS the host. 1 GB is
+    /// well above any legitimate challenge archive (the largest seen so
+    /// far is ~120 MB) but small enough that even a worst-case bomb
+    /// terminates before disk pressure becomes a problem.
+    /// </summary>
+    internal const long MaxExtractedBytes = 1024L * 1024 * 1024;
+
+    /// <summary>
+    /// <see cref="Stream"/> wrapper that forwards writes to an inner
+    /// stream while tracking a shared running total and throwing once
+    /// the cap is exceeded. Used to defuse decompression-bomb archives:
+    /// <see cref="GZipStream"/> + <see cref="ZipArchiveEntry.Open"/> both
+    /// stream uncompressed bytes one chunk at a time, so wrapping the
+    /// destination <see cref="FileStream"/> trips the limit at the point
+    /// the bomb would actually start consuming disk — before the rest of
+    /// the archive is even read.
+    /// </summary>
+    private sealed class LimitedWriteStream(Stream inner, ExtractCounter counter) : Stream
+    {
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => inner.Length;
+        public override long Position { get => inner.Position; set => throw new NotSupportedException(); }
+        public override void Flush() => inner.Flush();
+        public override Task FlushAsync(CancellationToken ct) => inner.FlushAsync(ct);
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            counter.Add(count);
+            inner.Write(buffer, offset, count);
+        }
+
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default)
+        {
+            counter.Add(buffer.Length);
+            await inner.WriteAsync(buffer, ct);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) inner.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
+    /// <summary>Shared mutable counter passed into per-entry wrappers.</summary>
+    private sealed class ExtractCounter
+    {
+        private long _total;
+        public void Add(int bytes)
+        {
+            _total += bytes;
+            if (_total > MaxExtractedBytes)
+                throw new InvalidOperationException(
+                    $"Archive exceeds the {MaxExtractedBytes / (1024 * 1024)} MB extracted-size cap " +
+                    "(likely a decompression bomb).");
+        }
+    }
+
+    /// <summary>
     /// Extracts a gzipped tar stream into <paramref name="workDir"/>,
     /// rejecting any entry whose normalized path escapes the work dir.
+    /// Aborts if the total uncompressed bytes exceed
+    /// <see cref="MaxExtractedBytes"/>.
     /// </summary>
     internal static async Task ExtractTarballStreamAsync(Stream tarGz, string workDir, CancellationToken token)
     {
@@ -670,6 +828,7 @@ public sealed class ChallengeImportService(
         await using var tar = new TarReader(gz);
 
         var canonical = Path.GetFullPath(workDir) + Path.DirectorySeparatorChar;
+        var counter = new ExtractCounter();
 
         while (await tar.GetNextEntryAsync(cancellationToken: token) is { } entry)
         {
@@ -691,8 +850,9 @@ public sealed class ChallengeImportService(
                 case TarEntryType.V7RegularFile:
                     Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
                     await using (var fs = File.Create(dest))
+                    await using (var limited = new LimitedWriteStream(fs, counter))
                         if (entry.DataStream is not null)
-                            await entry.DataStream.CopyToAsync(fs, token);
+                            await entry.DataStream.CopyToAsync(limited, token);
                     break;
                 // SymbolicLink / HardLink / others: deliberately skipped.
             }
@@ -701,12 +861,14 @@ public sealed class ChallengeImportService(
 
     /// <summary>
     /// Extracts a zip stream into <paramref name="workDir"/> with the same
-    /// path-escape guard the tar extractor uses.
+    /// path-escape guard the tar extractor uses, plus the shared
+    /// decompression-bomb cap (<see cref="MaxExtractedBytes"/>).
     /// </summary>
     internal static async Task ExtractZipStreamAsync(Stream zipStream, string workDir, CancellationToken token)
     {
         using var zip = new ZipArchive(zipStream, ZipArchiveMode.Read, leaveOpen: true);
         var canonical = Path.GetFullPath(workDir) + Path.DirectorySeparatorChar;
+        var counter = new ExtractCounter();
 
         foreach (var entry in zip.Entries)
         {
@@ -727,7 +889,8 @@ public sealed class ChallengeImportService(
             Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
             await using var src = entry.Open();
             await using var fs = File.Create(dest);
-            await src.CopyToAsync(fs, token);
+            await using var limited = new LimitedWriteStream(fs, counter);
+            await src.CopyToAsync(limited, token);
         }
     }
 
