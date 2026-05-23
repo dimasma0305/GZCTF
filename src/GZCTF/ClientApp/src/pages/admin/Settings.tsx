@@ -12,7 +12,6 @@ import {
   Grid,
   Group,
   InputBase,
-  NavLink,
   NumberInput,
   Paper,
   PasswordInput,
@@ -20,6 +19,7 @@ import {
   SimpleGrid,
   Stack,
   Switch,
+  Tabs,
   Text,
   TextInput,
   ThemeIcon,
@@ -320,35 +320,30 @@ const Configs: FC = () => {
 
   return (
     <AdminPage isLoading={!configs}>
-      <Box pb={100}>
-      <Grid>
-        {/* Sidebar nav */}
-        <Grid.Col span={{ base: 12, md: 3 }}>
-          <Paper p="xs" withBorder style={{ position: 'sticky', top: 16 }}>
-            <Stack gap={2}>
-              {navItems.map((item) => (
-                <NavLink
-                  key={item.key}
-                  active={activeSection === item.key}
-                  label={t(`admin.content.settings.${item.key}.title`)}
-                  leftSection={
-                    <ThemeIcon variant="light" size="sm" color={activeSection === item.key ? 'brand' : 'gray'}>
-                      <Icon path={item.icon} size={0.7} />
-                    </ThemeIcon>
-                  }
-                  rightSection={<StatusBadge status={statuses[item.key]} />}
-                  onClick={() => setActiveSection(item.key)}
-                  variant="filled"
-                />
-              ))}
-            </Stack>
-          </Paper>
-        </Grid.Col>
-
-        {/* Content pane */}
-        <Grid.Col span={{ base: 12, md: 9 }}>
-          <Paper p="lg" withBorder>
-            <Stack w="100%" gap="md">
+      <Group wrap="nowrap" justify="space-between" align="flex-start" w="100%" pb={100}>
+        <Tabs
+          orientation="vertical"
+          value={activeSection}
+          onChange={(value) => value && setActiveSection(value as SectionKey)}
+          classNames={{
+            root: misc.w10rem,
+            list: misc.w10rem,
+          }}
+        >
+          <Tabs.List>
+            {navItems.map((item) => (
+              <Tabs.Tab
+                key={item.key}
+                value={item.key}
+                leftSection={<Icon path={item.icon} size={1} />}
+                rightSection={<StatusBadge status={statuses[item.key]} />}
+              >
+                {t(`admin.content.settings.${item.key}.title`)}
+              </Tabs.Tab>
+            ))}
+          </Tabs.List>
+        </Tabs>
+        <Stack w="calc(100% - 11rem)" gap="md">
         {activeSection === 'platform' && (
         <Stack gap="sm">
           <Group justify="space-between">
@@ -1041,11 +1036,8 @@ const Configs: FC = () => {
           )}
         </Stack>
         )}
-            </Stack>
-          </Paper>
-        </Grid.Col>
-      </Grid>
-      </Box>
+        </Stack>
+      </Group>
 
       {/* Sticky save bar — only fires the save flow; dirty
          tracking lights the indicator when any field diverges
