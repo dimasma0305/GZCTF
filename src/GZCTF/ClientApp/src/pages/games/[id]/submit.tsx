@@ -18,6 +18,7 @@ import {
   mdiCheck,
   mdiCheckCircleOutline,
   mdiCloseCircleOutline,
+  mdiDownload,
   mdiFileTreeOutline,
   mdiFolderZipOutline,
   mdiUpload,
@@ -30,6 +31,11 @@ import { WithGameTab } from '@Components/WithGameTab'
 import { WithNavBar } from '@Components/WithNavbar'
 import { WithRole } from '@Components/WithRole'
 import { useGame } from '@Hooks/useGame'
+import {
+  buildDynamicContainerTemplate,
+  buildStaticContainerTemplate,
+  downloadBlob,
+} from '@Utils/SubmitTemplates'
 import { HunamizeSize, showErrorMsg } from '@Utils/Shared'
 import api, { ChallengeImportResult, Role } from '@Api'
 
@@ -98,64 +104,96 @@ const Submit: FC = () => {
                     <Text size="sm" fw={500}>{t('game.submit.example.title')}</Text>
                   </Accordion.Control>
                   <Accordion.Panel>
-                    <Stack gap="md">
+                    <Stack gap="lg">
                       <Text size="sm">{t('game.submit.example.intro')}</Text>
 
-                      <Stack gap={4}>
-                        <Text size="sm" fw={600}>{t('game.submit.example.attachment_title')}</Text>
-                        <Text size="xs" c="dimmed">
-                          {t('game.submit.example.attachment_desc')}
-                        </Text>
-                        <Code block style={{ fontSize: 12 }}>
-                          {`my-challenge.zip
-├── challenge.yml      ← required, see below
-└── dist/              ← (optional) files handed to the player
-    └── handout.zip`}
-                        </Code>
-                        <Code block style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>
-                          {`name: "Cool Web Challenge"
-author: "you"
-type: "StaticAttachment"
-category: "Web"
-description: |
-  Markdown is supported.
-  Solve me!
-flags:
-  - "flag{example}"
-provide: "./dist/handout.zip"`}
-                        </Code>
-                      </Stack>
-
-                      <Stack gap={4}>
-                        <Text size="sm" fw={600}>{t('game.submit.example.container_title')}</Text>
-                        <Text size="xs" c="dimmed">
-                          {t('game.submit.example.container_desc')}
-                        </Text>
+                      {/* Static Container — single shared instance per challenge */}
+                      <Stack gap={6}>
+                        <Group justify="space-between" align="flex-end" wrap="nowrap">
+                          <Stack gap={0}>
+                            <Text size="sm" fw={600}>
+                              {t('game.submit.example.static_container_title')}
+                            </Text>
+                            <Text size="xs" c="dimmed">
+                              {t('game.submit.example.static_container_desc')}
+                            </Text>
+                          </Stack>
+                          <Button
+                            size="xs"
+                            variant="default"
+                            leftSection={<Icon path={mdiDownload} size={0.9} />}
+                            onClick={async () => {
+                              try {
+                                const blob = await buildStaticContainerTemplate()
+                                downloadBlob(blob, 'gzctf-static-container-template.zip')
+                              } catch (e) {
+                                showErrorMsg(e, t)
+                              }
+                            }}
+                          >
+                            {t('game.submit.example.download_template')}
+                          </Button>
+                        </Group>
                         <Code block style={{ fontSize: 12 }}>
                           {`my-challenge.zip
 ├── challenge.yml
-├── dist/              ← player handouts (optional)
-│   └── handout.zip
-└── src/               ← server-side; platform builds this
-    ├── Dockerfile
-    ├── app.py
-    └── flag.txt`}
+├── src/
+│   ├── Dockerfile      ← platform auto-builds this
+│   ├── serve.sh
+│   └── flag.txt        ← baked into the image (shared flag)
+└── dist/               ← (optional) files handed to players`}
                         </Code>
                         <Code block style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>
-                          {`name: "Pwn Me"
-author: "you"
-type: "StaticContainer"
-category: "Pwn"
-description: |
-  \`nc {{ .host }} 1337\`
+                          {`type: "StaticContainer"
 flags:
-  - "flag{example}"
-provide: "./dist/handout.zip"
+  - "flag{shared_among_all_teams}"
 container:
-  containerImage: "{{.slug}}:latest"   # auto-built from ./src/Dockerfile
-  memoryLimit: 256
-  cpuCount: 1
+  containerImage: "./src/Dockerfile"
   exposePort: 1337`}
+                        </Code>
+                      </Stack>
+
+                      {/* Dynamic Container — per-team flag via env var */}
+                      <Stack gap={6}>
+                        <Group justify="space-between" align="flex-end" wrap="nowrap">
+                          <Stack gap={0}>
+                            <Text size="sm" fw={600}>
+                              {t('game.submit.example.dynamic_container_title')}
+                            </Text>
+                            <Text size="xs" c="dimmed">
+                              {t('game.submit.example.dynamic_container_desc')}
+                            </Text>
+                          </Stack>
+                          <Button
+                            size="xs"
+                            variant="default"
+                            leftSection={<Icon path={mdiDownload} size={0.9} />}
+                            onClick={async () => {
+                              try {
+                                const blob = await buildDynamicContainerTemplate()
+                                downloadBlob(blob, 'gzctf-dynamic-container-template.zip')
+                              } catch (e) {
+                                showErrorMsg(e, t)
+                              }
+                            }}
+                          >
+                            {t('game.submit.example.download_template')}
+                          </Button>
+                        </Group>
+                        <Code block style={{ fontSize: 12 }}>
+                          {`my-challenge.zip
+├── challenge.yml
+├── src/
+│   ├── Dockerfile      ← reads $GZCTF_FLAG at runtime
+│   └── serve.sh
+└── dist/`}
+                        </Code>
+                        <Code block style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>
+                          {`type: "DynamicContainer"
+container:
+  containerImage: "./src/Dockerfile"
+  exposePort: 1337
+  flagTemplate: "flag{[GUID]}"   # [GUID] is replaced per-team`}
                         </Code>
                       </Stack>
 
@@ -164,7 +202,7 @@ container:
                         <Text size="xs" c="dimmed">• {t('game.submit.example.tips.value_ignored')}</Text>
                         <Text size="xs" c="dimmed">• {t('game.submit.example.tips.visible_ignored')}</Text>
                         <Text size="xs" c="dimmed">• {t('game.submit.example.tips.review_queue')}</Text>
-                        <Text size="xs" c="dimmed">• {t('game.submit.example.tips.template_image')}</Text>
+                        <Text size="xs" c="dimmed">• {t('game.submit.example.tips.dynamic_flag_env')}</Text>
                         <Text size="xs" c="dimmed">• {t('game.submit.example.tips.size_cap')}</Text>
                       </Stack>
                     </Stack>
