@@ -304,8 +304,8 @@
     "example": {
       "title": "题目模板",
       "intro": "选择匹配的题目类型并下载模板。编辑文件后压缩文件夹再上传。",
-      "static_container_title": "Static Container（静态容器）",
-      "static_container_desc": "每道题一个共享容器，flag 写死在镜像里。适合无需按队伍隔离的 web / pwn 题。",
+      "static_attachment_title": "Static Attachment（附件题）",
+      "static_attachment_desc": "纯附件题：参赛者下载 dist/ 中的文件，flag 由服务端按 flags: 列表校验。适合 crypto、reverse、misc 等无需启动服务的题型。",
       "dynamic_container_title": "Dynamic Container（动态容器）",
       "dynamic_container_desc": "每个队伍一个独立容器，flag 通过 GZCTF_FLAG 环境变量注入。可防止 flag 共享。",
       "download_template": "下载模板",

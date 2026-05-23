@@ -15,98 +15,34 @@ import JSZip from 'jszip'
  */
 
 // ---------------------------------------------------------------------------
-// static-container
+// static-attachment
 // ---------------------------------------------------------------------------
 
-const STATIC_CONTAINER_YAML = `# yaml-language-server: $schema=https://raw.githubusercontent.com/dimasma0305/gzcli/refs/heads/main/internal/template/templates/others/ctf-template/.gzctf/challenge.schema.yaml
+const STATIC_ATTACHMENT_YAML = `# yaml-language-server: $schema=https://raw.githubusercontent.com/dimasma0305/gzcli/refs/heads/main/internal/template/templates/others/ctf-template/.gzctf/challenge.schema.yaml
 
-name: "static-container"
+name: "static-attachment"
 author: "dimas"
 
 # support markdown & html tags
 description: |
-  Example static container
+  Example static attachment
 
-  Connect: nc {{ .host }} 8011
-
-type: "StaticContainer" # don't touch this value
+type: "StaticAttachment" # don't touch this value
 value: 1000 # don't touch this value
 
 flags:
   - "flag{testing}"
 
 provide: "./dist"
-
-container:
-    containerImage: "{{.slug}}:latest"
-    memoryLimit: 1024
-    cpuCount: 10
-    storageLimit: 1024
-    exposePort: 5000
-    enableTrafficCapture: true
-
-scripts:
-    start: cd src && docker build -t {{.slug}} .
 `
 
-const STATIC_DOCKERFILE = `FROM python:3.9-alpine
-
-RUN apk update && apk add socat
-
-RUN adduser -D -u 1001 -s /bin/bash ctf
-
-RUN mkdir /home/ctf/chall
-
-COPY ./requirements.txt /home/ctf/chall
-RUN pip3 install -r /home/ctf/chall/requirements.txt
-
-RUN mkdir /home/ctf/chall/src
-
-COPY ./chall.py /home/ctf/chall/src
-COPY ./run.sh /home/ctf/chall/src
-COPY ./flag.txt /home/ctf/chall/src
-
-RUN chown -R root:root /home/ctf/chall
-RUN chmod -R 555 /home/ctf/chall
-USER ctf
-WORKDIR /home/ctf/chall/src
-
-CMD ["./run.sh"]
+const STATIC_ATTACHMENT_FLAG = `flag{testing}
 `
 
-const STATIC_RUN_SH = `#!/bin/sh
-socat tcp-l:8011,reuseaddr,fork exec:"python3 chall.py"
+const STATIC_ATTACHMENT_SOLVER = `# example solver
 `
 
-const STATIC_CHALL_PY = `FLAG = open('flag.txt').read().strip().lstrip('TCF{').rstrip("}")
-
-if __name__ == '__main__':
-    print(FLAG)
-`
-
-const STATIC_REQUIREMENTS = ``
-
-const STATIC_DOCKER_COMPOSE = `services:
-  example:
-    build: .
-    restart: on-failure
-    ports:
-      - 8011:8011
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: "256M"
-        reservations:
-          cpus: "0.25"
-          memory: "128M"
-`
-
-const STATIC_FLAG = `flag{testing}
-`
-
-const STATIC_SOLVER = `# example solver
-`
+const STATIC_ATTACHMENT_DIST_GITIGNORE = ``
 
 // ---------------------------------------------------------------------------
 // dynamic-container
@@ -201,19 +137,16 @@ const DYNAMIC_SOLVER = `# example solver
 // ---------------------------------------------------------------------------
 
 /**
- * Static container template — single shared instance per challenge,
- * flag baked into the image via src/flag.txt.
+ * Static attachment template — no container, no build. The player
+ * downloads whatever lives in `dist/`; flag is matched server-side
+ * from the `flags:` list.
  */
-export async function buildStaticContainerTemplate(): Promise<Blob> {
+export async function buildStaticAttachmentTemplate(): Promise<Blob> {
   const zip = new JSZip()
-  zip.file('challenge.yml', STATIC_CONTAINER_YAML)
-  zip.file('src/Dockerfile', STATIC_DOCKERFILE)
-  zip.file('src/run.sh', STATIC_RUN_SH)
-  zip.file('src/chall.py', STATIC_CHALL_PY)
-  zip.file('src/requirements.txt', STATIC_REQUIREMENTS)
-  zip.file('src/docker-compose.yml', STATIC_DOCKER_COMPOSE)
-  zip.file('src/flag.txt', STATIC_FLAG)
-  zip.file('solver/solve.py', STATIC_SOLVER)
+  zip.file('challenge.yml', STATIC_ATTACHMENT_YAML)
+  zip.file('src/flag.txt', STATIC_ATTACHMENT_FLAG)
+  zip.file('dist/.gitignore', STATIC_ATTACHMENT_DIST_GITIGNORE)
+  zip.file('solver/solve.py', STATIC_ATTACHMENT_SOLVER)
   return zip.generateAsync({ type: 'blob', compression: 'DEFLATE' })
 }
 

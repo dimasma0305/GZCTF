@@ -304,8 +304,8 @@
     "example": {
       "title": "Challenge templates",
       "intro": "Pick the type that matches your challenge and download the template. Edit the files, zip the folder, then upload below.",
-      "static_container_title": "Static Container",
-      "static_container_desc": "One shared container per challenge, shared flag baked into the image. Good for web / pwn challenges that don't need per-team isolation.",
+      "static_attachment_title": "Static Attachment",
+      "static_attachment_desc": "Files-only challenge. Players download whatever you put in dist/; flag is matched server-side from the flags: list. Use for crypto, reverse, misc, anything that doesn't need a live server.",
       "dynamic_container_title": "Dynamic Container",
       "dynamic_container_desc": "A separate container per team, each with a unique flag injected via the GZCTF_FLAG environment variable. Prevents flag-sharing.",
       "download_template": "Download template",

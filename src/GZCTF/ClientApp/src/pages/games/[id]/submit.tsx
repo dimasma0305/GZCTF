@@ -33,7 +33,7 @@ import { WithRole } from '@Components/WithRole'
 import { useGame } from '@Hooks/useGame'
 import {
   buildDynamicContainerTemplate,
-  buildStaticContainerTemplate,
+  buildStaticAttachmentTemplate,
   downloadBlob,
 } from '@Utils/SubmitTemplates'
 import { HunamizeSize, showErrorMsg } from '@Utils/Shared'
@@ -107,15 +107,15 @@ const Submit: FC = () => {
                     <Stack gap="lg">
                       <Text size="sm">{t('game.submit.example.intro')}</Text>
 
-                      {/* Static Container — single shared instance per challenge */}
+                      {/* Static Attachment — no container; player downloads dist/ */}
                       <Stack gap={6}>
                         <Group justify="space-between" align="flex-end" wrap="nowrap">
                           <Stack gap={0}>
                             <Text size="sm" fw={600}>
-                              {t('game.submit.example.static_container_title')}
+                              {t('game.submit.example.static_attachment_title')}
                             </Text>
                             <Text size="xs" c="dimmed">
-                              {t('game.submit.example.static_container_desc')}
+                              {t('game.submit.example.static_attachment_desc')}
                             </Text>
                           </Stack>
                           <Button
@@ -124,8 +124,8 @@ const Submit: FC = () => {
                             leftSection={<Icon path={mdiDownload} size={0.9} />}
                             onClick={async () => {
                               try {
-                                const blob = await buildStaticContainerTemplate()
-                                downloadBlob(blob, 'gzctf-static-container-template.zip')
+                                const blob = await buildStaticAttachmentTemplate()
+                                downloadBlob(blob, 'gzctf-static-attachment-template.zip')
                               } catch (e) {
                                 showErrorMsg(e, t)
                               }
@@ -135,25 +135,20 @@ const Submit: FC = () => {
                           </Button>
                         </Group>
                         <Code block style={{ fontSize: 12 }}>
-                          {`static-container.zip
+                          {`static-attachment.zip
 ├── challenge.yml
 ├── src/
-│   ├── Dockerfile          ← platform auto-builds this
-│   ├── run.sh
-│   ├── chall.py
-│   ├── flag.txt            ← baked into the image (shared flag)
-│   ├── requirements.txt
-│   └── docker-compose.yml  ← for local testing
+│   └── flag.txt            ← reference copy (not handed to players)
+├── dist/                   ← put files players download here
+│   └── .gitignore
 └── solver/
     └── solve.py            ← your working solver`}
                         </Code>
                         <Code block style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>
-                          {`type: "StaticContainer"
+                          {`type: "StaticAttachment"
 flags:
   - "flag{testing}"
-container:
-  containerImage: "{{.slug}}:latest"
-  exposePort: 5000`}
+provide: "./dist"`}
                         </Code>
                       </Stack>
 
