@@ -361,7 +361,7 @@ public sealed class GitRepoSyncService(ILogger<GitRepoSyncService> logger)
     /// <c>http.extraHeader=Authorization: Bearer ...</c> token never
     /// lands in an exception message.
     /// </summary>
-    private static string SafeCommandSummary(string[] args)
+    internal static string SafeCommandSummary(string[] args)
         => string.Join(' ', args.TakeWhile(a => a != "-c"));
 
     /// <summary>
@@ -376,7 +376,7 @@ public sealed class GitRepoSyncService(ILogger<GitRepoSyncService> logger)
     /// <para>Works identically for classic <c>ghp_</c> and fine-grained
     /// <c>github_pat_</c> tokens.</para>
     /// </summary>
-    private static string[] BuildAuthArgs(string? authToken)
+    internal static string[] BuildAuthArgs(string? authToken)
     {
         if (string.IsNullOrEmpty(authToken)) return [];
         var basic = Convert.ToBase64String(
