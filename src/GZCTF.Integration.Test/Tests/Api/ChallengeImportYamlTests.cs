@@ -114,8 +114,10 @@ public class ChallengeImportYamlTests(GZCTFApplicationFactory factory, ITestOutp
         Assert.Equal(256, ch.MemoryLimit);
         Assert.Equal(2, ch.CPUCount);
         Assert.Equal(1337, ch.ExposePort);
-        // Registry-image-only path: no build needed.
-        Assert.Equal(ChallengeBuildStatus.None, ch.BuildStatus);
+        // Registry-image-only path: ResolveBuildIntent returns
+        // NotApplicable for any image string that isn't a Dockerfile
+        // path or a gzctf-auto/ deterministic tag.
+        Assert.Equal(ChallengeBuildStatus.NotApplicable, ch.BuildStatus);
     }
 
     [Fact]
@@ -147,7 +149,8 @@ public class ChallengeImportYamlTests(GZCTFApplicationFactory factory, ITestOutp
             .FirstOrDefaultAsync(c => c.GameId == game.Id && c.Title == slug);
         Assert.NotNull(ch);
         Assert.Equal("ghcr.io/already-published/img:1.2.3", ch.ContainerImage);
-        Assert.Equal(ChallengeBuildStatus.None, ch.BuildStatus);
+        // Registry-image-only path → NotApplicable (no Dockerfile to build).
+        Assert.Equal(ChallengeBuildStatus.NotApplicable, ch.BuildStatus);
     }
 
     [Fact]

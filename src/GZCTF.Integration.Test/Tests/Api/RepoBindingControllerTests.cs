@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using GZCTF.Integration.Test.Base;
 using GZCTF.Models;
 using GZCTF.Models.Data;
@@ -43,6 +44,20 @@ public class RepoBindingControllerTests(GZCTFApplicationFactory factory, ITestOu
     /// </summary>
     private static string UniqueRepoUrl(string scope) =>
         $"https://github.com/test-{scope}/{TestDataSeeder.RandomName()}";
+
+    /// <summary>
+    /// The platform writes <see cref="DateTimeOffset"/> fields as Unix
+    /// milliseconds (see <c>DateTimeOffsetJsonConverter</c>). The default
+    /// <c>System.Net.Http.Json</c> deserializer expects ISO strings, so
+    /// any model with timestamp fields needs the matching converter.
+    /// </summary>
+    private static JsonSerializerOptions JsonOpts { get; } = BuildJsonOpts();
+    private static JsonSerializerOptions BuildJsonOpts()
+    {
+        var o = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+        o.Converters.Add(new DateTimeOffsetJsonConverter());
+        return o;
+    }
 
     [Fact]
     public async Task CreateBinding_HappyPath_ReturnsOkAndPersists()
@@ -101,22 +116,23 @@ public class RepoBindingControllerTests(GZCTFApplicationFactory factory, ITestOu
     }
 
     [Fact]
-    public async Task CreateBinding_IntervalBelowClamp_StoredAtMinimum()
+    public async Task CreateBinding_IntervalBelowRange_ReturnsBadRequest()
     {
+        // RepoBindingCreateModel has [Range(60, 86400)] on
+        // IntervalSeconds — model validation runs before the
+        // controller's defensive Math.Clamp, so anything below 60
+        // never reaches the clamp. Verify the model-validation 400
+        // (the clamp itself is dead code for these inputs but kept
+        // as defense-in-depth).
         using var client = await AdminClientAsync();
-        var url = UniqueRepoUrl("clamp");
+        var url = UniqueRepoUrl("badinterval");
         var resp = await client.PostAsJsonAsync("/api/admin/repobindings", new RepoBindingCreateModel
         {
             RepoUrl = url,
-            IntervalSeconds = 5,    // below 60 → server clamps
+            IntervalSeconds = 5,
             RunImmediately = false,
         });
-        resp.EnsureSuccessStatusCode();
-
-        using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var row = await db.GameRepoBindings.AsNoTracking().FirstAsync(b => b.RepoUrl == url);
-        Assert.Equal(60, row.IntervalSeconds);
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
     }
 
     [Fact]
@@ -130,7 +146,8 @@ public class RepoBindingControllerTests(GZCTFApplicationFactory factory, ITestOu
         });
         create.EnsureSuccessStatusCode();
 
-        var list = await client.GetFromJsonAsync<RepoBindingInfoModel[]>("/api/admin/repobindings");
+        var list = await client.GetFromJsonAsync<RepoBindingInfoModel[]>(
+            "/api/admin/repobindings", JsonOpts);
         Assert.NotNull(list);
         var ours = list!.FirstOrDefault(b => b.RepoUrl == url);
         Assert.NotNull(ours);

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using GZCTF.Integration.Test.Base;
 using GZCTF.Models;
 using GZCTF.Models.Data;
@@ -24,6 +25,19 @@ namespace GZCTF.Integration.Test.Tests.Api;
 public class BuildAuditsAdminTests(GZCTFApplicationFactory factory, ITestOutputHelper output)
 {
     private const string AdminPassword = "Admin@BuildAudit123";
+
+    /// <summary>
+    /// Match the platform's Unix-ms timestamp encoding (see
+    /// <c>DateTimeOffsetJsonConverter</c>); the default deserializer
+    /// expects ISO strings and trips on the numbers we emit.
+    /// </summary>
+    private static JsonSerializerOptions JsonOpts { get; } = BuildJsonOpts();
+    private static JsonSerializerOptions BuildJsonOpts()
+    {
+        var o = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+        o.Converters.Add(new DateTimeOffsetJsonConverter());
+        return o;
+    }
 
     private async Task<(HttpClient client, TestDataSeeder.SeededUser admin)> AdminClientAsync()
     {
@@ -77,7 +91,7 @@ public class BuildAuditsAdminTests(GZCTFApplicationFactory factory, ITestOutputH
             var (succId, _, _) = await SeedAuditAsync(ChallengeBuildStatus.Success);
 
             var failedOnly = await client.GetFromJsonAsync<ChallengeBuildAuditModel[]>(
-                "/api/admin/builds?status=Failed");
+                "/api/admin/builds?status=Failed", JsonOpts);
             Assert.NotNull(failedOnly);
             Assert.Contains(failedOnly!, a => a.Id == failedId);
             Assert.DoesNotContain(failedOnly!, a => a.Id == succId);
@@ -92,7 +106,7 @@ public class BuildAuditsAdminTests(GZCTFApplicationFactory factory, ITestOutputH
         {
             // No manipulation of the queue; the InMemory dict should be empty.
             var inFlight = await client.GetFromJsonAsync<ChallengeBuildInProgressModel[]>(
-                "/api/admin/builds/inprogress");
+                "/api/admin/builds/inprogress", JsonOpts);
             Assert.NotNull(inFlight);
             // Other tests in the same collection might leave entries — assert empty isn't safe.
             // What we can assert: returns valid JSON array.
