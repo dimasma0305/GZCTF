@@ -26,13 +26,20 @@
       "hint": {
         "add": "Add Hint"
       },
+      "import": "Import",
       "new": "New Challenge",
+      "pending": "Pending Review",
+      "watches": "Repo Watches",
+      "bulk_rebuild": "Rebuild failed",
+      "build_now": "Build image",
+      "build_in_flight": "Build in progress…",
       "next": "Next",
       "preview": "Preview",
       "previous": "Previous",
       "test_container": {
         "create": "Create",
-        "destroy": "Destroy"
+        "destroy": "Destroy",
+        "shell": "Shell"
       }
     },
     "divisions": {
@@ -67,9 +74,61 @@
     },
     "writeups": {
       "download_all": "Download All"
+    },
+    "import": {
+      "run": "Import",
+      "submit": "Submit",
+      "pick_file": "Choose archive"
+    },
+    "review": {
+      "approve": "Approve",
+      "reject": "Reject",
+      "audit": "Audit",
+      "delete": "Delete"
+    },
+    "exec": {
+      "open": "Open shell"
+    },
+    "audit": {
+      "download": "Download archive",
+      "rebuild": "Rebuild"
+    },
+    "watches": {
+      "add": "Add watch",
+      "run": "Run now",
+      "pause": "Pause",
+      "resume": "Resume",
+      "delete": "Remove",
+      "open_binding": "Open binding",
+      "token": "Update token"
+    },
+    "repo_binding": {
+      "add": "Add repository",
+      "scan": "Scan now",
+      "delete": "Remove",
+      "delete_cascade": "Remove + delete games",
+      "history": "Scan history",
+      "pause": "Pause polling",
+      "resume": "Resume polling"
+    },
+    "anti_cheat": {
+      "clear": "Clear this block"
+    },
+    "builds": {
+      "view_log": "View full build log",
+      "reenqueue": "Re-run this build",
+      "delete": "Delete this audit row",
+      "delete_selected": "Delete selected",
+      "prune_failed": "Clear failed",
+      "prune_images": "Prune images",
+      "copy": "Copy log",
+      "copied": "Copied"
     }
   },
   "content": {
+    "exec": {
+      "title": "Container console"
+    },
     "games": {
       "challenges": {
         "attachment": {
@@ -125,6 +184,7 @@
           "title": "Ouch! This game has no challenge yet."
         },
         "enable": "Are you sure you want to enable challenge {{name}}?",
+        "bulk_rebuild_confirm": "Enqueue rebuilds for the {{count}} challenge(s) with a Failed or Missing-Dockerfile status?",
         "flag": {
           "create": "Create flags. Multiple flags should be separated by lines, one flag per line.<br/> Each challenge can have multiple flags. Any configured flags can be accepted.",
           "delete": "Are you sure you want to delete this flag?",
@@ -291,6 +351,10 @@
           "description": "View challenges after the game ends",
           "label": "Practice Mode"
         },
+        "allow_user_submissions": {
+          "description": "Let logged-in users submit challenges (admin reviews before they go live)",
+          "label": "Allow User Submissions"
+        },
         "start_date": "Start Date",
         "start_time": "Start Time",
         "summary": {
@@ -379,6 +443,17 @@
           "description": "Collect browser fingerprint during login/registration for risk analysis.",
           "warning": "Enabling this feature collects additional user device information. Please ensure this complies with your local privacy regulations and update your privacy policy accordingly."
         },
+        "unique_ip_per_team_user": {
+          "label": "Require Unique IP per Team Member",
+          "description": "Block login when another teammate has logged in from the same IP within the last 24 hours."
+        },
+        "unique_fingerprint_per_team_user": {
+          "label": "Require Unique Fingerprint per Team Member",
+          "description": "Block login when another teammate has logged in with the same browser fingerprint within the last 24 hours. Requires Browser Fingerprinting to be enabled."
+        },
+        "unique_per_team_user": {
+          "warning": "These policies block legitimate logins from shared NAT (dorm/office), shared lab machines, or CGNAT exit IPs. Use only when each teammate is expected to log in from a distinct device and network."
+        },
         "title": "Account Policy",
         "use_captcha": {
           "description": "Verify on login, registration and recovery",
@@ -403,6 +478,31 @@
           "label": "Renewal Window (min)"
         },
         "title": "Container Policy"
+      },
+      "build_registry": {
+        "title": "Build registry",
+        "description": "Where the auto-build pipeline pushes images after a successful docker build. Leave the toggle off to keep built images on the local daemon only.",
+        "push_on_build": {
+          "label": "Push built images to a registry",
+          "description": "When on, every successful auto-build is retagged with the configured server + namespace and pushed."
+        },
+        "server": {
+          "label": "Server",
+          "description": "Hostname (no scheme). e.g. ghcr.io, registry.example.com:5000"
+        },
+        "namespace": {
+          "label": "Namespace",
+          "description": "Optional prefix under the server. e.g. myorg → ghcr.io/myorg/gzctf-auto/..."
+        },
+        "username": {
+          "label": "Username",
+          "description": "Registry user. Leave blank for anonymous push."
+        },
+        "password": {
+          "label": "Password / PAT",
+          "description": "Stored XOR-obfuscated. Leave blank to keep the current value.",
+          "configured": "(configured — leave blank to keep)"
+        }
       },
       "platform": {
         "api_encryption": {
@@ -457,6 +557,195 @@
         "title": "Reset password for {{name}}"
       },
       "stats": "<1>{{current}}</1> out of <1>{{total}}</1> users displayed"
+    },
+    "import": {
+      "github_tab": "From GitHub",
+      "tarball_tab": "From tarball",
+      "repo_url": "Repo URL",
+      "ref": "Branch / tag (optional)",
+      "subpath": "Subpath (optional)",
+      "token": "GitHub token (optional)",
+      "token_help": "Required only for private repos. Use a fine-grained PAT with 'Contents: read'. Not stored.",
+      "tarball_help": "Upload a .tar.gz or .zip of one challenge directory (challenge.yaml + attachments).",
+      "result": "Import result",
+      "imported": "imported",
+      "updated": "updated",
+      "skipped": "skipped",
+      "failed": "failed",
+      "no_file": "Pick an archive first.",
+      "no_url": "Enter a repo URL first."
+    },
+    "audit": {
+      "title": "Audit challenge",
+      "archive_available": "Original archive captured at upload time.",
+      "no_archive": "No original archive on file (admin-created or github-sourced).",
+      "unavailable": "Audit unavailable.",
+      "yaml": "challenge.yaml",
+      "no_yaml": "No challenge.yaml found in the archive.",
+      "files": "Files",
+      "previews": "Reviewer files",
+      "build_log": "Build log",
+      "no_build_log": "No build log captured yet."
+    },
+    "builds": {
+      "title": "Image builds",
+      "subtitle": "History of every challenge image build attempt — auto-fired by imports and scans, plus operator-triggered rebuilds.",
+      "empty_title": "No build history yet",
+      "empty": "Builds will appear here once a challenge with a local Dockerfile is imported.",
+      "in_progress_title": "In progress",
+      "no_in_progress": "No builds currently running.",
+      "attempt": "attempt {{n}}",
+      "log_modal_title": "Build log",
+      "no_log": "No log captured for this attempt.",
+      "confirm_delete": "Delete the audit row for {{challenge}}? The challenge itself and its built image are not affected.",
+      "confirm_bulk_delete": "Delete the {{count}} selected audit row(s)? The challenges and their built images are not affected.",
+      "confirm_prune_failed": "Delete {{count}} Failed audit row(s)? Successful builds, in-progress builds, and the challenges themselves are preserved.",
+      "select_all": "Select all rows on this page",
+      "confirm_prune_images": {
+        "line1": "Untag every gzctf-auto/* image on the local docker daemon that no current challenge references.",
+        "line2": "Pushed registry copies are not touched. Active challenges keep their images. Useful for reclaiming disk on the GZCTF host."
+      },
+      "filter": {
+        "all": "All statuses",
+        "placeholder": "Filter by status"
+      },
+      "column": {
+        "when": "When",
+        "challenge": "Challenge",
+        "trigger": "Trigger",
+        "attempt": "Attempt",
+        "status": "Status",
+        "duration": "Duration",
+        "detail": "Result"
+      }
+    },
+    "review": {
+      "badge": {
+        "pending": "Pending review",
+        "rejected": "Rejected",
+        "queued": "Queued",
+        "building": "Building",
+        "built": "Built",
+        "build_failed": "Build failed",
+        "build_failed_help": "The most recent docker build for this challenge failed. Open Audit to see the log.",
+        "not_applicable": "Registry",
+        "not_applicable_help": "This challenge ships a published registry image — no auto-build runs.",
+        "missing_dockerfile": "Dockerfile missing",
+        "missing_dockerfile_help": "The challenge.yaml pointed at a local Dockerfile path that didn't exist in the archive. Open Audit for the resolved path, fix the source, and trigger a rebuild."
+      },
+      "title": "Challenges awaiting review",
+      "empty": {
+        "title": "No pending challenges",
+        "description": "User-submitted challenges will appear here."
+      },
+      "reject_title": "Reject \"{{name}}\"?",
+      "reject_note_placeholder": "Reason (optional, visible to admins only).",
+      "delete_title": "Delete \"{{name}}\" permanently?",
+      "delete_warning": "This removes the challenge row, its flags, the persisted archive, and any attachments. There is no undo.",
+      "column": {
+        "status": "Status",
+        "submitted": "Submitted",
+        "submitter": "Submitter",
+        "title": "Title",
+        "category": "Category",
+        "type": "Type",
+        "actions": "Actions"
+      }
+    },
+    "repo_binding": {
+      "title": "Repository bindings",
+      "subtitle": "Register github repositories and the platform discovers events from any .gzevent files inside, then imports each event's challenges. Re-scans run on the configured cadence.",
+      "add": "Add a repository",
+      "repo_url": "Repo URL",
+      "ref": "Branch / tag (optional)",
+      "token": "GitHub token (optional)",
+      "token_help": "Required for private repos. Encrypted at rest. Use a fine-grained PAT with Contents: read.",
+      "interval": "Polling interval (seconds)",
+      "interval_help": "How often the background scanner re-fetches the repo. Min 60, max 86400 (24h).",
+      "run_immediately": "Run first scan immediately",
+      "empty": "Register one to start auto-discovering events from .gzevent manifests.",
+      "empty_title": "No repository bindings yet",
+      "no_games": "No .gzevent manifests found in this repo yet.",
+      "has_token": "Token configured",
+      "token_decrypt_failed": "Stored token can't be decrypted. The DataProtection key may have rotated. Update the token to fix.",
+      "paused_short": "Paused",
+      "due_now": "due now",
+      "history_title": "Scan history",
+      "history_loading": "Loading…",
+      "history_empty": "No scans recorded yet.",
+      "push_on_edit_label": "Push on edit",
+      "push_on_edit_help": "When on, admin edits to challenges from this binding are committed back as a fresh challenge.yml and pushed upstream. Requires a PAT with Contents:write scope.",
+      "card": {
+        "ref_label": "ref",
+        "events_count_one": "{{count}} event discovered",
+        "events_count_other": "{{count}} events discovered",
+        "last_scan": "Last scan",
+        "next_scan": "Next scan",
+        "never_scanned": "Never scanned",
+        "commit": "Commit"
+      },
+      "delete_title": "Delete binding to {{repo}}?",
+      "delete_warning": "By default the imported games are KEPT (detached from this binding). When you re-bind the same repo, the scanner auto-adopts the detached games by title so you don't get duplicates.",
+      "delete_cascade": {
+        "label": "Also delete imported games",
+        "description": "Permanently removes every game discovered by this binding, plus their challenges, flags, and build history. Useful for full cleanup."
+      },
+      "column": {
+        "repo": "Repository",
+        "ref": "Ref",
+        "status": "Status",
+        "games": "Events discovered",
+        "last_scan": "Last scan",
+        "next_scan": "Next scan",
+        "commit": "Commit",
+        "actions": "Actions"
+      }
+    },
+    "anti_cheat": {
+      "title": "Anti-cheat blocks",
+      "subtitle": "Logins blocked by the per-team-user IP / fingerprint policy. Clear a row when a block is a false positive (e.g., teammates sharing a NAT'd public IP).",
+      "empty_title": "No blocks recorded",
+      "empty": "When the policy fires it'll show up here. Configure it under Settings → Account.",
+      "column": {
+        "when": "When",
+        "user": "Blocked user",
+        "kind": "Kind",
+        "conflict_with": "Conflict with",
+        "value": "Value"
+      }
+    },
+    "watches": {
+      "title": "Repository watch",
+      "add": "Add a new watch",
+      "empty": "Add one to import challenges from a repo on a schedule.",
+      "empty_title": "No watch configured",
+      "one_per_event": "Each game uses one repository. Delete the existing watch before pointing this game at a different repo.",
+      "repo_url": "Repo URL",
+      "ref": "Branch / tag",
+      "subpath": "Subpath",
+      "interval": "Interval (seconds)",
+      "token": "GitHub token (optional)",
+      "token_help": "Required only for private repos. Encrypted at rest. Use a fine-grained PAT scoped to 'Contents: read'.",
+      "token_prompt": "Paste the new GitHub token (leave empty to clear):",
+      "has_token": "Token configured",
+      "run_immediately": "Run immediately",
+      "last_scan": "Last scan",
+      "next_scan": "Next scan",
+      "never_scanned": "Never scanned",
+      "managed_by_binding": {
+        "title": "Managed by repo binding",
+        "subtitle": "This game was auto-created by a global repo binding. The binding poller re-scans the repo on its own cadence; no per-game watch is needed."
+      },
+      "column": {
+        "repo": "Repo",
+        "ref": "Ref",
+        "subpath": "Subpath",
+        "interval": "Interval",
+        "last_run": "Last run",
+        "commit": "Commit",
+        "status": "Status",
+        "actions": "Actions"
+      }
     }
   },
   "label": {
@@ -472,7 +761,11 @@
     "instances": {
       "container_id": "Container ID",
       "entry": "Instance Entry",
-      "life_cycle": "Lifecycle"
+      "life_cycle": "Lifecycle",
+      "cpu": "CPU",
+      "memory": "Memory",
+      "network": "Network",
+      "live_stats": "Live stats"
     },
     "logs": {
       "message": "Message",
@@ -575,6 +868,32 @@
       "deleted": "{{name}} has been deleted",
       "password_copied": "Password copied to clipboard",
       "updated": "User profile updated"
+    },
+    "import": {
+      "complete": "Import complete"
+    },
+    "review": {
+      "approved": "Challenge approved",
+      "rejected": "Challenge rejected",
+      "deleted": "{{name}} deleted"
+    },
+    "watch": {
+      "created": "Watch created",
+      "run_queued": "Watch will run on the next tick",
+      "token_updated": "Token updated"
+    },
+    "anti_cheat": {
+      "cleared": "Block cleared"
+    },
+    "repo_binding": {
+      "scanned": "Scan complete",
+      "summary": "{{games}} games, {{challenges}} challenges, {{failures}} failures"
+    },
+    "builds": {
+      "bulk_enqueued": "Enqueued {{count}} build(s)",
+      "enqueued": "Build triggered",
+      "pruned": "Cleared {{count}} audit row(s)",
+      "images_pruned": "Removed {{count}} orphaned image tag(s)"
     }
   },
   "placeholder": {
@@ -638,6 +957,9 @@
     },
     "instances": "Instances",
     "logs": "Logs",
+    "repo_bindings": "Repo bindings",
+    "anti_cheat": "Anti-cheat",
+    "builds": "Builds",
     "settings": "Settings",
     "teams": "Teams",
     "users": "Users"

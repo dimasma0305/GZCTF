@@ -70,6 +70,15 @@ public partial class Game
     public bool AcceptWithoutReview { get; set; }
 
     /// <summary>
+    /// Whether logged-in users may submit challenges (which then sit in the
+    /// admin review queue). Default false — community submissions are
+    /// opt-in per game so a fresh event doesn't accept arbitrary uploads
+    /// before the admin has decided to enable the queue.
+    /// </summary>
+    [Required]
+    public bool AllowUserSubmissions { get; set; } = false;
+
+    /// <summary>
     /// Whether writeup is required
     /// </summary>
     public bool WriteupRequired { get; set; }
@@ -205,6 +214,7 @@ public partial class Game
         Hidden = model.Hidden;
         PracticeMode = model.PracticeMode;
         AcceptWithoutReview = model.AcceptWithoutReview;
+        AllowUserSubmissions = model.AllowUserSubmissions;
         InviteCode = model.InviteCode;
         EndTimeUtc = model.EndTimeUtc;
         StartTimeUtc = model.StartTimeUtc;
@@ -262,6 +272,24 @@ public partial class Game
     /// List of divisions for the game
     /// </summary>
     public HashSet<Division>? Divisions { get; set; }
+
+    /// <summary>
+    /// Set when this game was auto-created by a <see cref="GameRepoBinding"/>
+    /// scan; null for hand-created games. Lets the discovery service find
+    /// and update its own children on re-scan.
+    /// </summary>
+    public int? RepoBindingId { get; set; }
+
+    [JsonIgnore]
+    [MemoryPackIgnore]
+    public GameRepoBinding? RepoBinding { get; set; }
+
+    /// <summary>
+    /// Repo-relative path of the <c>.gzevent</c> file that defined this
+    /// game (e.g. <c>quals/.gzevent</c>). Unique within a binding.
+    /// </summary>
+    [MaxLength(512)]
+    public string? EventManifestPath { get; set; }
 
     #endregion Db Relationship
 }

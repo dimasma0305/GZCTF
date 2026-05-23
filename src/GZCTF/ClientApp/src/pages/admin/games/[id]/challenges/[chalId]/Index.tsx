@@ -1,10 +1,14 @@
 import {
+  Badge,
   Button,
+  Code,
   ComboboxItem,
   Grid,
   Group,
   Input,
+  Loader,
   NumberInput,
+  Paper,
   Select,
   Slider,
   Stack,
@@ -17,7 +21,7 @@ import {
 import { DateTimePicker } from '@mantine/dates'
 import { useModals } from '@mantine/modals'
 import { showNotification } from '@mantine/notifications'
-import { mdiCheck, mdiContentSaveOutline, mdiDatabaseEditOutline, mdiDeleteOutline, mdiEyeOutline } from '@mdi/js'
+import { mdiCheck, mdiContentSaveOutline, mdiDatabaseEditOutline, mdiDeleteOutline, mdiEyeOutline, mdiHammerWrench } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import dayjs from 'dayjs'
 import { FC, useEffect, useState } from 'react'
@@ -26,6 +30,7 @@ import { Link, useNavigate, useParams } from 'react-router'
 import { HintList } from '@Components/HintList'
 import { InstanceEntry } from '@Components/InstanceEntry'
 import { ChallengePreviewModal } from '@Components/admin/ChallengePreviewModal'
+import { ContainerExecModal } from '@Components/admin/ContainerExecModal'
 import { SwitchLabel } from '@Components/admin/SwitchLabel'
 import { WithChallengeEdit } from '@Components/admin/WithChallengeEdit'
 import { ScoreFunc } from '@Components/charts/ScoreFunc'
@@ -39,8 +44,52 @@ import {
 } from '@Utils/Shared'
 import { useEditChallenge, useEditChallenges } from '@Hooks/useEdit'
 import { useGame } from '@Hooks/useGame'
-import api, { ChallengeCategory, ChallengeType, ChallengeUpdateModel, NetworkMode } from '@Api'
+import api, { ChallengeBuildStatus, ChallengeCategory, ChallengeType, ChallengeUpdateModel, NetworkMode } from '@Api'
 import misc from '@Styles/Misc.module.css'
+
+/**
+ * Inline live build-log surface for the challenge edit page.
+ * Updates every ~2s while the build is in flight (driven by the
+ * useEffect in the parent that re-fetches the challenge). Once
+ * terminal, the badge color settles and the log sticks around as
+ * the post-mortem record.
+ */
+const BuildLogSection: FC<{ buildStatus: ChallengeBuildStatus; lastBuildLog: string | null }> = ({
+  buildStatus,
+  lastBuildLog,
+}) => {
+  const { t } = useTranslation()
+  const inFlight = buildStatus === 'Queued' || buildStatus === 'Building'
+  const color =
+    buildStatus === 'Success' ? 'teal'
+    : buildStatus === 'Failed' ? 'red'
+    : buildStatus === 'MissingDockerfile' ? 'orange'
+    : buildStatus === 'Queued' ? 'blue'
+    : 'yellow'
+  return (
+    <Paper p="sm" withBorder>
+      <Stack gap={4}>
+        <Group gap="xs" wrap="nowrap">
+          {inFlight && <Loader size="xs" />}
+          <Title order={6}>{t('admin.content.audit.build_log')}</Title>
+          <Badge size="xs" color={color} variant={buildStatus === 'Failed' ? 'filled' : 'light'}>
+            {buildStatus}
+          </Badge>
+        </Group>
+        {lastBuildLog ? (
+          <Code
+            block
+            style={{ whiteSpace: 'pre-wrap', maxHeight: '40vh', overflowY: 'auto', fontSize: 11 }}
+          >
+            {lastBuildLog}
+          </Code>
+        ) : (
+          <Text size="xs" c="dimmed">{t('admin.content.audit.no_build_log')}</Text>
+        )}
+      </Stack>
+    </Paper>
+  )
+}
 
 const GameChallengeEdit: FC = () => {
   const navigate = useNavigate()
@@ -64,6 +113,7 @@ const GameChallengeEdit: FC = () => {
   const [type, setType] = useState<string | null>(challenge?.type ?? ChallengeType.StaticAttachment)
   const [currentAcceptCount, setCurrentAcceptCount] = useState(0)
   const [previewOpened, setPreviewOpened] = useState(false)
+  const [execOpened, setExecOpened] = useState(false)
 
   const modals = useModals()
   const challengeTypeLabelMap = useChallengeTypeLabelMap()
@@ -109,6 +159,39 @@ const GameChallengeEdit: FC = () => {
       if (!noFeedback) {
         setDisabled(false)
       }
+    }
+  }
+
+  const [building, setBuilding] = useState(false)
+  const inFlightBuild = challenge?.buildStatus === 'Queued' || challenge?.buildStatus === 'Building'
+  const isBuildable =
+    (challenge?.type === 'StaticContainer' || challenge?.type === 'DynamicContainer')
+    && challenge?.buildStatus !== 'NotApplicable'
+
+  // While a build is in flight, the worker streams the docker output
+  // to Challenge.LastBuildLog every ~2s. Re-fetch on the same cadence
+  // so the inline log section below updates live.
+  useEffect(() => {
+    if (!inFlightBuild) return
+    const timer = window.setInterval(() => { mutate() }, 2000)
+    return () => window.clearInterval(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inFlightBuild])
+
+  const onBuildNow = async () => {
+    setBuilding(true)
+    try {
+      await api.edit.editRebuildChallengeImage(numId, numCId)
+      showNotification({
+        color: 'teal',
+        message: t('admin.notification.builds.enqueued'),
+        icon: <Icon path={mdiCheck} size={1} />,
+      })
+      mutate()
+    } catch (e) {
+      showErrorMsg(e, t)
+    } finally {
+      setBuilding(false)
     }
   }
 
@@ -231,6 +314,20 @@ const GameChallengeEdit: FC = () => {
             >
               {t('admin.button.challenges.delete')}
             </Button>
+            {isBuildable && (
+              <Button
+                disabled={disabled || building || inFlightBuild}
+                color="orange"
+                variant="outline"
+                leftSection={<Icon path={mdiHammerWrench} size={1} />}
+                onClick={onBuildNow}
+                loading={building || inFlightBuild}
+              >
+                {inFlightBuild
+                  ? t('admin.button.challenges.build_in_flight')
+                  : t('admin.button.challenges.build_now')}
+              </Button>
+            )}
             <Button
               disabled={disabled}
               leftSection={<Icon path={mdiEyeOutline} size={1} />}
@@ -502,6 +599,18 @@ const GameChallengeEdit: FC = () => {
                     ? t('admin.button.challenges.test_container.destroy')
                     : t('admin.button.challenges.test_container.create')}
                 </Button>
+                <Button
+                  miw="6rem"
+                  variant="default"
+                  disabled={
+                    disabled
+                    || !challenge?.testContainer
+                    || challenge.testContainer.status !== 'Running'
+                  }
+                  onClick={() => setExecOpened(true)}
+                >
+                  {t('admin.button.challenges.test_container.shell')}
+                </Button>
               </Group>
             </Grid.Col>
             <Grid.Col span={4}>
@@ -600,6 +709,13 @@ const GameChallengeEdit: FC = () => {
             </Grid.Col>
           </Grid>
         )}
+
+        {isBuildable && challenge?.buildStatus && challenge.buildStatus !== 'None' && (
+          <BuildLogSection
+            buildStatus={challenge.buildStatus}
+            lastBuildLog={challenge.lastBuildLog ?? null}
+          />
+        )}
       </Stack>
       <ChallengePreviewModal
         challenge={{
@@ -617,6 +733,12 @@ const GameChallengeEdit: FC = () => {
         cateData={
           challengeCategoryLabelMap.get((challengeInfo?.category as ChallengeCategory) ?? ChallengeCategory.Misc)!
         }
+      />
+      <ContainerExecModal
+        containerGuid={challenge?.testContainer?.id ?? null}
+        containerTitle={`${challenge?.title} (test)`}
+        opened={execOpened}
+        onClose={() => setExecOpened(false)}
       />
     </WithChallengeEdit>
   )

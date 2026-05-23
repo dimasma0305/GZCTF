@@ -402,6 +402,36 @@ export interface ConfigEditModel {
   globalConfig?: GlobalConfig | null;
   /** Game policy */
   containerPolicy?: ContainerPolicy | null;
+  /** Auto-build image push destination */
+  buildRegistry?: BuildRegistryConfig | null;
+}
+
+/**
+ * Optional registry push target for the auto-build pipeline.
+ * Built images stay on the local daemon when pushOnBuild is false;
+ * otherwise they're retagged to {server}/{namespace?}/gzctf-auto/...
+ * and pushed using the configured credentials.
+ */
+export interface BuildRegistryConfig {
+  /** Master switch. When false, built images stay local. */
+  pushOnBuild?: boolean;
+  /**
+   * Registry hostname (no scheme, no trailing slash).
+   * Examples: "ghcr.io", "docker.io", "registry.example.com:5000".
+   */
+  server?: string | null;
+  /** Optional namespace under the registry, e.g. "myorg". */
+  namespace?: string | null;
+  username?: string | null;
+  /**
+   * Plaintext password / PAT — sent only when the operator is setting
+   * or changing it. Empty string preserves the existing stored value.
+   */
+  password?: string | null;
+  /** Read-only flag indicating whether a password is currently configured. */
+  hasPassword?: boolean;
+  /** Read-only: pushOnBuild && server is set. */
+  isConfigured?: boolean;
 }
 
 /** Account policy */
@@ -418,6 +448,10 @@ export interface AccountPolicy {
   emailDomainList?: string;
   /** Enable browser fingerprinting in Login/Register */
   enableBrowserFingerprint?: boolean;
+  /** Require each user on a team to log in from an IP not used by another teammate within the last 24 hours */
+  requireUniqueIpPerTeamUser?: boolean;
+  /** Require each user on a team to have a browser fingerprint not used by another teammate within the last 24 hours */
+  requireUniqueFingerprintPerTeamUser?: boolean;
 }
 
 /** Global settings */
@@ -1078,6 +1112,8 @@ export interface GameInfoModel {
   content?: string;
   /** Accept teams without review */
   acceptWithoutReview?: boolean;
+  /** Whether users may submit challenges (with admin review) for this game */
+  allowUserSubmissions?: boolean;
   /** Is writeup required */
   writeupRequired?: boolean;
   /**
@@ -1352,6 +1388,10 @@ export interface ChallengeEditDetailModel {
    * @format double
    */
   difficulty: number;
+  /** Current build pipeline state */
+  buildStatus?: ChallengeBuildStatus;
+  /** Live-updated build log tail */
+  lastBuildLog?: string | null;
 }
 
 export interface Attachment {
@@ -1369,6 +1409,8 @@ export interface Attachment {
 }
 
 export interface ContainerInfoModel {
+  /** Container GUID — for the in-browser exec shell. */
+  id?: string;
   /** Container status */
   status?: ContainerStatus;
   /**
@@ -1436,6 +1478,80 @@ export interface ChallengeInfoModel {
    * @format uint64
    */
   deadlineUtc?: number | null;
+  /** Review state — surfaced so the admin list can badge pending/rejected challenges */
+  reviewStatus?: ChallengeReviewStatus;
+  /** Most recent auto-build outcome (for challenges with a local Dockerfile) */
+  buildStatus?: ChallengeBuildStatus;
+  /** True iff an OriginalArchiveBlobPath is on file (i.e. Rebuild has something to rebuild from) */
+  hasOriginalArchive?: boolean;
+}
+
+/** Review state of a challenge */
+export type ChallengeReviewStatus = "Active" | "Pending" | "Rejected"
+
+/**
+ * Lifecycle of the challenge image build pipeline.
+ *
+ * - `None` — manual challenge, no build context known
+ * - `Success` / `Failed` — terminal states from the most recent attempt
+ * - `Building` — a worker is actively running `docker build`
+ * - `NotApplicable` — challenge ships a registry image, no build needed
+ * - `Queued` — enqueued, waiting for a worker
+ * - `MissingDockerfile` — local-style image declared but no Dockerfile
+ *   at the resolved path; surfaces clearly instead of staying silent
+ */
+export type ChallengeBuildStatus =
+  | "None"
+  | "Success"
+  | "Failed"
+  | "Building"
+  | "NotApplicable"
+  | "Queued"
+  | "MissingDockerfile"
+
+/** Why a build was enqueued — drives audit-log filters */
+export type BuildTrigger = "Import" | "Manual" | "AutoRetry" | "Bulk"
+
+/** One row of the /admin/builds history table */
+export interface ChallengeBuildAuditModel {
+  id: number
+  challengeId: number
+  gameId: number
+  challengeTitle: string
+  enqueuedAtUtc: string
+  startedAtUtc?: string | null
+  finishedAtUtc?: string | null
+  trigger: BuildTrigger
+  attempt: number
+  status: ChallengeBuildStatus
+  digest?: string | null
+  logTail?: string | null
+  errorMessage?: string | null
+  durationMs: number
+}
+
+/** One row of the live in-progress strip */
+export interface ChallengeBuildInProgressModel {
+  auditId: number
+  challengeId: number
+  gameId: number
+  slug: string
+  attempt: number
+  trigger: BuildTrigger
+  startedAtUtc: string
+}
+
+/** Result of a "Rebuild all failed" bulk action */
+export interface BulkRebuildResultModel {
+  enqueued: number
+  skipped: number
+  messages: string[]
+}
+
+/** Result of a prune action — either audit rows or local images. */
+export interface PruneResultModel {
+  removed: number
+  messages?: string[]
 }
 
 /** Challenge update information (Edit) */
@@ -1708,6 +1824,8 @@ export interface DetailedGameInfoModel {
   teamName?: string | null;
   /** Whether the game is in practice mode (can still be accessed after the game ends) */
   practiceMode?: boolean;
+  /** Whether users may submit challenges (with admin review) for this game */
+  allowUserSubmissions?: boolean;
   /** Team participation status */
   status?: ParticipationStatus;
   /**
@@ -2114,6 +2232,276 @@ export interface TeamTrafficModel {
 }
 
 /** File record */
+/** Direction of a captured payload chunk relative to the proxied container */
+export type TrafficFlowDirection = "ContainerToTeam" | "TeamToContainer"
+
+/** Compact summary of a single proxied TCP session in a pcap */
+export interface TrafficFlowSummary {
+  connectionPort: number
+  firstSeenUtc: string
+  lastSeenUtc: string
+  peerIp: string
+  packetsIn: number
+  packetsOut: number
+  bytesIn: number
+  bytesOut: number
+  flagHits: number
+}
+
+/** One contiguous payload chunk in a flow */
+export interface TrafficFlowChunk {
+  direction: TrafficFlowDirection
+  timestampUtc: string
+  /** Base64-encoded raw bytes */
+  payloadBase64: string
+  /** Byte offsets within the decoded payload where a known flag begins */
+  flagOffsets: number[]
+}
+
+/** Full payload detail of a single flow */
+export interface TrafficFlowDetail extends TrafficFlowSummary {
+  chunks: TrafficFlowChunk[]
+}
+
+/** Filter parameters for the flow-list endpoint */
+export interface FlowFilter {
+  regexPattern?: string
+  peerIpContains?: string
+  startUtc?: string
+  endUtc?: string
+  direction?: TrafficFlowDirection
+  flagsOnly?: boolean
+}
+
+/** Result of a challenge import (tarball or github) */
+export interface ChallengeImportResult {
+  imported: number
+  updated: number
+  skipped: number
+  failed: number
+  messages: string[]
+}
+
+/** Body for POST /api/Edit/Games/{id}/Challenges/ImportFromGitHub */
+export interface ImportFromGitHubModel {
+  repoUrl: string
+  ref?: string | null
+  subpath?: string | null
+  /** Optional GitHub PAT for private repos. Admin/event-manager only; ignored for user submissions. */
+  githubToken?: string | null
+}
+
+/** Body for POST .../Reject */
+export interface RejectChallengeModel {
+  note?: string | null
+}
+
+/** Point-in-time stats for a running container instance */
+export interface ContainerStatsModel {
+  cpuPercent: number
+  memoryUsedBytes: number
+  memoryLimitBytes: number
+  netRxBytes: number
+  netTxBytes: number
+  sampledAt: string
+}
+
+/** Compact summary of a game discovered by a repo binding */
+export interface RepoBindingGameSummary {
+  id: number
+  title: string
+  eventManifestPath?: string | null
+}
+
+/** Row returned by GET /api/Admin/RepoBindings */
+export interface RepoBindingInfoModel {
+  id: number
+  repoUrl: string
+  ref?: string | null
+  createdAtUtc: string
+  lastScanUtc?: string | null
+  nextScanUtc?: string | null
+  intervalSeconds: number
+  status: RepoWatchStatus
+  lastCommitSha?: string | null
+  lastScanMessage?: string | null
+  hasGitHubToken?: boolean
+  tokenStatus?: TokenStatus
+  /** Live progress message from the scanner — non-null while a scan is running. */
+  currentActivity?: string | null
+  /**
+   * When true, admin edits to challenges owned by this binding get
+   * serialized back to challenge.yml and pushed upstream as commits.
+   * Requires a PAT with Contents:write scope.
+   */
+  pushOnEdit?: boolean
+  games: RepoBindingGameSummary[]
+}
+
+/** Body for POST /api/Admin/RepoBindings */
+export interface RepoBindingCreateModel {
+  repoUrl: string
+  ref?: string | null
+  githubToken?: string | null
+  intervalSeconds?: number
+  runImmediately?: boolean
+}
+
+/** Body for PUT /api/Admin/RepoBindings/{id} */
+export interface RepoBindingUpdateModel {
+  ref?: string | null
+  intervalSeconds?: number | null
+  status?: RepoWatchStatus | null
+  /** null = keep existing; "" = clear; non-empty = replace. */
+  githubToken?: string | null
+  /** Opt in to pushing admin edits back to the source repo. */
+  pushOnEdit?: boolean | null
+}
+
+/** Response from POST /api/Admin/RepoBindings or .../Scan */
+export interface RepoBindingScanResultModel {
+  gamesCreated: number
+  gamesUpdated: number
+  challengesImported: number
+  challengesUpdated: number
+  failures: number
+  messages: string[]
+}
+
+/** One row from the append-only binding scan history (GET .../{id}/Scans) */
+export interface RepoBindingScanHistoryModel {
+  id: number
+  ranAtUtc: string
+  commitSha?: string | null
+  gamesCreated: number
+  gamesUpdated: number
+  challengesImported: number
+  challengesUpdated: number
+  failures: number
+  messages?: string | null
+}
+
+/** One file inside the audit archive */
+export interface ChallengeAuditFile {
+  path: string
+  size: number
+}
+
+/** Parsed audit metadata for a pending/imported challenge */
+export interface ChallengeAuditModel {
+  yamlText?: string | null
+  files: ChallengeAuditFile[]
+  previews: Record<string, string>
+  archiveAvailable: boolean
+  buildStatus?: ChallengeBuildStatus
+  lastBuildLog?: string | null
+}
+
+/** Row returned by GET .../PendingChallenges (includes Pending + Rejected) */
+export interface PendingChallengeModel {
+  id: number
+  title: string
+  category: ChallengeCategory
+  type: ChallengeType
+  /** Either "Pending" or "Rejected" — "Active" rows are filtered out server-side. */
+  reviewStatus: ChallengeReviewStatus
+  reviewNote?: string | null
+  submittedAtUtc?: string | null
+  reviewedAtUtc?: string | null
+  submittedByUserId?: string | null
+  submittedByUserName?: string | null
+}
+
+/** Lifecycle state of a RepoWatch */
+export type RepoWatchStatus = "Active" | "Paused"
+
+/** Health of the encrypted GitHub access token for a binding / watch */
+export type TokenStatus = "NotConfigured" | "Ok" | "DecryptFailed"
+
+/** Anti-cheat block kind: which dimension fired the block */
+export type AntiCheatBlockKind = "Ip" | "Fingerprint"
+
+/** Row in the anti-cheat block log (GET /api/admin/AntiCheatBlocks) */
+export interface AntiCheatBlockModel {
+  id: number
+  userId: string
+  userName?: string | null
+  conflictUserId?: string | null
+  conflictUserName?: string | null
+  kind: AntiCheatBlockKind
+  conflictingValue?: string | null
+  occurredAtUtc: string
+}
+
+/**
+ * GET /api/Edit/Games/{id}/WatchBinding — read-only binding context.
+ * Returned when the game was auto-spawned by a GameRepoBinding; the
+ * per-game watches page renders a "managed by binding" card in that
+ * case and hides the add-watch form.
+ */
+export interface GameWatchBindingModel {
+  bindingId: number
+  repoUrl: string
+  ref?: string | null
+  eventManifestPath?: string | null
+  intervalSeconds: number
+  status: RepoWatchStatus
+  tokenStatus?: TokenStatus
+  lastScanUtc?: string | null
+  nextScanUtc?: string | null
+  lastScanMessage?: string | null
+}
+
+/** Body for POST /api/Edit/Games/{id}/Watches */
+export interface RepoWatchCreateModel {
+  repoUrl: string
+  ref?: string | null
+  subpath?: string | null
+  intervalSeconds: number
+  runImmediately?: boolean
+  /** Optional GitHub PAT for private repos. Encrypted at rest. */
+  githubToken?: string | null
+}
+
+/** Body for PUT /api/Edit/Games/{id}/Watches/{watchId} */
+export interface RepoWatchUpdateModel {
+  ref?: string | null
+  subpath?: string | null
+  intervalSeconds?: number | null
+  status?: RepoWatchStatus | null
+  /** null = keep existing token; "" = clear; non-empty = replace. */
+  githubToken?: string | null
+}
+
+/** One sync attempt as recorded in RepoWatchSync */
+export interface RepoWatchSyncModel {
+  ranAtUtc: string
+  commitSha?: string | null
+  imported: number
+  updated: number
+  skipped: number
+  failed: number
+  errorMessage?: string | null
+}
+
+/** Row returned by GET /api/Edit/Games/{id}/Watches */
+export interface RepoWatchInfoModel {
+  id: number
+  repoUrl: string
+  ref?: string | null
+  subpath?: string | null
+  intervalSeconds: number
+  status: RepoWatchStatus
+  nextRunUtc?: string | null
+  lastRunUtc?: string | null
+  lastCommitSha?: string | null
+  lastSync?: RepoWatchSyncModel | null
+  /** True iff a GitHub token is stored on this watch (plaintext never echoed). */
+  hasGitHubToken?: boolean
+  /** Latest decrypt health of the stored token. */
+  tokenStatus?: TokenStatus
+}
+
 export interface FileRecord {
   /** File name */
   fileName?: string;
@@ -3055,6 +3443,26 @@ export class Api<
       }),
 
     /**
+     * @description Sample CPU/memory/network stats for a running container.
+     * @tags Admin
+     * @name AdminGetInstanceStats
+     * @request GET:/api/admin/instances/{id}/stats
+     */
+    adminGetInstanceStats: (id: string, params: RequestParams = {}) =>
+      this.request<ContainerStatsModel, RequestResponse>({
+        path: `/api/admin/instances/${id}/stats`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    useAdminGetInstanceStats: (id: string, options?: SWRConfiguration, doFetch: boolean = true) =>
+      useSWR<ContainerStatsModel, RequestResponse>(
+        doFetch ? `/api/admin/instances/${id}/stats` : null,
+        options,
+      ),
+
+    /**
      * @description Use this API to download all Writeups, requires Admin permission
      *
      * @tags Admin
@@ -3823,6 +4231,307 @@ export class Api<
       data?: WriteupInfoModel | Promise<WriteupInfoModel>,
       options?: MutatorOptions,
     ) => mutate<WriteupInfoModel>(`/api/admin/writeups/${id}`, data, options),
+
+    /**
+     * @description List configured repo bindings
+     * @tags Admin
+     * @name AdminListRepoBindings
+     * @request GET:/api/admin/repobindings
+     */
+    adminListRepoBindings: (params: RequestParams = {}) =>
+      this.request<RepoBindingInfoModel[], RequestResponse>({
+        path: `/api/admin/repobindings`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    useAdminListRepoBindings: (options?: SWRConfiguration, doFetch: boolean = true) =>
+      useSWR<RepoBindingInfoModel[], RequestResponse>(
+        doFetch ? `/api/admin/repobindings` : null,
+        options,
+      ),
+
+    mutateAdminListRepoBindings: (
+      data?: RepoBindingInfoModel[] | Promise<RepoBindingInfoModel[]>,
+      options?: MutatorOptions,
+    ) => mutate<RepoBindingInfoModel[]>(`/api/admin/repobindings`, data, options),
+
+    /**
+     * @description Register a new repo binding (immediately scans for .gzevent manifests)
+     * @tags Admin
+     * @name AdminCreateRepoBinding
+     * @request POST:/api/admin/repobindings
+     */
+    adminCreateRepoBinding: (
+      data: RepoBindingCreateModel,
+      params: RequestParams = {},
+    ) =>
+      this.request<RepoBindingScanResultModel, RequestResponse>({
+        path: `/api/admin/repobindings`,
+        method: "POST",
+        body: data,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Trigger a re-scan of a repo binding now
+     * @tags Admin
+     * @name AdminScanRepoBinding
+     * @request POST:/api/admin/repobindings/{id}/scan
+     */
+    adminScanRepoBinding: (id: number, params: RequestParams = {}) =>
+      this.request<RepoBindingScanResultModel, RequestResponse>({
+        path: `/api/admin/repobindings/${id}/scan`,
+        method: "POST",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Recent scan history for a binding (newest first, max 20 rows).
+     * @tags Admin
+     * @name AdminGetRepoBindingScans
+     * @request GET:/api/admin/repobindings/{id}/scans
+     */
+    adminGetRepoBindingScans: (id: number, params: RequestParams = {}) =>
+      this.request<RepoBindingScanHistoryModel[], RequestResponse>({
+        path: `/api/admin/repobindings/${id}/scans`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Update a repo binding (ref, interval, status, token)
+     * @tags Admin
+     * @name AdminUpdateRepoBinding
+     * @request PUT:/api/admin/repobindings/{id}
+     */
+    adminUpdateRepoBinding: (
+      id: number,
+      data: RepoBindingUpdateModel,
+      params: RequestParams = {},
+    ) =>
+      this.request<RepoBindingInfoModel, RequestResponse>({
+        path: `/api/admin/repobindings/${id}`,
+        method: "PUT",
+        body: data,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Delete a repo binding. When cascade=true, also removes every imported game + its challenges. Default false detaches the games (sets RepoBindingId=null) so a re-bind can adopt them by title.
+     * @tags Admin
+     * @name AdminDeleteRepoBinding
+     * @request DELETE:/api/admin/repobindings/{id}
+     */
+    adminDeleteRepoBinding: (id: number, query?: { cascade?: boolean }, params: RequestParams = {}) =>
+      this.request<void, RequestResponse>({
+        path: `/api/admin/repobindings/${id}`,
+        method: "DELETE",
+        query,
+        ...params,
+      }),
+
+    /**
+     * @description List recent anti-cheat block events. Newest first; max 500 per page.
+     * @tags Admin
+     * @name AdminListAntiCheatBlocks
+     * @request GET:/api/admin/anticheatblocks
+     */
+    adminListAntiCheatBlocks: (
+      query?: { count?: number; skip?: number },
+      params: RequestParams = {},
+    ) =>
+      this.request<AntiCheatBlockModel[], RequestResponse>({
+        path: `/api/admin/anticheatblocks`,
+        method: "GET",
+        query,
+        format: "json",
+        ...params,
+      }),
+
+    useAdminListAntiCheatBlocks: (
+      query?: { count?: number; skip?: number },
+      options?: SWRConfiguration,
+      doFetch: boolean = true,
+    ) => {
+      const params = new URLSearchParams()
+      if (query?.count != null) params.append('count', String(query.count))
+      if (query?.skip != null) params.append('skip', String(query.skip))
+      const qs = params.toString()
+      const path = `/api/admin/anticheatblocks${qs ? `?${qs}` : ''}`
+      return useSWR<AntiCheatBlockModel[], RequestResponse>(doFetch ? path : null, options)
+    },
+
+    /**
+     * @description Delete an anti-cheat block row (false-positive clearance).
+     * @tags Admin
+     * @name AdminClearAntiCheatBlock
+     * @request DELETE:/api/admin/anticheatblocks/{id}
+     */
+    adminClearAntiCheatBlock: (id: number, params: RequestParams = {}) =>
+      this.request<void, RequestResponse>({
+        path: `/api/admin/anticheatblocks/${id}`,
+        method: "DELETE",
+        ...params,
+      }),
+
+    /**
+     * @description Paginated history of challenge image builds. Newest first.
+     * @tags Admin
+     * @name AdminListBuilds
+     * @request GET:/api/admin/builds
+     */
+    adminListBuilds: (
+      query?: {
+        count?: number
+        skip?: number
+        status?: ChallengeBuildStatus
+        gameId?: number
+      },
+      params: RequestParams = {},
+    ) =>
+      this.request<ChallengeBuildAuditModel[], RequestResponse>({
+        path: `/api/admin/builds`,
+        method: "GET",
+        query,
+        format: "json",
+        ...params,
+      }),
+
+    useAdminListBuilds: (
+      query?: {
+        count?: number
+        skip?: number
+        status?: ChallengeBuildStatus
+        gameId?: number
+      },
+      options?: SWRConfiguration,
+      doFetch: boolean = true,
+    ) => {
+      const params = new URLSearchParams()
+      if (query?.count != null) params.append('count', String(query.count))
+      if (query?.skip != null) params.append('skip', String(query.skip))
+      if (query?.status != null) params.append('status', query.status)
+      if (query?.gameId != null) params.append('gameId', String(query.gameId))
+      const qs = params.toString()
+      const path = `/api/admin/builds${qs ? `?${qs}` : ''}`
+      return useSWR<ChallengeBuildAuditModel[], RequestResponse>(doFetch ? path : null, options)
+    },
+
+    /**
+     * @description Live snapshot of builds currently being processed.
+     * @tags Admin
+     * @name AdminListBuildsInProgress
+     * @request GET:/api/admin/builds/inprogress
+     */
+    adminListBuildsInProgress: (params: RequestParams = {}) =>
+      this.request<ChallengeBuildInProgressModel[], RequestResponse>({
+        path: `/api/admin/builds/inprogress`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    useAdminListBuildsInProgress: (
+      options?: SWRConfiguration,
+      doFetch: boolean = true,
+    ) =>
+      useSWR<ChallengeBuildInProgressModel[], RequestResponse>(
+        doFetch ? `/api/admin/builds/inprogress` : null,
+        options,
+      ),
+
+    /**
+     * @description Enqueue a rebuild for every Failed / MissingDockerfile challenge in a game.
+     * @tags Admin
+     * @name AdminBulkRebuildFailed
+     * @request POST:/api/admin/games/{gameId}/bulkrebuild
+     */
+    adminBulkRebuildFailed: (gameId: number, params: RequestParams = {}) =>
+      this.request<BulkRebuildResultModel, RequestResponse>({
+        path: `/api/admin/games/${gameId}/bulkrebuild`,
+        method: "POST",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Delete a single ChallengeBuildAudit row.
+     * @tags Admin
+     * @name AdminDeleteBuildAudit
+     * @request DELETE:/api/admin/builds/{auditId}
+     */
+    adminDeleteBuildAudit: (auditId: number, params: RequestParams = {}) =>
+      this.request<void, RequestResponse>({
+        path: `/api/admin/builds/${auditId}`,
+        method: "DELETE",
+        ...params,
+      }),
+
+    /**
+     * @description Bulk-delete every Failed audit row.
+     * @tags Admin
+     * @name AdminPruneFailedBuildAudits
+     * @request POST:/api/admin/builds/prunefailed
+     */
+    adminPruneFailedBuildAudits: (params: RequestParams = {}) =>
+      this.request<PruneResultModel, RequestResponse>({
+        path: `/api/admin/builds/prunefailed`,
+        method: "POST",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Bulk-delete an explicit list of audit row ids.
+     * @tags Admin
+     * @name AdminBulkDeleteBuildAudits
+     * @request POST:/api/admin/builds/bulkdelete
+     */
+    adminBulkDeleteBuildAudits: (ids: number[], params: RequestParams = {}) =>
+      this.request<PruneResultModel, RequestResponse>({
+        path: `/api/admin/builds/bulkdelete`,
+        method: "POST",
+        body: ids,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description GC orphaned gzctf-auto/* images on the local docker daemon.
+     * @tags Admin
+     * @name AdminPruneOrphanBuildImages
+     * @request POST:/api/admin/builds/pruneimages
+     */
+    adminPruneOrphanBuildImages: (params: RequestParams = {}) =>
+      this.request<PruneResultModel, RequestResponse>({
+        path: `/api/admin/builds/pruneimages`,
+        method: "POST",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Re-enqueue the build for the challenge owning this audit row.
+     * @tags Admin
+     * @name AdminReenqueueBuild
+     * @request POST:/api/admin/builds/{auditId}/reenqueue
+     */
+    adminReenqueueBuild: (auditId: number, params: RequestParams = {}) =>
+      this.request<ChallengeAuditModel, RequestResponse>({
+        path: `/api/admin/builds/${auditId}/reenqueue`,
+        method: "POST",
+        format: "json",
+        ...params,
+      }),
   };
   apiToken = {
     /**
@@ -5133,6 +5842,332 @@ export class Api<
         format: "json",
         ...params,
       }),
+
+    /**
+     * @description Submit a single-challenge tarball for admin review; requires User permission.
+     *
+     * @tags Edit
+     * @name EditSubmitChallenge
+     * @request POST:/api/edit/games/{id}/challenges/submit
+     */
+    editSubmitChallenge: (
+      id: number,
+      archive: File,
+      params: RequestParams = {},
+    ) => {
+      const fd = new FormData()
+      fd.append("archive", archive)
+      return this.request<ChallengeImportResult, RequestResponse>({
+        path: `/api/edit/games/${id}/challenges/submit`,
+        method: "POST",
+        body: fd,
+        format: "json",
+        ...params,
+      })
+    },
+
+    /**
+     * @description Admin/game-admin tarball import (auto-approves).
+     *
+     * @tags Edit
+     * @name EditImportChallenge
+     * @request POST:/api/edit/games/{id}/challenges/import
+     */
+    editImportChallenge: (
+      id: number,
+      archive: File,
+      params: RequestParams = {},
+    ) => {
+      const fd = new FormData()
+      fd.append("archive", archive)
+      return this.request<ChallengeImportResult, RequestResponse>({
+        path: `/api/edit/games/${id}/challenges/import`,
+        method: "POST",
+        body: fd,
+        format: "json",
+        ...params,
+      })
+    },
+
+    /**
+     * @description Bulk import from a public github repo. Auto-approves when caller is admin/event-manager.
+     *
+     * @tags Edit
+     * @name EditImportChallengeFromGitHub
+     * @request POST:/api/edit/games/{id}/challenges/importfromgithub
+     */
+    editImportChallengeFromGitHub: (
+      id: number,
+      data: ImportFromGitHubModel,
+      params: RequestParams = {},
+    ) =>
+      this.request<ChallengeImportResult, RequestResponse>({
+        path: `/api/edit/games/${id}/challenges/importfromgithub`,
+        method: "POST",
+        body: data,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description List challenges awaiting admin review.
+     *
+     * @tags Edit
+     * @name EditListPendingChallenges
+     * @request GET:/api/edit/games/{id}/pendingchallenges
+     */
+    editListPendingChallenges: (
+      id: number,
+      params: RequestParams = {},
+    ) =>
+      this.request<PendingChallengeModel[], RequestResponse>({
+        path: `/api/edit/games/${id}/pendingchallenges`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    useEditListPendingChallenges: (
+      id: number,
+      options?: SWRConfiguration,
+      doFetch: boolean = true,
+    ) =>
+      useSWR<PendingChallengeModel[], RequestResponse>(
+        doFetch ? `/api/edit/games/${id}/pendingchallenges` : null,
+        options,
+      ),
+
+    mutateEditListPendingChallenges: (
+      id: number,
+      data?: PendingChallengeModel[] | Promise<PendingChallengeModel[]>,
+      options?: MutatorOptions,
+    ) =>
+      mutate<PendingChallengeModel[]>(
+        `/api/edit/games/${id}/pendingchallenges`,
+        data,
+        options,
+      ),
+
+    /**
+     * @description Get parsed audit metadata (YAML, file tree, previews) for a pending challenge.
+     *
+     * @tags Edit
+     * @name EditGetChallengeAuditMeta
+     * @request GET:/api/edit/games/{id}/challenges/{cId}/auditmeta
+     */
+    editGetChallengeAuditMeta: (
+      id: number,
+      cId: number,
+      params: RequestParams = {},
+    ) =>
+      this.request<ChallengeAuditModel, RequestResponse>({
+        path: `/api/edit/games/${id}/challenges/${cId}/auditmeta`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Re-run the auto-build pipeline against a challenge's persisted archive.
+     * @tags Edit
+     * @name EditRebuildChallengeImage
+     * @request POST:/api/edit/games/{id}/challenges/{cId}/rebuild
+     */
+    editRebuildChallengeImage: (
+      id: number,
+      cId: number,
+      params: RequestParams = {},
+    ) =>
+      this.request<ChallengeAuditModel, RequestResponse>({
+        path: `/api/edit/games/${id}/challenges/${cId}/rebuild`,
+        method: "POST",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Approve a pending challenge.
+     *
+     * @tags Edit
+     * @name EditApproveChallenge
+     * @request POST:/api/edit/games/{id}/challenges/{cId}/approve
+     */
+    editApproveChallenge: (
+      id: number,
+      cId: number,
+      params: RequestParams = {},
+    ) =>
+      this.request<void, RequestResponse>({
+        path: `/api/edit/games/${id}/challenges/${cId}/approve`,
+        method: "POST",
+        ...params,
+      }),
+
+    /**
+     * @description Reject a pending challenge with an optional note.
+     *
+     * @tags Edit
+     * @name EditRejectChallenge
+     * @request POST:/api/edit/games/{id}/challenges/{cId}/reject
+     */
+    editRejectChallenge: (
+      id: number,
+      cId: number,
+      data: RejectChallengeModel,
+      params: RequestParams = {},
+    ) =>
+      this.request<void, RequestResponse>({
+        path: `/api/edit/games/${id}/challenges/${cId}/reject`,
+        method: "POST",
+        body: data,
+        type: ContentType.Json,
+        ...params,
+      }),
+
+    /**
+     * @description List configured github repo watches for this game.
+     *
+     * @tags Edit
+     * @name EditListRepoWatches
+     * @request GET:/api/edit/games/{id}/watches
+     */
+    editListRepoWatches: (
+      id: number,
+      params: RequestParams = {},
+    ) =>
+      this.request<RepoWatchInfoModel[], RequestResponse>({
+        path: `/api/edit/games/${id}/watches`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Read-only binding context for binding-owned games. Returns null body when the game is hand-authored.
+     * @tags Edit
+     * @name EditGetGameWatchBinding
+     * @request GET:/api/edit/games/{id}/watchbinding
+     */
+    editGetGameWatchBinding: (
+      id: number,
+      params: RequestParams = {},
+    ) =>
+      this.request<GameWatchBindingModel | null, RequestResponse>({
+        path: `/api/edit/games/${id}/watchbinding`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    useEditGetGameWatchBinding: (
+      id: number,
+      options?: SWRConfiguration,
+      doFetch: boolean = true,
+    ) =>
+      useSWR<GameWatchBindingModel | null, RequestResponse>(
+        doFetch ? `/api/edit/games/${id}/watchbinding` : null,
+        options,
+      ),
+
+    useEditListRepoWatches: (
+      id: number,
+      options?: SWRConfiguration,
+      doFetch: boolean = true,
+    ) =>
+      useSWR<RepoWatchInfoModel[], RequestResponse>(
+        doFetch ? `/api/edit/games/${id}/watches` : null,
+        options,
+      ),
+
+    mutateEditListRepoWatches: (
+      id: number,
+      data?: RepoWatchInfoModel[] | Promise<RepoWatchInfoModel[]>,
+      options?: MutatorOptions,
+    ) =>
+      mutate<RepoWatchInfoModel[]>(
+        `/api/edit/games/${id}/watches`,
+        data,
+        options,
+      ),
+
+    /**
+     * @description Create a new repo watch.
+     *
+     * @tags Edit
+     * @name EditCreateRepoWatch
+     * @request POST:/api/edit/games/{id}/watches
+     */
+    editCreateRepoWatch: (
+      id: number,
+      data: RepoWatchCreateModel,
+      params: RequestParams = {},
+    ) =>
+      this.request<RepoWatchInfoModel, RequestResponse>({
+        path: `/api/edit/games/${id}/watches`,
+        method: "POST",
+        body: data,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Update an existing repo watch (interval / pause / resume / subpath).
+     *
+     * @tags Edit
+     * @name EditUpdateRepoWatch
+     * @request PUT:/api/edit/games/{id}/watches/{watchId}
+     */
+    editUpdateRepoWatch: (
+      id: number,
+      watchId: number,
+      data: RepoWatchUpdateModel,
+      params: RequestParams = {},
+    ) =>
+      this.request<void, RequestResponse>({
+        path: `/api/edit/games/${id}/watches/${watchId}`,
+        method: "PUT",
+        body: data,
+        type: ContentType.Json,
+        ...params,
+      }),
+
+    /**
+     * @description Delete a repo watch (does not remove already-imported challenges).
+     *
+     * @tags Edit
+     * @name EditDeleteRepoWatch
+     * @request DELETE:/api/edit/games/{id}/watches/{watchId}
+     */
+    editDeleteRepoWatch: (
+      id: number,
+      watchId: number,
+      params: RequestParams = {},
+    ) =>
+      this.request<void, RequestResponse>({
+        path: `/api/edit/games/${id}/watches/${watchId}`,
+        method: "DELETE",
+        ...params,
+      }),
+
+    /**
+     * @description Force a sync now on a repo watch.
+     *
+     * @tags Edit
+     * @name EditRunRepoWatchNow
+     * @request POST:/api/edit/games/{id}/watches/{watchId}/run
+     */
+    editRunRepoWatchNow: (
+      id: number,
+      watchId: number,
+      params: RequestParams = {},
+    ) =>
+      this.request<void, RequestResponse>({
+        path: `/api/edit/games/${id}/watches/${watchId}/run`,
+        method: "POST",
+        ...params,
+      }),
   };
   game = {
     /**
@@ -5910,6 +6945,51 @@ export class Api<
         data,
         options,
       ),
+
+    /**
+     * @description Reassemble captured pcap into per-TCP-session flow summaries; requires Monitor permission
+     *
+     * @tags Game
+     * @name GameGetTrafficFlows
+     * @summary Get reassembled flows from a traffic file
+     * @request GET:/api/game/captures/{challengeId}/{partId}/{filename}/flows
+     */
+    gameGetTrafficFlows: (
+      challengeId: number,
+      partId: number,
+      filename: string,
+      filter: FlowFilter = {},
+      params: RequestParams = {},
+    ) =>
+      this.request<TrafficFlowSummary[], RequestResponse>({
+        path: `/api/game/captures/${challengeId}/${partId}/${filename}/flows`,
+        method: "GET",
+        query: filter,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Get full payload of a single flow in a traffic file; requires Monitor permission
+     *
+     * @tags Game
+     * @name GameGetTrafficFlowDetail
+     * @summary Get one flow's chunked payload
+     * @request GET:/api/game/captures/{challengeId}/{partId}/{filename}/flow/{connectionPort}
+     */
+    gameGetTrafficFlowDetail: (
+      challengeId: number,
+      partId: number,
+      filename: string,
+      connectionPort: number,
+      params: RequestParams = {},
+    ) =>
+      this.request<TrafficFlowDetail, RequestResponse>({
+        path: `/api/game/captures/${challengeId}/${partId}/${filename}/flow/${connectionPort}`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
 
     /**
      * @description Retrieves post-game writeup submission information; requires User permission

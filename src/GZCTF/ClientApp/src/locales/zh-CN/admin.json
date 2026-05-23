@@ -26,13 +26,20 @@
       "hint": {
         "add": "添加提示"
       },
+      "import": "导入",
       "new": "新建题目",
+      "pending": "待审核",
+      "watches": "仓库监听",
+      "bulk_rebuild": "重建失败镜像",
+      "build_now": "构建镜像",
+      "build_in_flight": "构建进行中…",
       "next": "下一题",
       "preview": "预览题目",
       "previous": "上一题",
       "test_container": {
         "create": "创建测试容器",
-        "destroy": "销毁测试容器"
+        "destroy": "销毁测试容器",
+        "shell": "Shell"
       }
     },
     "divisions": {
@@ -67,9 +74,61 @@
     },
     "writeups": {
       "download_all": "下载全部 Writeup"
+    },
+    "import": {
+      "run": "导入",
+      "submit": "提交",
+      "pick_file": "选择压缩包"
+    },
+    "review": {
+      "approve": "通过",
+      "reject": "驳回",
+      "audit": "审查",
+      "delete": "删除"
+    },
+    "exec": {
+      "open": "打开终端"
+    },
+    "audit": {
+      "download": "下载压缩包",
+      "rebuild": "重新构建"
+    },
+    "watches": {
+      "add": "添加监听",
+      "run": "立即运行",
+      "pause": "暂停",
+      "resume": "恢复",
+      "delete": "删除",
+      "open_binding": "查看绑定",
+      "token": "更新 Token"
+    },
+    "repo_binding": {
+      "add": "添加仓库",
+      "scan": "立即扫描",
+      "delete": "移除",
+      "delete_cascade": "移除并删除比赛",
+      "history": "扫描历史",
+      "pause": "暂停轮询",
+      "resume": "恢复轮询"
+    },
+    "anti_cheat": {
+      "clear": "清除此记录"
+    },
+    "builds": {
+      "view_log": "查看完整日志",
+      "reenqueue": "重新构建",
+      "delete": "删除此记录",
+      "delete_selected": "删除所选",
+      "prune_failed": "清理失败记录",
+      "prune_images": "清理镜像",
+      "copy": "复制日志",
+      "copied": "已复制"
     }
   },
   "content": {
+    "exec": {
+      "title": "容器终端"
+    },
     "games": {
       "challenges": {
         "attachment": {
@@ -125,6 +184,7 @@
           "title": "Ouch! 这个比赛还没有题目"
         },
         "enable": "你确定要启用题目 {{name}} 吗？",
+        "bulk_rebuild_confirm": "是否对 {{count}} 个失败或缺少 Dockerfile 的题目重新触发构建？",
         "flag": {
           "create": "创建 flag，多个 flag 按行分割，每行一个。<br/>每道题目可以拥有多个 flag，获取任意 flag 均可得分。",
           "delete": "确定删除此 flag 吗？",
@@ -291,6 +351,10 @@
           "description": "比赛结束后仍然可以查看题目和提交",
           "label": "练习模式"
         },
+        "allow_user_submissions": {
+          "description": "允许登录用户提交题目（管理员审核后发布）",
+          "label": "允许用户提交题目"
+        },
         "start_date": "开始日期",
         "start_time": "开始时间",
         "summary": {
@@ -379,6 +443,17 @@
           "description": "在登录/注册时收集浏览器指纹用于风险分析。",
           "warning": "启用此功能将收集额外的用户设备信息。请确保符合当地隐私法规，并相应更新隐私政策。"
         },
+        "unique_ip_per_team_user": {
+          "label": "队员 IP 唯一性",
+          "description": "当另一名队员在 24 小时内已从相同 IP 登录时，阻止登录。"
+        },
+        "unique_fingerprint_per_team_user": {
+          "label": "队员浏览器指纹唯一性",
+          "description": "当另一名队员在 24 小时内已使用相同浏览器指纹登录时，阻止登录。需先启用浏览器指纹。"
+        },
+        "unique_per_team_user": {
+          "warning": "这些策略会拦截来自共享 NAT（宿舍/办公室）、共享实验室设备或 CGNAT 出口 IP 的合法登录。仅在确认每位队员都使用独立的设备和网络登录时启用。"
+        },
         "title": "账户策略",
         "use_captcha": {
           "description": "是否在登录、注册和找回时进行校验",
@@ -403,6 +478,31 @@
           "label": "续期窗口（分钟）"
         },
         "title": "容器策略"
+      },
+      "build_registry": {
+        "title": "镜像仓库",
+        "description": "自动构建成功后将镜像推送到此处。关闭开关则镜像仅保留在本地 Docker。",
+        "push_on_build": {
+          "label": "构建后推送到镜像仓库",
+          "description": "开启后，每次自动构建成功都会按 服务器 + 命名空间 重新打标签并推送。"
+        },
+        "server": {
+          "label": "服务器",
+          "description": "主机名（不含协议）。如 ghcr.io、registry.example.com:5000"
+        },
+        "namespace": {
+          "label": "命名空间",
+          "description": "可选前缀，如 myorg → ghcr.io/myorg/gzctf-auto/..."
+        },
+        "username": {
+          "label": "用户名",
+          "description": "推送账号，匿名推送可留空。"
+        },
+        "password": {
+          "label": "密码 / PAT",
+          "description": "以 XOR 混淆存储。留空将保留当前值。",
+          "configured": "（已配置 — 留空以保留）"
+        }
       },
       "platform": {
         "api_encryption": {
@@ -457,6 +557,195 @@
         "title": "为 {{name}} 重置密码"
       },
       "stats": "已显示 <1>{{current}}</1>/<1>{{total}}</1> 用户"
+    },
+    "import": {
+      "github_tab": "从 GitHub",
+      "tarball_tab": "从压缩包",
+      "repo_url": "仓库 URL",
+      "ref": "分支 / 标签（可选）",
+      "subpath": "子路径（可选）",
+      "token": "GitHub Token（可选）",
+      "token_help": "仅私有仓库需要。建议使用细粒度 PAT（Contents: read）。不会被存储。",
+      "tarball_help": "上传一个包含 challenge.yaml 和 attachments/ 的 .tar.gz 或 .zip。",
+      "result": "导入结果",
+      "imported": "新建",
+      "updated": "更新",
+      "skipped": "跳过",
+      "failed": "失败",
+      "no_file": "请先选择压缩包。",
+      "no_url": "请先填写仓库 URL。"
+    },
+    "audit": {
+      "title": "审查题目",
+      "archive_available": "上传时保留的原始压缩包可下载。",
+      "no_archive": "未保留原始压缩包（管理员手动新建或来自 GitHub）。",
+      "unavailable": "审查信息不可用。",
+      "yaml": "challenge.yaml",
+      "no_yaml": "压缩包中未找到 challenge.yaml。",
+      "files": "文件列表",
+      "previews": "审查文件预览",
+      "build_log": "构建日志",
+      "no_build_log": "暂无构建日志。"
+    },
+    "builds": {
+      "title": "镜像构建",
+      "subtitle": "记录每一次题目镜像的构建尝试 —— 包括导入扫描自动触发和管理员手动重建。",
+      "empty_title": "暂无构建记录",
+      "empty": "导入含本地 Dockerfile 的题目后，构建记录会出现在这里。",
+      "in_progress_title": "正在进行",
+      "no_in_progress": "当前没有进行中的构建。",
+      "attempt": "第 {{n}} 次",
+      "log_modal_title": "构建日志",
+      "no_log": "此次尝试没有日志。",
+      "confirm_delete": "删除 {{challenge}} 的审计记录？不会影响题目本身和已构建的镜像。",
+      "confirm_bulk_delete": "删除选中的 {{count}} 条审计记录？不会影响题目本身和已构建的镜像。",
+      "confirm_prune_failed": "删除 {{count}} 条 Failed 审计记录？成功、进行中的记录以及题目本身都不会受影响。",
+      "select_all": "选择本页全部记录",
+      "confirm_prune_images": {
+        "line1": "清理本地 Docker daemon 上没有题目引用的 gzctf-auto/* 镜像。",
+        "line2": "已推送到仓库的镜像不会被清理。正在使用的镜像会保留。用于释放 GZCTF 主机磁盘。"
+      },
+      "filter": {
+        "all": "全部状态",
+        "placeholder": "按状态筛选"
+      },
+      "column": {
+        "when": "时间",
+        "challenge": "题目",
+        "trigger": "触发方式",
+        "attempt": "尝试",
+        "status": "状态",
+        "duration": "耗时",
+        "detail": "结果"
+      }
+    },
+    "review": {
+      "badge": {
+        "pending": "待审核",
+        "rejected": "已驳回",
+        "queued": "排队中",
+        "building": "构建中",
+        "built": "已构建",
+        "build_failed": "构建失败",
+        "build_failed_help": "该题目最近一次 Docker 构建失败。打开「审查」查看构建日志。",
+        "not_applicable": "仓库镜像",
+        "not_applicable_help": "该题目使用了已发布的镜像，不会触发自动构建。",
+        "missing_dockerfile": "缺少 Dockerfile",
+        "missing_dockerfile_help": "challenge.yaml 指向的本地 Dockerfile 路径在压缩包中不存在。打开「审查」查看解析路径，修正后再重建。"
+      },
+      "title": "待审核题目",
+      "empty": {
+        "title": "暂无待审核题目",
+        "description": "用户提交的题目将会出现在这里。"
+      },
+      "reject_title": "驳回 \"{{name}}\" 吗？",
+      "reject_note_placeholder": "理由（可选，仅管理员可见）。",
+      "delete_title": "永久删除 \"{{name}}\" 吗？",
+      "delete_warning": "这将彻底移除题目记录、Flag、原始压缩包以及附件。不可恢复。",
+      "column": {
+        "status": "状态",
+        "submitted": "提交时间",
+        "submitter": "提交者",
+        "title": "标题",
+        "category": "分类",
+        "type": "类型",
+        "actions": "操作"
+      }
+    },
+    "repo_binding": {
+      "title": "仓库绑定",
+      "subtitle": "注册 GitHub 仓库，平台会扫描其中的 .gzevent 自动创建比赛并导入该比赛下的题目，按设定的轮询间隔自动重新扫描。",
+      "add": "添加仓库",
+      "repo_url": "仓库 URL",
+      "ref": "分支 / 标签（可选）",
+      "token": "GitHub Token（可选）",
+      "token_help": "私有仓库需要。加密存储。建议使用细粒度 PAT（Contents: read）。",
+      "interval": "轮询间隔（秒）",
+      "interval_help": "后台扫描器重新拉取仓库的频率。最小 60，最大 86400（24 小时）。",
+      "run_immediately": "立即执行首次扫描",
+      "empty": "注册一个仓库以便自动从 .gzevent 清单中发现比赛。",
+      "empty_title": "尚未绑定任何仓库",
+      "no_games": "该仓库尚未发现 .gzevent 清单。",
+      "has_token": "已配置 Token",
+      "token_decrypt_failed": "存储的 Token 无法解密。可能是 DataProtection 密钥已轮换。请更新 Token。",
+      "paused_short": "已暂停",
+      "due_now": "即将扫描",
+      "history_title": "扫描历史",
+      "history_loading": "加载中…",
+      "history_empty": "暂无扫描记录。",
+      "push_on_edit_label": "编辑后推送",
+      "push_on_edit_help": "开启后，管理员对来自此绑定的题目的编辑将作为新的 challenge.yml 提交并推送到上游仓库。需要带 Contents:write 权限的 PAT。",
+      "card": {
+        "ref_label": "分支",
+        "events_count_one": "已发现 {{count}} 个比赛",
+        "events_count_other": "已发现 {{count}} 个比赛",
+        "last_scan": "最近扫描",
+        "next_scan": "下次扫描",
+        "never_scanned": "尚未扫描",
+        "commit": "Commit"
+      },
+      "delete_title": "删除 {{repo}} 的绑定？",
+      "delete_warning": "默认会保留已导入的比赛（仅解除绑定关联）。重新绑定同一仓库时，扫描器会按标题自动认领这些孤立的比赛，避免出现重复。",
+      "delete_cascade": {
+        "label": "同时删除已导入的比赛",
+        "description": "永久删除此绑定发现的所有比赛及其题目、Flag、构建记录。适用于完整清理。"
+      },
+      "column": {
+        "repo": "仓库",
+        "ref": "Ref",
+        "status": "状态",
+        "games": "发现的比赛",
+        "last_scan": "最近扫描",
+        "next_scan": "下次扫描",
+        "commit": "Commit",
+        "actions": "操作"
+      }
+    },
+    "anti_cheat": {
+      "title": "反作弊拦截",
+      "subtitle": "按「每队员独立 IP / 指纹」策略被拦截的登录请求。若属误判（如队友共享 NAT 公网 IP），可清除该记录。",
+      "empty_title": "暂无拦截记录",
+      "empty": "策略触发时会显示在这里。请在「设置 → 账号策略」中配置。",
+      "column": {
+        "when": "时间",
+        "user": "被拦截用户",
+        "kind": "类型",
+        "conflict_with": "冲突来自",
+        "value": "值"
+      }
+    },
+    "watches": {
+      "title": "仓库监听",
+      "add": "添加监听",
+      "empty": "添加一个以按计划从仓库导入题目。",
+      "empty_title": "尚未配置监听",
+      "one_per_event": "每场比赛只关联一个仓库。如需切换，请先删除现有监听。",
+      "last_scan": "最近扫描",
+      "next_scan": "下次扫描",
+      "never_scanned": "尚未扫描",
+      "managed_by_binding": {
+        "title": "由仓库绑定管理",
+        "subtitle": "该比赛由全局仓库绑定自动创建。绑定轮询器按其自身节奏重新扫描仓库，无需添加单独的监听。"
+      },
+      "repo_url": "仓库 URL",
+      "ref": "分支 / 标签",
+      "subpath": "子路径",
+      "interval": "间隔（秒）",
+      "token": "GitHub Token（可选）",
+      "token_help": "仅私有仓库需要。加密存储。建议使用细粒度 PAT（Contents: read）。",
+      "token_prompt": "粘贴新的 GitHub Token（留空以清除）：",
+      "has_token": "已配置 Token",
+      "run_immediately": "立即运行",
+      "column": {
+        "repo": "仓库",
+        "ref": "Ref",
+        "subpath": "子路径",
+        "interval": "间隔",
+        "last_run": "最近一次",
+        "commit": "Commit",
+        "status": "状态",
+        "actions": "操作"
+      }
     }
   },
   "label": {
@@ -472,7 +761,11 @@
     "instances": {
       "container_id": "容器 ID",
       "entry": "访问入口",
-      "life_cycle": "生命周期"
+      "life_cycle": "生命周期",
+      "cpu": "CPU",
+      "memory": "内存",
+      "network": "网络",
+      "live_stats": "实时统计"
     },
     "logs": {
       "message": "信息",
@@ -575,6 +868,32 @@
       "deleted": "{{name}} 已删除",
       "password_copied": "密码已复制到剪贴板",
       "updated": "用户信息已更新"
+    },
+    "import": {
+      "complete": "导入完成"
+    },
+    "review": {
+      "approved": "题目已通过",
+      "rejected": "题目已驳回",
+      "deleted": "{{name}} 已删除"
+    },
+    "watch": {
+      "created": "已创建监听",
+      "run_queued": "将在下一个心跳触发",
+      "token_updated": "Token 已更新"
+    },
+    "anti_cheat": {
+      "cleared": "已清除"
+    },
+    "repo_binding": {
+      "scanned": "扫描完成",
+      "summary": "比赛 {{games}}，题目 {{challenges}}，失败 {{failures}}"
+    },
+    "builds": {
+      "bulk_enqueued": "已加入 {{count}} 个构建任务",
+      "enqueued": "构建已触发",
+      "pruned": "已清理 {{count}} 条记录",
+      "images_pruned": "已清理 {{count}} 个孤立镜像"
     }
   },
   "placeholder": {
@@ -638,6 +957,9 @@
     },
     "instances": "实例管理",
     "logs": "系统日志",
+    "repo_bindings": "仓库绑定",
+    "anti_cheat": "反作弊",
+    "builds": "镜像构建",
     "settings": "系统设置",
     "teams": "队伍管理",
     "users": "用户管理"

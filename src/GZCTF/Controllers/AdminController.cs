@@ -18,6 +18,8 @@ using GZCTF.Services.Config;
 using GZCTF.Services.Mail;
 using GZCTF.Storage.Interface;
 using GZCTF.Utils;
+using GZCTF.Models.Data;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -69,11 +71,26 @@ public class AdminController(
         // always reload, ensure latest
         configService.ReloadConfig();
 
+        // For the build-registry block, blank the obfuscated password
+        // bytes before returning. The UI doesn't need them — it shows a
+        // "(configured)" placeholder via HasPassword and only sends a
+        // value back when the operator intentionally types one.
+        var buildRegistry = serviceProvider.GetRequiredService<IOptionsSnapshot<BuildRegistryConfig>>().Value;
+        var safeBuildRegistry = new BuildRegistryConfig
+        {
+            PushOnBuild = buildRegistry.PushOnBuild,
+            Server = buildRegistry.Server,
+            Namespace = buildRegistry.Namespace,
+            Username = buildRegistry.Username,
+            Password = buildRegistry.HasPassword ? string.Empty : null,
+        };
+
         ConfigEditModel config = new()
         {
             AccountPolicy = serviceProvider.GetRequiredService<IOptionsSnapshot<AccountPolicy>>().Value,
             GlobalConfig = serviceProvider.GetRequiredService<IOptionsSnapshot<GlobalConfig>>().Value,
-            ContainerPolicy = serviceProvider.GetRequiredService<IOptionsSnapshot<ContainerPolicy>>().Value
+            ContainerPolicy = serviceProvider.GetRequiredService<IOptionsSnapshot<ContainerPolicy>>().Value,
+            BuildRegistry = safeBuildRegistry,
         };
 
         return Ok(config);
@@ -97,6 +114,32 @@ public class AdminController(
         var global = serviceProvider.GetRequiredService<IOptionsSnapshot<GlobalConfig>>().Value;
         if (!global.ApiEncryption && model.GlobalConfig?.ApiEncryption is true)
             await configService.UpdateApiEncryptionKey(token);
+
+        // Special-case the build-registry password: arrives plaintext
+        // from the form, gets XOR-obfuscated before persistence. Empty
+        // string means "leave the existing password alone" — the UI
+        // shows a "(configured)" placeholder when one is stored and
+        // only sends a value when the operator types one.
+        if (model.BuildRegistry is { } br)
+        {
+            if (string.IsNullOrEmpty(br.Password))
+            {
+                var existing = serviceProvider.GetRequiredService<IOptionsSnapshot<BuildRegistryConfig>>().Value;
+                br.Password = existing.Password;
+            }
+            else
+            {
+                var xorKey = configService.GetXorKey();
+                if (xorKey.Length > 0)
+                    br.Password = Convert.ToBase64String(
+                        Codec.Xor(br.Password.ToUTF8Bytes(), xorKey));
+                // If no XorKey is configured (test envs), the password
+                // lands plaintext in the DB. That's the same risk
+                // profile as the existing RegistryConfig.Password
+                // handling, which never obfuscated either — call out
+                // in the operator docs.
+            }
+        }
 
         // save all config properties
         foreach (var prop in typeof(ConfigEditModel).GetProperties())
@@ -1127,6 +1170,32 @@ public class AdminController(
     /// <response code="401">Unauthorized user</response>
     /// <response code="403">Forbidden</response>
     /// <response code="404">Container instance not found</response>
+    /// <summary>
+    /// Sample point-in-time CPU/memory/network stats for a running
+    /// container instance. Returns 404 when the instance is gone or the
+    /// runtime can't provide stats (e.g. Kubernetes mode in v1).
+    /// </summary>
+    [RequireAdmin]
+    [HttpGet("Instances/{id:guid}/Stats")]
+    [ProducesResponseType(typeof(ContainerStatsModel), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetInstanceStats(Guid id,
+        [FromServices] Services.Container.Manager.IContainerManager containerManager,
+        CancellationToken token = default)
+    {
+        var container = await containerRepository.GetContainerById(id, token);
+        if (container is null)
+            return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Admin_ContainerInstanceNotFound)],
+                StatusCodes.Status404NotFound));
+
+        var stats = await containerManager.GetStatsAsync(container, token);
+        if (stats is null)
+            return NotFound(new RequestResponse("Stats unavailable for this container.",
+                StatusCodes.Status404NotFound));
+
+        return Ok(stats);
+    }
+
     [RequireAdmin]
     [HttpDelete("Instances/{id:guid}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -1349,7 +1418,759 @@ public class AdminController(
         return Ok(writeups);
     }
 
+    /// <summary>
+    /// List recent anti-cheat blocks (the per-team-user IP / fingerprint
+    /// policy enforcement log). Newest first, capped at 200 rows.
+    /// </summary>
+    [RequireAdmin]
+    [HttpGet("AntiCheatBlocks")]
+    [ProducesResponseType(typeof(Models.Response.Admin.AntiCheatBlockModel[]), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListAntiCheatBlocks(
+        [FromServices] AppDbContext dbContext,
+        [FromQuery][Range(1, 500)] int count = 100,
+        [FromQuery] int skip = 0,
+        CancellationToken token = default)
+    {
+        var rows = await dbContext.AntiCheatBlocks.AsNoTracking()
+            .OrderByDescending(b => b.OccurredAtUtc)
+            .Skip(skip).Take(count)
+            .Select(b => new Models.Response.Admin.AntiCheatBlockModel
+            {
+                Id = b.Id,
+                UserId = b.UserId,
+                UserName = b.UserName,
+                ConflictUserId = b.ConflictUserId,
+                ConflictUserName = b.ConflictUserName,
+                Kind = b.Kind,
+                ConflictingValue = b.ConflictingValue,
+                OccurredAtUtc = b.OccurredAtUtc
+            })
+            .ToArrayAsync(token);
+        return Ok(rows);
+    }
+
+    /// <summary>
+    /// Remove an anti-cheat block row. Useful when an admin determines
+    /// a false positive (e.g., teammates legitimately share a NAT'd
+    /// public IP). The block is purely advisory — deleting it does not
+    /// retroactively allow the past login; it just drops the record.
+    /// </summary>
+    [RequireAdmin]
+    [HttpDelete("AntiCheatBlocks/{id:int}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ClearAntiCheatBlock(
+        [FromRoute] int id, [FromServices] AppDbContext dbContext, CancellationToken token)
+    {
+        var row = await dbContext.AntiCheatBlocks.FirstOrDefaultAsync(b => b.Id == id, token);
+        if (row is null) return NotFound(new RequestResponse("Block not found."));
+        dbContext.AntiCheatBlocks.Remove(row);
+        await dbContext.SaveChangesAsync(token);
+        return Ok();
+    }
+
+    // =========================================================
+    //  Challenge image build observability
+    //  See /root/.claude/plans/compiled-squishing-neumann.md
+    // =========================================================
+
+    /// <summary>
+    /// Paginated audit history across all challenge builds. Newest
+    /// first. Supports filtering by status (Failed by default omitted —
+    /// pass <c>status=</c> for the full history) and by game.
+    /// </summary>
+    [RequireAdmin]
+    [HttpGet("Builds")]
+    [ProducesResponseType(typeof(Models.Response.Admin.ChallengeBuildAuditModel[]), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListBuilds(
+        [FromServices] AppDbContext dbContext,
+        [FromQuery][Range(1, 500)] int count = 50,
+        [FromQuery] int skip = 0,
+        [FromQuery] ChallengeBuildStatus? status = null,
+        [FromQuery] int? gameId = null,
+        CancellationToken token = default)
+    {
+        var q = dbContext.ChallengeBuildAudits.AsNoTracking()
+            .Include(a => a.Challenge)
+            .OrderByDescending(a => a.EnqueuedAtUtc)
+            .AsQueryable();
+        if (status is { } s) q = q.Where(a => a.Status == s);
+        if (gameId is { } g) q = q.Where(a => a.GameId == g);
+
+        var rows = await q.Skip(skip).Take(count)
+            .Select(a => new Models.Response.Admin.ChallengeBuildAuditModel
+            {
+                Id = a.Id,
+                ChallengeId = a.ChallengeId,
+                GameId = a.GameId,
+                ChallengeTitle = a.Challenge != null ? a.Challenge.Title : string.Empty,
+                EnqueuedAtUtc = a.EnqueuedAtUtc,
+                StartedAtUtc = a.StartedAtUtc,
+                FinishedAtUtc = a.FinishedAtUtc,
+                Trigger = a.Trigger,
+                Attempt = a.Attempt,
+                Status = a.Status,
+                Digest = a.Digest,
+                LogTail = a.LogTail,
+                ErrorMessage = a.ErrorMessage,
+                DurationMs = a.DurationMs
+            })
+            .ToArrayAsync(token);
+        return Ok(rows);
+    }
+
+    /// <summary>
+    /// Live snapshot of builds currently being processed by a worker.
+    /// In-memory only; cleared on app restart.
+    /// </summary>
+    [RequireAdmin]
+    [HttpGet("Builds/InProgress")]
+    [ProducesResponseType(typeof(Models.Response.Admin.ChallengeBuildInProgressModel[]), StatusCodes.Status200OK)]
+    public IActionResult ListBuildsInProgress(
+        [FromServices] Services.Container.Build.IChallengeBuildQueue buildQueue)
+    {
+        var rows = buildQueue.GetInProgress()
+            .OrderByDescending(b => b.StartedAtUtc)
+            .Select(b => new Models.Response.Admin.ChallengeBuildInProgressModel
+            {
+                AuditId = b.AuditId,
+                ChallengeId = b.ChallengeId,
+                GameId = b.GameId,
+                Slug = b.Slug,
+                Attempt = b.Attempt,
+                Trigger = b.Trigger,
+                StartedAtUtc = b.StartedAtUtc
+            })
+            .ToArray();
+        return Ok(rows);
+    }
+
+    /// <summary>
+    /// Re-enqueue a build for the challenge that owns this audit row.
+    /// Convenience action on /admin/builds — under the hood it just
+    /// looks up the challenge id from the audit and forwards to the
+    /// existing per-challenge Rebuild flow (with all its dedup +
+    /// blob-vs-binding-fallback logic).
+    /// </summary>
+    [RequireAdmin]
+    [HttpPost("Builds/{auditId:int}/Reenqueue")]
+    [ProducesResponseType(typeof(Models.Response.Admin.ChallengeAuditModel), StatusCodes.Status202Accepted)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ReenqueueBuild(
+        [FromRoute] int auditId,
+        [FromServices] AppDbContext dbContext,
+        CancellationToken token)
+    {
+        var row = await dbContext.ChallengeBuildAudits.AsNoTracking()
+            .FirstOrDefaultAsync(a => a.Id == auditId, token);
+        if (row is null) return NotFound(new RequestResponse("Audit row not found."));
+        // Redirect to the existing Rebuild route — keeps all the
+        // blob-vs-binding fallback + EnqueueResult handling in one
+        // place. 307 preserves the POST verb.
+        return RedirectPreserveMethod($"/api/edit/games/{row.GameId}/challenges/{row.ChallengeId}/rebuild");
+    }
+
+    /// <summary>
+    /// Remove a single audit row. Doesn't touch the challenge or its
+    /// build artifacts — purely a history cleanup for operators who
+    /// don't want a stale Failed entry cluttering /admin/builds.
+    /// </summary>
+    [RequireAdmin]
+    [HttpDelete("Builds/{auditId:int}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteBuildAudit(
+        [FromRoute] int auditId,
+        [FromServices] AppDbContext dbContext,
+        CancellationToken token)
+    {
+        var row = await dbContext.ChallengeBuildAudits.FirstOrDefaultAsync(a => a.Id == auditId, token);
+        if (row is null) return NotFound(new RequestResponse("Audit row not found."));
+        dbContext.ChallengeBuildAudits.Remove(row);
+        await dbContext.SaveChangesAsync(token);
+        return Ok();
+    }
+
+    /// <summary>
+    /// Bulk-delete every Failed audit row. Lets the operator clear the
+    /// noise after a fix without scrolling through and deleting each
+    /// row individually. Doesn't affect Building / Queued / Success
+    /// rows.
+    /// </summary>
+    [RequireAdmin]
+    [HttpPost("Builds/PruneFailed")]
+    [ProducesResponseType(typeof(Models.Response.Admin.PruneResultModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> PruneFailedBuildAudits(
+        [FromServices] AppDbContext dbContext, CancellationToken token)
+    {
+        var deleted = await dbContext.ChallengeBuildAudits
+            .Where(a => a.Status == ChallengeBuildStatus.Failed)
+            .ExecuteDeleteAsync(token);
+        return Ok(new Models.Response.Admin.PruneResultModel { Removed = deleted });
+    }
+
+    /// <summary>
+    /// Bulk-delete an explicit list of audit row ids — the
+    /// select-many-and-Delete UX from <c>/admin/builds</c>. Single
+    /// transactional <c>ExecuteDeleteAsync</c> so a 100-row delete
+    /// doesn't round-trip per id. Silently no-ops on ids that don't
+    /// exist (parallel deletes / page-stale selection).
+    /// </summary>
+    [RequireAdmin]
+    [HttpPost("Builds/BulkDelete")]
+    [ProducesResponseType(typeof(Models.Response.Admin.PruneResultModel), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> BulkDeleteBuildAudits(
+        [FromBody] int[] ids,
+        [FromServices] AppDbContext dbContext,
+        CancellationToken token)
+    {
+        if (ids is null || ids.Length == 0)
+            return BadRequest(new RequestResponse("No ids provided."));
+        // Cap per request — keeps the IN-clause bounded and prevents a
+        // pathological one-shot delete from holding the table lock.
+        if (ids.Length > 500)
+            return BadRequest(new RequestResponse("At most 500 ids per request."));
+
+        var deleted = await dbContext.ChallengeBuildAudits
+            .Where(a => ids.Contains(a.Id))
+            .ExecuteDeleteAsync(token);
+        return Ok(new Models.Response.Admin.PruneResultModel { Removed = deleted });
+    }
+
+    /// <summary>
+    /// Garbage-collect <c>gzctf-auto/*</c> images on the local docker
+    /// daemon that no live <see cref="GameChallenge.ContainerImage"/>
+    /// points at. After the registry-push feature shipped, every
+    /// rebuild creates a new content-hashed tag locally; the old ones
+    /// stick around forever unless something prunes them. This trims
+    /// disk usage on the GZCTF host.
+    ///
+    /// <para>Images currently referenced by a challenge row are
+    /// preserved — even if that row's image is the registry-prefixed
+    /// version, the local <c>gzctf-auto/</c> tag is kept too so the
+    /// next rebuild can use the deterministic cache path.</para>
+    /// </summary>
+    [RequireAdmin]
+    [HttpPost("Builds/PruneImages")]
+    [ProducesResponseType(typeof(Models.Response.Admin.PruneResultModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> PruneOrphanBuildImages(
+        [FromServices] AppDbContext dbContext,
+        [FromServices] Services.Container.Provider.IContainerProvider<Docker.DotNet.DockerClient,
+            Services.Container.Provider.DockerMetadata> dockerProvider,
+        CancellationToken token)
+    {
+        // Build the keep-set from current ContainerImage values.
+        // ContainerImage can be either the bare local tag
+        // (gzctf-auto/...) or the registry-prefixed tag — derive the
+        // local form from the registry one so both versions are kept.
+        var referenced = await dbContext.GameChallenges
+            .Where(c => c.ContainerImage != null && c.ContainerImage.Contains("gzctf-auto/"))
+            .Select(c => c.ContainerImage!)
+            .ToListAsync(token);
+
+        var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var img in referenced)
+        {
+            keep.Add(img); // as stored
+            // If it's a registry-prefixed tag, also keep the bare local form.
+            var idx = img.IndexOf("gzctf-auto/", StringComparison.Ordinal);
+            if (idx > 0) keep.Add(img[idx..]);
+        }
+
+        var client = dockerProvider.GetProvider();
+        var images = await client.Images.ListImagesAsync(
+            new Docker.DotNet.Models.ImagesListParameters { All = false }, token);
+
+        int removed = 0;
+        var messages = new List<string>();
+        foreach (var img in images)
+        {
+            if (img.RepoTags is null) continue;
+            // Only touch images whose ONLY tags are gzctf-auto.
+            var gzTags = img.RepoTags
+                .Where(t => t.Contains("gzctf-auto/") || t.StartsWith("gzctf-auto/", StringComparison.Ordinal))
+                .ToArray();
+            if (gzTags.Length == 0) continue;
+            // If any of this image's tags is referenced, skip the whole image.
+            if (gzTags.Any(t => keep.Contains(t))) continue;
+            // Untag the gzctf-auto/* tags (leaves any non-gzctf tags alone).
+            foreach (var t in gzTags)
+            {
+                try
+                {
+                    await client.Images.DeleteImageAsync(t,
+                        new Docker.DotNet.Models.ImageDeleteParameters { Force = false, NoPrune = false },
+                        token);
+                    removed++;
+                }
+                catch (Exception ex)
+                {
+                    messages.Add($"{t}: {ex.Message}");
+                }
+            }
+        }
+
+        return Ok(new Models.Response.Admin.PruneResultModel
+        {
+            Removed = removed,
+            Messages = messages.ToArray()
+        });
+    }
+
+    /// <summary>
+    /// Bulk-rebuild every <c>Failed</c> / <c>MissingDockerfile</c>
+    /// challenge in a game. Skips challenges with no persisted archive
+    /// (registry-image or admin-created entries) and reports the
+    /// count.
+    /// </summary>
+    [RequireAdmin]
+    [HttpPost("Games/{gameId:int}/BulkRebuild")]
+    [ProducesResponseType(typeof(Models.Response.Admin.BulkRebuildResultModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> BulkRebuildFailed(
+        [FromRoute] int gameId,
+        [FromServices] AppDbContext dbContext,
+        [FromServices] Storage.Interface.IBlobStorage storage,
+        [FromServices] Services.Container.Build.IChallengeBuildQueue buildQueue,
+        CancellationToken token)
+    {
+        var candidates = await dbContext.GameChallenges
+            .Where(c => c.GameId == gameId
+                        && (c.BuildStatus == ChallengeBuildStatus.Failed
+                            || c.BuildStatus == ChallengeBuildStatus.MissingDockerfile))
+            .ToListAsync(token);
+
+        var result = new Models.Response.Admin.BulkRebuildResultModel();
+        var msgs = new List<string>();
+
+        foreach (var ch in candidates)
+        {
+            if (string.IsNullOrEmpty(ch.OriginalArchiveBlobPath))
+            {
+                result.Skipped++;
+                msgs.Add($"{ch.Title}: no archive on file");
+                continue;
+            }
+            if (!await storage.ExistsAsync(ch.OriginalArchiveBlobPath, token))
+            {
+                result.Skipped++;
+                msgs.Add($"{ch.Title}: archive blob missing");
+                continue;
+            }
+
+            // Extract → snapshot → enqueue, mirroring the single-shot
+            // Rebuild endpoint. Failures here are isolated per
+            // challenge: skip the one and keep going.
+            var workDir = Path.Combine(Path.GetTempPath(), $"gzctf-bulk-{Guid.NewGuid():N}");
+            try
+            {
+                Directory.CreateDirectory(workDir);
+                await using (var src = await storage.OpenReadAsync(ch.OriginalArchiveBlobPath, token))
+                {
+                    var spool = Path.Combine(workDir, "__archive.bin");
+                    await using (var fs = System.IO.File.Create(spool))
+                        await src.CopyToAsync(fs, token);
+                    await using var sf = System.IO.File.OpenRead(spool);
+                    await Services.Transfer.ChallengeImportService.ExtractArchiveAsync(sf, workDir, token);
+                    System.IO.File.Delete(spool);
+                }
+
+                var topLevel = Directory.EnumerateFileSystemEntries(workDir).Take(2).ToArray();
+                var packageDir = topLevel.Length == 1 && Directory.Exists(topLevel[0])
+                    ? topLevel[0]
+                    : workDir;
+
+                var srcDir = Path.Combine(packageDir, "src");
+                string contextDir = System.IO.File.Exists(Path.Combine(srcDir, "Dockerfile"))
+                    ? Path.GetFullPath(srcDir)
+                    : Path.GetFullPath(packageDir);
+                const string dockerfile = "Dockerfile";
+
+                if (!System.IO.File.Exists(Path.Combine(contextDir, dockerfile)))
+                {
+                    result.Skipped++;
+                    msgs.Add($"{ch.Title}: no Dockerfile in archive");
+                    continue;
+                }
+
+                // Skip challenges that already have a pending build —
+                // bulk action shouldn't pile up duplicate jobs.
+                if (buildQueue.IsPending(ch.Id))
+                {
+                    result.Skipped++;
+                    msgs.Add($"{ch.Title}: build already pending");
+                    continue;
+                }
+
+                var snap = Path.Combine(Path.GetTempPath(), $"gzctf-build-{Guid.NewGuid():N}");
+                CopyDirRecursive(contextDir, snap);
+
+                var er = buildQueue.Enqueue(new Services.Container.Build.ChallengeBuildJob(
+                    ch.Id, ch.GameId, ch.Title, snap, dockerfile,
+                    BuildTrigger.Bulk));
+                if (er == Services.Container.Build.EnqueueResult.Enqueued)
+                {
+                    ch.BuildStatus = ChallengeBuildStatus.Queued;
+                    ch.LastBuildLog = null;
+                    result.Enqueued++;
+                }
+                else
+                {
+                    try { Directory.Delete(snap, recursive: true); } catch { /* best effort */ }
+                    result.Skipped++;
+                    msgs.Add($"{ch.Title}: {(er == Services.Container.Build.EnqueueResult.Rejected ? "queue full" : "already pending")}");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Skipped++;
+                msgs.Add($"{ch.Title}: {ex.Message}");
+            }
+            finally
+            {
+                try { Directory.Delete(workDir, recursive: true); } catch { /* best effort */ }
+            }
+        }
+
+        if (result.Enqueued > 0)
+            await dbContext.SaveChangesAsync(token);
+
+        result.Messages = msgs.ToArray();
+        return Ok(result);
+    }
+
+    static void CopyDirRecursive(string src, string dst)
+    {
+        Directory.CreateDirectory(dst);
+        foreach (var f in Directory.EnumerateFiles(src))
+            System.IO.File.Copy(f, Path.Combine(dst, Path.GetFileName(f)));
+        foreach (var d in Directory.EnumerateDirectories(src))
+            CopyDirRecursive(d, Path.Combine(dst, Path.GetFileName(d)));
+    }
+
     private IActionResult HandleIdentityError(IEnumerable<IdentityError> errors) =>
         BadRequest(new RequestResponse(errors.FirstOrDefault()?.Description ??
                                        localizer[nameof(Resources.Program.Identity_UnknownError)]));
+
+    // =========================================================
+    //  Global repo bindings — multi-event ".gzevent" discovery
+    //  See /root/.claude/plans/compiled-squishing-neumann.md
+    // =========================================================
+
+    /// <summary>
+    /// List configured repo bindings with their child games.
+    /// </summary>
+    [RequireAdmin]
+    [HttpGet("RepoBindings")]
+    [ProducesResponseType(typeof(Models.Request.Edit.RepoBindingInfoModel[]), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListRepoBindings(
+        [FromServices] AppDbContext dbContext, CancellationToken token)
+    {
+        var rows = await dbContext.GameRepoBindings.AsNoTracking()
+            .OrderByDescending(b => b.CreatedAtUtc)
+            .Select(b => new Models.Request.Edit.RepoBindingInfoModel
+            {
+                Id = b.Id,
+                RepoUrl = b.RepoUrl,
+                Ref = b.Ref,
+                CreatedAtUtc = b.CreatedAtUtc,
+                LastScanUtc = b.LastScanUtc,
+                NextScanUtc = b.NextScanUtc,
+                IntervalSeconds = b.IntervalSeconds,
+                Status = b.Status,
+                LastCommitSha = b.LastCommitSha,
+                LastScanMessage = b.LastScanMessage,
+                HasGitHubToken = b.GitHubTokenEncrypted != null,
+                TokenStatus = b.TokenStatus,
+                CurrentActivity = b.CurrentActivity,
+                PushOnEdit = b.PushOnEdit,
+                Games = dbContext.Games
+                    .Where(g => g.RepoBindingId == b.Id)
+                    .OrderBy(g => g.Title)
+                    .Select(g => new Models.Request.Edit.RepoBindingGameSummary
+                    {
+                        Id = g.Id,
+                        Title = g.Title,
+                        EventManifestPath = g.EventManifestPath
+                    })
+                    .ToArray()
+            })
+            .ToArrayAsync(token);
+        return Ok(rows);
+    }
+
+    /// <summary>
+    /// Register a new repo and immediately scan it for .gzevent manifests.
+    /// </summary>
+    [RequireAdmin]
+    [HttpPost("RepoBindings")]
+    [ProducesResponseType(typeof(Models.Request.Edit.RepoBindingScanResultModel), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> CreateRepoBinding(
+        [FromBody] Models.Request.Edit.RepoBindingCreateModel model,
+        [FromServices] AppDbContext dbContext,
+        [FromServices] IDataProtectionProvider dataProtectionProvider,
+        [FromServices] Services.Transfer.RepoBindingDiscoveryService discovery,
+        CancellationToken token)
+    {
+        if (!Services.Transfer.GitHubLocator.TryParse(model.RepoUrl, model.Ref, overrideSubpath: null, out _, out var err))
+            return BadRequest(new RequestResponse(err ?? "Invalid github URL."));
+
+        var normalizedUrl = model.RepoUrl.Trim();
+        var existing = await dbContext.GameRepoBindings
+            .FirstOrDefaultAsync(b => b.RepoUrl == normalizedUrl, token);
+        if (existing is not null)
+            return Conflict(new RequestResponse(
+                $"This repository is already registered (binding id {existing.Id}). Delete or scan that one instead.",
+                StatusCodes.Status409Conflict));
+
+        var protector = dataProtectionProvider.CreateProtector(
+            Services.Transfer.GameRepoBindingProtection.Purpose);
+
+        var user = (await userManager.GetUserAsync(User))!;
+
+        var clamped = Math.Clamp(model.IntervalSeconds, 60, 86400);
+        var hasToken = !string.IsNullOrWhiteSpace(model.GitHubToken);
+        var binding = new GameRepoBinding
+        {
+            RepoUrl = normalizedUrl,
+            Ref = string.IsNullOrWhiteSpace(model.Ref) ? null : model.Ref.Trim(),
+            GitHubTokenEncrypted = hasToken
+                ? protector.Protect(model.GitHubToken!.Trim())
+                : null,
+            TokenStatus = hasToken ? TokenStatus.Ok : TokenStatus.NotConfigured,
+            CreatedByUserId = user.Id,
+            IntervalSeconds = clamped,
+            Status = RepoWatchStatus.Active,
+            // RunImmediately: leave NextScanUtc null so the next poller
+            // tick (~30s) picks it up. Otherwise schedule the first run
+            // a full interval out.
+            NextScanUtc = model.RunImmediately ? null : DateTimeOffset.UtcNow.AddSeconds(clamped)
+        };
+        dbContext.GameRepoBindings.Add(binding);
+        await dbContext.SaveChangesAsync(token);
+
+        // Synchronous first scan when RunImmediately is true so the
+        // admin gets immediate feedback. Otherwise the poller will pick
+        // it up later.
+        if (!model.RunImmediately)
+            return Ok(new Models.Request.Edit.RepoBindingScanResultModel());
+
+        // Creation flow: this is the very first scan, no prior
+        // LastCommitSha to short-circuit against — force=true is the
+        // safe default (avoids a no-op on an empty SHA cell).
+        var result = await discovery.ScanAsync(binding.Id, user.Id, token, force: true);
+        // discovery.ScanAsync writes LastScanUtc but not NextScanUtc;
+        // do that here so the poller doesn't double-scan within the
+        // same interval window.
+        await dbContext.GameRepoBindings
+            .Where(b => b.Id == binding.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.NextScanUtc,
+                DateTimeOffset.UtcNow.AddSeconds(clamped)), token);
+        return Ok(new Models.Request.Edit.RepoBindingScanResultModel
+        {
+            GamesCreated = result.GamesCreated,
+            GamesUpdated = result.GamesUpdated,
+            ChallengesImported = result.ChallengesImported,
+            ChallengesUpdated = result.ChallengesUpdated,
+            Failures = result.Failures,
+            Messages = result.Messages.ToArray()
+        });
+    }
+
+    /// <summary>
+    /// Update a binding's mutable fields. Every property is optional —
+    /// null leaves the existing value alone; <c>GitHubToken</c> follows
+    /// the established "" = clear / value = re-protect convention.
+    /// Pausing a binding stops the background poller from re-scanning
+    /// it without losing the configured interval or token.
+    /// </summary>
+    [RequireAdmin]
+    [HttpPut("RepoBindings/{id:int}")]
+    [ProducesResponseType(typeof(Models.Request.Edit.RepoBindingInfoModel), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateRepoBinding(
+        [FromRoute] int id,
+        [FromBody] Models.Request.Edit.RepoBindingUpdateModel model,
+        [FromServices] AppDbContext dbContext,
+        [FromServices] IDataProtectionProvider dataProtectionProvider,
+        CancellationToken token)
+    {
+        var binding = await dbContext.GameRepoBindings.FirstOrDefaultAsync(b => b.Id == id, token);
+        if (binding is null)
+            return NotFound(new RequestResponse("Binding not found."));
+
+        if (model.Ref is not null)
+            binding.Ref = string.IsNullOrWhiteSpace(model.Ref) ? null : model.Ref.Trim();
+        if (model.IntervalSeconds is { } iv)
+            binding.IntervalSeconds = Math.Clamp(iv, 60, 86400);
+        if (model.Status is { } st)
+        {
+            // Resuming from Paused: pull NextScanUtc to "now" so the
+            // poller picks it up immediately instead of waiting out the
+            // remainder of the previously-scheduled gap.
+            if (binding.Status == RepoWatchStatus.Paused && st == RepoWatchStatus.Active)
+                binding.NextScanUtc = null;
+            binding.Status = st;
+        }
+        if (model.GitHubToken is not null)
+        {
+            var protector = dataProtectionProvider.CreateProtector(
+                Services.Transfer.GameRepoBindingProtection.Purpose);
+            if (string.IsNullOrWhiteSpace(model.GitHubToken))
+            {
+                binding.GitHubTokenEncrypted = null;
+                binding.TokenStatus = TokenStatus.NotConfigured;
+            }
+            else
+            {
+                binding.GitHubTokenEncrypted = protector.Protect(model.GitHubToken.Trim());
+                binding.TokenStatus = TokenStatus.Ok;
+            }
+        }
+        if (model.PushOnEdit is { } poe)
+            binding.PushOnEdit = poe;
+        await dbContext.SaveChangesAsync(token);
+
+        return Ok(new Models.Request.Edit.RepoBindingInfoModel
+        {
+            Id = binding.Id,
+            RepoUrl = binding.RepoUrl,
+            Ref = binding.Ref,
+            CreatedAtUtc = binding.CreatedAtUtc,
+            LastScanUtc = binding.LastScanUtc,
+            NextScanUtc = binding.NextScanUtc,
+            IntervalSeconds = binding.IntervalSeconds,
+            Status = binding.Status,
+            LastCommitSha = binding.LastCommitSha,
+            LastScanMessage = binding.LastScanMessage,
+            HasGitHubToken = binding.GitHubTokenEncrypted != null,
+            TokenStatus = binding.TokenStatus,
+            PushOnEdit = binding.PushOnEdit,
+        });
+    }
+
+    /// <summary>
+    /// Return the most recent scan-history rows for a binding so the
+    /// admin can see *which* manifests failed without diving into logs.
+    /// Newest first; capped at 20 rows.
+    /// </summary>
+    [RequireAdmin]
+    [HttpGet("RepoBindings/{id:int}/Scans")]
+    [ProducesResponseType(typeof(Models.Request.Edit.RepoBindingScanHistoryModel[]), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetRepoBindingScans(
+        [FromRoute] int id, [FromServices] AppDbContext dbContext, CancellationToken token)
+    {
+        var rows = await dbContext.GameRepoBindingScans.AsNoTracking()
+            .Where(s => s.BindingId == id)
+            .OrderByDescending(s => s.RanAtUtc)
+            .Take(20)
+            .Select(s => new Models.Request.Edit.RepoBindingScanHistoryModel
+            {
+                Id = s.Id,
+                RanAtUtc = s.RanAtUtc,
+                CommitSha = s.CommitSha,
+                GamesCreated = s.GamesCreated,
+                GamesUpdated = s.GamesUpdated,
+                ChallengesImported = s.ChallengesImported,
+                ChallengesUpdated = s.ChallengesUpdated,
+                Failures = s.Failures,
+                Messages = s.Messages
+            })
+            .ToArrayAsync(token);
+        return Ok(rows);
+    }
+
+    /// <summary>
+    /// Trigger a re-scan of the binding now.
+    /// </summary>
+    [RequireAdmin]
+    [HttpPost("RepoBindings/{id:int}/Scan")]
+    [ProducesResponseType(typeof(Models.Request.Edit.RepoBindingScanResultModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ScanRepoBinding(
+        [FromRoute] int id,
+        [FromServices] Services.Transfer.RepoBindingDiscoveryService discovery,
+        [FromServices] AppDbContext dbContext,
+        CancellationToken token)
+    {
+        var user = (await userManager.GetUserAsync(User))!;
+        // Explicit operator action — force re-import even if the SHA
+        // hasn't moved. "Scan now" should always do *something* visible
+        // (rather than a silent no-op) so the user gets predictable
+        // feedback after clicking the button.
+        var result = await discovery.ScanAsync(id, user.Id, token, force: true);
+
+        // Reset the poll gate so the background poller waits a full
+        // interval before re-running. Without this an Admin "Scan now"
+        // + a poller tick a few seconds later would double-scan.
+        var iv = await dbContext.GameRepoBindings.AsNoTracking()
+            .Where(b => b.Id == id).Select(b => (int?)b.IntervalSeconds)
+            .FirstOrDefaultAsync(token) ?? 600;
+        var clamped = Math.Clamp(iv, 60, 86400);
+        await dbContext.GameRepoBindings
+            .Where(b => b.Id == id)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.NextScanUtc,
+                DateTimeOffset.UtcNow.AddSeconds(clamped)), token);
+
+        return Ok(new Models.Request.Edit.RepoBindingScanResultModel
+        {
+            GamesCreated = result.GamesCreated,
+            GamesUpdated = result.GamesUpdated,
+            ChallengesImported = result.ChallengesImported,
+            ChallengesUpdated = result.ChallengesUpdated,
+            Failures = result.Failures,
+            Messages = result.Messages.ToArray()
+        });
+    }
+
+    /// <summary>
+    /// Remove a repo binding. Does NOT delete child games — admin handles those manually.
+    /// </summary>
+    [RequireAdmin]
+    [HttpDelete("RepoBindings/{id:int}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteRepoBinding(
+        [FromRoute] int id,
+        [FromQuery] bool cascade,
+        [FromServices] AppDbContext dbContext,
+        [FromServices] Services.Transfer.GitRepoSyncService gitSync,
+        CancellationToken token)
+    {
+        var binding = await dbContext.GameRepoBindings.FirstOrDefaultAsync(b => b.Id == id, token);
+        if (binding is null)
+            return NotFound(new RequestResponse("Binding not found."));
+
+        var children = await dbContext.Games.Where(g => g.RepoBindingId == id).ToListAsync(token);
+
+        if (cascade)
+        {
+            // Operator explicitly wants the imported games gone too —
+            // EF cascade delete on Games will sweep up GameChallenges,
+            // and the GameChallenges → FlagContexts / Attachments
+            // cascades take care of the rest. ChallengeBuildAudits FK
+            // is also cascade so audit rows disappear cleanly.
+            dbContext.Games.RemoveRange(children);
+        }
+        else
+        {
+            // Detach: keep the games but null out the binding link so
+            // a re-bind can adopt them (see UpsertGameAsync's
+            // orphan-adoption pass).
+            foreach (var g in children)
+            {
+                g.RepoBindingId = null;
+                g.EventManifestPath = null;
+            }
+        }
+
+        dbContext.GameRepoBindings.Remove(binding);
+        await dbContext.SaveChangesAsync(token);
+
+        // Best-effort: drop the on-disk git clone for this binding so
+        // /app/repos doesn't accumulate orphaned checkouts.
+        gitSync.DropCache("binding", id);
+
+        return Ok();
+    }
 }

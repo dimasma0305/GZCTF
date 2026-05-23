@@ -4,6 +4,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using GZCTF.Middlewares;
 using GZCTF.Models;
+using GZCTF.Models.Data;
 using GZCTF.Models.Internal;
 using GZCTF.Models.Request.Account;
 using GZCTF.Models.Response.Account;
@@ -535,8 +536,12 @@ public partial class AccountController(
     [HttpPost]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> LogIn([FromBody] LoginModel model, CancellationToken token = default)
+    public async Task<IActionResult> LogIn(
+        [FromBody] LoginModel model,
+        [FromServices] AppDbContext dbContext,
+        CancellationToken token = default)
     {
         if (accountPolicy.Value.UseCaptcha && !await captcha.VerifyAsync(model, HttpContext, token))
             return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Account_TokenValidationFailed)]));
@@ -572,6 +577,73 @@ public partial class AccountController(
             return Unauthorized(new RequestResponse(
                 localizer[nameof(Resources.Program.Account_IncorrectUserNameOrPassword)],
                 StatusCodes.Status401Unauthorized));
+
+        var policy = accountPolicy.Value;
+        if (policy.RequireUniqueIpPerTeamUser || policy.RequireUniqueFingerprintPerTeamUser)
+        {
+            var currentIp = HttpContext.Connection.RemoteIpAddress;
+            var since = DateTimeOffset.UtcNow.AddHours(-24);
+            var teammates = await userManager.Users
+                .Where(u => u.Id != user.Id
+                    && u.LastVisitedUtc > since
+                    && u.Teams.Any(t => t.Members.Any(m => m.Id == user.Id)))
+                .Select(u => new { u.Id, u.UserName, u.IP, u.BrowserFingerprint })
+                .ToListAsync(token);
+
+            if (policy.RequireUniqueIpPerTeamUser && currentIp is not null)
+            {
+                var conflict = teammates.FirstOrDefault(t => t.IP is not null && t.IP.Equals(currentIp));
+                if (conflict is not null)
+                {
+                    logger.Log(
+                        StaticLocalizer[nameof(Resources.Program.Account_TeammateIpInUse), conflict.UserName ?? "?"],
+                        user.UserName ?? "Anonymous",
+                        currentIp.ToString(),
+                        TaskStatus.Failed);
+                    dbContext.AntiCheatBlocks.Add(new AntiCheatBlock
+                    {
+                        UserId = user.Id,
+                        UserName = user.UserName,
+                        ConflictUserId = conflict.Id,
+                        ConflictUserName = conflict.UserName,
+                        Kind = AntiCheatBlockKind.Ip,
+                        ConflictingValue = currentIp.ToString()
+                    });
+                    await dbContext.SaveChangesAsync(token);
+                    return new ObjectResult(new RequestResponse(
+                        localizer[nameof(Resources.Program.Account_TeammateIpInUse), conflict.UserName ?? "?"],
+                        StatusCodes.Status403Forbidden))
+                    { StatusCode = StatusCodes.Status403Forbidden };
+                }
+            }
+
+            if (policy.RequireUniqueFingerprintPerTeamUser && !string.IsNullOrEmpty(fingerprint))
+            {
+                var conflict = teammates.FirstOrDefault(t => t.BrowserFingerprint == fingerprint);
+                if (conflict is not null)
+                {
+                    logger.Log(
+                        StaticLocalizer[nameof(Resources.Program.Account_TeammateFingerprintInUse), conflict.UserName ?? "?"],
+                        user.UserName ?? "Anonymous",
+                        currentIp?.ToString(),
+                        TaskStatus.Failed);
+                    dbContext.AntiCheatBlocks.Add(new AntiCheatBlock
+                    {
+                        UserId = user.Id,
+                        UserName = user.UserName,
+                        ConflictUserId = conflict.Id,
+                        ConflictUserName = conflict.UserName,
+                        Kind = AntiCheatBlockKind.Fingerprint,
+                        ConflictingValue = fingerprint
+                    });
+                    await dbContext.SaveChangesAsync(token);
+                    return new ObjectResult(new RequestResponse(
+                        localizer[nameof(Resources.Program.Account_TeammateFingerprintInUse), conflict.UserName ?? "?"],
+                        StatusCodes.Status403Forbidden))
+                    { StatusCode = StatusCodes.Status403Forbidden };
+                }
+            }
+        }
 
         user.LastSignedInUtc = DateTimeOffset.UtcNow;
         user.UpdateByHttpContext(HttpContext);

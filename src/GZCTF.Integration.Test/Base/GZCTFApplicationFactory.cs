@@ -1,4 +1,6 @@
 using GZCTF.Models;
+using GZCTF.Services.Container.Build;
+using GZCTF.Services.Container.Exec;
 using GZCTF.Services.Container.Manager;
 using GZCTF.Services.Container.Provider;
 using GZCTF.Storage;
@@ -174,14 +176,27 @@ public class GZCTFApplicationFactory : WebApplicationFactory<Program>, IAsyncLif
             {
                 Console.WriteLine(@"[ConfigureTestServices] Reconfiguring container services for Kubernetes...");
 
-                // Remove existing container services
+                // Remove existing container services. The default
+                // AddContainerService registration (Docker-mode) wires
+                // four interface→impl pairs: IContainerProvider,
+                // IContainerManager, IChallengeImageBuilder,
+                // IContainerExecChannel. All four need the Docker
+                // provider transitively, so removing only the first
+                // two leaves the latter as Singleton descriptors
+                // pointing at a missing dependency → DI validation
+                // fails on app start ("Unable to resolve service for
+                // type IContainerProvider<DockerClient, ...>").
                 services.RemoveAll(typeof(IContainerManager));
                 services.RemoveAll(typeof(IContainerProvider<k8s.Kubernetes, KubernetesMetadata>));
                 services.RemoveAll(typeof(IContainerProvider<Docker.DotNet.DockerClient, DockerMetadata>));
+                services.RemoveAll(typeof(IChallengeImageBuilder));
+                services.RemoveAll(typeof(IContainerExecChannel));
 
-                // Add Kubernetes provider and manager
+                // Add Kubernetes provider, manager, builder, exec.
                 services.AddSingleton<IContainerProvider<k8s.Kubernetes, KubernetesMetadata>, KubernetesProvider>();
                 services.AddSingleton<IContainerManager, KubernetesManager>();
+                services.AddSingleton<IChallengeImageBuilder, K8sChallengeImageBuilder>();
+                services.AddSingleton<IContainerExecChannel, K8sContainerExecChannel>();
 
                 Console.WriteLine(@"[ConfigureTestServices] Kubernetes container services registered");
             }

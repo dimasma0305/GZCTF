@@ -50,8 +50,14 @@ public static class ContainerServiceExtension
         private IServiceCollection AddManager(ContainerProvider config)
             => config.Type switch
             {
-                ContainerProviderType.Kubernetes => services.AddSingleton<IContainerManager, KubernetesManager>(),
-                _ => services.AddSingleton<IContainerManager, DockerManager>()
+                ContainerProviderType.Kubernetes => services
+                    .AddSingleton<IContainerManager, KubernetesManager>()
+                    .AddSingleton<Build.IChallengeImageBuilder, Build.K8sChallengeImageBuilder>()
+                    .AddSingleton<Exec.IContainerExecChannel, Exec.K8sContainerExecChannel>(),
+                _ => services
+                    .AddSingleton<IContainerManager, DockerManager>()
+                    .AddSingleton<Build.IChallengeImageBuilder, Build.DockerChallengeImageBuilder>()
+                    .AddSingleton<Exec.IContainerExecChannel, Exec.DockerContainerExecChannel>()
             };
     }
 }

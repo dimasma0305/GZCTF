@@ -31,6 +31,89 @@ public enum Role : byte
 }
 
 /// <summary>
+/// Review state for a challenge that was imported via the tarball/github
+/// pipeline. <c>Active</c> means the challenge is visible to participants
+/// (subject to the usual <c>IsEnabled</c> gate). <c>Pending</c> hides it
+/// until an admin reviews. <c>Rejected</c> is a terminal state kept for
+/// audit but never shown to participants.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<ChallengeReviewStatus>))]
+public enum ChallengeReviewStatus : byte
+{
+    Active = 0,
+    Pending = 1,
+    Rejected = 2
+}
+
+/// <summary>
+/// Lifecycle of the auto-build pipeline that turns a local
+/// <c>Dockerfile</c> declared in a challenge.yaml into a usable image
+/// reference. The expanded set distinguishes "no build needed" from
+/// "we tried to build and the Dockerfile wasn't there" — otherwise
+/// both surfaced as <see cref="None"/> and operators had no way to tell
+/// whether the import had silently skipped a build that should have
+/// fired.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<ChallengeBuildStatus>))]
+public enum ChallengeBuildStatus : byte
+{
+    None = 0,
+    Success = 1,
+    Failed = 2,
+    Building = 3,
+    NotApplicable = 4,
+    Queued = 5,
+    MissingDockerfile = 6
+}
+
+/// <summary>
+/// Why a <see cref="GZCTF.Services.Container.Build.ChallengeBuildJob"/>
+/// was enqueued. Drives audit-log filtering and helps the operator tell
+/// "system spun this up on a scan tick" from "someone clicked Rebuild".
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<BuildTrigger>))]
+public enum BuildTrigger : byte
+{
+    /// <summary>Auto-fired by an import path (scan/upload).</summary>
+    Import = 0,
+    /// <summary>Operator clicked Rebuild in the admin UI.</summary>
+    Manual = 1,
+    /// <summary>Worker re-enqueued after a transient failure.</summary>
+    AutoRetry = 2,
+    /// <summary>Bulk "Rebuild all failed" action.</summary>
+    Bulk = 3
+}
+
+/// <summary>
+/// Health of the encrypted GitHub access token stored on a
+/// <see cref="GZCTF.Models.Data.RepoWatch"/> or
+/// <see cref="GZCTF.Models.Data.GameRepoBinding"/>. The background
+/// poller updates this on every tick so the admin UI can show a clear
+/// "Token decrypt failed" badge instead of a generic scan-failure
+/// string buried in LastScanMessage.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<TokenStatus>))]
+public enum TokenStatus : byte
+{
+    /// <summary>No token configured (public repo path).</summary>
+    NotConfigured = 0,
+    /// <summary>Token decrypted + used successfully on the last attempt.</summary>
+    Ok = 1,
+    /// <summary>Stored ciphertext could not be decrypted (DataProtection key changed?).</summary>
+    DecryptFailed = 2
+}
+
+/// <summary>
+/// Lifecycle state of a <see cref="GZCTF.Models.Data.RepoWatch"/>.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<RepoWatchStatus>))]
+public enum RepoWatchStatus : byte
+{
+    Active = 0,
+    Paused = 1
+}
+
+/// <summary>
 /// Login response status
 /// </summary>
 [JsonConverter(typeof(JsonStringEnumConverter<RegisterStatus>))]

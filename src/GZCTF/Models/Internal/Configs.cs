@@ -65,6 +65,16 @@ public class AccountPolicy
     /// </summary>
     [CacheFlush(CacheKey.ClientConfig)]
     public bool EnableBrowserFingerprint { get; set; }
+
+    /// <summary>
+    /// Require each user on a team to log in from an IP not used by another teammate within the last 24 hours
+    /// </summary>
+    public bool RequireUniqueIpPerTeamUser { get; set; }
+
+    /// <summary>
+    /// Require each user on a team to have a browser fingerprint not used by another teammate within the last 24 hours
+    /// </summary>
+    public bool RequireUniqueFingerprintPerTeamUser { get; set; }
 }
 
 /// <summary>
@@ -105,6 +115,69 @@ public class ContainerPolicy
     [Range(1, 360, ErrorMessageResourceName = nameof(Resources.Program.Model_OutOfRange),
         ErrorMessageResourceType = typeof(Resources.Program))]
     public int RenewalWindow { get; set; } = 10;
+}
+
+/// <summary>
+/// Where the auto-build pipeline should push images after a successful
+/// docker build. When disabled, images stay on the local daemon only
+/// (fine for single-host setups where the runner shares the daemon).
+/// When enabled, the builder retags the local image to
+/// <c>{Server}/{Namespace?}/gzctf-auto/{gameId}/{slug}:{sha}</c> and
+/// pushes — the runner then pulls from this registry.
+///
+/// <para>Password is stored XOR-obfuscated at rest (same pattern as
+/// the API encryption keys in <see cref="X25519KeyPair"/>); plaintext
+/// is never persisted to the Configs table.</para>
+/// </summary>
+public class BuildRegistryConfig
+{
+    /// <summary>
+    /// Master switch. When false, the rest of the fields are ignored
+    /// and built images stay local. UI hides the input fields behind
+    /// this switch.
+    /// </summary>
+    public bool PushOnBuild { get; set; }
+
+    /// <summary>
+    /// Registry hostname, e.g. <c>ghcr.io</c>, <c>docker.io</c>,
+    /// <c>registry.example.com:5000</c>. No scheme, no trailing slash.
+    /// </summary>
+    [MaxLength(255)]
+    public string? Server { get; set; }
+
+    /// <summary>
+    /// Optional namespace prefix under <see cref="Server"/>, e.g.
+    /// <c>myorg</c> in <c>ghcr.io/myorg/...</c>. Single segment, no
+    /// slashes. Leave empty to push directly under the server root.
+    /// </summary>
+    [MaxLength(255)]
+    public string? Namespace { get; set; }
+
+    [MaxLength(255)]
+    public string? Username { get; set; }
+
+    /// <summary>
+    /// XOR-obfuscated registry password / PAT. <see cref="HasPassword"/>
+    /// surfaces presence to the UI without round-tripping the secret.
+    /// </summary>
+    [MaxLength(2048)]
+    public string? Password { get; set; }
+
+    /// <summary>
+    /// True when <see cref="Password"/> is non-empty. Read by the UI
+    /// so the password input can show a "(configured)" placeholder
+    /// without echoing the obfuscated bytes back to the operator.
+    /// </summary>
+    [AutoSaveIgnore]
+    public bool HasPassword => !string.IsNullOrEmpty(Password);
+
+    /// <summary>
+    /// True when the registry is wired up enough to attempt a push.
+    /// Server is the only hard requirement — anonymous pushes (no
+    /// username/password) are valid against a local insecure registry.
+    /// </summary>
+    [AutoSaveIgnore]
+    public bool IsConfigured => PushOnBuild && !string.IsNullOrEmpty(Server);
 }
 
 public class X25519KeyPair

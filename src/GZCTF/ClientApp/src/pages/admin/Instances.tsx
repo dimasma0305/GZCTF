@@ -1,4 +1,5 @@
 import {
+  ActionIcon,
   Badge,
   Box,
   Code,
@@ -6,9 +7,12 @@ import {
   Group,
   Input,
   Paper,
+  Progress,
   ScrollArea,
   Select,
   SelectProps,
+  Stack,
+  Switch,
   Table,
   Text,
   Tooltip,
@@ -20,6 +24,7 @@ import {
   mdiAccountGroupOutline,
   mdiCheck,
   mdiChevronTripleRight,
+  mdiConsole,
   mdiPackageVariantClosedRemove,
   mdiPuzzleOutline,
 } from '@mdi/js'
@@ -29,9 +34,10 @@ import { FC, useEffect, useState } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 import { ActionIconWithConfirm } from '@Components/ActionIconWithConfirm'
 import { AdminPage } from '@Components/admin/AdminPage'
+import { ContainerExecModal } from '@Components/admin/ContainerExecModal'
 import { useLanguage } from '@Utils/I18n'
 import { showErrorMsg } from '@Utils/Shared'
-import { useChallengeCategoryLabelMap, getProxyUrl } from '@Utils/Shared'
+import { HunamizeSize, useChallengeCategoryLabelMap, getProxyUrl } from '@Utils/Shared'
 import api, { ChallengeModel, ChallengeCategory, TeamModel } from '@Api'
 import classes from '@Styles/Instances.module.css'
 import misc from '@Styles/Misc.module.css'
@@ -74,6 +80,53 @@ const SelectChallengeItem: SelectProps['renderOption'] = ({ option }) => {
   )
 }
 
+const barColor = (pct: number) => (pct >= 85 ? 'red' : pct >= 60 ? 'yellow' : 'teal')
+
+const InstanceStatsCells: FC<{ instanceGuid?: string; live: boolean }> = ({ instanceGuid, live }) => {
+  const { data, isLoading } = api.admin.useAdminGetInstanceStats(
+    instanceGuid ?? '',
+    live ? { refreshInterval: 5000, revalidateOnFocus: false } : { revalidateIfStale: false, refreshInterval: 0 },
+    !!instanceGuid && live,
+  )
+
+  const placeholder = (
+    <Text size="xs" c="dimmed" ta="center">—</Text>
+  )
+
+  if (!instanceGuid) return <>{placeholder}{placeholder}{placeholder}</>
+  if (!data && isLoading) return <>{placeholder}{placeholder}{placeholder}</>
+  if (!data) return <>{placeholder}{placeholder}{placeholder}</>
+
+  const memPct = data.memoryLimitBytes > 0
+    ? Math.min(100, (data.memoryUsedBytes / data.memoryLimitBytes) * 100)
+    : 0
+
+  return (
+    <>
+      <Table.Td>
+        <Stack gap={2} miw="5rem">
+          <Text size="xs" ff="monospace">{data.cpuPercent.toFixed(1)}%</Text>
+          <Progress value={Math.min(100, data.cpuPercent)} color={barColor(data.cpuPercent)} size="xs" />
+        </Stack>
+      </Table.Td>
+      <Table.Td>
+        <Stack gap={2} miw="7rem">
+          <Text size="xs" ff="monospace">
+            {HunamizeSize(data.memoryUsedBytes)} / {HunamizeSize(data.memoryLimitBytes)}
+          </Text>
+          <Progress value={memPct} color={barColor(memPct)} size="xs" />
+        </Stack>
+      </Table.Td>
+      <Table.Td>
+        <Stack gap={2}>
+          <Text size="xs" ff="monospace" c="green">↓ {HunamizeSize(data.netRxBytes)}</Text>
+          <Text size="xs" ff="monospace" c="blue">↑ {HunamizeSize(data.netTxBytes)}</Text>
+        </Stack>
+      </Table.Td>
+    </>
+  )
+}
+
 const Instances: FC = () => {
   const { data: instances, mutate } = api.admin.useAdminInstances({
     refreshInterval: 30 * 1000, // refresh every 30 seconds
@@ -103,6 +156,8 @@ const Instances: FC = () => {
 
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null)
   const [selectedChallengeId, setSelectedChallengeId] = useState<string | null>(null)
+  const [liveStats, setLiveStats] = useState(true)
+  const [execTarget, setExecTarget] = useState<{ guid: string; title: string } | null>(null)
 
   const [filteredInstances, setFilteredInstances] = useState(instances?.data)
 
@@ -189,7 +244,13 @@ const Instances: FC = () => {
             />
           </Group>
 
-          <Group justify="right">
+          <Group justify="right" gap="md">
+            <Switch
+              size="xs"
+              label={t('admin.label.instances.live_stats')}
+              checked={liveStats}
+              onChange={(e) => setLiveStats(e.currentTarget.checked)}
+            />
             <Text fw="bold" size="sm">
               <Trans i18nKey="admin.content.instances.stats" values={{ count: instances?.length }}>
                 _<Code>_</Code>_
@@ -207,6 +268,9 @@ const Instances: FC = () => {
                 <Table.Th>{t('common.label.team')}</Table.Th>
                 <Table.Th>{t('common.label.challenge')}</Table.Th>
                 <Table.Th>{t('admin.label.instances.life_cycle')}</Table.Th>
+                <Table.Th>{t('admin.label.instances.cpu')}</Table.Th>
+                <Table.Th>{t('admin.label.instances.memory')}</Table.Th>
+                <Table.Th>{t('admin.label.instances.network')}</Table.Th>
                 <Table.Th>{t('admin.label.instances.container_id')}</Table.Th>
                 <Table.Th>{t('admin.label.instances.entry')}</Table.Th>
                 <Table.Th />
@@ -244,6 +308,7 @@ const Instances: FC = () => {
                           </Badge>
                         </Group>
                       </Table.Td>
+                      <InstanceStatsCells instanceGuid={inst.containerGuid} live={liveStats} />
                       <Table.Td>
                         <Text size="sm" ff="monospace" lineClamp={1}>
                           <Tooltip label={t('common.button.copy')} withArrow position="left">
@@ -294,7 +359,19 @@ const Instances: FC = () => {
                         </Tooltip>
                       </Table.Td>
                       <Table.Td align="right">
-                        <Group wrap="nowrap" gap="sm" justify="right">
+                        <Group wrap="nowrap" gap="xs" justify="right">
+                          <Tooltip label={t('admin.button.exec.open')} withArrow position="left">
+                            <ActionIcon
+                              variant="subtle"
+                              disabled={!inst.containerGuid}
+                              onClick={() => inst.containerGuid && setExecTarget({
+                                guid: inst.containerGuid,
+                                title: `${inst.team?.name ?? ''} - ${inst.challenge?.title ?? ''}`,
+                              })}
+                            >
+                              <Icon path={mdiConsole} size={1} />
+                            </ActionIcon>
+                          </Tooltip>
                           <ActionIconWithConfirm
                             iconPath={mdiPackageVariantClosedRemove}
                             color="alert"
@@ -316,6 +393,12 @@ const Instances: FC = () => {
           {t('admin.content.instances.note')}
         </Text>
       </Paper>
+      <ContainerExecModal
+        containerGuid={execTarget?.guid ?? null}
+        containerTitle={execTarget?.title}
+        opened={execTarget != null}
+        onClose={() => setExecTarget(null)}
+      />
     </AdminPage>
   )
 }

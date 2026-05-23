@@ -109,6 +109,78 @@ public class Challenge
     public string? FlagTemplate { get; set; }
 
     /// <summary>
+    /// Review state for challenges that came in via the tarball / github
+    /// import pipeline. Defaults to <see cref="ChallengeReviewStatus.Active"/>
+    /// so admin-created challenges and existing rows behave unchanged.
+    /// User-submitted challenges land as <see cref="ChallengeReviewStatus.Pending"/>
+    /// and are invisible to participants until an admin approves.
+    /// </summary>
+    [Required]
+    public ChallengeReviewStatus ReviewStatus { get; set; } = ChallengeReviewStatus.Active;
+
+    /// <summary>
+    /// Optional admin note attached on Approve / Reject. Free-form.
+    /// </summary>
+    [MaxLength(Limits.MaxUserDataLength)]
+    public string? ReviewNote { get; set; }
+
+    /// <summary>
+    /// User that submitted this challenge through the import endpoint.
+    /// Null for admin-created challenges.
+    /// </summary>
+    public Guid? SubmittedByUserId { get; set; }
+
+    public DateTimeOffset? SubmittedAtUtc { get; set; }
+
+    public DateTimeOffset? ReviewedAtUtc { get; set; }
+
+    /// <summary>
+    /// Blob path to the original archive uploaded for this import, kept
+    /// for admin audit. Null for admin-created challenges and for
+    /// github-sourced imports (those are inherently public).
+    /// </summary>
+    [MaxLength(1024)]
+    public string? OriginalArchiveBlobPath { get; set; }
+
+    /// <summary>
+    /// Most recent outcome of the auto-build pipeline for this
+    /// challenge's image. <see cref="ChallengeBuildStatus.None"/> for
+    /// challenges that ship a registry-published image (no build needed).
+    /// </summary>
+    [Required]
+    public ChallengeBuildStatus BuildStatus { get; set; } = ChallengeBuildStatus.None;
+
+    /// <summary>
+    /// SHA256 digest of the most recently built image, surfaced for audit
+    /// (admin can confirm a re-import didn't accidentally retag).
+    /// </summary>
+    [MaxLength(80)]
+    public string? BuildImageDigest { get; set; }
+
+    /// <summary>
+    /// Tail of the docker-build log (last ~32 KiB) for the most recent
+    /// build attempt. Lets the admin diagnose a Failed build without
+    /// re-running.
+    /// </summary>
+    [MaxLength(32768)]
+    public string? LastBuildLog { get; set; }
+
+    /// <summary>
+    /// Relative path to the source <c>challenge.yml</c> inside the
+    /// owning repo binding's git checkout (e.g.
+    /// <c>final/Pwn/kopi-naught-file/challenge.yml</c>). Set by the
+    /// repo-binding import when this challenge was discovered there.
+    /// Null for admin-created or one-shot-uploaded challenges.
+    ///
+    /// <para>Used by the push-back feature
+    /// (<see cref="GameRepoBinding.PushOnEdit"/>) to know which file
+    /// to overwrite when the operator edits the challenge in the
+    /// admin UI.</para>
+    /// </summary>
+    [MaxLength(512)]
+    public string? SourceYamlPath { get; set; }
+
+    /// <summary>
     /// Generate dynamic flag for the participant
     /// </summary>
     /// <param name="part"></param>

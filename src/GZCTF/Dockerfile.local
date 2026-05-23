@@ -6,7 +6,7 @@ WORKDIR /src
 RUN apt-get update && apt-get install -y curl && \
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y nodejs && \
-    npm install -g pnpm
+    npm install -g pnpm@10.33.0
 
 # Copy solution and configuration files
 COPY global.json Directory.Packages.props GZCTF.slnx ./
@@ -21,7 +21,7 @@ COPY GZCTF.Integration.Test/GZCTF.Integration.Test.csproj ./GZCTF.Integration.Te
 RUN dotnet restore
 
 # Copy frontend configuration
-COPY GZCTF/ClientApp/package.json GZCTF/ClientApp/pnpm-lock.yaml ./GZCTF/ClientApp/
+COPY GZCTF/ClientApp/package.json GZCTF/ClientApp/pnpm-lock.yaml GZCTF/ClientApp/pnpm-workspace.yaml ./GZCTF/ClientApp/
 
 # Install frontend dependencies (cached layer)
 WORKDIR /src/GZCTF/ClientApp
@@ -43,7 +43,7 @@ ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false \
     LC_ALL=en_US.UTF-8
 
 RUN apk add --update --no-cache wget libpcap icu-data-full icu-libs \
-    ca-certificates libgdiplus tzdata krb5-libs && \
+    ca-certificates libgdiplus tzdata krb5-libs git openssh-client && \
     update-ca-certificates
 
 COPY --from=build /app/publish .

@@ -1,7 +1,7 @@
 import { Button, Center, ComboboxItem, Group, ScrollArea, Select, SimpleGrid, Stack, Text, Title } from '@mantine/core'
 import { useModals } from '@mantine/modals'
 import { showNotification } from '@mantine/notifications'
-import { mdiCheck, mdiHexagonSlice6, mdiPlus, mdiRefresh } from '@mdi/js'
+import { mdiCheck, mdiHammerWrench, mdiHexagonSlice6, mdiPlus, mdiRefresh } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import { Dispatch, FC, SetStateAction, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -69,6 +69,39 @@ const GameChallengeEdit: FC = () => {
     }
   }
 
+  const failedBuildCount = challenges?.filter(
+    (c) => c.buildStatus === 'Failed' || c.buildStatus === 'MissingDockerfile',
+  ).length ?? 0
+
+  const onBulkRebuild = () => {
+    if (!numId || failedBuildCount === 0) return
+    modals.openConfirmModal({
+      title: t('admin.button.challenges.bulk_rebuild'),
+      children: (
+        <Text size="sm">
+          {t('admin.content.games.challenges.bulk_rebuild_confirm', { count: failedBuildCount })}
+        </Text>
+      ),
+      onConfirm: async () => {
+        setDisabled(true)
+        try {
+          const resp = await api.admin.adminBulkRebuildFailed(numId)
+          showNotification({
+            color: 'teal',
+            message: t('admin.notification.builds.bulk_enqueued', { count: resp.data.enqueued }),
+            icon: <Icon path={mdiCheck} size={1} />,
+          })
+          mutate()
+        } catch (e) {
+          showErrorMsg(e, t)
+        } finally {
+          setDisabled(false)
+        }
+      },
+      confirmProps: { color: 'orange' },
+    })
+  }
+
   const onFlushScoreboard = async () => {
     if (!numId) return
 
@@ -110,6 +143,17 @@ const GameChallengeEdit: FC = () => {
             })}
           />
           <Group justify="right">
+            {failedBuildCount > 0 && (
+              <Button
+                leftSection={<Icon path={mdiHammerWrench} size={1} />}
+                variant="default"
+                color="orange"
+                disabled={disabled}
+                onClick={onBulkRebuild}
+              >
+                {t('admin.button.challenges.bulk_rebuild')} ({failedBuildCount})
+              </Button>
+            )}
             <Button leftSection={<Icon path={mdiRefresh} size={1} />} disabled={disabled} onClick={onFlushScoreboard}>
               {t('admin.button.challenges.flush_scoreboard')}
             </Button>
@@ -135,7 +179,12 @@ const GameChallengeEdit: FC = () => {
           <SimpleGrid pr={6} cols={{ base: 2, w18: 3, w24: 4, w30: 5, w36: 6, w42: 7, w48: 8 }} spacing="sm">
             {filteredChallenges &&
               filteredChallenges.map((challenge) => (
-                <ChallengeEditCard key={challenge.id} challenge={challenge} onToggle={onToggle} />
+                <ChallengeEditCard
+                  key={challenge.id}
+                  challenge={challenge}
+                  onToggle={onToggle}
+                  onMutate={() => mutate()}
+                />
               ))}
           </SimpleGrid>
         )}

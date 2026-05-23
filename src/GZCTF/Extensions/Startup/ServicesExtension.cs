@@ -34,6 +34,7 @@ internal static class ServicesExtension
             builder.AddConfig<ManagedConfig>();
             builder.AddConfig<ContainerPolicy>();
             builder.AddConfig<ContainerProvider>();
+            builder.AddConfig<BuildRegistryConfig>();
             builder.AddConfig<HoneypotConfig>();
             builder.AddConfig<FlagEgressConfig>();
             builder.AddConfig<CheatDetectionConfig>();
@@ -97,19 +98,39 @@ internal static class ServicesExtension
             builder.Services.AddScoped<ExcelHelper>();
             builder.Services.AddScoped<GameExportService>();
             builder.Services.AddScoped<GameImportService>();
+            builder.Services.AddScoped<ChallengeImportService>();
+            builder.Services.AddScoped<RepoBindingDiscoveryService>();
+            builder.Services.AddSingleton<GitRepoSyncService>();
+
+            builder.Services.AddHttpClient("GitHubApi", client =>
+            {
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("GZCTF");
+                client.Timeout = TimeSpan.FromMinutes(2);
+            });
 
             builder.Services.AddChannel<Submission>();
             builder.Services.AddChannel<CacheRequest>();
+            // Build queue is bounded at 256 so a runaway scan loop
+            // (malformed import enqueuing thousands of jobs) can't OOM
+            // the host. 256 is generous: findit has ~16 challenges,
+            // 16 bindings scanning simultaneously is still well within.
+            builder.Services.AddBoundedChannel<Services.Container.Build.ChallengeBuildJob>(256);
+            builder.Services.AddSingleton<Services.Container.Build.IChallengeBuildQueue,
+                Services.Container.Build.ChallengeBuildQueue>();
             builder.Services.AddSingleton<CacheHelper>();
             builder.Services.AddSingleton<IMailSender, MailSender>();
             builder.Services.AddSingleton<FlagEgressService>();
             builder.Services.AddSingleton<TrafficRecorderRegistry>();
+            builder.Services.AddScoped<IPcapFlowExtractor, PcapFlowExtractor>();
 
             builder.Services.AddHostedService<CacheMaker>();
             builder.Services.AddHostedService<FlagChecker>();
             builder.Services.AddHostedService<CronJobService>();
             builder.Services.AddHostedService<HoneypotPortListenerService>();
             builder.Services.AddHostedService<HoneypotChainDetectorService>();
+            builder.Services.AddHostedService<RepoWatchService>();
+            builder.Services.AddHostedService<RepoBindingScanService>();
+            builder.Services.AddHostedService<Services.Container.Build.ChallengeBuildQueueService>();
         }
 
         internal void AddWebServices()

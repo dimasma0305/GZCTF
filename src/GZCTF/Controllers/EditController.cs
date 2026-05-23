@@ -9,6 +9,8 @@ using GZCTF.Repositories.Interface;
 using GZCTF.Services.Cache;
 using GZCTF.Services.Container.Manager;
 using GZCTF.Services.Transfer;
+using GZCTF.Storage.Interface;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -42,9 +44,15 @@ public class EditController(
     IBlobRepository blobService,
     GameExportService exportService,
     GameImportService importService,
+    ChallengeImportService challengeImportService,
+    AppDbContext dbContext,
+    IDataProtectionProvider dataProtectionProvider,
     IDivisionRepository divisionRepository,
     IStringLocalizer<Program> localizer) : Controller
 {
+    private readonly IDataProtector _repoWatchProtector =
+        dataProtectionProvider.CreateProtector(RepoWatchProtection.Purpose);
+
     /// <summary>
     /// Add Post
     /// </summary>
@@ -746,13 +754,18 @@ public class EditController(
 
         var scoreboard = await gameRepository.TryGetScoreboard(id, token);
 
-        var result = challenges.Select(c =>
-        {
-            var model = ChallengeInfoModel.FromChallenge(c);
-            if (scoreboard is not null && scoreboard.ChallengeMap.TryGetValue(c.Id, out var challengeInfo))
-                model.Score = challengeInfo.Score;
-            return model;
-        });
+        // Hide Pending / Rejected from the main admin list — they live in
+        // /admin/games/{id}/pending so the active list stays focused on
+        // challenges that participants might actually see.
+        var result = challenges
+            .Where(c => c.ReviewStatus == ChallengeReviewStatus.Active)
+            .Select(c =>
+            {
+                var model = ChallengeInfoModel.FromChallenge(c);
+                if (scoreboard is not null && scoreboard.ChallengeMap.TryGetValue(c.Id, out var challengeInfo))
+                    model.Score = challengeInfo.Score;
+                return model;
+            });
 
         return Ok(result);
     }
@@ -895,7 +908,104 @@ public class EditController(
         // Always flush scoreboard
         await cacheHelper.FlushScoreboardCache(game.Id, token);
 
+        // Push-back: if this challenge came from a repo binding that
+        // has PushOnEdit on, serialize the row to yaml and push it
+        // upstream. Fire-and-forget so a slow git push doesn't extend
+        // the operator's edit-save round trip.
+        await TryPushBackAsync(game, res, token);
+
         return Ok(ChallengeEditDetailModel.FromChallenge(res));
+    }
+
+    /// <summary>
+    /// If the challenge belongs to a binding-managed game and that
+    /// binding has push-on-edit enabled, regenerate the
+    /// <c>challenge.yml</c> from the current DB state and push it back
+    /// to upstream. Best-effort: failures land in the logs but don't
+    /// block the operator's edit, since the in-DB change is the
+    /// source-of-truth from the operator's perspective.
+    /// </summary>
+    private async Task TryPushBackAsync(GZCTF.Models.Data.Game game,
+        GZCTF.Models.Data.GameChallenge ch, CancellationToken token)
+    {
+        if (game.RepoBindingId is not { } bid) return;
+        if (string.IsNullOrEmpty(ch.SourceYamlPath)) return;
+
+        var binding = await dbContext.GameRepoBindings.AsNoTracking()
+            .FirstOrDefaultAsync(b => b.Id == bid, token);
+        if (binding is null || !binding.PushOnEdit) return;
+        if (string.IsNullOrEmpty(binding.GitHubTokenEncrypted)) return;
+
+        // Decrypt the PAT in this thread (uses request-scope
+        // IDataProtectionProvider) so we don't have to plumb the
+        // protector into the fire-and-forget Task.
+        string plaintext;
+        try
+        {
+            var protector = HttpContext.RequestServices
+                .GetRequiredService<Microsoft.AspNetCore.DataProtection.IDataProtectionProvider>()
+                .CreateProtector(GZCTF.Services.Transfer.GameRepoBindingProtection.Purpose);
+            plaintext = protector.Unprotect(binding.GitHubTokenEncrypted);
+        }
+        catch
+        {
+            logger.LogWarning("PushBack: failed to decrypt token for binding {Id}", bid);
+            return;
+        }
+
+        if (!GZCTF.Services.Transfer.GitHubLocator.TryParse(
+            binding.RepoUrl, binding.Ref, overrideSubpath: null, out var loc, out _) || loc is null)
+            return;
+
+        // Re-load with Flags so we can serialize them.
+        var withFlags = await dbContext.GameChallenges
+            .Include(c => c.Flags)
+            .FirstOrDefaultAsync(c => c.Id == ch.Id, token);
+        if (withFlags is null) return;
+
+        // Skip the dynamic-flag-template case — we'd need to serialize
+        // the template, not the materialized flags. The yaml's
+        // flag_template field already captures that; we can leave the
+        // existing yaml's flag list as-is.
+        var flagTexts = withFlags.Type == ChallengeType.DynamicContainer
+            ? Array.Empty<string>()
+            : withFlags.Flags.Where(f => !string.IsNullOrEmpty(f.Flag)).Select(f => f.Flag).ToArray();
+
+        var yamlPath = ch.SourceYamlPath!;
+        var commitMsg = $"chore: update {ch.Title} from GZCTF admin edit";
+        var scopeFactory = HttpContext.RequestServices.GetRequiredService<IServiceScopeFactory>();
+        var gitSync = HttpContext.RequestServices.GetRequiredService<GZCTF.Services.Transfer.GitRepoSyncService>();
+
+        // Fire-and-forget with its own scope; HTTP scope is disposed
+        // shortly after we return.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                // Make sure the checkout exists + is at HEAD before we
+                // overlay the new yaml.
+                await gitSync.SyncAsync("binding", bid, loc, plaintext, CancellationToken.None);
+
+                var repoDir = $"{GZCTF.Services.Transfer.GitRepoSyncService.RepoRoot}/binding/{bid}";
+                var fullPath = System.IO.Path.Combine(repoDir, yamlPath);
+                if (!System.IO.File.Exists(fullPath))
+                {
+                    logger.LogWarning("PushBack: yaml {Path} missing in checkout — operator may have moved it; skipping push", yamlPath);
+                    return;
+                }
+
+                var newYaml = GZCTF.Services.Transfer.ChallengeYamlSerializer.Serialize(withFlags, flagTexts);
+                await System.IO.File.WriteAllTextAsync(fullPath, newYaml, CancellationToken.None);
+
+                await gitSync.CommitAndPushAsync("binding", bid, loc, plaintext,
+                    [yamlPath], commitMsg, ct: CancellationToken.None);
+                logger.LogInformation("PushBack: pushed {Yaml} for challenge {Cid}", yamlPath, ch.Id);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "PushBack: failed for challenge {Cid} ({Yaml})", ch.Id, yamlPath);
+            }
+        });
     }
 
     /// <summary>
@@ -1416,6 +1526,842 @@ public class EditController(
         dbContext.EventManagers.Remove(manager);
         await dbContext.SaveChangesAsync(token);
 
+        return Ok();
+    }
+
+    // =========================================================
+    //  Challenge import / review / repo-watch endpoints
+    //  See /root/.claude/plans/compiled-squishing-neumann.md
+    // =========================================================
+
+    const long MaxTarballBytes = 64L * 1024 * 1024;
+
+    /// <summary>
+    /// Submit a single-challenge tarball for admin review. Any logged-in
+    /// user may call this; the challenge lands with
+    /// <see cref="ChallengeReviewStatus.Pending"/> and is hidden from
+    /// participants until an admin approves.
+    /// </summary>
+    [RequireUser]
+    [HttpPost("Games/{id:int}/Challenges/Submit")]
+    [RequestSizeLimit(MaxTarballBytes)]
+    [ProducesResponseType(typeof(ChallengeImportResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> SubmitChallenge(
+        [FromRoute] int id, IFormFile archive, CancellationToken token)
+    {
+        if (archive is null || archive.Length == 0)
+            return BadRequest(new RequestResponse("Archive is required."));
+        if (archive.Length > MaxTarballBytes)
+            return BadRequest(new RequestResponse("Archive exceeds 64 MB."));
+
+        var game = await dbContext.Games.FirstOrDefaultAsync(g => g.Id == id, token);
+        if (game is null)
+            return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Game_NotFound)],
+                StatusCodes.Status404NotFound));
+
+        // Per-game gate. Admin / game-admin still bypass this via the
+        // Import endpoint above; this only restricts the public Submit path.
+        if (!game.AllowUserSubmissions)
+            return new ObjectResult(new RequestResponse("User submissions are disabled for this game.",
+                StatusCodes.Status403Forbidden))
+            { StatusCode = StatusCodes.Status403Forbidden };
+
+        var user = (await userManager.GetUserAsync(User))!;
+
+        await using var stream = archive.OpenReadStream();
+        var result = await challengeImportService.ImportFromArchiveAsync(
+            stream, new ChallengeImportOptions(id, user.Id, AutoApprove: false), token);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Admin / game-admin one-shot tarball import; auto-approves the
+    /// resulting challenges.
+    /// </summary>
+    [RequireGameAdmin]
+    [HttpPost("Games/{id:int}/Challenges/Import")]
+    [RequestSizeLimit(MaxTarballBytes)]
+    [ProducesResponseType(typeof(ChallengeImportResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ImportChallenge(
+        [FromRoute] int id, IFormFile archive, CancellationToken token)
+    {
+        if (archive is null || archive.Length == 0)
+            return BadRequest(new RequestResponse("Archive is required."));
+
+        var user = (await userManager.GetUserAsync(User))!;
+
+        await using var stream = archive.OpenReadStream();
+        var result = await challengeImportService.ImportFromArchiveAsync(
+            stream, new ChallengeImportOptions(id, user.Id, AutoApprove: true), token);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// One-shot bulk import from a github repo. Admin / game-admin only;
+    /// regular users can only submit single-challenge archives.
+    /// </summary>
+    [RequireGameAdmin]
+    [HttpPost("Games/{id:int}/Challenges/ImportFromGitHub")]
+    [ProducesResponseType(typeof(ChallengeImportResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ImportChallengeFromGitHub(
+        [FromRoute] int id, [FromBody] ImportFromGitHubModel model, CancellationToken token)
+    {
+        if (!GitHubLocator.TryParse(model.RepoUrl, model.Ref, model.Subpath, out var loc, out var err) || loc is null)
+            return BadRequest(new RequestResponse(err ?? "Invalid github URL."));
+
+        var user = (await userManager.GetUserAsync(User))!;
+        var result = await challengeImportService.ImportFromGitHubAsync(
+            loc, model.GitHubToken, new ChallengeImportOptions(id, user.Id, AutoApprove: true), token);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// List challenges awaiting admin review for this game.
+    /// </summary>
+    [RequireGameAdmin]
+    [HttpGet("Games/{id:int}/PendingChallenges")]
+    [ProducesResponseType(typeof(PendingChallengeModel[]), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListPendingChallenges([FromRoute] int id, CancellationToken token)
+    {
+        // Pending + Rejected both belong to the review queue. Active rows
+        // live in the main /admin/games/{id}/challenges list; Active is
+        // excluded here so the queue stays focused on "needs attention".
+        var rows = await dbContext.GameChallenges
+            .AsNoTracking()
+            .Where(c => c.GameId == id && c.ReviewStatus != ChallengeReviewStatus.Active)
+            .OrderBy(c => c.ReviewStatus) // Pending (1) before Rejected (2)
+            .ThenByDescending(c => c.SubmittedAtUtc)
+            .Select(c => new PendingChallengeModel
+            {
+                Id = c.Id,
+                Title = c.Title,
+                Category = c.Category,
+                Type = c.Type,
+                ReviewStatus = c.ReviewStatus,
+                ReviewNote = c.ReviewNote,
+                SubmittedAtUtc = c.SubmittedAtUtc,
+                ReviewedAtUtc = c.ReviewedAtUtc,
+                SubmittedByUserId = c.SubmittedByUserId,
+                SubmittedByUserName = c.SubmittedByUserId != null
+                    ? dbContext.Users.Where(u => u.Id == c.SubmittedByUserId).Select(u => u.UserName).FirstOrDefault()
+                    : null
+            })
+            .ToArrayAsync(token);
+        return Ok(rows);
+    }
+
+    /// <summary>
+    /// Approve a pending challenge. Optionally enables it in one shot.
+    /// </summary>
+    [RequireGameAdmin]
+    [HttpPost("Games/{id:int}/Challenges/{cId:int}/Approve")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ApproveChallenge(
+        [FromRoute] int id, [FromRoute] int cId, CancellationToken token)
+    {
+        var challenge = await dbContext.GameChallenges
+            .FirstOrDefaultAsync(c => c.GameId == id && c.Id == cId, token);
+        if (challenge is null)
+            return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Challenge_NotFound)],
+                StatusCodes.Status404NotFound));
+
+        challenge.ReviewStatus = ChallengeReviewStatus.Active;
+        challenge.ReviewedAtUtc = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(token);
+        return Ok();
+    }
+
+    /// <summary>
+    /// Reject a pending (or active) challenge. Persists the optional note
+    /// for audit. Challenge stays in the DB but is hidden from participants.
+    /// </summary>
+    [RequireGameAdmin]
+    [HttpPost("Games/{id:int}/Challenges/{cId:int}/Reject")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RejectChallenge(
+        [FromRoute] int id, [FromRoute] int cId,
+        [FromBody] RejectChallengeModel model, CancellationToken token)
+    {
+        var challenge = await dbContext.GameChallenges
+            .FirstOrDefaultAsync(c => c.GameId == id && c.Id == cId, token);
+        if (challenge is null)
+            return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Challenge_NotFound)],
+                StatusCodes.Status404NotFound));
+
+        challenge.ReviewStatus = ChallengeReviewStatus.Rejected;
+        challenge.ReviewedAtUtc = DateTimeOffset.UtcNow;
+        challenge.ReviewNote = model.Note;
+        await dbContext.SaveChangesAsync(token);
+        return Ok();
+    }
+
+    /// <summary>
+    /// Re-run the auto-build pipeline against the persisted original
+    /// archive. Useful when a Dockerfile change shipped and the admin
+    /// wants to refresh the image without re-uploading the package.
+    ///
+    /// <para>As of the async-queue rework this endpoint enqueues a job
+    /// and returns 202 with the fresh <see cref="ChallengeAuditModel"/>
+    /// in <c>Queued</c> state. The UI polls the AuditMeta endpoint
+    /// every couple of seconds to see the transition through
+    /// <c>Building</c> to <c>Success</c> / <c>Failed</c>. 404 stays in
+    /// place for challenges that lack a persisted archive (admin-created
+    /// or github-sourced where we didn't keep the blob).</para>
+    /// </summary>
+    [RequireGameAdmin]
+    [HttpPost("Games/{id:int}/Challenges/{cId:int}/Rebuild")]
+    [ProducesResponseType(typeof(Models.Response.Admin.ChallengeAuditModel), StatusCodes.Status202Accepted)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RebuildChallengeImage(
+        [FromRoute] int id, [FromRoute] int cId,
+        [FromServices] Services.Container.Build.IChallengeBuildQueue buildQueue,
+        [FromServices] Storage.Interface.IBlobStorage storage,
+        [FromServices] IServiceScopeFactory scopeFactory,
+        CancellationToken token)
+    {
+        var challenge = await dbContext.GameChallenges
+            .FirstOrDefaultAsync(c => c.GameId == id && c.Id == cId, token);
+        if (challenge is null)
+            return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Challenge_NotFound)]));
+
+        // Fallback path for binding/watcher-imported challenges that
+        // didn't keep a blob: re-fetch from the upstream repo. We just
+        // re-run the binding scan (idempotent) — it will re-import every
+        // challenge and the new ResolveBuildIntent decision enqueues a
+        // build job for this one along the way.
+        var blobPath = challenge.OriginalArchiveBlobPath;
+        var noBlob = string.IsNullOrEmpty(blobPath) || !await storage.ExistsAsync(blobPath, token);
+        if (noBlob)
+        {
+            var game = await dbContext.Games.FirstOrDefaultAsync(g => g.Id == id, token);
+            if (game?.RepoBindingId is { } bid)
+            {
+                challenge.BuildStatus = ChallengeBuildStatus.Queued;
+                challenge.LastBuildLog = "Triggered re-fetch from parent repo binding…";
+                await dbContext.SaveChangesAsync(token);
+
+                var user = (await userManager.GetUserAsync(User))!;
+                var userId = user.Id;
+                // Fire-and-forget background scan. The HTTP request
+                // scope is disposed the moment we return 202, so we
+                // CANNOT capture any scoped service (DbContext-backed
+                // ones explode with ObjectDisposedException). Open a
+                // fresh DI scope here and resolve the discovery service
+                // from it — the scope lives until the lambda completes.
+                //
+                // ScanAsync's own SetActivityAsync calls write the
+                // CurrentActivity field on the binding so progress is
+                // visible on /admin/repo-bindings while the scan runs.
+                logger.LogInformation(
+                    "Rebuild fallback: kicking force-scan of binding {Bid} for challenge {Cid}",
+                    bid, cId);
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await using var scope = scopeFactory.CreateAsyncScope();
+                        var disc = scope.ServiceProvider
+                            .GetRequiredService<Services.Transfer.RepoBindingDiscoveryService>();
+                        // force=true: per-challenge Build fallback exists
+                        // precisely because the challenge needs work. A
+                        // SHA-match short-circuit here would silently leave
+                        // the challenge stuck in Queued forever.
+                        await disc.ScanAsync(bid, userId, CancellationToken.None, force: true);
+                        logger.LogInformation(
+                            "Rebuild fallback: scan of binding {Bid} done (challenge {Cid})",
+                            bid, cId);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex,
+                            "Rebuild fallback: scan of binding {Bid} failed for challenge {Cid}",
+                            bid, cId);
+                        // Surface the failure on the challenge row so
+                        // the operator doesn't sit watching Queued
+                        // forever. The empty catch in the prior
+                        // version is what made the bug silent.
+                        try
+                        {
+                            await using var scope = scopeFactory.CreateAsyncScope();
+                            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                            await db.GameChallenges
+                                .Where(c => c.Id == cId)
+                                .ExecuteUpdateAsync(s => s
+                                    .SetProperty(x => x.BuildStatus, ChallengeBuildStatus.Failed)
+                                    .SetProperty(x => x.LastBuildLog,
+                                        $"Re-fetch from binding {bid} failed: {ex.Message}"));
+                        }
+                        catch { /* nothing more we can do */ }
+                    }
+                });
+
+                return Accepted(new Models.Response.Admin.ChallengeAuditModel
+                {
+                    ArchiveAvailable = false,
+                    BuildStatus = challenge.BuildStatus,
+                    LastBuildLog = challenge.LastBuildLog
+                });
+            }
+            return NotFound(new RequestResponse(
+                "No archive on file and no parent repo binding — re-upload to trigger a build.",
+                StatusCodes.Status404NotFound));
+        }
+
+        // Extract the archive into a temp dir owned by THIS handler.
+        // After we identify the context dir, we hand a fresh snapshot to
+        // the queue worker and tear down workDir before returning. The
+        // queue owns the snapshot's lifecycle from there.
+        var workDir = Path.Combine(Path.GetTempPath(), $"gzctf-rebuild-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(workDir);
+        try
+        {
+            await using (var src = await storage.OpenReadAsync(challenge.OriginalArchiveBlobPath, token))
+            {
+                var spool = Path.Combine(workDir, "__archive.bin");
+                await using (var fs = System.IO.File.Create(spool))
+                    await src.CopyToAsync(fs, token);
+                await using var sf = System.IO.File.OpenRead(spool);
+                await Services.Transfer.ChallengeImportService.ExtractArchiveAsync(sf, workDir, token);
+                System.IO.File.Delete(spool);
+            }
+
+            var topLevel = Directory.EnumerateFileSystemEntries(workDir).Take(2).ToArray();
+            var packageDir = topLevel.Length == 1 && Directory.Exists(topLevel[0])
+                ? topLevel[0]
+                : workDir;
+
+            var declared = challenge.ContainerImage?.Trim();
+            if (string.IsNullOrEmpty(declared) ||
+                !(declared.StartsWith("./") || declared.StartsWith("../") || declared.StartsWith('/') ||
+                  declared.Equals("Dockerfile", StringComparison.OrdinalIgnoreCase) ||
+                  declared.EndsWith("/Dockerfile", StringComparison.OrdinalIgnoreCase) ||
+                  declared.StartsWith("gzctf-auto/", StringComparison.OrdinalIgnoreCase)))
+            {
+                challenge.BuildStatus = ChallengeBuildStatus.NotApplicable;
+                challenge.LastBuildLog =
+                    "Rebuild skipped: this challenge ships a published registry image. Re-upload to change.";
+                await dbContext.SaveChangesAsync(token);
+                return NotFound(new RequestResponse(
+                    "Rebuild is only valid for challenges with a local Dockerfile.",
+                    StatusCodes.Status404NotFound));
+            }
+
+            string contextDir;
+            string dockerfile;
+            if (declared.StartsWith("./") || declared.StartsWith("../") || declared.StartsWith('/'))
+            {
+                var rel = declared.Replace('\\', '/').TrimStart('.').TrimStart('/');
+                var combined = Path.Combine(packageDir, rel);
+                if (Directory.Exists(combined)) { contextDir = Path.GetFullPath(combined); dockerfile = "Dockerfile"; }
+                else if (System.IO.File.Exists(combined)) { contextDir = Path.GetFullPath(Path.GetDirectoryName(combined)!); dockerfile = "Dockerfile"; }
+                else { contextDir = Path.GetFullPath(combined); dockerfile = "Dockerfile"; }
+            }
+            else if (declared.Equals("Dockerfile", StringComparison.OrdinalIgnoreCase))
+            {
+                contextDir = Path.GetFullPath(packageDir); dockerfile = "Dockerfile";
+            }
+            else
+            {
+                // gzctf-auto tag — look for a Dockerfile in src/ first, then root.
+                var srcDir = Path.Combine(packageDir, "src");
+                if (System.IO.File.Exists(Path.Combine(srcDir, "Dockerfile")))
+                {
+                    contextDir = Path.GetFullPath(srcDir); dockerfile = "Dockerfile";
+                }
+                else
+                {
+                    contextDir = Path.GetFullPath(packageDir); dockerfile = "Dockerfile";
+                }
+            }
+
+            if (!System.IO.File.Exists(Path.Combine(contextDir, dockerfile)))
+            {
+                challenge.BuildStatus = ChallengeBuildStatus.MissingDockerfile;
+                challenge.LastBuildLog = $"Rebuild failed: no Dockerfile found at '{contextDir}/{dockerfile}'.";
+                await dbContext.SaveChangesAsync(token);
+                return BadRequest(new RequestResponse(challenge.LastBuildLog));
+            }
+
+            // If a build for this challenge is already pending /
+            // running, short-circuit: the user's intent is already
+            // satisfied by the in-flight build. No second snapshot,
+            // no second enqueue, no second audit row.
+            if (buildQueue.IsPending(challenge.Id))
+            {
+                return Accepted(new Models.Response.Admin.ChallengeAuditModel
+                {
+                    ArchiveAvailable = true,
+                    BuildStatus = challenge.BuildStatus,
+                    LastBuildLog = challenge.LastBuildLog
+                });
+            }
+
+            // Snapshot to a queue-owned location so we can tear down
+            // workDir before returning.
+            var snap = Path.Combine(Path.GetTempPath(), $"gzctf-build-{Guid.NewGuid():N}");
+            CopyDirRecursive(contextDir, snap);
+
+            var enqueueResult = buildQueue.Enqueue(new Services.Container.Build.ChallengeBuildJob(
+                challenge.Id, challenge.GameId, challenge.Title,
+                snap, dockerfile, BuildTrigger.Manual));
+
+            switch (enqueueResult)
+            {
+                case Services.Container.Build.EnqueueResult.Enqueued:
+                    challenge.BuildStatus = ChallengeBuildStatus.Queued;
+                    challenge.LastBuildLog = null;
+                    await dbContext.SaveChangesAsync(token);
+                    break;
+                case Services.Container.Build.EnqueueResult.AlreadyPending:
+                    // Raced with another caller — drop the snapshot, the
+                    // existing job will satisfy this request too.
+                    try { Directory.Delete(snap, recursive: true); } catch { /* best effort */ }
+                    break;
+                case Services.Container.Build.EnqueueResult.Rejected:
+                    try { Directory.Delete(snap, recursive: true); } catch { /* best effort */ }
+                    return StatusCode(503, new RequestResponse(
+                        "Build queue is full — try again in a moment.",
+                        503));
+            }
+
+            return Accepted(new Models.Response.Admin.ChallengeAuditModel
+            {
+                ArchiveAvailable = true,
+                BuildStatus = challenge.BuildStatus,
+                LastBuildLog = challenge.LastBuildLog
+            });
+        }
+        catch (Exception e)
+        {
+            challenge.BuildStatus = ChallengeBuildStatus.Failed;
+            challenge.LastBuildLog = $"Rebuild crashed: {e.Message}";
+            await dbContext.SaveChangesAsync(token);
+            return BadRequest(new RequestResponse(challenge.LastBuildLog));
+        }
+        finally
+        {
+            try { Directory.Delete(workDir, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    static void CopyDirRecursive(string src, string dst)
+    {
+        Directory.CreateDirectory(dst);
+        foreach (var f in Directory.EnumerateFiles(src))
+            System.IO.File.Copy(f, Path.Combine(dst, Path.GetFileName(f)));
+        foreach (var d in Directory.EnumerateDirectories(src))
+            CopyDirRecursive(d, Path.Combine(dst, Path.GetFileName(d)));
+    }
+
+    /// <summary>
+    /// Download the original archive that produced a challenge, for
+    /// offline audit. Returns 404 when no archive was persisted
+    /// (admin-created or github-sourced).
+    /// </summary>
+    [RequireGameAdmin]
+    [HttpGet("Games/{id:int}/Challenges/{cId:int}/AuditArchive")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetChallengeAuditArchive(
+        [FromRoute] int id, [FromRoute] int cId, CancellationToken token,
+        [FromServices] IBlobStorage storage)
+    {
+        var challenge = await dbContext.GameChallenges.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.GameId == id && c.Id == cId, token);
+        if (challenge?.OriginalArchiveBlobPath is null)
+            return NotFound(new RequestResponse("No archive available for this challenge."));
+
+        if (!await storage.ExistsAsync(challenge.OriginalArchiveBlobPath, token))
+            return NotFound(new RequestResponse("Archive blob is missing from storage."));
+
+        var stream = await storage.OpenReadAsync(challenge.OriginalArchiveBlobPath, token);
+        var safeTitle = string.Concat(challenge.Title
+            .Select(c => char.IsLetterOrDigit(c) || c == '-' || c == '_' ? c : '_'));
+        return File(stream, "application/octet-stream", $"{safeTitle}.archive.bin");
+    }
+
+    /// <summary>
+    /// Parse the stored archive on-demand and return YAML text, file
+    /// tree, and previews of reviewer-targeted files (READMEs / writeups
+    /// / solvers). Heavy enough that the modal calls it explicitly on
+    /// open, not on every render.
+    /// </summary>
+    [RequireGameAdmin]
+    [HttpGet("Games/{id:int}/Challenges/{cId:int}/AuditMeta")]
+    [ProducesResponseType(typeof(Models.Response.Admin.ChallengeAuditModel), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetChallengeAuditMeta(
+        [FromRoute] int id, [FromRoute] int cId, CancellationToken token,
+        [FromServices] IBlobStorage storage)
+    {
+        var challenge = await dbContext.GameChallenges.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.GameId == id && c.Id == cId, token);
+        if (challenge is null)
+            return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Challenge_NotFound)]));
+
+        var model = new Models.Response.Admin.ChallengeAuditModel
+        {
+            ArchiveAvailable = challenge.OriginalArchiveBlobPath is not null,
+            BuildStatus = challenge.BuildStatus,
+            LastBuildLog = challenge.LastBuildLog
+        };
+
+        if (challenge.OriginalArchiveBlobPath is null)
+            return Ok(model);
+
+        if (!await storage.ExistsAsync(challenge.OriginalArchiveBlobPath, token))
+        {
+            model.ArchiveAvailable = false;
+            return Ok(model);
+        }
+
+        var tempDir = Path.Combine(Path.GetTempPath(), $"gzctf-audit-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            await using (var src = await storage.OpenReadAsync(challenge.OriginalArchiveBlobPath, token))
+            {
+                var spool = Path.Combine(tempDir, "__archive.bin");
+                await using (var fs = System.IO.File.Create(spool))
+                    await src.CopyToAsync(fs, token);
+                await using var sf = System.IO.File.OpenRead(spool);
+                await ChallengeImportService.ExtractArchiveAsync(sf, tempDir, token);
+                System.IO.File.Delete(spool);
+            }
+
+            FillAuditModel(model, tempDir);
+            return Ok(model);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Audit: failed to parse archive for challenge {Id}", cId);
+            return Ok(model);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    private static void FillAuditModel(Models.Response.Admin.ChallengeAuditModel model, string root)
+    {
+        var rootCanonical = Path.GetFullPath(root) + Path.DirectorySeparatorChar;
+        var files = new List<Models.Response.Admin.ChallengeAuditFile>();
+
+        // GitHub-style downloads wrap content in one dir; descend if so.
+        var firstLevel = Directory.EnumerateFileSystemEntries(root).Take(2).ToArray();
+        var scanRoot = firstLevel.Length == 1 && Directory.Exists(firstLevel[0])
+            ? firstLevel[0]
+            : root;
+        var scanCanonical = Path.GetFullPath(scanRoot) + Path.DirectorySeparatorChar;
+
+        // First yaml we find wins. Anything deeper is also collected as a file
+        // entry — admins still see it but it doesn't dominate the panel.
+        string? yamlText = null;
+        var previews = new Dictionary<string, string>();
+        var previewKeywords = new[] { "readme", "writeup", "solution", "solve", "solver", "notes" };
+
+        foreach (var path in Directory.EnumerateFiles(scanRoot, "*", SearchOption.AllDirectories))
+        {
+            var rel = Path.GetRelativePath(scanRoot, path).Replace('\\', '/');
+            var info = new FileInfo(path);
+            files.Add(new() { Path = rel, Size = info.Length });
+
+            var name = Path.GetFileName(path);
+            if (yamlText is null &&
+                (string.Equals(name, "challenge.yaml", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(name, "challenge.yml", StringComparison.OrdinalIgnoreCase)))
+            {
+                try { yamlText = System.IO.File.ReadAllText(path); }
+                catch { /* ignore */ }
+                continue;
+            }
+
+            var lowerName = name.ToLowerInvariant();
+            if (info.Length <= 64 * 1024 &&
+                previewKeywords.Any(k => lowerName.Contains(k)))
+            {
+                try
+                {
+                    var contents = System.IO.File.ReadAllText(path);
+                    if (contents.Length > 8 * 1024)
+                        contents = contents[..(8 * 1024)] + "\n…(truncated)";
+                    previews[rel] = contents;
+                }
+                catch { /* binary or unreadable; skip */ }
+            }
+        }
+
+        model.YamlText = yamlText;
+        model.Files = files.OrderBy(f => f.Path, StringComparer.OrdinalIgnoreCase).ToArray();
+        model.Previews = previews;
+    }
+
+    /// <summary>
+    /// When the game was auto-spawned by a global
+    /// <see cref="GZCTF.Models.Data.GameRepoBinding"/>, return read-only
+    /// details about which binding owns it and on what cadence it
+    /// re-polls. Returns <c>null</c> when the game is hand-authored —
+    /// the watches page uses that as the signal to render the regular
+    /// add-watch form. No per-game <see cref="GZCTF.Models.Data.RepoWatch"/>
+    /// row is created for binding-owned games (single-authoritative
+    /// poller, no double-scan); this endpoint is what surfaces the
+    /// binding to the per-game UI.
+    /// </summary>
+    [RequireGameAdmin]
+    [HttpGet("Games/{id:int}/WatchBinding")]
+    [ProducesResponseType(typeof(GameWatchBindingModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetGameWatchBinding([FromRoute] int id, CancellationToken token)
+    {
+        var info = await dbContext.Games.AsNoTracking()
+            .Where(g => g.Id == id && g.RepoBindingId != null)
+            .Select(g => new
+            {
+                g.EventManifestPath,
+                Binding = dbContext.GameRepoBindings.AsNoTracking()
+                    .Where(b => b.Id == g.RepoBindingId)
+                    .Select(b => new
+                    {
+                        b.Id,
+                        b.RepoUrl,
+                        b.Ref,
+                        b.IntervalSeconds,
+                        b.Status,
+                        b.TokenStatus,
+                        b.LastScanUtc,
+                        b.NextScanUtc,
+                        b.LastScanMessage
+                    })
+                    .FirstOrDefault()
+            })
+            .FirstOrDefaultAsync(token);
+
+        if (info?.Binding is null)
+            return Ok((GameWatchBindingModel?)null);
+
+        return Ok(new GameWatchBindingModel
+        {
+            BindingId = info.Binding.Id,
+            RepoUrl = info.Binding.RepoUrl,
+            Ref = info.Binding.Ref,
+            EventManifestPath = info.EventManifestPath,
+            IntervalSeconds = info.Binding.IntervalSeconds,
+            Status = info.Binding.Status,
+            TokenStatus = info.Binding.TokenStatus,
+            LastScanUtc = info.Binding.LastScanUtc,
+            NextScanUtc = info.Binding.NextScanUtc,
+            LastScanMessage = info.Binding.LastScanMessage
+        });
+    }
+
+    /// <summary>
+    /// List configured repo watches for this game with last sync info.
+    /// </summary>
+    [RequireGameAdmin]
+    [HttpGet("Games/{id:int}/Watches")]
+    [ProducesResponseType(typeof(RepoWatchInfoModel[]), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListRepoWatches([FromRoute] int id, CancellationToken token)
+    {
+        var rows = await dbContext.RepoWatches.AsNoTracking()
+            .Where(w => w.GameId == id)
+            .OrderByDescending(w => w.CreatedAtUtc)
+            .Select(w => new RepoWatchInfoModel
+            {
+                Id = w.Id,
+                RepoUrl = w.RepoUrl,
+                Ref = w.Ref,
+                Subpath = w.Subpath,
+                IntervalSeconds = w.IntervalSeconds,
+                Status = w.Status,
+                NextRunUtc = w.NextRunUtc,
+                LastRunUtc = w.LastRunUtc,
+                LastCommitSha = w.LastCommitSha,
+                HasGitHubToken = w.GitHubTokenEncrypted != null,
+                TokenStatus = w.TokenStatus,
+                LastSync = dbContext.RepoWatchSyncs
+                    .Where(s => s.RepoWatchId == w.Id)
+                    .OrderByDescending(s => s.RanAtUtc)
+                    .Select(s => new RepoWatchSyncModel
+                    {
+                        RanAtUtc = s.RanAtUtc,
+                        CommitSha = s.CommitSha,
+                        Imported = s.Imported,
+                        Updated = s.Updated,
+                        Skipped = s.Skipped,
+                        Failed = s.Failed,
+                        ErrorMessage = s.ErrorMessage
+                    })
+                    .FirstOrDefault()
+            })
+            .ToArrayAsync(token);
+        return Ok(rows);
+    }
+
+    /// <summary>
+    /// Create a new repo watch. Validates the URL up front and clamps the
+    /// interval; schedules the first run immediately when requested.
+    /// </summary>
+    [RequireGameAdmin]
+    [HttpPost("Games/{id:int}/Watches")]
+    [ProducesResponseType(typeof(RepoWatchInfoModel), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> CreateRepoWatch(
+        [FromRoute] int id, [FromBody] RepoWatchCreateModel model, CancellationToken token)
+    {
+        if (!GitHubLocator.TryParse(model.RepoUrl, model.Ref, model.Subpath, out _, out var err))
+            return BadRequest(new RequestResponse(err ?? "Invalid github URL."));
+
+        // One repository per event. The watch is conceptually the single
+        // source of truth for the game; bidirectional sync (pull + push)
+        // relies on a 1:1 mapping. Admin must delete the existing watch
+        // before pointing the game at a different repo.
+        if (await dbContext.RepoWatches.AnyAsync(w => w.GameId == id, token))
+            return Conflict(new RequestResponse(
+                "This game already has a repo watch. Delete or update the existing one before adding another.",
+                StatusCodes.Status409Conflict));
+
+        // Games auto-created by a GameRepoBinding are managed at the
+        // global /admin/repo-bindings page. A per-game watch on top of
+        // that would create two competing polling sources.
+        var ownedByBinding = await dbContext.Games
+            .AsNoTracking()
+            .Where(g => g.Id == id)
+            .Select(g => g.RepoBindingId)
+            .FirstOrDefaultAsync(token);
+        if (ownedByBinding is not null)
+            return Conflict(new RequestResponse(
+                "This game was auto-created by a repo binding — manage it from /admin/repo-bindings instead.",
+                StatusCodes.Status409Conflict));
+
+        var user = (await userManager.GetUserAsync(User))!;
+
+        var watch = new RepoWatch
+        {
+            GameId = id,
+            RepoUrl = model.RepoUrl.Trim(),
+            Ref = string.IsNullOrWhiteSpace(model.Ref) ? null : model.Ref.Trim(),
+            Subpath = string.IsNullOrWhiteSpace(model.Subpath) ? null : model.Subpath.Trim().TrimEnd('/'),
+            IntervalSeconds = Math.Clamp(model.IntervalSeconds, 60, 86400),
+            Status = RepoWatchStatus.Active,
+            NextRunUtc = model.RunImmediately ? DateTimeOffset.UtcNow : DateTimeOffset.UtcNow.AddSeconds(model.IntervalSeconds),
+            CreatedByUserId = user.Id,
+            GitHubTokenEncrypted = string.IsNullOrWhiteSpace(model.GitHubToken)
+                ? null
+                : _repoWatchProtector.Protect(model.GitHubToken!.Trim()),
+            TokenStatus = string.IsNullOrWhiteSpace(model.GitHubToken)
+                ? TokenStatus.NotConfigured
+                : TokenStatus.Ok
+        };
+
+        dbContext.RepoWatches.Add(watch);
+        await dbContext.SaveChangesAsync(token);
+
+        return Ok(new RepoWatchInfoModel
+        {
+            Id = watch.Id,
+            RepoUrl = watch.RepoUrl,
+            Ref = watch.Ref,
+            Subpath = watch.Subpath,
+            IntervalSeconds = watch.IntervalSeconds,
+            Status = watch.Status,
+            NextRunUtc = watch.NextRunUtc,
+            LastRunUtc = watch.LastRunUtc,
+            LastCommitSha = watch.LastCommitSha,
+            HasGitHubToken = watch.GitHubTokenEncrypted != null,
+            TokenStatus = watch.TokenStatus
+        });
+    }
+
+    /// <summary>
+    /// Update an existing repo watch (interval / ref / subpath / pause-resume).
+    /// </summary>
+    [RequireGameAdmin]
+    [HttpPut("Games/{id:int}/Watches/{watchId:int}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateRepoWatch(
+        [FromRoute] int id, [FromRoute] int watchId,
+        [FromBody] RepoWatchUpdateModel model, CancellationToken token)
+    {
+        var watch = await dbContext.RepoWatches.FirstOrDefaultAsync(
+            w => w.Id == watchId && w.GameId == id, token);
+        if (watch is null)
+            return NotFound(new RequestResponse("Watch not found."));
+
+        if (model.Ref is not null) watch.Ref = string.IsNullOrWhiteSpace(model.Ref) ? null : model.Ref.Trim();
+        if (model.Subpath is not null) watch.Subpath = string.IsNullOrWhiteSpace(model.Subpath) ? null : model.Subpath.Trim().TrimEnd('/');
+        if (model.IntervalSeconds is { } iv) watch.IntervalSeconds = Math.Clamp(iv, 60, 86400);
+        if (model.Status is { } status) watch.Status = status;
+
+        // GitHubToken: null = keep existing, empty = clear, non-empty = re-protect.
+        if (model.GitHubToken is not null)
+        {
+            if (string.IsNullOrWhiteSpace(model.GitHubToken))
+            {
+                watch.GitHubTokenEncrypted = null;
+                watch.TokenStatus = TokenStatus.NotConfigured;
+            }
+            else
+            {
+                watch.GitHubTokenEncrypted = _repoWatchProtector.Protect(model.GitHubToken.Trim());
+                watch.TokenStatus = TokenStatus.Ok;
+            }
+        }
+
+        await dbContext.SaveChangesAsync(token);
+        return Ok();
+    }
+
+    /// <summary>
+    /// Delete a repo watch. Does NOT delete the challenges already imported by it.
+    /// </summary>
+    [RequireGameAdmin]
+    [HttpDelete("Games/{id:int}/Watches/{watchId:int}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteRepoWatch(
+        [FromRoute] int id, [FromRoute] int watchId,
+        [FromServices] Services.Transfer.GitRepoSyncService gitSync,
+        CancellationToken token)
+    {
+        var watch = await dbContext.RepoWatches.FirstOrDefaultAsync(
+            w => w.Id == watchId && w.GameId == id, token);
+        if (watch is null)
+            return NotFound(new RequestResponse("Watch not found."));
+
+        dbContext.RepoWatches.Remove(watch);
+        await dbContext.SaveChangesAsync(token);
+
+        // Best-effort: drop the on-disk git clone so /app/repos doesn't
+        // accumulate orphaned checkouts after watch deletions.
+        gitSync.DropCache("watch", watchId);
+
+        return Ok();
+    }
+
+    /// <summary>
+    /// Force a sync now by setting <c>NextRunUtc = UtcNow</c>. The watcher
+    /// will pick it up on the next 30-second tick.
+    /// </summary>
+    [RequireGameAdmin]
+    [HttpPost("Games/{id:int}/Watches/{watchId:int}/Run")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RunRepoWatchNow(
+        [FromRoute] int id, [FromRoute] int watchId, CancellationToken token)
+    {
+        var watch = await dbContext.RepoWatches.FirstOrDefaultAsync(
+            w => w.Id == watchId && w.GameId == id, token);
+        if (watch is null)
+            return NotFound(new RequestResponse("Watch not found."));
+
+        watch.NextRunUtc = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(token);
         return Ok();
     }
 }

@@ -505,7 +505,8 @@ public class TransferValidatorTest
             Title = "Test Challenge",
             Category = ChallengeCategory.Web,
             Type = ChallengeType.StaticAttachment,
-            Flags = new FlagsSection { Static = [new() { Value = new string('a', 150) }] }
+            // Limits.MaxFlagLength = 512; pad past it.
+            Flags = new FlagsSection { Static = [new() { Value = new string('a', 513) }] }
         };
 
         var ex = Assert.Throws<InvalidOperationException>(() =>
@@ -523,7 +524,8 @@ public class TransferValidatorTest
             Type = ChallengeType.DynamicAttachment,
             Flags = new FlagsSection
             {
-                Template = new string('a', 130) // Exceeds 120 chars
+                // Limits.MaxFlagTemplateLength = 480; pad past it.
+                Template = new string('a', 481)
             }
         };
 
