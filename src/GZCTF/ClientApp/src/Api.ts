@@ -404,6 +404,65 @@ export interface ConfigEditModel {
   containerPolicy?: ContainerPolicy | null;
   /** Auto-build image push destination */
   buildRegistry?: BuildRegistryConfig | null;
+  /** SMTP relay for email verification + password reset. */
+  email?: EmailConfig | null;
+  /** Captcha provider for login / register flows. */
+  captcha?: CaptchaConfig | null;
+  /** Pull credentials for a private image registry. */
+  registry?: RegistryConfig | null;
+}
+
+/** SMTP relay used for email verification / password reset.
+ *  Password is stored XOR-obfuscated; empty string preserves existing. */
+export interface EmailConfig {
+  userName?: string;
+  /** Empty string = leave existing password unchanged. */
+  password?: string;
+  senderAddress?: string | null;
+  senderName?: string | null;
+  smtp?: SmtpConfig | null;
+  /** Read-only: a password is currently configured. */
+  hasPassword?: boolean;
+  /** Read-only: enough fields are filled to actually send mail. */
+  isConfigured?: boolean;
+}
+
+export interface SmtpConfig {
+  host?: string;
+  port?: number;
+  bypassCertVerify?: boolean;
+}
+
+export type CaptchaProvider = "None" | "HashPow" | "CloudflareTurnstile";
+
+/** Captcha provider config. SiteKey is public (served as-is);
+ *  SecretKey is XOR-obfuscated and empty-string-preserves. */
+export interface CaptchaConfig {
+  provider?: CaptchaProvider;
+  /** Public site key — served to the browser. */
+  siteKey?: string | null;
+  /** Empty string = leave existing secret unchanged. */
+  secretKey?: string | null;
+  hashPow?: HashPowConfig | null;
+  /** Read-only: a secret key is currently configured. */
+  hasSecretKey?: boolean;
+}
+
+export interface HashPowConfig {
+  /** Required leading zero bits (clamped 8–48 server-side). */
+  difficulty?: number;
+}
+
+/** Pull credentials for a private image registry. */
+export interface RegistryConfig {
+  serverAddress?: string | null;
+  userName?: string | null;
+  /** Empty string = leave existing password unchanged. */
+  password?: string | null;
+  /** Read-only: a password is currently configured. */
+  hasPassword?: boolean;
+  /** Read-only: serverAddress is set. */
+  isConfigured?: boolean;
 }
 
 /**

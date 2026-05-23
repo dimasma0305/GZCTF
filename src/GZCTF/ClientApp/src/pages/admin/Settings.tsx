@@ -10,6 +10,7 @@ import {
   InputBase,
   NumberInput,
   PasswordInput,
+  Select,
   SimpleGrid,
   Stack,
   Switch,
@@ -32,7 +33,17 @@ import { webCryptoAvailable } from '@Utils/Crypto'
 import { getInputNumber, showErrorMsg } from '@Utils/Shared'
 import { IMAGE_MIME_TYPES } from '@Utils/Shared'
 import { OnceSWRConfig, useCaptchaConfig, useConfig } from '@Hooks/useConfig'
-import api, { AccountPolicy, BuildRegistryConfig, ConfigEditModel, ContainerPolicy, GlobalConfig } from '@Api'
+import api, {
+  AccountPolicy,
+  BuildRegistryConfig,
+  CaptchaConfig,
+  CaptchaProvider,
+  ConfigEditModel,
+  ContainerPolicy,
+  EmailConfig,
+  GlobalConfig,
+  RegistryConfig,
+} from '@Api'
 import misc from '@Styles/Misc.module.css'
 
 const Configs: FC = () => {
@@ -45,6 +56,9 @@ const Configs: FC = () => {
   const [accountPolicy, setAccountPolicy] = useState<AccountPolicy | null>()
   const [containerPolicy, setContainerPolicy] = useState<ContainerPolicy | null>()
   const [buildRegistry, setBuildRegistry] = useState<BuildRegistryConfig | null>()
+  const [email, setEmail] = useState<EmailConfig | null>()
+  const [captcha, setCaptcha] = useState<CaptchaConfig | null>()
+  const [registry, setRegistry] = useState<RegistryConfig | null>()
   const [color, setColor] = useState<string | undefined | null>(globalConfig?.customTheme)
   const [logoFile, setLogoFile] = useState<File | null>(null)
 
@@ -59,6 +73,9 @@ const Configs: FC = () => {
       setGlobalConfig(configs.globalConfig)
       setAccountPolicy(configs.accountPolicy)
       setBuildRegistry(configs.buildRegistry)
+      setEmail(configs.email)
+      setCaptcha(configs.captcha)
+      setRegistry(configs.registry)
       setColor(configs.globalConfig?.customTheme)
     }
   }, [configs])
@@ -119,6 +136,9 @@ const Configs: FC = () => {
             accountPolicy,
             containerPolicy,
             buildRegistry,
+            email,
+            captcha,
+            registry,
           })
           setSaved(false)
           setTimeout(() => {
@@ -512,6 +532,190 @@ const Configs: FC = () => {
               />
             </SimpleGrid>
           )}
+        </Stack>
+
+        {/* Email (SMTP) */}
+        <Stack gap="sm">
+          <Title order={2}>{t('admin.content.settings.email.title')}</Title>
+          <Text size="sm" c="dimmed">
+            {t('admin.content.settings.email.description')}
+          </Text>
+          <Divider />
+          <SimpleGrid cols={2}>
+            <TextInput
+              label={t('admin.content.settings.email.smtp_host.label')}
+              description={t('admin.content.settings.email.smtp_host.description')}
+              placeholder="smtp.example.com"
+              disabled={disabled}
+              value={email?.smtp?.host ?? ''}
+              onChange={(e) =>
+                setEmail({ ...email, smtp: { ...email?.smtp, host: e.currentTarget.value } })
+              }
+            />
+            <NumberInput
+              label={t('admin.content.settings.email.smtp_port.label')}
+              description={t('admin.content.settings.email.smtp_port.description')}
+              placeholder="587"
+              min={1}
+              max={65535}
+              disabled={disabled}
+              value={email?.smtp?.port ?? 587}
+              onChange={(e) =>
+                setEmail({ ...email, smtp: { ...email?.smtp, port: getInputNumber(e) || 587 } })
+              }
+            />
+            <TextInput
+              label={t('admin.content.settings.email.sender_address.label')}
+              description={t('admin.content.settings.email.sender_address.description')}
+              placeholder="noreply@example.com"
+              disabled={disabled}
+              value={email?.senderAddress ?? ''}
+              onChange={(e) => setEmail({ ...email, senderAddress: e.currentTarget.value })}
+            />
+            <TextInput
+              label={t('admin.content.settings.email.sender_name.label')}
+              description={t('admin.content.settings.email.sender_name.description')}
+              placeholder="GZCTF"
+              disabled={disabled}
+              value={email?.senderName ?? ''}
+              onChange={(e) => setEmail({ ...email, senderName: e.currentTarget.value })}
+            />
+            <TextInput
+              label={t('admin.content.settings.email.username.label')}
+              description={t('admin.content.settings.email.username.description')}
+              disabled={disabled}
+              value={email?.userName ?? ''}
+              onChange={(e) => setEmail({ ...email, userName: e.currentTarget.value })}
+            />
+            <PasswordInput
+              label={t('admin.content.settings.email.password.label')}
+              description={t('admin.content.settings.email.password.description')}
+              placeholder={
+                email?.hasPassword
+                  ? t('admin.content.settings.email.password.configured')
+                  : ''
+              }
+              disabled={disabled}
+              value={email?.password ?? ''}
+              onChange={(e) => setEmail({ ...email, password: e.currentTarget.value })}
+            />
+          </SimpleGrid>
+          <Switch
+            checked={email?.smtp?.bypassCertVerify ?? false}
+            disabled={disabled}
+            label={SwitchLabel(
+              t('admin.content.settings.email.bypass_cert.label'),
+              t('admin.content.settings.email.bypass_cert.description')
+            )}
+            onChange={(e) =>
+              setEmail({
+                ...email,
+                smtp: { ...email?.smtp, bypassCertVerify: e.currentTarget.checked },
+              })
+            }
+          />
+        </Stack>
+
+        {/* Captcha */}
+        <Stack gap="sm">
+          <Title order={2}>{t('admin.content.settings.captcha.title')}</Title>
+          <Text size="sm" c="dimmed">
+            {t('admin.content.settings.captcha.description')}
+          </Text>
+          <Divider />
+          <Select
+            label={t('admin.content.settings.captcha.provider.label')}
+            description={t('admin.content.settings.captcha.provider.description')}
+            disabled={disabled}
+            value={captcha?.provider ?? 'None'}
+            data={[
+              { value: 'None', label: t('admin.content.settings.captcha.provider.none') },
+              { value: 'HashPow', label: 'HashPow (in-browser PoW)' },
+              { value: 'CloudflareTurnstile', label: 'Cloudflare Turnstile' },
+            ]}
+            onChange={(v) =>
+              setCaptcha({ ...captcha, provider: (v ?? 'None') as CaptchaProvider })
+            }
+          />
+          {captcha?.provider === 'CloudflareTurnstile' && (
+            <SimpleGrid cols={2}>
+              <TextInput
+                label={t('admin.content.settings.captcha.site_key.label')}
+                description={t('admin.content.settings.captcha.site_key.description')}
+                disabled={disabled}
+                value={captcha?.siteKey ?? ''}
+                onChange={(e) => setCaptcha({ ...captcha, siteKey: e.currentTarget.value })}
+              />
+              <PasswordInput
+                label={t('admin.content.settings.captcha.secret_key.label')}
+                description={t('admin.content.settings.captcha.secret_key.description')}
+                placeholder={
+                  captcha?.hasSecretKey
+                    ? t('admin.content.settings.captcha.secret_key.configured')
+                    : ''
+                }
+                disabled={disabled}
+                value={captcha?.secretKey ?? ''}
+                onChange={(e) => setCaptcha({ ...captcha, secretKey: e.currentTarget.value })}
+              />
+            </SimpleGrid>
+          )}
+          {captcha?.provider === 'HashPow' && (
+            <NumberInput
+              label={t('admin.content.settings.captcha.difficulty.label')}
+              description={t('admin.content.settings.captcha.difficulty.description')}
+              min={8}
+              max={48}
+              disabled={disabled}
+              value={captcha?.hashPow?.difficulty ?? 18}
+              onChange={(e) =>
+                setCaptcha({
+                  ...captcha,
+                  hashPow: { ...captcha?.hashPow, difficulty: getInputNumber(e) || 18 },
+                })
+              }
+            />
+          )}
+        </Stack>
+
+        {/* Private registry pull credentials */}
+        <Stack gap="sm">
+          <Title order={2}>{t('admin.content.settings.registry_pull.title')}</Title>
+          <Text size="sm" c="dimmed">
+            {t('admin.content.settings.registry_pull.description')}
+          </Text>
+          <Divider />
+          <SimpleGrid cols={3}>
+            <TextInput
+              label={t('admin.content.settings.registry_pull.server.label')}
+              description={t('admin.content.settings.registry_pull.server.description')}
+              placeholder="ghcr.io"
+              disabled={disabled}
+              value={registry?.serverAddress ?? ''}
+              onChange={(e) =>
+                setRegistry({ ...registry, serverAddress: e.currentTarget.value })
+              }
+            />
+            <TextInput
+              label={t('admin.content.settings.registry_pull.username.label')}
+              description={t('admin.content.settings.registry_pull.username.description')}
+              disabled={disabled}
+              value={registry?.userName ?? ''}
+              onChange={(e) => setRegistry({ ...registry, userName: e.currentTarget.value })}
+            />
+            <PasswordInput
+              label={t('admin.content.settings.registry_pull.password.label')}
+              description={t('admin.content.settings.registry_pull.password.description')}
+              placeholder={
+                registry?.hasPassword
+                  ? t('admin.content.settings.registry_pull.password.configured')
+                  : ''
+              }
+              disabled={disabled}
+              value={registry?.password ?? ''}
+              onChange={(e) => setRegistry({ ...registry, password: e.currentTarget.value })}
+            />
+          </SimpleGrid>
         </Stack>
       </Stack>
     </AdminPage>

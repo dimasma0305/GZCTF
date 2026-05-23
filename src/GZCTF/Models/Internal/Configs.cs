@@ -472,10 +472,30 @@ public class SmtpConfig
 public class EmailConfig
 {
     public string UserName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// SMTP password. XOR-obfuscated at rest by the
+    /// <see cref="AdminController.UpdateConfigs"/> save path (same
+    /// shape as <see cref="BuildRegistryConfig.Password"/>);
+    /// <see cref="HasPassword"/> surfaces presence to the UI without
+    /// round-tripping the secret.
+    /// </summary>
     public string Password { get; set; } = string.Empty;
     public string? SenderAddress { get; set; } = string.Empty;
     public string? SenderName { get; set; } = string.Empty;
     public SmtpConfig? Smtp { get; set; } = new();
+
+    /// <summary>UI surrogate — true when <see cref="Password"/> is set.</summary>
+    [AutoSaveIgnore]
+    public bool HasPassword => !string.IsNullOrEmpty(Password);
+
+    /// <summary>UI surrogate — true when the minimum needed to send
+    /// mail is present (host + sender address).</summary>
+    [AutoSaveIgnore]
+    public bool IsConfigured =>
+        !string.IsNullOrWhiteSpace(SenderAddress) &&
+        !string.IsNullOrWhiteSpace(Smtp?.Host) &&
+        Smtp.Port > 0;
 }
 
 #endregion
@@ -547,10 +567,27 @@ public class RegistryConfig
 {
     public string? ServerAddress { get; set; }
     public string? UserName { get; set; }
+
+    /// <summary>
+    /// Registry password / PAT used when pulling private images.
+    /// Stored XOR-obfuscated at rest via
+    /// <see cref="AdminController.UpdateConfigs"/> (same shape as
+    /// <see cref="BuildRegistryConfig.Password"/>);
+    /// <see cref="HasPassword"/> is the UI presence surrogate.
+    /// </summary>
     public string? Password { get; set; }
 
     public bool Valid => !string.IsNullOrEmpty(UserName) &&
                          !string.IsNullOrEmpty(Password);
+
+    /// <summary>UI surrogate — true when <see cref="Password"/> is set.</summary>
+    [AutoSaveIgnore]
+    public bool HasPassword => !string.IsNullOrEmpty(Password);
+
+    /// <summary>UI surrogate — server hostname is configured; auth
+    /// fields may still be blank (anonymous pulls).</summary>
+    [AutoSaveIgnore]
+    public bool IsConfigured => !string.IsNullOrWhiteSpace(ServerAddress);
 }
 
 #endregion
@@ -580,9 +617,21 @@ public class HashPowConfig
 public class CaptchaConfig
 {
     public CaptchaProvider Provider { get; set; }
+
+    /// <summary>
+    /// Server-side captcha secret (verified by the provider's
+    /// validation endpoint). XOR-obfuscated at rest via
+    /// <see cref="AdminController.UpdateConfigs"/>.
+    /// </summary>
     public string? SecretKey { get; set; }
+
+    /// <summary>Browser-side site key — public, served as-is.</summary>
     public string? SiteKey { get; set; }
     public HashPowConfig HashPow { get; set; } = new();
+
+    /// <summary>UI surrogate — true when <see cref="SecretKey"/> is set.</summary>
+    [AutoSaveIgnore]
+    public bool HasSecretKey => !string.IsNullOrEmpty(SecretKey);
 }
 
 #endregion

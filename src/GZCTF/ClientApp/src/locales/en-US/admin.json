@@ -504,6 +504,78 @@
           "configured": "(configured — leave blank to keep)"
         }
       },
+      "email": {
+        "title": "Email (SMTP)",
+        "description": "SMTP relay for email verification + password reset. Changes take effect on next send — no restart needed.",
+        "smtp_host": {
+          "label": "SMTP host",
+          "description": "Hostname of the SMTP relay. e.g. smtp.gmail.com"
+        },
+        "smtp_port": {
+          "label": "SMTP port",
+          "description": "Usually 587 (STARTTLS) or 465 (TLS)."
+        },
+        "sender_address": {
+          "label": "From address",
+          "description": "Address shown in the From: header. Must be allowed by the relay."
+        },
+        "sender_name": {
+          "label": "From name",
+          "description": "Display name shown next to the address. Falls back to the platform name."
+        },
+        "username": {
+          "label": "Username",
+          "description": "Auth user for the SMTP relay. Often equal to the From address."
+        },
+        "password": {
+          "label": "Password",
+          "description": "Stored XOR-obfuscated. Leave blank to keep the current value.",
+          "configured": "(configured — leave blank to keep)"
+        },
+        "bypass_cert": {
+          "label": "Bypass TLS certificate verification",
+          "description": "Only enable for testing against self-signed SMTP servers."
+        }
+      },
+      "captcha": {
+        "title": "Captcha",
+        "description": "Bot protection on login + registration. None disables the check entirely.",
+        "provider": {
+          "label": "Provider",
+          "description": "Pick the verification mechanism for login + registration forms.",
+          "none": "None (disabled)"
+        },
+        "site_key": {
+          "label": "Site key",
+          "description": "Public key served to the browser."
+        },
+        "secret_key": {
+          "label": "Secret key",
+          "description": "Server-side verification key. Stored XOR-obfuscated. Leave blank to keep.",
+          "configured": "(configured — leave blank to keep)"
+        },
+        "difficulty": {
+          "label": "PoW difficulty (leading zero bits)",
+          "description": "Higher = more browser CPU on form submit. Clamped 8–48."
+        }
+      },
+      "registry_pull": {
+        "title": "Private registry pull credentials",
+        "description": "Single set of credentials used by the platform to pull challenge images from a private registry (separate from the Build Registry above, which is for pushing built images).",
+        "server": {
+          "label": "Server",
+          "description": "Hostname (no scheme). e.g. ghcr.io"
+        },
+        "username": {
+          "label": "Username",
+          "description": "Registry user (or empty for anonymous pulls)."
+        },
+        "password": {
+          "label": "Password / PAT",
+          "description": "Stored XOR-obfuscated. Leave blank to keep.",
+          "configured": "(configured — leave blank to keep)"
+        }
+      },
       "platform": {
         "api_encryption": {
           "description": "Encrypt sensitive data in some APIs",

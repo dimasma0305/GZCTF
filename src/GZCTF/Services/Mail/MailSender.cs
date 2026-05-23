@@ -16,57 +16,118 @@ public sealed class MailSender : IMailSender, IDisposable
     private readonly CancellationTokenSource _cancellationTokenSource = new();
     private readonly ILogger<MailSender> _logger;
     private readonly ConcurrentQueue<MailContent> _mailQueue = new();
-    private readonly EmailConfig? _options;
+    private EmailConfig? _options;
     private readonly AsyncManualResetEvent _resetEvent = new();
-    private readonly SmtpClient? _smtpClient;
+    private SmtpClient? _smtpClient;
+    private readonly object _clientLock = new();
+    /// <summary>Set by the options-monitor callback; checked by the worker loop
+    /// before each send so config changes from /admin/settings take effect
+    /// without a service restart.</summary>
+    private volatile bool _configDirty;
+    private readonly IDisposable? _optionsChangeListener;
     private bool _disposed;
 
     public MailSender(
         IOptions<AccountPolicy> accountPolicy,
-        IOptions<EmailConfig> options,
+        IOptionsMonitor<EmailConfig> optionsMonitor,
         ILogger<MailSender> logger)
     {
         _logger = logger;
-        _options = options.Value;
+        _options = optionsMonitor.CurrentValue;
         _cancellationToken = _cancellationTokenSource.Token;
 
-        if (string.IsNullOrWhiteSpace(_options.SenderAddress) ||
-            string.IsNullOrWhiteSpace(_options.Smtp?.Host) || _options.Smtp.Port <= 0)
-            return;
-
-        _smtpClient = new();
-        _smtpClient.AuthenticationMechanisms.Remove("XOAUTH2");
-
-        if (!OperatingSystem.IsWindows())
-            // Some systems may not enable old (non-recommend) ciphers in TLS configuration and lead to failures when
-            // connecting to some SMTP servers, override the default policy to include all ciphers except MD5, SHA1, and NULL
-            _smtpClient.SslCipherSuitesPolicy = new CipherSuitesPolicy(Enum.GetValues<TlsCipherSuite>()
-                .Where(cipher =>
-                {
-                    var cipherName = cipher.ToString();
-                    // Exclude MD5, SHA1, and NULL ciphers for security reasons
-                    return !cipherName.EndsWith("MD5") && !cipherName.EndsWith("SHA") &&
-                           !cipherName.EndsWith("NULL");
-                }));
-
-        _smtpClient.ServerCertificateValidationCallback = (_, _, _, errors)
-            => errors is SslPolicyErrors.None || options.Value.Smtp?.BypassCertVerify is true;
-
-        if (!TestSmtpClient())
+        // Live-reload: when /admin/settings writes a new EmailConfig
+        // the OptionsMonitor fires; flip the dirty flag and the worker
+        // tears down + rebuilds the SmtpClient on the next iteration.
+        _optionsChangeListener = optionsMonitor.OnChange(newOpts =>
         {
-            if (accountPolicy.Value.EmailConfirmationRequired)
+            _options = newOpts;
+            _configDirty = true;
+            _resetEvent.Set();
+            _logger.SystemLog(
+                "EmailConfig changed; SmtpClient will rebuild on next send",
+                TaskStatus.Pending, LogLevel.Information);
+        });
+
+        if (!TryBuildClient(out var startupErr))
+        {
+            if (accountPolicy.Value.EmailConfirmationRequired && startupErr is FatalConfig)
                 ExitWithFatalMessage(StaticLocalizer[nameof(Resources.Program.MailSender_InvalidEmailConfig)]);
-
-            _smtpClient.Dispose();
-            _smtpClient = null;
-            return;
+            // Not fatal — start the worker anyway so future config
+            // changes from /admin/settings can bring the sender online.
         }
-
-        _logger.SystemLog(StaticLocalizer[nameof(Resources.Program.MailSender_ConnectedToSmtp),
-            $"{_options.Smtp.Host}:{_options.Smtp.Port}"], TaskStatus.Success, LogLevel.Debug);
 
         Task.Factory.StartNew(MailSenderWorker, _cancellationToken, TaskCreationOptions.LongRunning,
             TaskScheduler.Default);
+    }
+
+    /// <summary>Sentinel returned by <see cref="TryBuildClient"/> to
+    /// distinguish "config is fundamentally bad" from "client just
+    /// disconnected" — only the former should kill the process when
+    /// EmailConfirmationRequired is on.</summary>
+    private enum FatalConfig { Yes }
+
+    /// <summary>(Re)build the SMTP client from the current
+    /// <see cref="_options"/>. Returns false if the config is
+    /// incomplete or the connection test fails. Safe to call from
+    /// multiple threads; the lock serializes rebuilds.</summary>
+    private bool TryBuildClient(out object? err)
+    {
+        err = null;
+        lock (_clientLock)
+        {
+            _smtpClient?.Dispose();
+            _smtpClient = null;
+
+            var opts = _options;
+            if (opts is null ||
+                string.IsNullOrWhiteSpace(opts.SenderAddress) ||
+                string.IsNullOrWhiteSpace(opts.Smtp?.Host) || opts.Smtp.Port <= 0)
+            {
+                err = FatalConfig.Yes;
+                return false;
+            }
+
+            var client = new SmtpClient();
+            client.AuthenticationMechanisms.Remove("XOAUTH2");
+
+            if (!OperatingSystem.IsWindows())
+                // Some systems may not enable old (non-recommend) ciphers in TLS configuration and lead to failures when
+                // connecting to some SMTP servers, override the default policy to include all ciphers except MD5, SHA1, and NULL
+                client.SslCipherSuitesPolicy = new CipherSuitesPolicy(Enum.GetValues<TlsCipherSuite>()
+                    .Where(cipher =>
+                    {
+                        var cipherName = cipher.ToString();
+                        // Exclude MD5, SHA1, and NULL ciphers for security reasons
+                        return !cipherName.EndsWith("MD5") && !cipherName.EndsWith("SHA") &&
+                               !cipherName.EndsWith("NULL");
+                    }));
+
+            client.ServerCertificateValidationCallback = (_, _, _, errors)
+                => errors is SslPolicyErrors.None || opts.Smtp?.BypassCertVerify is true;
+
+            // Test the connection synchronously here so misconfig is
+            // surfaced immediately rather than at first send.
+            try
+            {
+                client.Connect(opts.Smtp.Host, opts.Smtp.Port);
+                client.Authenticate(opts.UserName, opts.Password);
+                client.Disconnect(true);
+            }
+            catch (Exception e)
+            {
+                _logger.LogDebug(e, "{msg}",
+                    StaticLocalizer[nameof(Resources.Program.MailSender_MailSendFailed)]);
+                client.Dispose();
+                return false;
+            }
+
+            _smtpClient = client;
+            _configDirty = false;
+            _logger.SystemLog(StaticLocalizer[nameof(Resources.Program.MailSender_ConnectedToSmtp),
+                $"{opts.Smtp.Host}:{opts.Smtp.Port}"], TaskStatus.Success, LogLevel.Debug);
+            return true;
+        }
     }
 
     public void Dispose()
@@ -76,7 +137,12 @@ public sealed class MailSender : IMailSender, IDisposable
 
         _disposed = true;
         _cancellationTokenSource.Cancel();
-        _smtpClient?.Dispose();
+        _optionsChangeListener?.Dispose();
+        lock (_clientLock)
+        {
+            _smtpClient?.Dispose();
+            _smtpClient = null;
+        }
         GC.SuppressFinalize(this);
     }
 
@@ -243,13 +309,30 @@ public sealed class MailSender : IMailSender, IDisposable
 
     private async Task MailSenderWorker()
     {
-        if (_smtpClient is null)
-            return;
-
         while (!_cancellationToken.IsCancellationRequested)
         {
             await _resetEvent.WaitAsync(_cancellationToken);
             _resetEvent.Reset();
+
+            // Pick up any pending config change before this batch.
+            if (_configDirty)
+                TryBuildClient(out _);
+
+            // No client + nothing we can do — drop the batch with a
+            // log so the operator sees why. The next config change
+            // will restart this loop.
+            if (_smtpClient is null)
+            {
+                if (!_mailQueue.IsEmpty)
+                {
+                    _logger.SystemLog(
+                        "Mail queue drained without sending — SMTP not configured. " +
+                        "Set EmailConfig in /admin/settings.",
+                        TaskStatus.Failed, LogLevel.Warning);
+                    _mailQueue.Clear();
+                }
+                continue;
+            }
 
             try
             {
@@ -273,7 +356,7 @@ public sealed class MailSender : IMailSender, IDisposable
             }
             finally
             {
-                await _smtpClient.DisconnectAsync(true, _cancellationToken);
+                try { await _smtpClient!.DisconnectAsync(true, _cancellationToken); } catch { }
             }
         }
     }
@@ -297,26 +380,6 @@ public sealed class MailSender : IMailSender, IDisposable
         _resetEvent.Set();
 
         return true;
-    }
-
-    private bool TestSmtpClient(CancellationToken token = default)
-    {
-        if (_smtpClient is null)
-            return false;
-
-        try
-        {
-            _smtpClient.Connect(_options!.Smtp!.Host, _options.Smtp.Port, cancellationToken: token);
-            _smtpClient.Authenticate(_options.UserName, _options.Password, token);
-            _smtpClient.Disconnect(true, token);
-            return true;
-        }
-        catch (Exception e)
-        {
-            _logger.LogDebug(e, "{msg}",
-                StaticLocalizer[nameof(Resources.Program.MailSender_MailSendFailed)]);
-            return false;
-        }
     }
 
     ~MailSender()
