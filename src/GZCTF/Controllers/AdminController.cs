@@ -137,6 +137,7 @@ public class AdminController(
             Email = safeEmail,
             Captcha = safeCaptcha,
             Registry = safeRegistry,
+            ProxyTrust = serviceProvider.GetRequiredService<IOptionsSnapshot<ProxyTrustConfig>>().Value,
         };
 
         return Ok(config);

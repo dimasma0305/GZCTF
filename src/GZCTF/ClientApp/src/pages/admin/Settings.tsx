@@ -19,6 +19,7 @@ import {
   Stack,
   Switch,
   Text,
+  Textarea,
   TextInput,
   ThemeIcon,
   Title,
@@ -64,6 +65,7 @@ import api, {
   EmailConfig,
   GlobalConfig,
   MyIpInfoModel,
+  ProxyTrustConfig,
   RegistryConfig,
 } from '@Api'
 import misc from '@Styles/Misc.module.css'
@@ -81,6 +83,7 @@ const Configs: FC = () => {
   const [email, setEmail] = useState<EmailConfig | null>()
   const [captcha, setCaptcha] = useState<CaptchaConfig | null>()
   const [registry, setRegistry] = useState<RegistryConfig | null>()
+  const [proxyTrust, setProxyTrust] = useState<ProxyTrustConfig | null>()
   // Local-only state for the "Send test email" button — never
   // persisted, never round-tripped through the Save flow.
   const [testRecipient, setTestRecipient] = useState('')
@@ -120,6 +123,7 @@ const Configs: FC = () => {
       setEmail(configs.email)
       setCaptcha(configs.captcha)
       setRegistry(configs.registry)
+      setProxyTrust(configs.proxyTrust)
       setColor(configs.globalConfig?.customTheme)
       // Stash baseline for dirty tracking. Identity (referential
       // equality) isn't enough — the SWR cache may return the same
@@ -133,6 +137,7 @@ const Configs: FC = () => {
         email: configs.email,
         captcha: configs.captcha,
         registry: configs.registry,
+        proxyTrust: configs.proxyTrust,
       })
     }
   }, [configs])
@@ -147,6 +152,7 @@ const Configs: FC = () => {
     email,
     captcha,
     registry,
+    proxyTrust,
   })
   const dirty = initialSnapshotRef.current !== null && currentSnapshot !== initialSnapshotRef.current
 
@@ -323,6 +329,7 @@ const Configs: FC = () => {
       email,
       captcha,
       registry,
+      proxyTrust,
     })
     setSaved(false)
     setTimeout(() => {
@@ -1038,6 +1045,100 @@ const Configs: FC = () => {
                   </Text>
                 </Stack>
               </Alert>
+            </Stack>
+          )}
+
+          {/* Proxy trust — editable override for the appsettings
+              ForwardedOptions section. Restart required to apply. */}
+          <Divider mt="lg" label={t('admin.content.settings.proxy_trust.title')} labelPosition="left" />
+          <Text size="sm" c="dimmed">
+            {t('admin.content.settings.proxy_trust.description')}
+          </Text>
+          <Switch
+            checked={proxyTrust?.enabled ?? false}
+            disabled={disabled}
+            label={SwitchLabel(
+              t('admin.content.settings.proxy_trust.enabled.label'),
+              t('admin.content.settings.proxy_trust.enabled.description')
+            )}
+            onChange={(e) => setProxyTrust({ ...proxyTrust, enabled: e.currentTarget.checked })}
+          />
+          {proxyTrust?.enabled && (
+            <Stack gap="sm">
+              <Alert color="yellow" icon={<Icon path={mdiAlert} size={1} />}>
+                {t('admin.content.settings.proxy_trust.restart_required')}
+              </Alert>
+              <SimpleGrid cols={{ base: 1, sm: 3 }}>
+                <Switch
+                  checked={proxyTrust?.forwardXForwardedFor ?? false}
+                  disabled={disabled}
+                  label={SwitchLabel(
+                    t('admin.content.settings.proxy_trust.x_forwarded_for.label'),
+                    t('admin.content.settings.proxy_trust.x_forwarded_for.description')
+                  )}
+                  onChange={(e) =>
+                    setProxyTrust({ ...proxyTrust, forwardXForwardedFor: e.currentTarget.checked })
+                  }
+                />
+                <Switch
+                  checked={proxyTrust?.forwardXForwardedHost ?? false}
+                  disabled={disabled}
+                  label={SwitchLabel(
+                    t('admin.content.settings.proxy_trust.x_forwarded_host.label'),
+                    t('admin.content.settings.proxy_trust.x_forwarded_host.description')
+                  )}
+                  onChange={(e) =>
+                    setProxyTrust({ ...proxyTrust, forwardXForwardedHost: e.currentTarget.checked })
+                  }
+                />
+                <Switch
+                  checked={proxyTrust?.forwardXForwardedProto ?? false}
+                  disabled={disabled}
+                  label={SwitchLabel(
+                    t('admin.content.settings.proxy_trust.x_forwarded_proto.label'),
+                    t('admin.content.settings.proxy_trust.x_forwarded_proto.description')
+                  )}
+                  onChange={(e) =>
+                    setProxyTrust({ ...proxyTrust, forwardXForwardedProto: e.currentTarget.checked })
+                  }
+                />
+              </SimpleGrid>
+              <NumberInput
+                label={t('admin.content.settings.proxy_trust.forward_limit.label')}
+                description={t('admin.content.settings.proxy_trust.forward_limit.description')}
+                min={1}
+                max={10}
+                disabled={disabled}
+                value={proxyTrust?.forwardLimit ?? 1}
+                onChange={(e) => {
+                  const n = getInputNumber(e)
+                  if (!isNaN(n)) setProxyTrust({ ...proxyTrust, forwardLimit: n })
+                }}
+              />
+              <Textarea
+                label={t('admin.content.settings.proxy_trust.trusted_networks.label')}
+                description={t('admin.content.settings.proxy_trust.trusted_networks.description')}
+                placeholder={'172.16.0.0/12\n10.0.0.0/8\n0.0.0.0/0  ::/0'}
+                minRows={3}
+                autosize
+                disabled={disabled}
+                value={proxyTrust?.trustedNetworksCsv ?? ''}
+                onChange={(e) =>
+                  setProxyTrust({ ...proxyTrust, trustedNetworksCsv: e.currentTarget.value })
+                }
+              />
+              <Textarea
+                label={t('admin.content.settings.proxy_trust.trusted_proxies.label')}
+                description={t('admin.content.settings.proxy_trust.trusted_proxies.description')}
+                placeholder={'192.168.1.10\nproxy.internal.example.com'}
+                minRows={2}
+                autosize
+                disabled={disabled}
+                value={proxyTrust?.trustedProxiesCsv ?? ''}
+                onChange={(e) =>
+                  setProxyTrust({ ...proxyTrust, trustedProxiesCsv: e.currentTarget.value })
+                }
+              />
             </Stack>
           )}
         </Stack>

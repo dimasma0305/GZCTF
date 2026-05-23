@@ -43,6 +43,12 @@ internal static class ServicesExtension
             // initial-load source via the standard ConfigurationRoot).
             builder.AddConfig<CaptchaConfig>();
             builder.AddConfig<RegistryConfig>();
+            // Editable proxy trust list. When ProxyTrustConfig.Enabled
+            // is true (settable only via /admin/settings), the
+            // ForwardedHeadersOptions assembled below pulls from
+            // this config instead of appsettings ForwardedOptions.
+            // Restart-required to apply — surfaced in the UI.
+            builder.AddConfig<ProxyTrustConfig>();
 
             builder.Services.Configure<RegistrySet<RegistryConfig>>(builder.Configuration.GetSection("Registries"));
 
@@ -55,16 +61,30 @@ internal static class ServicesExtension
                         set[oldConfig.ServerAddress] = oldConfig;
                 });
 
+            // Three-way priority for ForwardedHeaders:
+            //   1. ProxyTrustConfig from DB (when Enabled=true via
+            //      /admin/settings) — admin UI takes precedence
+            //   2. ForwardedOptions from appsettings.json — legacy
+            //      / declarative path for operators not using the UI
+            //   3. Hardcoded sensible default — XForwardedFor +
+            //      XForwardedProto, no trust list (every proxy
+            //      ignored). Safe default; operator must explicitly
+            //      opt-in to honour any X-Forwarded-* header.
+            var proxyTrust =
+                builder.Configuration.GetSection(nameof(ProxyTrustConfig)).Get<ProxyTrustConfig>();
             var forwardedOptions =
                 builder.Configuration.GetSection(nameof(ForwardedOptions)).Get<ForwardedOptions>();
-            if (forwardedOptions is null)
+
+            if (proxyTrust is { Enabled: true })
+                builder.Services.Configure<ForwardedHeadersOptions>(proxyTrust.ToForwardedHeadersOptions);
+            else if (forwardedOptions is not null)
+                builder.Services.Configure<ForwardedHeadersOptions>(forwardedOptions.ToForwardedHeadersOptions);
+            else
                 builder.Services.Configure<ForwardedHeadersOptions>(options =>
                 {
                     options.ForwardedHeaders =
                         ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
                 });
-            else
-                builder.Services.Configure<ForwardedHeadersOptions>(forwardedOptions.ToForwardedHeadersOptions);
         }
 
         internal void AddCustomServices()

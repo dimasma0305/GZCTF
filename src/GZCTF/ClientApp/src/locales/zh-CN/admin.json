@@ -604,6 +604,39 @@
           "configured": "（已配置 — 留空以保留）"
         }
       },
+      "proxy_trust": {
+        "title": "代理信任（高级）",
+        "description": "覆盖 appsettings.json 中的 ForwardedOptions 设置，决定哪些上游代理可以通过 X-Forwarded-For 改写客户端 IP。配置错误会导致 gzctf 信任来自公网的伪造 IP，或忽略真实反向代理而将所有团队压成同一 IP。请配合上方「检查我的 IP」按钮使用。",
+        "restart_required": "保存后立即写入数据库，但需要重启 gzctf 服务后才会生效（ForwardedHeaders 中间件仅在启动时读取一次配置）。",
+        "enabled": {
+          "label": "覆盖 appsettings.json",
+          "description": "关闭时由 appsettings.json 的 ForwardedOptions 段控制；打开后由下方设置接管。"
+        },
+        "x_forwarded_for": {
+          "label": "信任 X-Forwarded-For",
+          "description": "从该头读取真实客户端 IP（通常需要打开）。"
+        },
+        "x_forwarded_host": {
+          "label": "信任 X-Forwarded-Host",
+          "description": "从该头改写请求的 Host 头。"
+        },
+        "x_forwarded_proto": {
+          "label": "信任 X-Forwarded-Proto",
+          "description": "从该头改写请求的协议（http/https）。"
+        },
+        "forward_limit": {
+          "label": "信任跳数",
+          "description": "向后回溯 X-Forwarded-For 链时允许的最大跳数。1 表示仅信任直接上游。"
+        },
+        "trusted_networks": {
+          "label": "信任的网段",
+          "description": "可设置 X-Forwarded-* 的 CIDR 范围。每行一个，或用逗号/空格分隔。只有在 gzctf 必须经过代理才能访问时，才设置 0.0.0.0/0 + ::/0。"
+        },
+        "trusted_proxies": {
+          "label": "信任的代理",
+          "description": "上游代理的 IP 或主机名（启动时解析）。如果上面的「信任的网段」已覆盖代理子网，通常无需填写。"
+        }
+      },
       "diagnostics": {
         "title": "诊断",
         "description": "检查 gzctf 是否能正确识别客户端真实 IP。若检测到的 IP 是反向代理自身容器 IP，说明 X-Forwarded-For 被忽略，所有团队会被视为来自同一 IP，限流和「同队不同 IP」规则都会失效。",

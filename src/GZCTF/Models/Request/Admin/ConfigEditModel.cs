@@ -43,4 +43,16 @@ public class ConfigEditModel
     /// covers the common "we host private images on ghcr.io" case.
     /// </summary>
     public RegistryConfig? Registry { get; set; }
+
+    /// <summary>
+    /// Reverse-proxy trust list (X-Forwarded-For / -Host / -Proto).
+    /// When <see cref="ProxyTrustConfig.Enabled"/> is true, overrides
+    /// appsettings.json's ForwardedOptions section. Changes save
+    /// immediately but only take effect after the next service
+    /// restart — ASP.NET's ForwardedHeadersMiddleware reads its
+    /// options once at startup via <c>IOptions&lt;T&gt;</c> and
+    /// doesn't observe later changes. The admin UI shows a
+    /// restart-required alert next to this section.
+    /// </summary>
+    public ProxyTrustConfig? ProxyTrust { get; set; }
 }

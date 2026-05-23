@@ -410,6 +410,27 @@ export interface ConfigEditModel {
   captcha?: CaptchaConfig | null;
   /** Pull credentials for a private image registry. */
   registry?: RegistryConfig | null;
+  /** Reverse-proxy trust list — admin-editable override for the
+   *  appsettings ForwardedOptions section. Restart required to apply. */
+  proxyTrust?: ProxyTrustConfig | null;
+}
+
+/** Admin-editable proxy trust configuration. Mirror of
+ *  appsettings.json's ForwardedOptions section, but with primitive
+ *  CSV-string fields the reflection-based config service can save.
+ *  Restart required to apply changes. */
+export interface ProxyTrustConfig {
+  /** Master switch — when true, overrides appsettings.json. */
+  enabled?: boolean;
+  forwardXForwardedFor?: boolean;
+  forwardXForwardedHost?: boolean;
+  forwardXForwardedProto?: boolean;
+  /** Maximum hops to walk back through X-Forwarded-For. */
+  forwardLimit?: number;
+  /** Comma/newline-separated CIDR ranges trusted as upstream proxies. */
+  trustedNetworksCsv?: string;
+  /** Comma/newline-separated literal proxy IPs/hostnames. */
+  trustedProxiesCsv?: string;
 }
 
 /** SMTP relay used for email verification / password reset.
