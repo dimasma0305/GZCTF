@@ -205,6 +205,19 @@ public sealed class ChallengeImportService(
         if (!Enum.TryParse<ChallengeType>(model.Type ?? "", true, out var type))
             return new(OutcomeKind.Skipped, $"Unknown challenge type '{model.Type}'");
 
+        // Shape-check for user-submitted archives (admin imports +
+        // binding scans are trusted and skipped). Surfaces friendly
+        // errors instead of letting a half-broken submission land in
+        // the review queue. See ValidateSubmissionShape for the rules.
+        if (!opts.AutoApprove)
+        {
+            var problems = ValidateSubmissionShape(packageDir, type, model);
+            if (problems.Count > 0)
+                return new(OutcomeKind.Skipped,
+                    "Submission rejected — fix the following and re-upload:\n  - "
+                    + string.Join("\n  - ", problems));
+        }
+
         // Decide what build intent this challenge implies — distinct
         // from "what status should we set right now". We resolve before
         // touching the DB so the persisted state is internally
@@ -326,6 +339,81 @@ public sealed class ChallengeImportService(
                 $"'{model.Name}': Dockerfile not found at '{image}'.");
 
         return new(kind, null);
+    }
+
+    /// <summary>
+    /// Cheap policy check for user-submitted challenge archives. The
+    /// goal is "did the user follow the template?", not security —
+    /// the path-traversal + bomb caps in the extractors do that.
+    /// Surfacing these problems early gives the submitter a clear
+    /// "fix and re-upload" message instead of leaving the admin to
+    /// figure out why their review queue is full of half-built
+    /// challenges.
+    ///
+    /// <para>Rules — all intentionally minimal:</para>
+    /// <list type="bullet">
+    ///   <item>A <c>solver/</c> directory must exist somewhere under
+    ///   the package, with at least one non-empty file. We don't try
+    ///   to RUN it (sandboxing is a separate slice); we just require
+    ///   evidence the author has a working solution to hand to admins
+    ///   for verification.</item>
+    ///   <item>At least one flag source must be declared:
+    ///   <c>flags:</c> for static challenges, <c>flagTemplate:</c> for
+    ///   dynamic ones. A challenge with neither isn't gradable.</item>
+    ///   <item>Container types need either a buildable Dockerfile in
+    ///   the conventional spot (<c>./src/Dockerfile</c> or
+    ///   <c>./Dockerfile</c>) OR an explicit registry image — we
+    ///   reuse <see cref="ResolveBuildIntent"/> for this check.</item>
+    /// </list>
+    ///
+    /// <para>Admin-imported challenges and binding-scanned ones bypass
+    /// this entirely (callers pass <c>AutoApprove: true</c>).</para>
+    /// </summary>
+    internal static IReadOnlyList<string> ValidateSubmissionShape(
+        string packageDir, ChallengeType type, ChallengeYamlModel model)
+    {
+        var problems = new List<string>();
+
+        // 1. solver/ exists with at least one non-empty file.
+        var solverDirs = Directory.EnumerateDirectories(packageDir, "solver", SearchOption.AllDirectories)
+            .ToList();
+        bool hasSolverFiles = false;
+        foreach (var dir in solverDirs)
+        {
+            foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    if (new FileInfo(f).Length > 0) { hasSolverFiles = true; break; }
+                }
+                catch { /* skip unreadable */ }
+            }
+            if (hasSolverFiles) break;
+        }
+        if (!hasSolverFiles)
+            problems.Add("Missing a working solver. Add a non-empty file under solver/ "
+                + "(e.g. solver/solve.py) so admins can verify the challenge.");
+
+        // 2. Flag source declared.
+        var hasStaticFlags = model.Flags is { Count: > 0 }
+            && model.Flags.Any(f => !string.IsNullOrWhiteSpace(f));
+        var hasFlagTemplate =
+            !string.IsNullOrWhiteSpace(model.Container?.FlagTemplate)
+            || !string.IsNullOrWhiteSpace(model.FlagTemplate);
+        if (!hasStaticFlags && !hasFlagTemplate)
+            problems.Add("No flag declared. Add either a `flags:` list (static) "
+                + "or a `flagTemplate:` field under `container:` (dynamic).");
+
+        // 3. Container types need a buildable shape.
+        if (type.IsContainer())
+        {
+            var intent = ResolveBuildIntent(type, model.Container?.ContainerImage?.Trim(), packageDir);
+            if (intent.Kind == BuildIntentKind.MissingDockerfile)
+                problems.Add(intent.Diagnostic
+                    ?? "Container type declared but no Dockerfile found at ./src/Dockerfile or ./Dockerfile.");
+        }
+
+        return problems;
     }
 
     private enum BuildIntentKind { None, NotApplicable, MissingDockerfile, BuildNeeded }
