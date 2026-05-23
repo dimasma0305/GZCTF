@@ -3,7 +3,6 @@ import {
   Affix,
   Alert,
   ActionIcon,
-  Badge,
   Box,
   Button,
   ColorInput,
@@ -19,7 +18,6 @@ import {
   SimpleGrid,
   Stack,
   Switch,
-  Tabs,
   Text,
   TextInput,
   ThemeIcon,
@@ -48,6 +46,7 @@ import { FC, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { showNotification } from '@mantine/notifications'
 import { ColorPreview } from '@Components/ColorPreview'
+import { IconTabs } from '@Components/IconTabs'
 import { LogoBox } from '@Components/LogoBox'
 import { AdminPage } from '@Components/admin/AdminPage'
 import { SwitchLabel } from '@Components/admin/SwitchLabel'
@@ -193,18 +192,31 @@ const Configs: FC = () => {
     { key: 'diagnostics', icon: mdiHeartPulse },
   ]
 
-  const StatusBadge: FC<{ status: SectionStatus }> = ({ status }) => {
-    const colorMap: Record<SectionStatus, string> = {
-      configured: 'teal',
-      inactive: 'gray',
-      attention: 'orange',
-    }
-    return (
-      <Badge size="xs" variant="light" color={colorMap[status]}>
-        {t(`admin.content.settings.status.${status}`)}
-      </Badge>
-    )
+  const STATUS_COLORS: Record<SectionStatus, string> = {
+    configured: 'var(--mantine-color-teal-5)',
+    inactive: 'var(--mantine-color-gray-4)',
+    attention: 'var(--mantine-color-orange-5)',
   }
+
+  // Inline 6×6 dot rendered next to each tab label. Less visual
+  // weight than a Badge — IconTabs already has icons; we just need
+  // a colour signal so the operator sees deployment state at a
+  // glance without crowding the label.
+  const StatusDot: FC<{ status: SectionStatus }> = ({ status }) => (
+    <Tooltip label={t(`admin.content.settings.status.${status}`)} withArrow>
+      <Box
+        component="span"
+        w={6}
+        h={6}
+        style={{
+          borderRadius: '50%',
+          background: STATUS_COLORS[status],
+          display: 'inline-block',
+          flexShrink: 0,
+        }}
+      />
+    </Tooltip>
+  )
 
   const SectionHelp: FC<{ description: string }> = ({ description }) => (
     <Tooltip label={description} multiline w={320} withArrow position="right">
@@ -320,34 +332,24 @@ const Configs: FC = () => {
 
   return (
     <AdminPage isLoading={!configs}>
-      <Group wrap="nowrap" justify="space-between" align="flex-start" w="100%" pb={100}>
-        <Tabs
-          orientation="vertical"
-          value={activeSection}
-          onChange={(value) => value && setActiveSection(value as SectionKey)}
-          classNames={{
-            root: misc.w10rem,
-            list: misc.w10rem,
-          }}
-        >
-          <Tabs.List>
-            {navItems.map((item) => (
-              <Tabs.Tab
-                key={item.key}
-                value={item.key}
-                leftSection={<Icon path={item.icon} size={1} />}
-              >
-                <Group justify="space-between" wrap="nowrap" gap={4}>
-                  <Text size="sm" truncate>
-                    {t(`admin.content.settings.nav.${item.key}`)}
-                  </Text>
-                  <StatusBadge status={statuses[item.key]} />
-                </Group>
-              </Tabs.Tab>
-            ))}
-          </Tabs.List>
-        </Tabs>
-        <Stack w="calc(100% - 11rem)" gap="md">
+      <Stack gap="md" w="100%" pb={100}>
+        <IconTabs
+          active={navItems.findIndex((i) => i.key === activeSection)}
+          onTabChange={(_, tabKey) => setActiveSection(tabKey as SectionKey)}
+          tabs={navItems.map((item) => ({
+            tabKey: item.key,
+            icon: <Icon path={item.icon} size={1} />,
+            label: (
+              <Group gap={6} wrap="nowrap" align="center" justify="center">
+                <Text size="sm" fw={500}>
+                  {t(`admin.content.settings.nav.${item.key}`)}
+                </Text>
+                <StatusDot status={statuses[item.key]} />
+              </Group>
+            ),
+          }))}
+        />
+        <Stack gap="md" w="100%">
         {activeSection === 'platform' && (
         <Stack gap="sm">
           <Group justify="space-between">
@@ -355,7 +357,7 @@ const Configs: FC = () => {
             <SectionHelp description={t('admin.content.settings.platform.api_encryption.description')} />
           </Group>
           <Divider />
-          <Grid columns={2} align="center">
+          <Grid columns={4} align="center">
             <Grid.Col span={1}>
               <TextInput
                 label={t('admin.content.settings.platform.name.label')}
@@ -452,7 +454,7 @@ const Configs: FC = () => {
                 }}
               />
             </Grid.Col>
-            <Grid.Col span={2}>
+            <Grid.Col span={3}>
               <TextInput
                 label={t('admin.content.settings.platform.footer.label')}
                 description={t('admin.content.settings.platform.footer.description')}
@@ -492,7 +494,7 @@ const Configs: FC = () => {
             <SectionHelp description={t('admin.content.settings.account.unique_ip_per_team_user.description')} />
           </Group>
           <Divider />
-          <SimpleGrid cols={{ base: 1, sm: 2, xl: 3 }}>
+          <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }}>
             <Switch
               checked={accountPolicy?.allowRegister ?? true}
               disabled={disabled}
@@ -620,7 +622,7 @@ const Configs: FC = () => {
             <SectionHelp description={t('admin.content.settings.container.default_lifetime.description')} />
           </Group>
           <Divider />
-          <SimpleGrid cols={{ base: 1, sm: 2, xl: 3 }} className={misc.alignCenter}>
+          <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }} className={misc.alignCenter}>
             <NumberInput
               label={t('admin.content.settings.container.default_lifetime.label')}
               description={t('admin.content.settings.container.default_lifetime.description')}
@@ -1041,7 +1043,7 @@ const Configs: FC = () => {
         </Stack>
         )}
         </Stack>
-      </Group>
+      </Stack>
 
       {/* Sticky save bar — only fires the save flow; dirty
          tracking lights the indicator when any field diverges
