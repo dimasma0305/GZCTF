@@ -7,7 +7,8 @@
       "rotate_token": "重置 Token",
       "generate_token": "生成 Token",
       "copy_curl": "复制 curl",
-      "copy_token": "复制 Token"
+      "copy_token": "复制 Token",
+      "download_vpn": "下载 VPN 配置"
     },
     "challenges": "进入比赛",
     "delete": {
@@ -106,6 +107,10 @@
         "expired": "Flag 已过期",
         "self_attack": "这是你自己的 Flag",
         "not_started": "回合尚未开始"
+      },
+      "vpn_modal": {
+        "title": "VPN 配置",
+        "body": "按队伍下发 WireGuard 配置将在后续阶段提供。当前预览版中请联系管理员获取网络访问 — A&D 容器在开发预览阶段会直接暴露服务端口。"
       }
     },
     "all_solved": {

@@ -97,15 +97,16 @@ export const useGameTeamInfo = (numId: number) => {
   return { teamInfo, game, error, mutate }
 }
 
-/** A&D — player state poll (own team's containers + flags). */
-export const useAdState = (numId: number) => {
+/** A&D — player state poll (own team's containers + flags). Pass doFetch=false
+ *  to skip the request entirely (e.g. on pages that only conditionally need it). */
+export const useAdState = (numId: number, doFetch: boolean = true) => {
   const { game } = useGame(numId)
   const { status } = getGameStatus(game)
   const { data: adState, error, mutate } = api.game.useGameAdState(numId, {
     ...OnceSWRConfig,
     shouldRetryOnError: false,
     refreshInterval: status === GameStatus.OnGoing ? 10 * 1000 : 0,
-  })
+  }, doFetch)
   return { adState, error, mutate }
 }
 

@@ -7,7 +7,8 @@
       "rotate_token": "Rotate token",
       "generate_token": "Generate token",
       "copy_curl": "Copy curl",
-      "copy_token": "Copy token"
+      "copy_token": "Copy token",
+      "download_vpn": "Download VPN config"
     },
     "challenges": "Challenges",
     "delete": {
@@ -106,6 +107,10 @@
         "expired": "Flag expired",
         "self_attack": "That's your own flag",
         "not_started": "Game hasn't started rounds yet"
+      },
+      "vpn_modal": {
+        "title": "VPN provisioning",
+        "body": "Per-team WireGuard config download is coming in a follow-up phase. For now, contact your operator for network access — A&D containers expose their service ports directly during the dev preview."
       }
     },
     "all_solved": {
