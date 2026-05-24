@@ -1790,18 +1790,48 @@ export interface ChallengeUpdateModel {
   adMinGracePeriodSeconds?: number | null;
 }
 
-/** A&D — body for POST /api/Game/{id}/Ad/Submit (attack submission). */
-export interface AdSubmitModel {
-  flag: string;
+/**
+ * A&D — body for POST /api/Game/{id}/Ad/Submit. Batch shape: scripts capture
+ * many flags per tick and submit them together. Bounded server-side at 100.
+ */
+export interface AdBatchSubmitModel {
+  flags: string[];
 }
 
-/** A&D — response from POST /api/Game/{id}/Ad/Submit. */
+/** A&D — per-flag result row (returned in input order for correlation). */
 export interface AdSubmitResultModel {
+  /** Echoed back so the caller can correlate result with submitted flag. */
+  flag: string;
   /** accepted | duplicate | wrong | expired | self_attack | not_started */
   status: string;
   points?: number | null;
   flagPlantedAtRound?: number | null;
   message?: string | null;
+}
+
+/** A&D — POST /api/Game/{id}/Ad/Submit response. */
+export interface AdBatchSubmitResultModel {
+  acceptedCount: number;
+  totalPoints: number;
+  results: AdSubmitResultModel[];
+}
+
+/** A&D — POST /api/Game/{id}/Ad/Token response. Plaintext shown once. */
+export interface AdTokenGenerateResultModel {
+  token: string;
+  hint: string;
+  rotatedAt: string;
+}
+
+/** A&D — GET /api/Game/{id}/Ad/Token response (hint only, never plaintext). */
+export interface AdTokenHintModel {
+  exists: boolean;
+  hint: string;
+  createdAt?: string | null;
+  lastRotatedAt?: string | null;
+  lastUsedAt?: string | null;
+  /** True iff caller is captain of the participating team. */
+  canManage: boolean;
 }
 
 /** A&D — per-service row in the player's state view. */
@@ -7801,13 +7831,14 @@ export class Api<
     ) => mutate<ScoreboardModel>(`/api/game/${id}/scoreboard`, data, options),
 
     /**
-     * @description A&D — submit a captured flag.
+     * @description A&D — submit one or more captured flags (batch). Accepts
+     *   cookie session OR `Authorization: Bearer ad_...`.
      * @tags Game
      * @name GameAdSubmit
      * @request POST:/api/Game/{id}/Ad/Submit
      */
-    gameAdSubmit: (id: number, data: AdSubmitModel, params: RequestParams = {}) =>
-      this.request<AdSubmitResultModel, RequestResponse>({
+    gameAdSubmit: (id: number, data: AdBatchSubmitModel, params: RequestParams = {}) =>
+      this.request<AdBatchSubmitResultModel, RequestResponse>({
         path: `/api/Game/${id}/Ad/Submit`,
         method: "POST",
         body: data,
@@ -7826,6 +7857,75 @@ export class Api<
       this.request<void, RequestResponse>({
         path: `/api/Game/${id}/Ad/Services/${adTeamServiceId}/Reset`,
         method: "POST",
+        ...params,
+      }),
+
+    /**
+     * @description A&D — generate or rotate the team API token. Captain only.
+     *   Plaintext returned exactly once.
+     * @tags Game
+     * @name GameAdRotateToken
+     * @request POST:/api/Game/{id}/Ad/Token
+     */
+    gameAdRotateToken: (id: number, params: RequestParams = {}) =>
+      this.request<AdTokenGenerateResultModel, RequestResponse>({
+        path: `/api/Game/${id}/Ad/Token`,
+        method: "POST",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description A&D — read the team API token hint (never the plaintext).
+     * @tags Game
+     * @name GameAdTokenHint
+     * @request GET:/api/Game/{id}/Ad/Token
+     */
+    gameAdTokenHint: (id: number, params: RequestParams = {}) =>
+      this.request<AdTokenHintModel, RequestResponse>({
+        path: `/api/Game/${id}/Ad/Token`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description A&D — SWR variant of gameAdTokenHint.
+     * @tags Game
+     * @name GameAdTokenHint
+     * @request GET:/api/Game/{id}/Ad/Token
+     */
+    useGameAdTokenHint: (
+      id: number,
+      options?: SWRConfiguration,
+      doFetch: boolean = true,
+    ) =>
+      useSWR<AdTokenHintModel, RequestResponse>(
+        doFetch ? `/api/Game/${id}/Ad/Token` : null,
+        options,
+      ),
+
+    /**
+     * @description A&D — refresh helper for gameAdTokenHint.
+     * @tags Game
+     * @name GameAdTokenHint
+     */
+    mutateGameAdTokenHint: (
+      id: number,
+      data?: AdTokenHintModel | Promise<AdTokenHintModel>,
+      options?: MutatorOptions,
+    ) => mutate<AdTokenHintModel>(`/api/Game/${id}/Ad/Token`, data, options),
+
+    /**
+     * @description A&D — revoke the team API token. Captain only.
+     * @tags Game
+     * @name GameAdRevokeToken
+     * @request DELETE:/api/Game/{id}/Ad/Token
+     */
+    gameAdRevokeToken: (id: number, params: RequestParams = {}) =>
+      this.request<void, RequestResponse>({
+        path: `/api/Game/${id}/Ad/Token`,
+        method: "DELETE",
         ...params,
       }),
 

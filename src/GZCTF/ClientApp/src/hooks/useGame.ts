@@ -120,6 +120,15 @@ export const useAdScoreboard = (numId: number) => {
   return { adScoreboard, error, mutate }
 }
 
+/** A&D — team API token hint (never plaintext); used by the per-challenge modal. */
+export const useAdTokenHint = (numId: number, doFetch: boolean = true) => {
+  const { data: adTokenHint, error, mutate } = api.game.useGameAdTokenHint(numId, {
+    ...OnceSWRConfig,
+    shouldRetryOnError: false,
+  }, doFetch)
+  return { adTokenHint, error, mutate }
+}
+
 /** A&D admin — operator console state poll. Faster refresh during active games. */
 export const useAdminAdState = (numId: number) => {
   const { game } = useGame(numId)
