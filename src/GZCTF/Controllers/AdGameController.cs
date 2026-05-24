@@ -3,6 +3,7 @@ using GZCTF.Middlewares;
 using GZCTF.Models;
 using GZCTF.Models.Data;
 using GZCTF.Models.Request.Game;
+using GZCTF.Models.Response.Admin;
 using GZCTF.Services;
 using GZCTF.Utils;
 using Microsoft.AspNetCore.Identity;
@@ -281,6 +282,114 @@ public class AdGameController(
             RoundStartedAt = currentRound?.StartedAt,
             RoundEndsAt = currentRound?.EndsAt,
             Services = serviceModels
+        });
+    }
+
+    /// <summary>
+    /// Get the A&amp;D scoreboard for this game — independent of the jeopardy
+    /// scoreboard. Public; respects the game's hidden flag.
+    /// </summary>
+    [HttpGet("Scoreboard")]
+    [ProducesResponseType(typeof(AdScoreboardModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Scoreboard(int id, CancellationToken token)
+    {
+        var game = await db.Games.FirstOrDefaultAsync(g => g.Id == id, token);
+        if (game is null || game.Hidden) return NotFound();
+
+        var hasAd = await db.GameChallenges.AnyAsync(
+            c => c.GameId == id && c.Type == ChallengeType.AttackDefense, token);
+        if (!hasAd) return NotFound();
+
+        var latestRound = await db.AdRounds
+            .Where(r => r.GameId == id)
+            .OrderByDescending(r => r.Number)
+            .Select(r => r.Number)
+            .FirstOrDefaultAsync(token);
+
+        var teams = await db.Participations
+            .Where(p => p.GameId == id && p.Status == ParticipationStatus.Accepted)
+            .Include(p => p.Team)
+            .Include(p => p.Division)
+            .ToListAsync(token);
+
+        var partIds = teams.Select(p => p.Id).ToList();
+
+        // Attack stats per attacker.
+        var attackAgg = await db.AdAttacks
+            .Where(a => partIds.Contains(a.AttackerParticipationId))
+            .GroupBy(a => a.AttackerParticipationId)
+            .Select(g => new
+            {
+                PartId = g.Key,
+                Points = g.Sum(a => a.Points),
+                Count = g.Count()
+            })
+            .ToDictionaryAsync(g => g.PartId, token);
+
+        // Defense loss per victim: each distinct (AdFlagId) the victim was
+        // tagged for counts once (DB pre-aggregates).
+        var defenseAgg = await db.AdAttacks
+            .Where(a => partIds.Contains(a.VictimParticipationId))
+            .GroupBy(a => a.VictimParticipationId)
+            .Select(g => new { PartId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(g => g.PartId, token);
+
+        // SLA: count of Ok checks vs total checks per team.
+        var checks = await db.AdCheckResults
+            .Where(c => db.AdTeamServices
+                .Where(ts => ts.Id == c.AdTeamServiceId)
+                .Any(ts => partIds.Contains(ts.ParticipationId)))
+            .Join(db.AdTeamServices,
+                c => c.AdTeamServiceId, ts => ts.Id,
+                (c, ts) => new { ts.ParticipationId, c.Status })
+            .GroupBy(x => x.ParticipationId)
+            .Select(g => new
+            {
+                PartId = g.Key,
+                Ok = g.Count(x => x.Status == AdCheckStatus.Ok),
+                Total = g.Count()
+            })
+            .ToDictionaryAsync(g => g.PartId, token);
+
+        const double slaScale = 10.0;
+        const double defensePenaltyScale = 2.0;
+
+        var rows = teams.Select(p =>
+        {
+            var atk = attackAgg.GetValueOrDefault(p.Id);
+            var def = defenseAgg.GetValueOrDefault(p.Id);
+            var sla = checks.GetValueOrDefault(p.Id);
+
+            var attackPoints = atk?.Points ?? 0;
+            var timesCaptured = def?.Count ?? 0;
+            var defenseLoss = Math.Pow(timesCaptured, 0.75) * defensePenaltyScale;
+            var slaFraction = sla is { Total: > 0 } ? (double)sla.Ok / sla.Total : 0;
+            var slaPoints = slaFraction * slaScale * Math.Max(1, latestRound);
+
+            return new AdTeamScoreRow
+            {
+                ParticipationId = p.Id,
+                TeamId = p.TeamId,
+                TeamName = p.Team.Name,
+                Division = p.Division?.Name,
+                AttackPoints = attackPoints,
+                DefenseLoss = defenseLoss,
+                SlaPoints = slaPoints,
+                Total = attackPoints - defenseLoss + slaPoints,
+                TimesCaptured = timesCaptured,
+                FlagsCaptured = atk?.Count ?? 0
+            };
+        })
+        .OrderByDescending(r => r.Total)
+        .ToList();
+
+        for (int i = 0; i < rows.Count; i++)
+            rows[i].Rank = i + 1;
+
+        return Ok(new AdScoreboardModel
+        {
+            LatestRound = latestRound,
+            Teams = rows
         });
     }
 }
