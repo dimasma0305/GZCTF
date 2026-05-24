@@ -464,6 +464,18 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
                     </List.Item>
                     <List.Item>
                       {t(
+                        'game.content.ad.guide.container.flag_file',
+                        "The current round's flag lives in /flag inside your container. Your challenge code should read it from there (the path is also in the GZCTF_FLAG_FILE env var). The platform overwrites /flag at the start of every round via docker exec."
+                      )}
+                    </List.Item>
+                    <List.Item>
+                      {t(
+                        'game.content.ad.guide.container.flag_env',
+                        "GZCTF_FLAG is also set as an env var, but only contains the flag from the round when your container was created — env vars in a running process are immutable, so subsequent rounds only update /flag. Read the file for the live value."
+                      )}
+                    </List.Item>
+                    <List.Item>
+                      {t(
                         'game.content.ad.guide.container.patch',
                         'You can patch the binary / web service inside the container live — the platform does NOT redeploy unless you reset.'
                       )}

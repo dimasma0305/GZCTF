@@ -416,7 +416,7 @@ public class DockerManager : IContainerManager
 
     private static IList<string> BuildContainerEnv(GZCTF.Models.Internal.ContainerConfig config)
     {
-        var env = new List<string>(5)
+        var env = new List<string>(6)
         {
             $"GZCTF_TEAM_ID={config.TeamId}",
             $"GZCTF_USER_ID={config.UserId}",
@@ -428,6 +428,12 @@ public class DockerManager : IContainerManager
 
         if (!string.IsNullOrWhiteSpace(config.Flag))
             env.Add($"GZCTF_FLAG={config.Flag}");
+
+        // A&D challenges: surface the in-container flag-file path so the
+        // challenge author's code can read the LIVE per-tick flag (env var
+        // is frozen at exec time — see ContainerConfig.FlagFilePath).
+        if (!string.IsNullOrWhiteSpace(config.FlagFilePath))
+            env.Add($"GZCTF_FLAG_FILE={config.FlagFilePath}");
 
         return env;
     }

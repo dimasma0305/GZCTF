@@ -279,6 +279,19 @@ public sealed class AdContainerManager(
         // existing Open/Isolated knob.
         var networkMode = challenge.AdAllowEgress ? NetworkMode.Open : NetworkMode.Isolated;
 
+        // Initial flag for GZCTF_FLAG env var — read whatever the latest
+        // round planted for this (team, challenge). On first spawn before
+        // any round has run, this is null and the env var is omitted; the
+        // file at FlagFilePath will be populated on the next AdRoundService
+        // tick. Subsequent ticks update only the file (env is frozen at exec).
+        var initialFlag = existing is not null
+            ? await db.AdFlags
+                .Where(f => f.AdTeamServiceId == existing.Id)
+                .OrderByDescending(f => f.PlantedAtRound)
+                .Select(f => f.Flag)
+                .FirstOrDefaultAsync(token)
+            : null;
+
         var config = new ContainerConfig
         {
             Image = challenge.ContainerImage,
@@ -287,7 +300,8 @@ public sealed class AdContainerManager(
             GameId = participation.GameId,
             UserId = participation.FirstUserId,
             ExposedPort = challenge.ExposePort ?? 80,
-            Flag = null,
+            Flag = initialFlag,
+            FlagFilePath = "/flag",
             CPUCount = challenge.CPUCount ?? 1,
             MemoryLimit = challenge.MemoryLimit ?? 128,
             StorageLimit = challenge.StorageLimit ?? 256,

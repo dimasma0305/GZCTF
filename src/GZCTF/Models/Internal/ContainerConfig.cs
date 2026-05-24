@@ -33,9 +33,22 @@ public class ContainerConfig
     public int ExposedPort { get; set; }
 
     /// <summary>
-    /// Flag text
+    /// Flag text. For static / dynamic-container challenges this is the
+    /// per-team flag set at container create time. For A&amp;D this is the
+    /// FIRST round's flag — the env var is immutable for the life of the
+    /// process, so subsequent ticks update <see cref="FlagFilePath"/>
+    /// instead. Operator's challenge code should prefer reading the file.
     /// </summary>
     public string? Flag { get; set; } = string.Empty;
+
+    /// <summary>
+    /// In-container path that AdRoundService writes the per-tick flag to
+    /// (via <c>docker exec</c>). Exposed to the running container as the
+    /// <c>GZCTF_FLAG_FILE</c> env var so challenge code knows where to
+    /// look without hard-coding the path. Only set for A&amp;D containers;
+    /// null for jeopardy + exercise.
+    /// </summary>
+    public string? FlagFilePath { get; set; }
 
     /// <summary>
     /// Whether to record traffic

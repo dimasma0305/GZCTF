@@ -1,6 +1,9 @@
 using System.Security.Cryptography;
+using Docker.DotNet;
+using Docker.DotNet.Models;
 using GZCTF.Models;
 using GZCTF.Models.Data;
+using GZCTF.Services.Container.Provider;
 using Microsoft.EntityFrameworkCore;
 
 namespace GZCTF.Services;
@@ -18,9 +21,11 @@ namespace GZCTF.Services;
 /// </summary>
 public sealed class AdRoundService(
     AppDbContext db,
+    IServiceProvider serviceProvider,
     ILogger<AdRoundService> logger)
 {
     private const int FlagRandomBytes = 24;
+    private const string FlagFilePath = "/flag";
 
     public sealed record Result(AdRound Round, int FlagsPlanted);
 
@@ -63,9 +68,14 @@ public sealed class AdRoundService(
 
         var services = await db.AdTeamServices
             .Where(ts => ts.Participation.GameId == gameId)
+            .Include(ts => ts.Container)
             .ToListAsync(token);
 
-        var flagsPlanted = 0;
+        // (service, flag) pairs we need to push into containers after the
+        // DB save commits. Collected up-front so the exec calls don't race
+        // with the row inserts.
+        var toInject = new List<(AdTeamService Service, string Flag)>();
+
         foreach (var ts in services)
         {
             var bytes = new byte[FlagRandomBytes];
@@ -81,15 +91,68 @@ public sealed class AdRoundService(
                 Flag = flag,
                 PlantedAt = now
             }, token);
-            flagsPlanted++;
+            toInject.Add((ts, flag));
         }
 
         await db.SaveChangesAsync(token);
 
+        // Push each flag into its container via `docker exec`. Best-effort —
+        // a failed exec only loses one tick of attackability for that team;
+        // the next round will retry. Skipped on K8s deploys (no Docker
+        // provider registered).
+        var docker = serviceProvider
+            .GetService<IContainerProvider<DockerClient, DockerMetadata>>()
+            ?.GetProvider();
+        int injected = 0;
+        if (docker is not null)
+        {
+            foreach (var (ts, flag) in toInject)
+            {
+                if (ts.Container?.ContainerId is not { Length: > 0 } cid) continue;
+                try
+                {
+                    await WriteFlagFileAsync(docker, cid, flag, token);
+                    injected++;
+                }
+                catch (Exception e)
+                {
+                    logger.LogWarning(e,
+                        "A&D flag inject failed for team={Tid} challenge={Cid}",
+                        ts.ParticipationId, ts.ChallengeId);
+                }
+            }
+        }
+
         logger.SystemLog(
-            $"A&D round advanced: game={gameId} round={nextNumber} flags_planted={flagsPlanted}",
+            $"A&D round advanced: game={gameId} round={nextNumber} flags_planted={toInject.Count} flags_injected={injected}",
             TaskStatus.Success, LogLevel.Information);
 
-        return new Result(round, flagsPlanted);
+        return new Result(round, toInject.Count);
+    }
+
+    /// <summary>
+    /// Write the round's flag to <see cref="FlagFilePath"/> inside a running
+    /// container via the Docker exec API. Flag chars are restricted to URL-
+    /// safe base64 + the literal <c>flag{}</c> wrapper (see
+    /// <c>AdvanceAsync</c>'s generator), so wrapping in single quotes is
+    /// shell-safe — no escape needed.
+    /// </summary>
+    private static async Task WriteFlagFileAsync(
+        DockerClient docker, string containerId, string flag, CancellationToken token)
+    {
+        var exec = await docker.Exec.CreateContainerExecAsync(containerId,
+            new ContainerExecCreateParameters
+            {
+                AttachStdout = false,
+                AttachStderr = false,
+                Cmd = new[]
+                {
+                    "sh", "-c",
+                    $"printf '%s' '{flag}' > {FlagFilePath} && chmod 644 {FlagFilePath}"
+                }
+            }, token);
+
+        await docker.Exec.StartContainerExecAsync(exec.ID,
+            new ContainerExecStartParameters(), token);
     }
 }
