@@ -1,11 +1,12 @@
-import { Alert, Badge, Button, Group, Modal, Paper, Stack, Text } from '@mantine/core'
+import { Badge, Button, Group, Paper, Stack, Text } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { mdiAlertCircleOutline, mdiOpenInNew, mdiSword, mdiVpn } from '@mdi/js'
+import { mdiBookOpenPageVariantOutline, mdiOpenInNew, mdiSword } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import dayjs from 'dayjs'
 import { FC, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router'
+import { AdGuideModal } from '@Components/AdGuideModal'
 import { ChallengePanel } from '@Components/ChallengePanel'
 import { GameNoticePanel } from '@Components/GameNoticePanel'
 import { TeamRank } from '@Components/TeamRank'
@@ -31,7 +32,7 @@ const Challenges: FC = () => {
   }, [teamInfo])
 
   const { adState } = useAdState(numId, hasAd)
-  const [vpnOpened, vpnHandlers] = useDisclosure(false)
+  const [guideOpened, guideHandlers] = useDisclosure(false)
 
   const roundEndsIn = adState?.roundEndsAt
     ? Math.max(0, dayjs(adState.roundEndsAt).diff(dayjs(), 'second'))
@@ -88,10 +89,10 @@ const Challenges: FC = () => {
                   <Button
                     variant="default"
                     fullWidth
-                    leftSection={<Icon path={mdiVpn} size={1} />}
-                    onClick={vpnHandlers.open}
+                    leftSection={<Icon path={mdiBookOpenPageVariantOutline} size={1} />}
+                    onClick={guideHandlers.open}
                   >
-                    {t('game.button.ad.download_vpn', 'Download VPN config')}
+                    {t('game.button.ad.open_guide', 'A&D Player Guide')}
                   </Button>
                 </>
               )}
@@ -100,26 +101,13 @@ const Challenges: FC = () => {
             </Stack>
           </Group>
 
-          <Modal
-            opened={vpnOpened}
-            onClose={vpnHandlers.close}
-            title={t('game.content.ad.vpn_modal.title', 'VPN provisioning')}
-            centered
-          >
-            <Stack gap="sm">
-              <Alert color="blue" icon={<Icon path={mdiAlertCircleOutline} size={1} />}>
-                {t(
-                  'game.content.ad.vpn_modal.body',
-                  'Per-team WireGuard config download is coming in a follow-up phase. For now, contact your operator for network access — A&D containers expose their service ports directly during the dev preview.'
-                )}
-              </Alert>
-              <Group justify="flex-end">
-                <Button onClick={vpnHandlers.close}>
-                  {t('common.modal.confirm', 'Confirm')}
-                </Button>
-              </Group>
-            </Stack>
-          </Modal>
+          {hasAd && (
+            <AdGuideModal
+              gameId={numId}
+              opened={guideOpened}
+              onClose={guideHandlers.close}
+            />
+          )}
         </WithGameTab>
       </WithRole>
     </WithNavBar>
