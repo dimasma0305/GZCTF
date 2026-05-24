@@ -128,6 +128,18 @@ public class GameInfoModel : IValidatableObject
     [JsonPropertyName("bloodBonus")]
     public long BloodBonusValue { get; set; } = BloodBonus.DefaultValue;
 
+    /// <summary>
+    /// A&D — warmup seconds before round 1 starts (default 1800 = 30 min).
+    /// Teams get this gap to SSH in + write initial patches before scoring.
+    /// Only consulted by games containing AttackDefense challenges.
+    /// </summary>
+    public int? AdWarmupSeconds { get; set; }
+
+    /// <summary>
+    /// A&D — how long to retain per-team container snapshots after game end.
+    /// </summary>
+    public int? AdSnapshotRetentionDays { get; set; }
+
     internal static GameInfoModel FromGame(Data.Game game) =>
         new()
         {
@@ -151,7 +163,9 @@ public class GameInfoModel : IValidatableObject
             WriteupDeadline = game.WriteupDeadline,
             WriteupNote = game.WriteupNote,
             WriteupRequired = game.WriteupRequired,
-            BloodBonusValue = game.BloodBonus.Val
+            BloodBonusValue = game.BloodBonus.Val,
+            AdWarmupSeconds = game.AdWarmupSeconds,
+            AdSnapshotRetentionDays = game.AdSnapshotRetentionDays
         };
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)

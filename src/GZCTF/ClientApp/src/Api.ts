@@ -1288,6 +1288,16 @@ export interface GameInfoModel {
    * @format int64
    */
   bloodBonus?: number;
+  /**
+   * A&D — warmup seconds before round 1 starts (default 1800 = 30 min).
+   * @format int32
+   */
+  adWarmupSeconds?: number | null;
+  /**
+   * A&D — how long to retain per-team container snapshots after game end.
+   * @format int32
+   */
+  adSnapshotRetentionDays?: number | null;
 }
 
 /** List response */

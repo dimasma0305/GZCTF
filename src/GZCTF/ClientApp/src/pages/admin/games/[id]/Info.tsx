@@ -405,6 +405,32 @@ const GameInfoEdit: FC = () => {
           />
         </Stack>
       </Group>
+      <Group grow gap="md">
+        <NumberInput
+          label={t('admin.content.games.info.ad_warmup_seconds.label')}
+          description={t('admin.content.games.info.ad_warmup_seconds.description')}
+          disabled={disabled}
+          min={0}
+          max={86400}
+          value={game?.adWarmupSeconds ?? 1800}
+          onChange={(e) => {
+            const n = getInputNumber(e)
+            if (!isNaN(n)) game && setGame({ ...game, adWarmupSeconds: n })
+          }}
+        />
+        <NumberInput
+          label={t('admin.content.games.info.ad_snapshot_retention_days.label')}
+          description={t('admin.content.games.info.ad_snapshot_retention_days.description')}
+          disabled={disabled}
+          min={1}
+          max={365}
+          value={game?.adSnapshotRetentionDays ?? 30}
+          onChange={(e) => {
+            const n = getInputNumber(e)
+            if (!isNaN(n)) game && setGame({ ...game, adSnapshotRetentionDays: n })
+          }}
+        />
+      </Group>
       <Grid grow>
         <Grid.Col span={8}>
           <Textarea

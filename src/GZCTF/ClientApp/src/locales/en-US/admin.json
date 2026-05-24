@@ -439,6 +439,14 @@
         "writeup_required": {
           "description": "Enable writeup submission",
           "label": "Writeup Required"
+        },
+        "ad_warmup_seconds": {
+          "label": "A&D warmup (seconds)",
+          "description": "Seconds between game start and round 1. Teams use this gap to SSH in + write initial patches (default 1800 = 30 min). Only applies to games with A&D challenges."
+        },
+        "ad_snapshot_retention_days": {
+          "label": "A&D snapshot retention (days)",
+          "description": "How long the per-team container snapshots stay available for download after game end."
         }
       },
       "managers": {

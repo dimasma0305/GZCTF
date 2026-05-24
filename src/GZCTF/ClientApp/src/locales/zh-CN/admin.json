@@ -445,6 +445,14 @@
         "writeup_required": {
           "description": "是否启用比赛的 Writeup 提交功能",
           "label": "需要 Writeup"
+        },
+        "ad_warmup_seconds": {
+          "label": "攻防预热（秒）",
+          "description": "比赛开始到首个回合之间的时间。队伍可在此期间 SSH 接入并完成初始打补丁（默认 1800 即 30 分钟）。仅对包含 A&D 题目的比赛生效。"
+        },
+        "ad_snapshot_retention_days": {
+          "label": "攻防快照保留（天）",
+          "description": "终局快照在赛后保留下载的天数。"
         }
       },
       "managers": {

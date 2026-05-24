@@ -226,6 +226,9 @@ public partial class Game
         FreezeTimeUtc = model.FreezeTimeUtc;
         BloodBonus = BloodBonus.FromValue(model.BloodBonusValue);
         DiscordWebhook = model.DiscordWebhook;
+        // A&D — only overwrite when caller provides; null leaves existing default.
+        if (model.AdWarmupSeconds is { } warmup) AdWarmupSeconds = warmup;
+        if (model.AdSnapshotRetentionDays is { } retention) AdSnapshotRetentionDays = retention;
 
         return this;
     }
