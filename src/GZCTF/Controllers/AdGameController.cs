@@ -742,13 +742,16 @@ public class AdGameController(
     /// <summary>
     /// Download a per-user WireGuard config (.conf) for accessing the A&amp;D
     /// network. Generates a fresh X25519 keypair + assigns a /32 from the
-    /// configured client CIDR on first call; subsequent calls return the
-    /// same peer's .conf so the operator-side WG server config stays valid.
-    /// Server endpoint/pubkey/CIDR/DNS/AllowedIPs come from IConfiguration
-    /// (env vars: <c>Ad__Vpn__ServerEndpoint</c>, <c>Ad__Vpn__ServerPublicKey</c>,
-    /// <c>Ad__Vpn__ClientCidr</c>, <c>Ad__Vpn__Dns</c>, <c>Ad__Vpn__AllowedIps</c>).
-    /// When the server isn't configured the .conf still downloads with clear
-    /// <c>&lt;unconfigured&gt;</c> placeholders so the operator can fill them in.
+    /// configured client CIDR on first call; subsequent calls return the same
+    /// peer's .conf so the matching server-side entry rendered by
+    /// <see cref="AdWireGuardSyncService"/> stays valid.
+    ///
+    /// <para>Server pubkey comes from the shared <c>/wg-config/server.pub</c>
+    /// file written by the wireguard sidecar on first boot. Server endpoint
+    /// and other knobs read from <c>IConfiguration</c> (env vars
+    /// <c>Ad__Vpn__ServerEndpoint</c>, <c>Ad__Vpn__ClientCidr</c>,
+    /// <c>Ad__Vpn__Dns</c>, <c>Ad__Vpn__AllowedIps</c>) and fall back to
+    /// in-host-test defaults when unset.</para>
     /// </summary>
     [RequireUser]
     [HttpGet("Vpn/Config")]
@@ -771,8 +774,22 @@ public class AdGameController(
             c => c.GameId == id && c.Type == ChallengeType.AttackDefense, token);
         if (!hasAd) return NotFound(new RequestResponse("This game has no A&D challenges"));
 
-        var serverEndpoint = config["Ad:Vpn:ServerEndpoint"] ?? "<unconfigured-server:51820>";
-        var serverPublicKey = config["Ad:Vpn:ServerPublicKey"] ?? "<unconfigured-server-public-key>";
+        var configDir = config["Ad:Vpn:ConfigDir"] ?? "/wg-config";
+        var serverPubKeyPath = Path.Combine(configDir, "server.pub");
+
+        // Server pubkey comes from the sidecar's shared volume. Env var
+        // override exists for tests / out-of-cluster deployments.
+        var serverPublicKey =
+            config["Ad:Vpn:ServerPublicKey"]
+            ?? (System.IO.File.Exists(serverPubKeyPath)
+                ? (await System.IO.File.ReadAllTextAsync(serverPubKeyPath, token)).Trim()
+                : null);
+
+        if (string.IsNullOrEmpty(serverPublicKey))
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new RequestResponse(
+                "WireGuard server keypair not yet provisioned by the sidecar. Make sure the wireguard service is running and the shared volume is mounted at " + configDir));
+
+        var serverEndpoint = config["Ad:Vpn:ServerEndpoint"] ?? "127.0.0.1:51820";
         var clientCidr = config["Ad:Vpn:ClientCidr"] ?? "10.13.37.0/24";
         var dns = config["Ad:Vpn:Dns"] ?? "1.1.1.1";
         var allowedIps = config["Ad:Vpn:AllowedIps"] ?? clientCidr;

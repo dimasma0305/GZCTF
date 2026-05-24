@@ -213,12 +213,6 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
                         {t('game.button.ad.download_vpn', 'Download .conf')}
                       </Button>
                     </Group>
-                    <Alert color="blue" icon={<Icon path={mdiAlertCircleOutline} size={0.9} />}>
-                      {t(
-                        'game.content.ad.guide.vpn.operator_note',
-                        'If the downloaded file contains <unconfigured-server:...> placeholders, your operator has not finished provisioning the WireGuard server. The keypair + assigned IP in your .conf are still valid; the operator just needs to set the server endpoint + server pubkey for the connection to come up.'
-                      )}
-                    </Alert>
                     <Text size="xs" c="dimmed">
                       {t(
                         'game.content.ad.guide.vpn.linux_hint',
