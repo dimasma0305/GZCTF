@@ -156,6 +156,8 @@ internal static class ServicesExtension
             builder.Services.AddHostedService<RepoWatchService>();
             builder.Services.AddHostedService<RepoBindingScanService>();
             builder.Services.AddHostedService<Services.Container.Build.ChallengeBuildQueueService>();
+            builder.Services.AddSingleton<Services.AdContainerManager>();
+            builder.Services.AddHostedService(sp => sp.GetRequiredService<Services.AdContainerManager>());
         }
 
         internal void AddWebServices()
