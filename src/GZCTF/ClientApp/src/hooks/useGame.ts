@@ -96,3 +96,37 @@ export const useGameTeamInfo = (numId: number) => {
 
   return { teamInfo, game, error, mutate }
 }
+
+/** A&D — player state poll (own team's containers + flags). */
+export const useAdState = (numId: number) => {
+  const { game } = useGame(numId)
+  const { status } = getGameStatus(game)
+  const { data: adState, error, mutate } = api.game.useGameAdState(numId, {
+    ...OnceSWRConfig,
+    shouldRetryOnError: false,
+    refreshInterval: status === GameStatus.OnGoing ? 10 * 1000 : 0,
+  })
+  return { adState, error, mutate }
+}
+
+/** A&D — independent scoreboard poll. */
+export const useAdScoreboard = (numId: number) => {
+  const { game } = useGame(numId)
+  const { status } = getGameStatus(game)
+  const { data: adScoreboard, error, mutate } = api.game.useGameAdScoreboard(numId, {
+    ...OnceSWRConfig,
+    refreshInterval: status === GameStatus.OnGoing ? 10 * 1000 : 0,
+  })
+  return { adScoreboard, error, mutate }
+}
+
+/** A&D admin — operator console state poll. Faster refresh during active games. */
+export const useAdminAdState = (numId: number) => {
+  const { game } = useGame(numId)
+  const { status } = getGameStatus(game)
+  const { data: adminAdState, error, mutate } = api.edit.useEditAdState(numId, {
+    ...OnceSWRConfig,
+    refreshInterval: status === GameStatus.OnGoing ? 5 * 1000 : 0,
+  })
+  return { adminAdState, error, mutate }
+}

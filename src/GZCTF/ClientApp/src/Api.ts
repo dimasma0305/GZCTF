@@ -81,6 +81,15 @@ export enum ChallengeType {
   StaticContainer = "StaticContainer",
   DynamicAttachment = "DynamicAttachment",
   DynamicContainer = "DynamicContainer",
+  AttackDefense = "AttackDefense",
+}
+
+/** Per-tick checker result for an A&D service. */
+export enum AdCheckStatus {
+  Ok = "Ok",
+  Mumble = "Mumble",
+  Offline = "Offline",
+  InternalError = "InternalError",
 }
 
 /** Game participant permission */
@@ -1749,6 +1758,136 @@ export interface ChallengeUpdateModel {
    * @format double
    */
   difficulty?: number | null;
+  /** A&D — Docker image for the per-challenge checker container. */
+  adCheckerImage?: string | null;
+  /** A&D — Seconds per tick (default 120). */
+  adTickSeconds?: number | null;
+  /** A&D — Ticks a planted flag stays valid (default 5). */
+  adFlagLifetimeTicks?: number | null;
+  /** A&D — When true, team containers can reach the public internet. */
+  adAllowEgress?: boolean | null;
+  /** A&D — When true, teams can self-reset to baseline (default true). */
+  adAllowSelfReset?: boolean | null;
+  /** A&D — Minimum minutes between consecutive self-resets (default 5). */
+  adResetCooldownMinutes?: number | null;
+  /** A&D — When true, snapshot the team container at game end (default true). */
+  adAllowSnapshotDownload?: boolean | null;
+  /** A&D — putflag jitter window as a fraction of tick (default 0.4). */
+  adPutflagWindowFraction?: number | null;
+  /** A&D — getflag jitter window as a fraction of tick (default 0.5). */
+  adGetflagWindowFraction?: number | null;
+  /** A&D — Seconds between putflag and getflag (default 3). */
+  adMinGracePeriodSeconds?: number | null;
+}
+
+/** A&D — body for POST /api/Game/{id}/Ad/Submit (attack submission). */
+export interface AdSubmitModel {
+  flag: string;
+}
+
+/** A&D — response from POST /api/Game/{id}/Ad/Submit. */
+export interface AdSubmitResultModel {
+  /** accepted | duplicate | wrong | expired | self_attack | not_started */
+  status: string;
+  points?: number | null;
+  flagPlantedAtRound?: number | null;
+  message?: string | null;
+}
+
+/** A&D — per-service row in the player's state view. */
+export interface AdTeamServiceStateModel {
+  adTeamServiceId: number;
+  challengeId: number;
+  challengeTitle: string;
+  containerIp?: string | null;
+  containerPort?: number | null;
+  /** The flag the team should currently be defending (their own). */
+  currentFlag?: string | null;
+  lastCheckStatus?: string | null;
+  lastResetAt?: string | null;
+  canReset: boolean;
+  resetCooldownSecondsRemaining?: number | null;
+}
+
+/** A&D — GET /api/Game/{id}/Ad/State response. */
+export interface AdStateModel {
+  currentRound: number;
+  roundStartedAt?: string | null;
+  roundEndsAt?: string | null;
+  services: AdTeamServiceStateModel[];
+}
+
+/** A&D — one row in the A&D scoreboard. */
+export interface AdTeamScoreRow {
+  rank: number;
+  participationId: number;
+  teamId: number;
+  teamName: string;
+  division?: string | null;
+  total: number;
+  attackPoints: number;
+  defenseLoss: number;
+  slaPoints: number;
+  timesCaptured: number;
+  flagsCaptured: number;
+}
+
+/** A&D — GET /api/Game/{id}/Ad/Scoreboard response. */
+export interface AdScoreboardModel {
+  latestRound: number;
+  generatedAt: string;
+  teams: AdTeamScoreRow[];
+}
+
+/** A&D admin — POST /api/edit/games/{id}/ad/AdvanceRound response. */
+export interface AdAdvanceRoundResult {
+  roundNumber: number;
+  flagsPlanted: number;
+  startedAt: string;
+  endsAt: string;
+}
+
+/** A&D admin — per-challenge state in the admin console. */
+export interface AdChallengeStateModel {
+  challengeId: number;
+  title: string;
+  isEnabled: boolean;
+  tickSeconds: number;
+  flagLifetimeTicks: number;
+  teamsWithLiveContainer?: number | null;
+}
+
+/** A&D admin — per-cell (team × challenge) state in the admin grid. */
+export interface AdTeamCellModel {
+  adTeamServiceId: number;
+  challengeId: number;
+  containerIp?: string | null;
+  containerPort?: number | null;
+  lastCheckStatus?: string | null;
+  currentFlag?: string | null;
+}
+
+/** A&D admin — per-team row in the admin grid. */
+export interface AdTeamRowModel {
+  participationId: number;
+  teamName: string;
+  services: AdTeamCellModel[];
+}
+
+/** A&D admin — GET /api/edit/games/{id}/ad/State response. */
+export interface AdGameStateModel {
+  currentRound?: number | null;
+  roundStartedAt?: string | null;
+  roundEndsAt?: string | null;
+  scoringPaused: boolean;
+  challenges: AdChallengeStateModel[];
+  teams: AdTeamRowModel[];
+}
+
+/** A&D admin — body for POST /api/edit/games/{id}/ad/Checks/{checkId}/Override. */
+export interface AdOverrideCheckModel {
+  newStatus: AdCheckStatus;
+  note?: string | null;
 }
 
 /** New attachment information (Edit) */
@@ -5934,6 +6073,122 @@ export class Api<
       }),
 
     /**
+     * @description A&D — advance round + plant fresh flags. Manual driver for Phase 1.
+     * @tags Edit
+     * @name EditAdvanceRound
+     * @request POST:/api/edit/games/{id}/ad/AdvanceRound
+     */
+    editAdvanceRound: (id: number, params: RequestParams = {}) =>
+      this.request<AdAdvanceRoundResult, RequestResponse>({
+        path: `/api/edit/games/${id}/ad/AdvanceRound`,
+        method: "POST",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description A&D — operator dashboard state (current round + per-team grid).
+     * @tags Edit
+     * @name EditAdState
+     * @request GET:/api/edit/games/{id}/ad/State
+     */
+    editAdState: (id: number, params: RequestParams = {}) =>
+      this.request<AdGameStateModel, RequestResponse>({
+        path: `/api/edit/games/${id}/ad/State`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description A&D — SWR variant of editAdState.
+     * @tags Edit
+     * @name EditAdState
+     * @request GET:/api/edit/games/{id}/ad/State
+     */
+    useEditAdState: (
+      id: number,
+      options?: SWRConfiguration,
+      doFetch: boolean = true,
+    ) =>
+      useSWR<AdGameStateModel, RequestResponse>(
+        doFetch ? `/api/edit/games/${id}/ad/State` : null,
+        options,
+      ),
+
+    /**
+     * @description A&D — refresh helper for editAdState.
+     * @tags Edit
+     * @name EditAdState
+     * @request GET:/api/edit/games/{id}/ad/State
+     */
+    mutateEditAdState: (
+      id: number,
+      data?: AdGameStateModel | Promise<AdGameStateModel>,
+      options?: MutatorOptions,
+    ) => mutate<AdGameStateModel>(`/api/edit/games/${id}/ad/State`, data, options),
+
+    /**
+     * @description A&D — toggle a challenge enabled/disabled mid-event.
+     * @tags Edit
+     * @name EditAdToggleChallenge
+     * @request POST:/api/edit/games/{id}/ad/Challenges/{challengeId}/Toggle
+     */
+    editAdToggleChallenge: (id: number, challengeId: number, params: RequestParams = {}) =>
+      this.request<{ isEnabled: boolean }, RequestResponse>({
+        path: `/api/edit/games/${id}/ad/Challenges/${challengeId}/Toggle`,
+        method: "POST",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description A&D — operator force-restart of a stuck team container.
+     * @tags Edit
+     * @name EditAdForceRestart
+     * @request POST:/api/edit/games/{id}/ad/Services/{adTeamServiceId}/Restart
+     */
+    editAdForceRestart: (id: number, adTeamServiceId: number, params: RequestParams = {}) =>
+      this.request<void, RequestResponse>({
+        path: `/api/edit/games/${id}/ad/Services/${adTeamServiceId}/Restart`,
+        method: "POST",
+        ...params,
+      }),
+
+    /**
+     * @description A&D — judge override of a recorded check result.
+     * @tags Edit
+     * @name EditAdOverrideCheck
+     * @request POST:/api/edit/games/{id}/ad/Checks/{checkId}/Override
+     */
+    editAdOverrideCheck: (
+      id: number,
+      checkId: number,
+      data: AdOverrideCheckModel,
+      params: RequestParams = {},
+    ) =>
+      this.request<void, RequestResponse>({
+        path: `/api/edit/games/${id}/ad/Checks/${checkId}/Override`,
+        method: "POST",
+        body: data,
+        type: ContentType.Json,
+        ...params,
+      }),
+
+    /**
+     * @description A&D — one-shot ensure containers for late-join no-wait.
+     * @tags Edit
+     * @name EditAdEnsureContainers
+     * @request POST:/api/edit/games/{id}/ad/EnsureContainers
+     */
+    editAdEnsureContainers: (id: number, params: RequestParams = {}) =>
+      this.request<void, RequestResponse>({
+        path: `/api/edit/games/${id}/ad/EnsureContainers`,
+        method: "POST",
+        ...params,
+      }),
+
+    /**
      * @description Updating a game notice requires administrator privileges
      *
      * @tags Edit
@@ -7532,6 +7787,116 @@ export class Api<
       data?: ScoreboardModel | Promise<ScoreboardModel>,
       options?: MutatorOptions,
     ) => mutate<ScoreboardModel>(`/api/game/${id}/scoreboard`, data, options),
+
+    /**
+     * @description A&D — submit a captured flag.
+     * @tags Game
+     * @name GameAdSubmit
+     * @request POST:/api/Game/{id}/Ad/Submit
+     */
+    gameAdSubmit: (id: number, data: AdSubmitModel, params: RequestParams = {}) =>
+      this.request<AdSubmitResultModel, RequestResponse>({
+        path: `/api/Game/${id}/Ad/Submit`,
+        method: "POST",
+        body: data,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description A&D — self-reset a team service container.
+     * @tags Game
+     * @name GameAdResetService
+     * @request POST:/api/Game/{id}/Ad/Services/{adTeamServiceId}/Reset
+     */
+    gameAdResetService: (id: number, adTeamServiceId: number, params: RequestParams = {}) =>
+      this.request<void, RequestResponse>({
+        path: `/api/Game/${id}/Ad/Services/${adTeamServiceId}/Reset`,
+        method: "POST",
+        ...params,
+      }),
+
+    /**
+     * @description A&D — player view of own team's A&D state.
+     * @tags Game
+     * @name GameAdState
+     * @request GET:/api/Game/{id}/Ad/State
+     */
+    gameAdState: (id: number, params: RequestParams = {}) =>
+      this.request<AdStateModel, RequestResponse>({
+        path: `/api/Game/${id}/Ad/State`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description A&D — SWR variant of gameAdState.
+     * @tags Game
+     * @name GameAdState
+     * @request GET:/api/Game/{id}/Ad/State
+     */
+    useGameAdState: (
+      id: number,
+      options?: SWRConfiguration,
+      doFetch: boolean = true,
+    ) =>
+      useSWR<AdStateModel, RequestResponse>(
+        doFetch ? `/api/Game/${id}/Ad/State` : null,
+        options,
+      ),
+
+    /**
+     * @description A&D — refresh helper for gameAdState.
+     * @tags Game
+     * @name GameAdState
+     * @request GET:/api/Game/{id}/Ad/State
+     */
+    mutateGameAdState: (
+      id: number,
+      data?: AdStateModel | Promise<AdStateModel>,
+      options?: MutatorOptions,
+    ) => mutate<AdStateModel>(`/api/Game/${id}/Ad/State`, data, options),
+
+    /**
+     * @description A&D — independent A&D scoreboard.
+     * @tags Game
+     * @name GameAdScoreboard
+     * @request GET:/api/Game/{id}/Ad/Scoreboard
+     */
+    gameAdScoreboard: (id: number, params: RequestParams = {}) =>
+      this.request<AdScoreboardModel, RequestResponse>({
+        path: `/api/Game/${id}/Ad/Scoreboard`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description A&D — SWR variant of gameAdScoreboard.
+     * @tags Game
+     * @name GameAdScoreboard
+     * @request GET:/api/Game/{id}/Ad/Scoreboard
+     */
+    useGameAdScoreboard: (
+      id: number,
+      options?: SWRConfiguration,
+      doFetch: boolean = true,
+    ) =>
+      useSWR<AdScoreboardModel, RequestResponse>(
+        doFetch ? `/api/Game/${id}/Ad/Scoreboard` : null,
+        options,
+      ),
+
+    /**
+     * @description A&D — download URL helper for the post-game container snapshot tarball.
+     * @tags Game
+     * @name GameAdDownloadSnapshot
+     * @request GET:/api/Game/{id}/Ad/Services/{adTeamServiceId}/Snapshot
+     */
+    gameAdDownloadSnapshotUrl: (id: number, adTeamServiceId: number) =>
+      `/api/Game/${id}/Ad/Services/${adTeamServiceId}/Snapshot`,
 
     /**
      * @description Downloads the game scoreboard; requires Monitor permission
