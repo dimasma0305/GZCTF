@@ -92,11 +92,11 @@ services:
     volumes:
       - "wg-config:/config"
     networks:
-      # Join every network the platform might land A&D containers on so the
-      # sidecar has a direct kernel route to challenge IPs. AdContainerManager
-      # picks between the *-open and *-isolated networks based on each
-      # challenge's AdAllowEgress flag.
-      - default
+      # Intentionally NOT on `default`: the default network is where postgres,
+      # redis, and the gzctf control plane live, and the sidecar must not have
+      # a kernel route from VPN clients to those hosts. Sidecar joins only the
+      # challenge subnets so MASQUERADE'd VPN traffic can only reach challenge
+      # containers, never the control plane.
       - z-test-challenges-open
       - z-test-challenges-isolated
     restart: unless-stopped
