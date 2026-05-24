@@ -495,6 +495,8 @@
       "static_attachment_desc": "Files-only challenge. Players download whatever you put in dist/; flag is matched server-side from the flags: list. Use for crypto, reverse, misc, anything that doesn't need a live server.",
       "dynamic_container_title": "Dynamic Container",
       "dynamic_container_desc": "A separate container per team, each with a unique flag injected via the GZCTF_FLAG environment variable. Prevents flag-sharing.",
+      "attack_defense_title": "Attack & Defense",
+      "attack_defense_desc": "Persistent per-team service plus a checker. The platform plants a fresh flag into /flag every tick and rotates it — no flags: or flagTemplate: block. Defenders patch the bug; attackers exploit other teams' instances.",
       "download_template": "Download template",
       "tips_title": "Notes",
       "tips": {

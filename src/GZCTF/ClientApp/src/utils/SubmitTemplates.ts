@@ -129,6 +129,144 @@ const DYNAMIC_SOLVER = `# example solver
 `
 
 // ---------------------------------------------------------------------------
+// attack-defense
+// ---------------------------------------------------------------------------
+
+const AD_CHALLENGE_YAML = `# yaml-language-server: $schema=https://raw.githubusercontent.com/dimasma0305/gzcli/refs/heads/main/internal/template/templates/others/ctf-template/.gzctf/challenge.schema.yaml
+
+name: "attack-defense"
+author: "test"
+
+# support markdown & html tags
+description: |
+  Example Attack & Defense service. The platform plants a fresh flag into
+  /flag every tick; your service must expose it to whoever holds the
+  intended capability, and defenders patch the bug without breaking the
+  checker.
+
+type: "AttackDefense" # don't touch this value
+value: 1000 # don't touch this value
+
+# A&D reuses the container block for the per-team SERVICE image + port.
+# containerImage omitted → platform auto-builds ./src/Dockerfile.
+container:
+  exposePort: 80
+  memoryLimit: 256
+  cpuCount: 1
+  storageLimit: 256
+
+# A&D-specific knobs. All optional — omit to take platform defaults.
+ad:
+  # Checker image (enochecker3 exit-code contract: 0 Ok / 1 Mumble /
+  # 2 Offline / 3 InternalError). Omit to fall back to a TCP-reachability
+  # probe. A local ./checker path is NOT auto-built yet — push the checker
+  # to a registry and reference it here, or leave empty for the TCP probe.
+  checkerImage: ""
+  tickSeconds: 120
+  flagLifetimeTicks: 5
+  allowEgress: false
+  allowSelfReset: true
+  resetCooldownMinutes: 5
+  allowSnapshotDownload: true
+`
+
+const AD_DOCKERFILE = `FROM alpine:3.21
+
+RUN apk add --no-cache socat
+
+# Warmup flag — the platform overwrites /flag every tick via docker exec,
+# and also injects the first round's flag through the GZCTF_FLAG env var.
+RUN echo 'flag{warmup-no-round-yet}' > /flag && chmod 644 /flag
+
+COPY serve.sh /serve.sh
+RUN chmod +x /serve.sh
+
+EXPOSE 80
+
+# socat forks per connection; serve.sh reads /flag fresh each request so
+# the per-tick rotation is visible immediately (no caching).
+CMD ["socat", "-T", "5", "TCP-LISTEN:80,reuseaddr,fork", "SYSTEM:/serve.sh"]
+`
+
+const AD_SERVE_SH = `#!/bin/sh
+# Toy vulnerable service: echoes /flag to anyone who asks. Replace this
+# with your real service — the only platform contract is that the round's
+# flag lives at /flag (and \\$GZCTF_FLAG holds the first round's flag).
+# Defenders patch the bug; attackers exploit it to read another team's /flag.
+while IFS= read -r line; do
+    line="\${line%$'\\r'}"
+    [ -z "$line" ] && break
+done
+
+flag="$(cat /flag 2>/dev/null || echo 'no flag yet')"
+body="flag is: \${flag}
+"
+printf 'HTTP/1.1 200 OK\\r\\n'
+printf 'Content-Type: text/plain\\r\\n'
+printf 'Content-Length: %d\\r\\n' "\${#body}"
+printf 'Connection: close\\r\\n'
+printf '\\r\\n'
+printf '%s' "$body"
+`
+
+const AD_CHECKER_DOCKERFILE = `FROM alpine:3.21
+
+RUN apk add --no-cache curl
+
+COPY check.sh /check.sh
+RUN chmod +x /check.sh
+
+# enochecker3 exit-code contract: 0 Ok / 1 Mumble / 2 Offline / 3 InternalError.
+# The platform runs this image once per (team, tick) with the target +
+# planted flag in the environment.
+ENTRYPOINT ["/check.sh"]
+`
+
+const AD_CHECK_SH = `#!/bin/sh
+# Reference checker for the example echo service. The platform sets:
+#   GZCTF_TARGET_IP / GZCTF_TARGET_PORT  -> the team's service
+#   GZCTF_FLAG                           -> the flag planted THIS tick
+#   GZCTF_ROUND / GZCTF_TEAM_ID          -> context (unused here)
+#
+# Exit code -> check status:
+#   0 Ok       flag retrieved as planted
+#   1 Mumble   service up but flag wrong / missing
+#   2 Offline  TCP refused / timeout
+#   3 InternalError  checker bug / missing env
+set -u
+
+[ -z "\${GZCTF_TARGET_IP:-}" ] && { echo "no target ip" >&2; exit 3; }
+[ -z "\${GZCTF_TARGET_PORT:-}" ] && { echo "no target port" >&2; exit 3; }
+
+body="$(curl -sS --max-time 5 "http://\${GZCTF_TARGET_IP}:\${GZCTF_TARGET_PORT}/" 2>&1)"
+rc=$?
+case "$rc" in
+    0) ;;
+    6|7|28|56) echo "offline: $body" >&2; exit 2 ;;
+    *) echo "offline (curl $rc): $body" >&2; exit 2 ;;
+esac
+
+# No flag context (warmup) -> reachability only.
+[ -z "\${GZCTF_FLAG:-}" ] && exit 0
+
+case "$body" in
+    *"\${GZCTF_FLAG}"*) exit 0 ;;
+    *) echo "flag missing from response" >&2; exit 1 ;;
+esac
+`
+
+const AD_SOLVER = `# Example A&D exploit.
+#
+# In Attack & Defense your "solver" is the exploit you run against OTHER
+# teams' instances of this service each tick, then submit the captured
+# flags via the API (see the in-game Toolkit -> "How to submit").
+#
+#   import requests
+#   flag = requests.get(f"http://{target_ip}/", timeout=5).text
+#   # POST flag to /api/Game/{id}/Ad/Submit with your Bearer token
+`
+
+// ---------------------------------------------------------------------------
 // Build / download helpers
 // ---------------------------------------------------------------------------
 
@@ -160,6 +298,24 @@ export async function buildDynamicContainerTemplate(): Promise<Blob> {
   zip.file('src/docker-compose.yml', DYNAMIC_DOCKER_COMPOSE)
   zip.file('dist/.gitignore', DYNAMIC_DIST_GITIGNORE)
   zip.file('solver/solve.py', DYNAMIC_SOLVER)
+  return zip.generateAsync({ type: 'blob', compression: 'DEFLATE' })
+}
+
+/**
+ * Attack & Defense template — a persistent per-team service plus a
+ * checker. No `flags:` / `flagTemplate:`: the platform plants a fresh
+ * flag into `/flag` every tick and rotates it. Ships the vuln service
+ * under `src/`, a reference checker under `checker/`, and an exploit
+ * stub under `solver/`.
+ */
+export async function buildAttackDefenseTemplate(): Promise<Blob> {
+  const zip = new JSZip()
+  zip.file('challenge.yml', AD_CHALLENGE_YAML)
+  zip.file('src/Dockerfile', AD_DOCKERFILE)
+  zip.file('src/serve.sh', AD_SERVE_SH)
+  zip.file('checker/Dockerfile', AD_CHECKER_DOCKERFILE)
+  zip.file('checker/check.sh', AD_CHECK_SH)
+  zip.file('solver/solve.py', AD_SOLVER)
   return zip.generateAsync({ type: 'blob', compression: 'DEFLATE' })
 }
 

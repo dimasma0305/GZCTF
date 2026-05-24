@@ -394,15 +394,21 @@ public sealed class ChallengeImportService(
             problems.Add("Missing a working solver. Add a non-empty file under solver/ "
                 + "(e.g. solver/solve.py) so admins can verify the challenge.");
 
-        // 2. Flag source declared.
-        var hasStaticFlags = model.Flags is { Count: > 0 }
-            && model.Flags.Any(f => !string.IsNullOrWhiteSpace(f));
-        var hasFlagTemplate =
-            !string.IsNullOrWhiteSpace(model.Container?.FlagTemplate)
-            || !string.IsNullOrWhiteSpace(model.FlagTemplate);
-        if (!hasStaticFlags && !hasFlagTemplate)
-            problems.Add("No flag declared. Add either a `flags:` list (static) "
-                + "or a `flagTemplate:` field under `container:` (dynamic).");
+        // 2. Flag source declared. A&D is exempt — flags aren't authored
+        // in the package; the platform plants a fresh per-team flag into
+        // each container every tick (see AdRoundService), so neither a
+        // `flags:` list nor a `flagTemplate:` applies.
+        if (!type.IsAttackDefense())
+        {
+            var hasStaticFlags = model.Flags is { Count: > 0 }
+                && model.Flags.Any(f => !string.IsNullOrWhiteSpace(f));
+            var hasFlagTemplate =
+                !string.IsNullOrWhiteSpace(model.Container?.FlagTemplate)
+                || !string.IsNullOrWhiteSpace(model.FlagTemplate);
+            if (!hasStaticFlags && !hasFlagTemplate)
+                problems.Add("No flag declared. Add either a `flags:` list (static) "
+                    + "or a `flagTemplate:` field under `container:` (dynamic).");
+        }
 
         // 3. Container types need a buildable shape.
         if (type.IsContainer())
@@ -599,6 +605,22 @@ public sealed class ChallengeImportService(
             if (Enum.TryParse<NetworkMode>(m.Container?.NetworkMode ?? "", true, out var nm))
                 c.NetworkMode = nm;
             c.EnableTrafficCapture = m.Container?.EnableTrafficCapture ?? c.EnableTrafficCapture;
+        }
+
+        // A&D-specific knobs. Each falls back to whatever's already on the row
+        // (platform defaults for a fresh import), so a sparse `ad:` block only
+        // overrides the fields it names. AdAllowEgress also feeds the network
+        // mode the checker + container attach to.
+        if (type.IsAttackDefense() && m.Ad is { } ad)
+        {
+            if (!string.IsNullOrWhiteSpace(ad.CheckerImage))
+                c.AdCheckerImage = ad.CheckerImage.Trim();
+            c.AdTickSeconds = ad.TickSeconds ?? c.AdTickSeconds;
+            c.AdFlagLifetimeTicks = ad.FlagLifetimeTicks ?? c.AdFlagLifetimeTicks;
+            c.AdAllowEgress = ad.AllowEgress ?? c.AdAllowEgress;
+            c.AdAllowSelfReset = ad.AllowSelfReset ?? c.AdAllowSelfReset;
+            c.AdResetCooldownMinutes = ad.ResetCooldownMinutes ?? c.AdResetCooldownMinutes;
+            c.AdAllowSnapshotDownload = ad.AllowSnapshotDownload ?? c.AdAllowSnapshotDownload;
         }
 
         // 'visible:' is intentionally ignored — admin is the only one who

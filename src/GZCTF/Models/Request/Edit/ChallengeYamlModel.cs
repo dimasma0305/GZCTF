@@ -75,6 +75,44 @@ public sealed class ChallengeYamlModel
     [YamlMember(Alias = "container")]
     public ContainerSection? Container { get; set; }
 
+    /// <summary>
+    /// Attack &amp; Defense block — only consulted when <c>type: AttackDefense</c>.
+    /// All fields optional; omitted ones fall back to the platform defaults
+    /// baked into <see cref="GameChallenge"/>. The service image + ports come
+    /// from the shared <c>container:</c> block (A&amp;D reuses them); this block
+    /// only carries the A&amp;D-specific knobs.
+    /// </summary>
+    [YamlMember(Alias = "ad")]
+    public AdSection? Ad { get; set; }
+
+    public sealed class AdSection
+    {
+        /// <summary>
+        /// Checker image (enochecker3 exit-code contract). Optional — when
+        /// omitted the platform falls back to a TCP-reachability probe.
+        /// </summary>
+        [YamlMember(Alias = "checkerImage")]
+        public string? CheckerImage { get; set; }
+
+        [YamlMember(Alias = "tickSeconds")]
+        public int? TickSeconds { get; set; }
+
+        [YamlMember(Alias = "flagLifetimeTicks")]
+        public int? FlagLifetimeTicks { get; set; }
+
+        [YamlMember(Alias = "allowEgress")]
+        public bool? AllowEgress { get; set; }
+
+        [YamlMember(Alias = "allowSelfReset")]
+        public bool? AllowSelfReset { get; set; }
+
+        [YamlMember(Alias = "resetCooldownMinutes")]
+        public int? ResetCooldownMinutes { get; set; }
+
+        [YamlMember(Alias = "allowSnapshotDownload")]
+        public bool? AllowSnapshotDownload { get; set; }
+    }
+
     public sealed class ContainerSection
     {
         /// <summary>

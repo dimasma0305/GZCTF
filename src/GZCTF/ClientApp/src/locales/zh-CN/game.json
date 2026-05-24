@@ -495,6 +495,8 @@
       "static_attachment_desc": "纯附件题：参赛者下载 dist/ 中的文件，flag 由服务端按 flags: 列表校验。适合 crypto、reverse、misc 等无需启动服务的题型。",
       "dynamic_container_title": "Dynamic Container（动态容器）",
       "dynamic_container_desc": "每个队伍一个独立容器，flag 通过 GZCTF_FLAG 环境变量注入。可防止 flag 共享。",
+      "attack_defense_title": "Attack & Defense（攻防）",
+      "attack_defense_desc": "每队一个持续运行的服务 + 一个 checker。平台每个 tick 向 /flag 写入新 flag 并轮换 —— 无需 flags: 或 flagTemplate:。防守方修补漏洞，攻击方利用其他队伍的实例。",
       "download_template": "下载模板",
       "tips_title": "说明",
       "tips": {

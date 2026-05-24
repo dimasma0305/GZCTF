@@ -32,6 +32,7 @@ import { WithNavBar } from '@Components/WithNavbar'
 import { WithRole } from '@Components/WithRole'
 import { useGame } from '@Hooks/useGame'
 import {
+  buildAttackDefenseTemplate,
   buildDynamicContainerTemplate,
   buildStaticAttachmentTemplate,
   downloadBlob,
@@ -198,6 +199,60 @@ container:
   flagTemplate: "FLAG{ini_test_flag_[TEAM_HASH]}"
   exposePort: 8011
   # containerImage omitted → platform auto-builds ./src/Dockerfile`}
+                        </Code>
+                      </Stack>
+
+                      {/* Attack & Defense — persistent service + checker, per-tick flag */}
+                      <Stack gap={6}>
+                        <Group justify="space-between" align="flex-end" wrap="nowrap">
+                          <Stack gap={0}>
+                            <Text size="sm" fw={600}>
+                              {t('game.submit.example.attack_defense_title', 'Attack & Defense')}
+                            </Text>
+                            <Text size="xs" c="dimmed">
+                              {t(
+                                'game.submit.example.attack_defense_desc',
+                                'Persistent per-team service + checker. Platform plants a fresh /flag each tick — no flags: block.'
+                              )}
+                            </Text>
+                          </Stack>
+                          <Button
+                            size="xs"
+                            variant="default"
+                            leftSection={<Icon path={mdiDownload} size={0.9} />}
+                            onClick={async () => {
+                              try {
+                                const blob = await buildAttackDefenseTemplate()
+                                downloadBlob(blob, 'gzctf-attack-defense-template.zip')
+                              } catch (e) {
+                                showErrorMsg(e, t)
+                              }
+                            }}
+                          >
+                            {t('game.submit.example.download_template')}
+                          </Button>
+                        </Group>
+                        <Code block style={{ fontSize: 12 }}>
+                          {`attack-defense.zip
+├── challenge.yml
+├── src/                    ← the vulnerable SERVICE (auto-built)
+│   ├── Dockerfile          ← serves /flag; platform rotates it each tick
+│   └── serve.sh
+├── checker/                ← SLA/correctness checker (push to a registry)
+│   ├── Dockerfile
+│   └── check.sh
+└── solver/
+    └── solve.py            ← your attack exploit`}
+                        </Code>
+                        <Code block style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>
+                          {`type: "AttackDefense"
+container:
+  exposePort: 80          # the per-team service
+ad:
+  checkerImage: ""        # empty → TCP-reachability fallback
+  tickSeconds: 120
+  flagLifetimeTicks: 5
+  allowEgress: false`}
                         </Code>
                       </Stack>
 
