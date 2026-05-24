@@ -10,7 +10,7 @@ import {
   Tooltip,
 } from '@mantine/core'
 import { showNotification } from '@mantine/notifications'
-import { mdiAlertCircleOutline, mdiRestart } from '@mdi/js'
+import { mdiAlertCircleOutline, mdiConsole, mdiRestart } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import { FC, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -49,11 +49,63 @@ interface AdChallengePanelProps {
 export const AdChallengePanel: FC<AdChallengePanelProps> = ({ gameId, challengeId }) => {
   const { t } = useTranslation()
   const { adState, mutate: mutateState } = useAdState(gameId)
+  const { data: sshKey } = api.game.useAdGameGetSshKey(gameId)
   const [resetting, setResetting] = useState(false)
 
   const service: AdTeamServiceStateModel | undefined = adState?.services.find(
     (s) => s.challengeId === challengeId
   )
+
+  // Render the `ssh <id>@host -p <port>` snippet the player runs to shell
+  // into their container for THIS challenge. Host/port come from the SSH
+  // key info endpoint (operator-configured Ad:Ssh:PublicHost/Port). We
+  // only show the snippet once they've registered a key — otherwise it
+  // would just confuse a player whose first auth would fail anyway.
+  const renderSshHint = () => {
+    if (!sshKey?.jumpHost) return null
+    const [host, port] = sshKey.jumpHost.split(':')
+    const cmd = `ssh ${challengeId}@${host} -p ${port ?? '22022'}`
+    return (
+      <Group gap={6} align="center" wrap="nowrap">
+        <Tooltip
+          label={
+            sshKey.exists
+              ? t('game.tooltip.ad.ssh_ready', 'SSH key is registered — connect any time')
+              : t('game.tooltip.ad.ssh_not_ready', 'Register an SSH key in the Toolkit first')
+          }
+        >
+          <Group gap={4} wrap="nowrap" style={{ opacity: sshKey.exists ? 1 : 0.5 }}>
+            <Icon path={mdiConsole} size={0.6} />
+            <Text size="xs" c="dimmed">
+              SSH:
+            </Text>
+          </Group>
+        </Tooltip>
+        <CopyButton value={cmd}>
+          {({ copied, copy }) => (
+            <Tooltip
+              label={
+                copied
+                  ? t('game.tooltip.copy.copied', 'Copied')
+                  : t('game.tooltip.copy.ssh_cmd', 'Copy ssh command')
+              }
+            >
+              <Text
+                className={misc.ffmono}
+                size="xs"
+                c={sshKey.exists ? undefined : 'dimmed'}
+                truncate
+                style={{ cursor: 'pointer' }}
+                onClick={copy}
+              >
+                {cmd}
+              </Text>
+            </Tooltip>
+          )}
+        </CopyButton>
+      </Group>
+    )
+  }
 
   const onReset = async () => {
     if (!service) return
@@ -194,6 +246,8 @@ export const AdChallengePanel: FC<AdChallengePanelProps> = ({ gameId, challengeI
           </CopyButton>
         </Group>
       )}
+
+      {renderSshHint()}
     </Stack>
   )
 }

@@ -13,7 +13,9 @@ import {
   ModalProps,
   ScrollArea,
   Stack,
+  Tabs,
   Text,
+  Textarea,
   ThemeIcon,
   Title,
 } from '@mantine/core'
@@ -22,15 +24,19 @@ import { showNotification } from '@mantine/notifications'
 import {
   mdiAlertCircleOutline,
   mdiCheck,
+  mdiConsole,
   mdiContentCopy,
   mdiCounter,
   mdiCubeOutline,
+  mdiDelete,
   mdiDownload,
   mdiKeyChain,
+  mdiKeyOutline,
   mdiRestart,
   mdiShieldHalfFull,
   mdiSwordCross,
   mdiToolboxOutline,
+  mdiUpload,
   mdiVpn,
 } from '@mdi/js'
 import { Icon } from '@mdi/react'
@@ -56,10 +62,80 @@ interface AdToolkitModalProps extends ModalProps {
 export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps }) => {
   const { t } = useTranslation()
   const { adTokenHint, mutate: mutateHint } = useAdTokenHint(gameId)
+  const { data: sshKey, mutate: mutateSshKey } = api.game.useAdGameGetSshKey(gameId)
 
   const [rotating, setRotating] = useState(false)
   const [freshToken, setFreshToken] = useState<string | null>(null)
   const [tokenModalOpen, { open: openTokenModal, close: closeTokenModal }] = useDisclosure(false)
+
+  const [sshTab, setSshTab] = useState<string>('paste')
+  const [pastedPubkey, setPastedPubkey] = useState('')
+  const [sshBusy, setSshBusy] = useState(false)
+  const [freshPrivKey, setFreshPrivKey] = useState<{ privateKey: string; publicKey: string; fingerprint: string } | null>(null)
+  const [privKeyModalOpen, { open: openPrivKeyModal, close: closePrivKeyModal }] = useDisclosure(false)
+
+  const onUploadSshKey = async () => {
+    if (!pastedPubkey.trim()) return
+    setSshBusy(true)
+    try {
+      await api.game.adGameUploadSshKey(gameId, { publicKey: pastedPubkey.trim() })
+      setPastedPubkey('')
+      mutateSshKey()
+      showNotification({
+        color: 'teal',
+        message: t('game.notification.ad.ssh.uploaded', 'SSH public key registered'),
+        icon: <Icon path={mdiCheck} size={1} />,
+      })
+    } catch (e) {
+      showErrorMsg(e, t)
+    } finally {
+      setSshBusy(false)
+    }
+  }
+
+  const onGenerateSshKey = async () => {
+    setSshBusy(true)
+    try {
+      const { data } = await api.game.adGameGenerateSshKey(gameId)
+      setFreshPrivKey({ privateKey: data.privateKey, publicKey: data.publicKey, fingerprint: data.fingerprint })
+      openPrivKeyModal()
+      mutateSshKey()
+    } catch (e) {
+      showErrorMsg(e, t)
+    } finally {
+      setSshBusy(false)
+    }
+  }
+
+  const onRevokeSshKey = async () => {
+    setSshBusy(true)
+    try {
+      await api.game.adGameRevokeSshKey(gameId)
+      mutateSshKey()
+      showNotification({
+        color: 'orange',
+        message: t('game.notification.ad.ssh.revoked', 'SSH key revoked'),
+      })
+    } catch (e) {
+      showErrorMsg(e, t)
+    } finally {
+      setSshBusy(false)
+    }
+  }
+
+  const downloadPrivKey = () => {
+    if (!freshPrivKey) return
+    const blob = new Blob([freshPrivKey.privateKey], { type: 'application/x-pem-file' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `gzctf-ad-game${gameId}.key`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const jumpHost = sshKey?.jumpHost ?? 'host:22022'
+  const sshExample = `ssh <challenge-id>@${jumpHost.split(':')[0]} -p ${jumpHost.split(':')[1] ?? '22022'} -i ~/.ssh/your-key`
 
   const apiUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/api/Game/${gameId}/Ad`
 
@@ -221,7 +297,7 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
                       <Button
                         leftSection={<Icon path={mdiDownload} size={0.9} />}
                         component="a"
-                        href={api.game.gameAdVpnConfigUrl(gameId)}
+                        href={`/api/Game/${gameId}/Ad/Vpn/Config`}
                         download
                       >
                         {t('game.button.ad.download_vpn', 'Download .conf')}
@@ -231,6 +307,149 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
                       {t(
                         'game.content.ad.guide.vpn.linux_hint',
                         'Linux: sudo wg-quick up ./ad-game-….conf. macOS / Windows: import via the official WireGuard app.'
+                      )}
+                    </Text>
+                  </Stack>
+                </Accordion.Panel>
+              </Accordion.Item>
+
+              {/* SSH */}
+              <Accordion.Item value="ssh">
+                <Accordion.Control
+                  icon={<Icon path={mdiConsole} size={1} color="var(--mantine-color-grape-6)" />}
+                >
+                  <Text fw={600}>{t('game.content.ad.guide.ssh.title', 'Shell access (SSH)')}</Text>
+                </Accordion.Control>
+                <Accordion.Panel>
+                  <Stack gap="sm">
+                    <Text size="sm">
+                      {t(
+                        'game.content.ad.guide.ssh.intro',
+                        "Direct shell into your team's container for any A&D challenge — patch the binary, tail logs, read /flag, install tools. Auth is your SSH key, identity is the SSH username (= the challenge id)."
+                      )}
+                    </Text>
+
+                    <Group justify="space-between" wrap="wrap" gap="xs">
+                      <Group gap="xs">
+                        <Text size="sm" fw={600}>
+                          {t('game.content.ad.guide.ssh.current', 'Your registered key')}:
+                        </Text>
+                        {sshKey?.exists ? (
+                          <Group gap={4}>
+                            <Text size="sm" className={misc.ffmono}>
+                              {sshKey.fingerprint}
+                            </Text>
+                            <Text size="xs" c="dimmed">
+                              ({sshKey.algorithm}
+                              {sshKey.platformGenerated && t('game.content.ad.guide.ssh.generated_tag', ', platform-generated')}
+                              )
+                            </Text>
+                          </Group>
+                        ) : (
+                          <Text size="sm" c="dimmed">
+                            {t('game.content.ad.guide.ssh.no_key', 'No key yet')}
+                          </Text>
+                        )}
+                      </Group>
+                      {sshKey?.exists && (
+                        <Button
+                          size="xs"
+                          variant="default"
+                          color="red"
+                          leftSection={<Icon path={mdiDelete} size={0.7} />}
+                          loading={sshBusy}
+                          onClick={onRevokeSshKey}
+                        >
+                          {t('game.button.ad.ssh.revoke', 'Revoke')}
+                        </Button>
+                      )}
+                    </Group>
+                    {sshKey?.exists && sshKey.lastUsedAt && (
+                      <Text size="xs" c="dimmed">
+                        {t('game.content.ad.last_used', 'Last used')}: {dayjs(sshKey.lastUsedAt).fromNow()}
+                      </Text>
+                    )}
+
+                    <Divider />
+
+                    <Tabs value={sshTab} onChange={(v) => v && setSshTab(v)}>
+                      <Tabs.List>
+                        <Tabs.Tab value="paste" leftSection={<Icon path={mdiKeyOutline} size={0.8} />}>
+                          {t('game.content.ad.guide.ssh.tab_paste', 'Paste public key')}
+                        </Tabs.Tab>
+                        <Tabs.Tab value="generate" leftSection={<Icon path={mdiKeyChain} size={0.8} />}>
+                          {t('game.content.ad.guide.ssh.tab_generate', 'Generate keypair')}
+                        </Tabs.Tab>
+                      </Tabs.List>
+
+                      <Tabs.Panel value="paste" pt="sm">
+                        <Stack gap="xs">
+                          <Text size="xs" c="dimmed">
+                            {t(
+                              'game.content.ad.guide.ssh.paste_hint',
+                              'Run `cat ~/.ssh/id_ed25519.pub` (or id_rsa.pub) locally and paste the single line below. The private half never leaves your machine.'
+                            )}
+                          </Text>
+                          <Textarea
+                            value={pastedPubkey}
+                            onChange={(e) => setPastedPubkey(e.currentTarget.value)}
+                            placeholder="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5... your-comment"
+                            minRows={2}
+                            maxRows={4}
+                            autosize
+                            styles={{ input: { fontFamily: 'monospace', fontSize: '0.75rem' } }}
+                          />
+                          <Group justify="flex-end">
+                            <Button
+                              size="xs"
+                              leftSection={<Icon path={mdiUpload} size={0.8} />}
+                              loading={sshBusy}
+                              disabled={!pastedPubkey.trim()}
+                              onClick={onUploadSshKey}
+                            >
+                              {sshKey?.exists
+                                ? t('game.button.ad.ssh.replace', 'Replace')
+                                : t('game.button.ad.ssh.upload', 'Upload')}
+                            </Button>
+                          </Group>
+                        </Stack>
+                      </Tabs.Panel>
+
+                      <Tabs.Panel value="generate" pt="sm">
+                        <Stack gap="xs">
+                          <Text size="xs" c="dimmed">
+                            {t(
+                              'game.content.ad.guide.ssh.generate_hint',
+                              "Less secure (the private key crosses the network once). Useful if you don't have ssh-keygen locally, e.g. on Windows without WSL. Downloads a .key file you save and pass to ssh -i."
+                            )}
+                          </Text>
+                          <Group justify="flex-end">
+                            <Button
+                              size="xs"
+                              color="grape"
+                              leftSection={<Icon path={mdiKeyChain} size={0.8} />}
+                              loading={sshBusy}
+                              onClick={onGenerateSshKey}
+                            >
+                              {t('game.button.ad.ssh.generate', 'Generate ed25519 keypair')}
+                            </Button>
+                          </Group>
+                        </Stack>
+                      </Tabs.Panel>
+                    </Tabs>
+
+                    <Divider />
+
+                    <Text size="sm" fw={600}>
+                      {t('game.content.ad.guide.ssh.connect', 'Connect')}
+                    </Text>
+                    <Code block className={misc.ffmono} style={{ fontSize: '0.75rem' }}>
+                      {sshExample}
+                    </Code>
+                    <Text size="xs" c="dimmed">
+                      {t(
+                        'game.content.ad.guide.ssh.connect_hint',
+                        'Replace <challenge-id> with the numeric id from the challenge card (visible in the URL and the "SSH access" hint inside each challenge). The username doubles as the target selector — `ssh 76@host` lands in your team\'s container for challenge 76.'
                       )}
                     </Text>
                   </Stack>
@@ -600,6 +819,68 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
               onClick={() => {
                 closeTokenModal()
                 setFreshToken(null)
+              }}
+            >
+              {t('common.modal.confirm', 'Confirm')}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* Generated SSH keypair reveal — private key shown ONCE */}
+      <Modal
+        opened={privKeyModalOpen}
+        size="lg"
+        onClose={() => {
+          closePrivKeyModal()
+          setFreshPrivKey(null)
+        }}
+        title={t('game.content.ad.ssh_modal.title', 'Your new SSH keypair')}
+        centered
+      >
+        <Stack gap="sm">
+          <Alert color="orange" icon={<Icon path={mdiAlertCircleOutline} size={1} />}>
+            {t(
+              'game.content.ad.ssh_modal.warning',
+              'Download the private key now — it will not be shown again. Save it somewhere ssh-agent can find it (e.g. ~/.ssh/) and chmod 600.'
+            )}
+          </Alert>
+          <Text size="xs" fw={600}>
+            {t('game.content.ad.ssh_modal.fingerprint', 'Fingerprint')}
+          </Text>
+          <Code className={misc.ffmono}>{freshPrivKey?.fingerprint}</Code>
+          <Text size="xs" fw={600}>
+            {t('game.content.ad.ssh_modal.private', 'Private key (PEM, OpenSSH format)')}
+          </Text>
+          <Box style={{ position: 'relative' }}>
+            <Code block className={misc.ffmono} style={{ maxHeight: 220, overflow: 'auto', fontSize: '0.7rem' }}>
+              {freshPrivKey?.privateKey}
+            </Code>
+          </Box>
+          <Group justify="flex-end">
+            <CopyButton value={freshPrivKey?.privateKey ?? ''}>
+              {({ copied, copy }) => (
+                <Button
+                  variant="default"
+                  leftSection={<Icon path={copied ? mdiCheck : mdiContentCopy} size={0.8} />}
+                  onClick={copy}
+                >
+                  {copied
+                    ? t('game.tooltip.copy.copied', 'Copied')
+                    : t('game.button.ad.ssh.copy_private', 'Copy')}
+                </Button>
+              )}
+            </CopyButton>
+            <Button
+              leftSection={<Icon path={mdiDownload} size={0.8} />}
+              onClick={downloadPrivKey}
+            >
+              {t('game.button.ad.ssh.download_key', 'Download .key')}
+            </Button>
+            <Button
+              onClick={() => {
+                closePrivKeyModal()
+                setFreshPrivKey(null)
               }}
             >
               {t('common.modal.confirm', 'Confirm')}

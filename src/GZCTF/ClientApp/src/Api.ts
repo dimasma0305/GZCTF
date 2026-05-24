@@ -1823,6 +1823,32 @@ export interface AdTokenGenerateResultModel {
   rotatedAt: string;
 }
 
+/** A&D SSH key — body for POST /api/Game/{id}/Ad/Ssh/Key. */
+export interface AdSshKeyUploadModel {
+  publicKey: string;
+}
+
+/** A&D SSH key — GET response (no plaintext). */
+export interface AdSshKeyInfoModel {
+  exists: boolean;
+  algorithm: string;
+  fingerprint: string;
+  platformGenerated: boolean;
+  createdAt?: string | null;
+  lastUsedAt?: string | null;
+  /** Hostname:port the player ssh's to (Ad:Ssh:PublicHost/Port). */
+  jumpHost?: string | null;
+}
+
+/** A&D SSH key — server-generated keypair (private key shown once). */
+export interface AdSshKeyGeneratedModel {
+  algorithm: string;
+  publicKey: string;
+  privateKey: string;
+  fingerprint: string;
+  createdAt: string;
+}
+
 /** A&D — GET /api/Game/{id}/Ad/Token response (hint only, never plaintext). */
 export interface AdTokenHintModel {
   exists: boolean;
@@ -8043,6 +8069,79 @@ export class Api<
     gameAdRevokeToken: (id: number, params: RequestParams = {}) =>
       this.request<void, RequestResponse>({
         path: `/api/Game/${id}/Ad/Token`,
+        method: "DELETE",
+        ...params,
+      }),
+
+    /**
+     * @description A&D SSH — upload an OpenSSH public key. Private half never leaves the client.
+     * @tags Game
+     * @name AdGameUploadSshKey
+     * @request POST:/api/Game/{id}/Ad/Ssh/Key
+     */
+    adGameUploadSshKey: (id: number, data: AdSshKeyUploadModel, params: RequestParams = {}) =>
+      this.request<AdSshKeyInfoModel, RequestResponse>({
+        path: `/api/Game/${id}/Ad/Ssh/Key`,
+        method: "POST",
+        body: data,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description A&D SSH — server-generate an ed25519 keypair. Private key returned ONCE.
+     * @tags Game
+     * @name AdGameGenerateSshKey
+     * @request POST:/api/Game/{id}/Ad/Ssh/Key/Generate
+     */
+    adGameGenerateSshKey: (id: number, params: RequestParams = {}) =>
+      this.request<AdSshKeyGeneratedModel, RequestResponse>({
+        path: `/api/Game/${id}/Ad/Ssh/Key/Generate`,
+        method: "POST",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description A&D SSH — caller's installed key metadata (no plaintext).
+     * @tags Game
+     * @name AdGameGetSshKey
+     * @request GET:/api/Game/{id}/Ad/Ssh/Key
+     */
+    adGameGetSshKey: (id: number, params: RequestParams = {}) =>
+      this.request<AdSshKeyInfoModel, RequestResponse>({
+        path: `/api/Game/${id}/Ad/Ssh/Key`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description A&D SSH — caller's installed key metadata, SWR-friendly hook.
+     * @tags Game
+     * @name AdGameGetSshKey
+     * @request GET:/api/Game/{id}/Ad/Ssh/Key
+     */
+    useAdGameGetSshKey: (
+      id: number,
+      options?: SWRConfiguration,
+      doFetch: boolean = true,
+    ) =>
+      useSWR<AdSshKeyInfoModel, RequestResponse>(
+        doFetch ? `/api/Game/${id}/Ad/Ssh/Key` : null,
+        options,
+      ),
+
+    /**
+     * @description A&D SSH — revoke caller's installed key.
+     * @tags Game
+     * @name AdGameRevokeSshKey
+     * @request DELETE:/api/Game/{id}/Ad/Ssh/Key
+     */
+    adGameRevokeSshKey: (id: number, params: RequestParams = {}) =>
+      this.request<void, RequestResponse>({
+        path: `/api/Game/${id}/Ad/Ssh/Key`,
         method: "DELETE",
         ...params,
       }),
