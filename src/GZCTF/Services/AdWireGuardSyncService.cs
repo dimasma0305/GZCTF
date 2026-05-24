@@ -106,7 +106,9 @@ public sealed class AdWireGuardSyncService(
 
         var sb = new StringBuilder();
         sb.AppendLine("# wg0.conf — managed by GZCTF AdWireGuardSyncService. Do not edit by hand.");
-        sb.AppendLine($"# Generated {DateTimeOffset.UtcNow:u} — {peers.Count} active peer(s)");
+        sb.AppendLine($"# {peers.Count} active peer(s)");
+        // No "Generated <timestamp>" line — it would defeat the no-op dedup
+        // below and cause a wg syncconf every poll tick.
         sb.AppendLine();
         sb.AppendLine("[Interface]");
         sb.AppendLine($"Address = {serverIp}/{ParsePrefix(ClientCidr)}");
