@@ -6,7 +6,14 @@ import ReactDOM from 'react-dom/client'
 import { initReactI18next } from 'react-i18next'
 import { BrowserRouter } from 'react-router'
 import manifest from 'virtual:i18n-manifest'
+import { installClipboardPolyfill } from '@Utils/clipboardPolyfill'
 import { convertLanguage, LanguageProvider } from '@Utils/I18n'
+
+// Browsers gate navigator.clipboard behind a secure context (HTTPS or
+// localhost). Plain HTTP deploys like 1pc.tf:8080 lose every Mantine
+// CopyButton silently — install the execCommand fallback before any
+// Mantine code runs.
+installClipboardPolyfill()
 
 i18n
   .use(LanguageDetector)
