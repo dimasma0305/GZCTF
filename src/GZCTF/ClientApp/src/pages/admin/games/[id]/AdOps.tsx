@@ -38,6 +38,7 @@ import { WithGameEditTab } from '@Components/admin/WithGameEditTab'
 import { showErrorMsg } from '@Utils/Shared'
 import { useIsMobile } from '@Utils/ThemeOverride'
 import { useAdminAdState } from '@Hooks/useGame'
+import { useTicker } from '@Hooks/useTicker'
 import api, { AdTeamCellModel } from '@Api'
 import misc from '@Styles/Misc.module.css'
 import tableClasses from '@Styles/AdOpsTable.module.css'
@@ -162,8 +163,9 @@ const AdOps: FC = () => {
     )
   }
 
+  const now = useTicker()
   const roundEndsIn =
-    state.roundEndsAt ? Math.max(0, dayjs(state.roundEndsAt).diff(dayjs(), 'second')) : null
+    state.roundEndsAt ? Math.max(0, dayjs(state.roundEndsAt).diff(now, 'second')) : null
 
   return (
     <WithGameEditTab>

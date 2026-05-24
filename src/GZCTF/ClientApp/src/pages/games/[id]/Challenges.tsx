@@ -15,6 +15,7 @@ import { WithNavBar } from '@Components/WithNavbar'
 import { WithRole } from '@Components/WithRole'
 import { useAdState } from '@Hooks/useGame'
 import { useGameTeamInfo } from '@Hooks/useGame'
+import { useTicker } from '@Hooks/useTicker'
 import { ChallengeType, Role } from '@Api'
 
 const Challenges: FC = () => {
@@ -34,8 +35,12 @@ const Challenges: FC = () => {
   const { adState } = useAdState(numId, hasAd)
   const [guideOpened, guideHandlers] = useDisclosure(false)
 
+  // useTicker fires every 1s so the countdown actually counts down between
+  // SWR refreshes (which only happen every 10s). Without this the value is
+  // frozen until the next adState refetch.
+  const now = useTicker()
   const roundEndsIn = adState?.roundEndsAt
-    ? Math.max(0, dayjs(adState.roundEndsAt).diff(dayjs(), 'second'))
+    ? Math.max(0, dayjs(adState.roundEndsAt).diff(now, 'second'))
     : null
 
   return (
