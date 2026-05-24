@@ -1,0 +1,67 @@
+# Attack & Defense NetworkPolicy — apply this in whatever namespace your
+# KubernetesConfig.Namespace points at. Provides L4 isolation:
+#
+#   • A&D pods can talk to other pods in the same namespace (peer-to-peer
+#     attacks + checker access) — this is the gameplay
+#   • A&D pods CANNOT reach the gzctf control plane or other Docker/K8s
+#     networks — they're sandboxed
+#   • Per-challenge AdAllowEgress=true is NOT honoured at this layer — if
+#     a specific challenge needs external internet, add a more permissive
+#     NetworkPolicy or run that challenge on the Docker provider instead
+#
+# Known limitation vs the Docker provider:
+#   • L2 ARP-spoofing prevention (FAUST-style) is not configured here. K8s
+#     doesn't have an ebtables-on-bridge equivalent without Multus CNI or
+#     Cilium ARP-inspect rules. For events that require strict L2 isolation,
+#     deploy via the Docker provider or layer a CNI that supports it.
+#
+# Per-game namespace isolation (ad-{gameId} suggested in the roadmap) is
+# also a future enhancement — for v1, all A&D containers across all games
+# share the configured namespace alongside jeopardy challenge pods. Per-
+# game NetworkPolicies + namespaces will reduce blast radius further when
+# they land.
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ad-isolation
+  # Set this to whatever your appsettings.ContainerProvider.KubernetesConfig.Namespace is.
+  namespace: gzctf-challenges
+spec:
+  # Apply to pods labeled with the challenge type. The GZCTF Kubernetes
+  # provider labels challenge pods; A&D pods inherit those labels.
+  podSelector:
+    matchLabels:
+      gzctf/category: attack-defense
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # Allow ingress from any pod in the same namespace (other teams' A&D
+    # containers attacking + the checker probing). This is the gameplay.
+    - from:
+        - podSelector: {}
+
+  egress:
+    # Allow egress to any pod in the same namespace.
+    - to:
+        - podSelector: {}
+    # Allow DNS so service discovery works (required for the checker
+    # to resolve service hostnames; required for any service that uses
+    # DNS internally).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # NO general egress rule = all other outbound traffic is denied.
+    # Operators needing public internet for a specific challenge should
+    # add a more permissive override or run that challenge on Docker.

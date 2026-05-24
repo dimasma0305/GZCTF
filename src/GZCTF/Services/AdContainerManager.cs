@@ -20,13 +20,21 @@ namespace GZCTF.Services;
 ///   <item>For each active A&amp;D game (running window + has AttackDefense challenges):
 ///         ensure every accepted Participation has a live container for every A&amp;D
 ///         challenge. Launch missing ones via <see cref="IContainerManager"/>.</item>
-///   <item>For ended games: destroy any still-running A&amp;D containers.</item>
+///   <item>For ended games: snapshot (Docker only) + destroy any still-running
+///         A&amp;D containers.</item>
 /// </list>
 ///
-/// <para>MVP scope: uses the existing per-game Docker/K8s network (no dedicated
+/// <para>MVP scope: uses the existing per-provider network (no dedicated
 /// ad-net + ebtables L2 isolation yet — Phase 1 follow-up). Late-join works
 /// implicitly: an Accepted-mid-game Participation gets containers on the next
 /// reconcile tick (≤ <see cref="PollInterval"/> seconds).</para>
+///
+/// <para>Provider compatibility — works on both Docker and Kubernetes via the
+/// <see cref="IContainerManager"/> abstraction. K8s-only operators should
+/// apply <c>scripts/ad-k8s-networkpolicy.yaml</c> for L4 isolation between
+/// A&amp;D pods and the control plane. See <c>scripts/ad-k8s-readme.md</c>
+/// for the parity gaps (L2 isolation, snapshot, per-game namespace) that
+/// stay Docker-only for v1.</para>
 /// </summary>
 public sealed class AdContainerManager(
     IServiceScopeFactory scopeFactory,
