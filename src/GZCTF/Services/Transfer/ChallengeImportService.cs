@@ -607,20 +607,17 @@ public sealed class ChallengeImportService(
             c.EnableTrafficCapture = m.Container?.EnableTrafficCapture ?? c.EnableTrafficCapture;
         }
 
-        // A&D-specific knobs. Each falls back to whatever's already on the row
-        // (platform defaults for a fresh import), so a sparse `ad:` block only
-        // overrides the fields it names. AdAllowEgress also feeds the network
-        // mode the checker + container attach to.
+        // A&D per-challenge knobs (the service's own properties). Event-wide
+        // policy — tick, flag lifetime, reset cooldown, snapshot — lives on
+        // the game, set via admin game settings, not here. A sparse `ad:`
+        // block only overrides the fields it names. AdAllowEgress also feeds
+        // the network mode the checker + container attach to.
         if (type.IsAttackDefense() && m.Ad is { } ad)
         {
             if (!string.IsNullOrWhiteSpace(ad.CheckerImage))
                 c.AdCheckerImage = ad.CheckerImage.Trim();
-            c.AdTickSeconds = ad.TickSeconds ?? c.AdTickSeconds;
-            c.AdFlagLifetimeTicks = ad.FlagLifetimeTicks ?? c.AdFlagLifetimeTicks;
             c.AdAllowEgress = ad.AllowEgress ?? c.AdAllowEgress;
             c.AdAllowSelfReset = ad.AllowSelfReset ?? c.AdAllowSelfReset;
-            c.AdResetCooldownMinutes = ad.ResetCooldownMinutes ?? c.AdResetCooldownMinutes;
-            c.AdAllowSnapshotDownload = ad.AllowSnapshotDownload ?? c.AdAllowSnapshotDownload;
         }
 
         // 'visible:' is intentionally ignored — admin is the only one who

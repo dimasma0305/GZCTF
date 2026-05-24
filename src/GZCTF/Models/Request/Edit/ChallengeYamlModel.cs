@@ -94,23 +94,16 @@ public sealed class ChallengeYamlModel
         [YamlMember(Alias = "checkerImage")]
         public string? CheckerImage { get; set; }
 
-        [YamlMember(Alias = "tickSeconds")]
-        public int? TickSeconds { get; set; }
-
-        [YamlMember(Alias = "flagLifetimeTicks")]
-        public int? FlagLifetimeTicks { get; set; }
-
         [YamlMember(Alias = "allowEgress")]
         public bool? AllowEgress { get; set; }
 
         [YamlMember(Alias = "allowSelfReset")]
         public bool? AllowSelfReset { get; set; }
 
-        [YamlMember(Alias = "resetCooldownMinutes")]
-        public int? ResetCooldownMinutes { get; set; }
-
-        [YamlMember(Alias = "allowSnapshotDownload")]
-        public bool? AllowSnapshotDownload { get; set; }
+        // tickSeconds / flagLifetimeTicks / resetCooldownMinutes /
+        // allowSnapshotDownload are EVENT-WIDE — set them on the game (admin
+        // game settings), not per challenge. Rounds span the whole game, so a
+        // per-challenge tick was never actually honored.
     }
 
     public sealed class ContainerSection

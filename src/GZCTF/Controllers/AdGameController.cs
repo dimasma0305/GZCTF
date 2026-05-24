@@ -137,8 +137,10 @@ public class AdGameController(
             return result;
         }
 
-        var challenge = await db.GameChallenges.FirstAsync(c => c.Id == adFlag.AdTeamService.ChallengeId, token);
-        var lifetimeTicks = challenge.AdFlagLifetimeTicks ?? 5;
+        var lifetimeTicks = await db.Games
+            .Where(g => g.Id == currentRound.GameId)
+            .Select(g => g.AdFlagLifetimeTicks)
+            .FirstOrDefaultAsync(token) ?? 5;
         if (adFlag.PlantedAtRound < currentRound.Number - lifetimeTicks + 1)
         {
             result.Status = "expired";
@@ -403,8 +405,11 @@ public class AdGameController(
         if (!ts.Challenge.AdAllowSelfReset)
             return BadRequest(new RequestResponse("Self-reset is disabled for this challenge by the operator"));
 
-        // Cooldown check.
-        var cooldownMinutes = ts.Challenge.AdResetCooldownMinutes ?? 5;
+        // Cooldown check — game-wide policy.
+        var cooldownMinutes = await db.Games
+            .Where(g => g.Id == id)
+            .Select(g => g.AdResetCooldownMinutes)
+            .FirstOrDefaultAsync(token) ?? 5;
         if (ts.LastResetAt is { } last)
         {
             var elapsed = DateTimeOffset.UtcNow - last;
@@ -473,9 +478,14 @@ public class AdGameController(
 
         var lastChecksByService = lastChecks.ToDictionary(c => c.AdTeamServiceId);
 
+        // Reset cooldown is game-wide policy — fetch once, apply to every service.
+        var cooldownMinutes = await db.Games
+            .Where(g => g.Id == id)
+            .Select(g => g.AdResetCooldownMinutes)
+            .FirstOrDefaultAsync(token) ?? 5;
+
         var serviceModels = services.Select(s =>
         {
-            var cooldownMinutes = s.Challenge.AdResetCooldownMinutes ?? 5;
             var cooldownRemaining = s.LastResetAt is { } last
                 ? Math.Max(0, (int)(TimeSpan.FromMinutes(cooldownMinutes) - (DateTimeOffset.UtcNow - last)).TotalSeconds)
                 : 0;
@@ -558,13 +568,19 @@ public class AdGameController(
                 .ToListAsync(token);
         var lastChecksByService = lastChecks.ToDictionary(c => c.AdTeamServiceId);
 
+        // Tick is game-wide — one value for every challenge row below.
+        var tickSeconds = await db.Games
+            .Where(g => g.Id == id)
+            .Select(g => g.AdTickSeconds)
+            .FirstOrDefaultAsync(token) ?? 120;
+
         foreach (var chal in enabledChallenges)
         {
             var row = new AdChallengeTargets
             {
                 ChallengeId = chal.Id,
                 Title = chal.Title,
-                TickSeconds = chal.AdTickSeconds ?? 120,
+                TickSeconds = tickSeconds,
                 Teams = services
                     .Where(s => s.ChallengeId == chal.Id)
                     .OrderBy(s => s.Participation.Team.Name, StringComparer.OrdinalIgnoreCase)

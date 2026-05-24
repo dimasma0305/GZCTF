@@ -746,48 +746,9 @@ const GameChallengeEdit: FC = () => {
                   onChange={(e) => setChallengeInfo({ ...challengeInfo, adCheckerImage: e.target.value })}
                 />
               </Grid.Col>
-              <Grid.Col span={2}>
-                <NumberInput
-                  label={t('admin.content.games.challenges.ad.tick_seconds.label')}
-                  description={t('admin.content.games.challenges.ad.tick_seconds.description')}
-                  min={30}
-                  max={600}
-                  disabled={disabled}
-                  value={challengeInfo.adTickSeconds ?? 120}
-                  onChange={(e) => {
-                    const n = getInputNumber(e)
-                    if (!isNaN(n)) setChallengeInfo({ ...challengeInfo, adTickSeconds: n })
-                  }}
-                />
-              </Grid.Col>
-              <Grid.Col span={2}>
-                <NumberInput
-                  label={t('admin.content.games.challenges.ad.flag_lifetime_ticks.label')}
-                  description={t('admin.content.games.challenges.ad.flag_lifetime_ticks.description')}
-                  min={1}
-                  max={50}
-                  disabled={disabled}
-                  value={challengeInfo.adFlagLifetimeTicks ?? 5}
-                  onChange={(e) => {
-                    const n = getInputNumber(e)
-                    if (!isNaN(n)) setChallengeInfo({ ...challengeInfo, adFlagLifetimeTicks: n })
-                  }}
-                />
-              </Grid.Col>
-              <Grid.Col span={2}>
-                <NumberInput
-                  label={t('admin.content.games.challenges.ad.reset_cooldown_minutes.label')}
-                  description={t('admin.content.games.challenges.ad.reset_cooldown_minutes.description')}
-                  min={0}
-                  max={60}
-                  disabled={disabled}
-                  value={challengeInfo.adResetCooldownMinutes ?? 5}
-                  onChange={(e) => {
-                    const n = getInputNumber(e)
-                    if (!isNaN(n)) setChallengeInfo({ ...challengeInfo, adResetCooldownMinutes: n })
-                  }}
-                />
-              </Grid.Col>
+              {/* tick / flag-lifetime / reset-cooldown / snapshot-download are
+                  event-wide now — edit them in the game's settings (Info tab),
+                  not per challenge. */}
               <Grid.Col span={2}>
                 <NumberInput
                   label={t('admin.content.games.challenges.ad.putflag_window_fraction.label')}
@@ -834,7 +795,7 @@ const GameChallengeEdit: FC = () => {
                   }}
                 />
               </Grid.Col>
-              <Grid.Col span={4} display="flex" className={misc.alignCenter}>
+              <Grid.Col span={6} display="flex" className={misc.alignCenter}>
                 <Switch
                   disabled={disabled}
                   checked={challengeInfo.adAllowEgress ?? false}
@@ -845,7 +806,7 @@ const GameChallengeEdit: FC = () => {
                   onChange={(e) => setChallengeInfo({ ...challengeInfo, adAllowEgress: e.target.checked })}
                 />
               </Grid.Col>
-              <Grid.Col span={4} display="flex" className={misc.alignCenter}>
+              <Grid.Col span={6} display="flex" className={misc.alignCenter}>
                 <Switch
                   disabled={disabled}
                   checked={challengeInfo.adAllowSelfReset ?? true}
@@ -854,17 +815,6 @@ const GameChallengeEdit: FC = () => {
                     t('admin.content.games.challenges.ad.allow_self_reset.description')
                   )}
                   onChange={(e) => setChallengeInfo({ ...challengeInfo, adAllowSelfReset: e.target.checked })}
-                />
-              </Grid.Col>
-              <Grid.Col span={4} display="flex" className={misc.alignCenter}>
-                <Switch
-                  disabled={disabled}
-                  checked={challengeInfo.adAllowSnapshotDownload ?? true}
-                  label={SwitchLabel(
-                    t('admin.content.games.challenges.ad.allow_snapshot_download.label'),
-                    t('admin.content.games.challenges.ad.allow_snapshot_download.description')
-                  )}
-                  onChange={(e) => setChallengeInfo({ ...challengeInfo, adAllowSnapshotDownload: e.target.checked })}
                 />
               </Grid.Col>
             </Grid>

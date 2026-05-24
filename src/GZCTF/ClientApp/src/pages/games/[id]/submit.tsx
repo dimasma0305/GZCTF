@@ -248,11 +248,10 @@ container:
                           {`type: "AttackDefense"
 container:
   exposePort: 80          # the per-team service
-ad:
+ad:                       # per-challenge knobs only
   checkerImage: ""        # empty → TCP-reachability fallback
-  tickSeconds: 120
-  flagLifetimeTicks: 5
-  allowEgress: false`}
+  allowEgress: false
+# tick / flag-lifetime / reset-cooldown are game-wide (admin → game settings)`}
                         </Code>
                       </Stack>
 

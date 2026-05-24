@@ -122,26 +122,15 @@ public class AdSection
     [Required(ErrorMessage = "A&D checker image is required")]
     public string CheckerImage { get; set; } = string.Empty;
 
-    /// <summary>Seconds per tick. Default 120.</summary>
-    [Range(30, 600, ErrorMessage = "tick_seconds must be 30..600")]
-    public int? TickSeconds { get; set; }
-
-    /// <summary>How many ticks a planted flag stays valid. Default 5.</summary>
-    [Range(1, 50, ErrorMessage = "flag_lifetime_ticks must be 1..50")]
-    public int? FlagLifetimeTicks { get; set; }
-
     /// <summary>Whether the team's container can reach the public internet. Default false.</summary>
     public bool? AllowEgress { get; set; }
 
     /// <summary>Whether teams can self-reset their own container. Default true.</summary>
     public bool? AllowSelfReset { get; set; }
 
-    /// <summary>Cooldown between consecutive self-resets, minutes. Default 5.</summary>
-    [Range(0, 60, ErrorMessage = "reset_cooldown_minutes must be 0..60")]
-    public int? ResetCooldownMinutes { get; set; }
-
-    /// <summary>Whether to snapshot the team's container at game end and offer the tarball for download. Default true.</summary>
-    public bool? AllowSnapshotDownload { get; set; }
+    // tick_seconds, flag_lifetime_ticks, reset_cooldown_minutes, and
+    // allow_snapshot_download are EVENT-WIDE policy and live on the game,
+    // not the challenge — see Game.Ad* fields.
 
     /// <summary>Putflag jitter window as a fraction of the tick. Default 0.4.</summary>
     [Range(0.01, 0.9, ErrorMessage = "putflag_window_fraction must be 0.01..0.9")]

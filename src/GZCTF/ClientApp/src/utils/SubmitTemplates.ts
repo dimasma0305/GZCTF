@@ -155,19 +155,17 @@ container:
   cpuCount: 1
   storageLimit: 256
 
-# A&D-specific knobs. All optional — omit to take platform defaults.
+# A&D per-challenge knobs (this service's own properties). All optional.
+# Event-wide policy — tick length, flag lifetime, reset cooldown, snapshot
+# download — lives in the game's settings (admin → game → Info), not here.
 ad:
   # Checker image (enochecker3 exit-code contract: 0 Ok / 1 Mumble /
   # 2 Offline / 3 InternalError). Omit to fall back to a TCP-reachability
   # probe. A local ./checker path is NOT auto-built yet — push the checker
   # to a registry and reference it here, or leave empty for the TCP probe.
   checkerImage: ""
-  tickSeconds: 120
-  flagLifetimeTicks: 5
   allowEgress: false
   allowSelfReset: true
-  resetCooldownMinutes: 5
-  allowSnapshotDownload: true
 `
 
 const AD_DOCKERFILE = `FROM alpine:3.21

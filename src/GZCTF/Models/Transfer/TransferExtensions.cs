@@ -129,12 +129,8 @@ public static class TransferExtensions
                 transfer.Ad = new AdSection
                 {
                     CheckerImage = challenge.AdCheckerImage ?? string.Empty,
-                    TickSeconds = challenge.AdTickSeconds,
-                    FlagLifetimeTicks = challenge.AdFlagLifetimeTicks,
                     AllowEgress = challenge.AdAllowEgress,
                     AllowSelfReset = challenge.AdAllowSelfReset,
-                    ResetCooldownMinutes = challenge.AdResetCooldownMinutes,
-                    AllowSnapshotDownload = challenge.AdAllowSnapshotDownload,
                     PutflagWindowFraction = challenge.AdPutflagWindowFraction,
                     GetflagWindowFraction = challenge.AdGetflagWindowFraction,
                     MinGracePeriodSeconds = challenge.AdMinGracePeriodSeconds
@@ -302,12 +298,8 @@ public static class TransferExtensions
             if (transfer.Type.IsAttackDefense() && transfer.Ad is { } ad)
             {
                 challenge.AdCheckerImage = ad.CheckerImage;
-                if (ad.TickSeconds is { } ts) challenge.AdTickSeconds = ts;
-                if (ad.FlagLifetimeTicks is { } lt) challenge.AdFlagLifetimeTicks = lt;
                 if (ad.AllowEgress is { } ae) challenge.AdAllowEgress = ae;
                 if (ad.AllowSelfReset is { } asr) challenge.AdAllowSelfReset = asr;
-                if (ad.ResetCooldownMinutes is { } cm) challenge.AdResetCooldownMinutes = cm;
-                if (ad.AllowSnapshotDownload is { } asd) challenge.AdAllowSnapshotDownload = asd;
                 if (ad.PutflagWindowFraction is { } pw) challenge.AdPutflagWindowFraction = pw;
                 if (ad.GetflagWindowFraction is { } gw) challenge.AdGetflagWindowFraction = gw;
                 if (ad.MinGracePeriodSeconds is { } mg) challenge.AdMinGracePeriodSeconds = mg;

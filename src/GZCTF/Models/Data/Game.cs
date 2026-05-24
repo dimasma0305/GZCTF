@@ -229,6 +229,10 @@ public partial class Game
         // A&D — only overwrite when caller provides; null leaves existing default.
         if (model.AdWarmupSeconds is { } warmup) AdWarmupSeconds = warmup;
         if (model.AdSnapshotRetentionDays is { } retention) AdSnapshotRetentionDays = retention;
+        if (model.AdTickSeconds is { } tick) AdTickSeconds = tick;
+        if (model.AdFlagLifetimeTicks is { } lifetime) AdFlagLifetimeTicks = lifetime;
+        if (model.AdResetCooldownMinutes is { } cooldown) AdResetCooldownMinutes = cooldown;
+        if (model.AdAllowSnapshotDownload is { } snap) AdAllowSnapshotDownload = snap;
 
         return this;
     }
@@ -308,8 +312,38 @@ public partial class Game
     public int? AdWarmupSeconds { get; set; } = 1800;
 
     /// <summary>
+    /// Seconds per tick — the global scoring unit. The checker runs once per
+    /// (team, service) per tick and flags rotate at tick boundaries.
+    /// Event-wide: every A&amp;D service in the game shares one tick (rounds
+    /// span the whole game), so this is a game knob, not a per-challenge one.
+    /// Default 120. Industry norm is 60–180s.
+    /// </summary>
+    public int? AdTickSeconds { get; set; } = 120;
+
+    /// <summary>
+    /// Number of ticks a planted flag remains valid for attack submission —
+    /// the uniform attack window across the event. Default 5.
+    /// </summary>
+    public int? AdFlagLifetimeTicks { get; set; } = 5;
+
+    /// <summary>
+    /// Minimum minutes between consecutive self-resets of a team's container.
+    /// Event-wide anti-spam fairness policy. Default 5. (Whether a given
+    /// service can be reset at all is the per-challenge
+    /// <see cref="Challenge.AdAllowSelfReset"/> flag.)
+    /// </summary>
+    public int? AdResetCooldownMinutes { get; set; } = 5;
+
+    /// <summary>
+    /// If true, each team's final container state is committed + saved as a
+    /// gzipped tarball at game end and made available for download. Event-wide
+    /// policy; pairs with <see cref="AdSnapshotRetentionDays"/>. Default true.
+    /// </summary>
+    public bool AdAllowSnapshotDownload { get; set; } = true;
+
+    /// <summary>
     /// How long to retain per-team container snapshots (the tarballs produced
-    /// at game end when <see cref="Challenge.AdAllowSnapshotDownload"/>) before
+    /// at game end when <see cref="AdAllowSnapshotDownload"/>) before
     /// the cleanup job expires them. Null (default) = keep forever — operators
     /// opt-in to expiration explicitly. Any positive integer = retain N days
     /// after game end.

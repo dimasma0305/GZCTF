@@ -142,18 +142,6 @@ public class GameChallenge : Challenge
     public string? AdCheckerImage { get; set; }
 
     /// <summary>
-    /// Seconds per tick. The checker runs once per (team, service) per tick;
-    /// flags rotate at tick boundaries. Industry norm is 60–180s; default 120.
-    /// </summary>
-    public int? AdTickSeconds { get; set; } = 120;
-
-    /// <summary>
-    /// Number of ticks a planted flag remains valid for attack submission.
-    /// Default 5 = an attacker has 5 ticks to exfiltrate before the flag rotates out.
-    /// </summary>
-    public int? AdFlagLifetimeTicks { get; set; } = 5;
-
-    /// <summary>
     /// If true, team containers can reach the public internet. Default false
     /// (sandboxed). Opt-in per challenge for services that genuinely need an
     /// external API call.
@@ -162,23 +150,18 @@ public class GameChallenge : Challenge
 
     /// <summary>
     /// If true, teams can self-reset their own container to the baseline image
-    /// (subject to <see cref="AdResetCooldownMinutes"/>). Default true — lets
-    /// teams recover from being fully owned without operator intervention.
+    /// (subject to the game-wide <see cref="Game.AdResetCooldownMinutes"/>).
+    /// Default true — lets teams recover from being fully owned without
+    /// operator intervention. Per-challenge because some fragile services
+    /// shouldn't be resettable at all.
     /// </summary>
     public bool AdAllowSelfReset { get; set; } = true;
 
-    /// <summary>
-    /// Minimum minutes between consecutive self-resets of the same team's
-    /// container. Default 5. Prevents reset spam.
-    /// </summary>
-    public int? AdResetCooldownMinutes { get; set; } = 5;
-
-    /// <summary>
-    /// If true, each team's final container state is committed + saved as a
-    /// gzipped tarball at game end and made available for download. Default
-    /// true — friendly for educational events / post-mortems.
-    /// </summary>
-    public bool AdAllowSnapshotDownload { get; set; } = true;
+    // Tick length, flag lifetime, reset cooldown, and snapshot-download are
+    // EVENT-WIDE policy and live on Game (AdTickSeconds, AdFlagLifetimeTicks,
+    // AdResetCooldownMinutes, AdAllowSnapshotDownload). Rounds span the whole
+    // game, so a per-challenge tick was never actually honored — the round
+    // advancer collapsed them to a single value.
 
     /// <summary>
     /// Putflag jitter window as a fraction of the tick duration. Default 0.4

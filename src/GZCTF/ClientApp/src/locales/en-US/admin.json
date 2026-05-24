@@ -449,6 +449,22 @@
           "label": "A&D snapshot retention (days)",
           "description": "How long the per-team container snapshots stay available for download after game end. Leave empty to keep forever (the default).",
           "placeholder": "∞ (keep forever)"
+        },
+        "ad_tick_seconds": {
+          "label": "A&D tick (seconds)",
+          "description": "Length of one scoring tick. Every A&D service in the game shares this — flags rotate and the checker runs once per tick (default 120)."
+        },
+        "ad_flag_lifetime_ticks": {
+          "label": "A&D flag lifetime (ticks)",
+          "description": "How many ticks a planted flag stays submittable — the attack window (default 5)."
+        },
+        "ad_reset_cooldown_minutes": {
+          "label": "A&D reset cooldown (minutes)",
+          "description": "Minimum minutes between a team's container self-resets (default 5). Whether a service can be reset at all is per-challenge."
+        },
+        "ad_allow_snapshot_download": {
+          "label": "A&D snapshot download",
+          "description": "Snapshot each team's container at game end and offer the tarball for download."
         }
       },
       "managers": {

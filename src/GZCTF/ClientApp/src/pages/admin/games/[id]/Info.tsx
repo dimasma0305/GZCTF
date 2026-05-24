@@ -438,6 +438,52 @@ const GameInfoEdit: FC = () => {
           }}
         />
       </Group>
+      <Group grow gap="md" align="flex-start">
+        <NumberInput
+          label={t('admin.content.games.info.ad_tick_seconds.label')}
+          description={t('admin.content.games.info.ad_tick_seconds.description')}
+          disabled={disabled}
+          min={30}
+          max={600}
+          value={game?.adTickSeconds ?? 120}
+          onChange={(e) => {
+            const n = getInputNumber(e)
+            if (!isNaN(n)) game && setGame({ ...game, adTickSeconds: n })
+          }}
+        />
+        <NumberInput
+          label={t('admin.content.games.info.ad_flag_lifetime_ticks.label')}
+          description={t('admin.content.games.info.ad_flag_lifetime_ticks.description')}
+          disabled={disabled}
+          min={1}
+          max={50}
+          value={game?.adFlagLifetimeTicks ?? 5}
+          onChange={(e) => {
+            const n = getInputNumber(e)
+            if (!isNaN(n)) game && setGame({ ...game, adFlagLifetimeTicks: n })
+          }}
+        />
+        <NumberInput
+          label={t('admin.content.games.info.ad_reset_cooldown_minutes.label')}
+          description={t('admin.content.games.info.ad_reset_cooldown_minutes.description')}
+          disabled={disabled}
+          min={0}
+          max={60}
+          value={game?.adResetCooldownMinutes ?? 5}
+          onChange={(e) => {
+            const n = getInputNumber(e)
+            if (!isNaN(n)) game && setGame({ ...game, adResetCooldownMinutes: n })
+          }}
+        />
+        <Switch
+          mt="md"
+          label={t('admin.content.games.info.ad_allow_snapshot_download.label')}
+          description={t('admin.content.games.info.ad_allow_snapshot_download.description')}
+          disabled={disabled}
+          checked={game?.adAllowSnapshotDownload ?? true}
+          onChange={(e) => game && setGame({ ...game, adAllowSnapshotDownload: e.currentTarget.checked })}
+        />
+      </Group>
       <Grid grow>
         <Grid.Col span={8}>
           <Textarea

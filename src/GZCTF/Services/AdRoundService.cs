@@ -51,9 +51,12 @@ public sealed class AdRoundService(
 
         var nextNumber = (prev?.Number ?? 0) + 1;
 
-        // Pick the shortest tick across enabled A&D challenges so the round
-        // window honors the most-aggressive checker.
-        var tickSeconds = adChallenges.Min(c => c.AdTickSeconds ?? 120);
+        // Tick length is an event-wide knob on the game — a round spans the
+        // whole game, so every A&D service shares one tick window.
+        var tickSeconds = await db.Games
+            .Where(g => g.Id == gameId)
+            .Select(g => g.AdTickSeconds)
+            .FirstOrDefaultAsync(token) ?? 120;
 
         var now = DateTimeOffset.UtcNow;
         var round = new AdRound

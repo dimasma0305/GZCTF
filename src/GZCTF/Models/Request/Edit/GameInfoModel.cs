@@ -140,6 +140,29 @@ public class GameInfoModel : IValidatableObject
     /// </summary>
     public int? AdSnapshotRetentionDays { get; set; }
 
+    /// <summary>
+    /// A&D — seconds per tick (the global scoring unit). Every A&amp;D service
+    /// in the game shares one tick. Default 120.
+    /// </summary>
+    public int? AdTickSeconds { get; set; }
+
+    /// <summary>
+    /// A&D — how many ticks a planted flag stays valid for attack submission
+    /// (the uniform attack window). Default 5.
+    /// </summary>
+    public int? AdFlagLifetimeTicks { get; set; }
+
+    /// <summary>
+    /// A&D — minimum minutes between a team's self-resets (anti-spam). Default 5.
+    /// </summary>
+    public int? AdResetCooldownMinutes { get; set; }
+
+    /// <summary>
+    /// A&D — whether team containers are snapshotted at game end for download.
+    /// Default true.
+    /// </summary>
+    public bool? AdAllowSnapshotDownload { get; set; }
+
     internal static GameInfoModel FromGame(Data.Game game) =>
         new()
         {
@@ -165,7 +188,11 @@ public class GameInfoModel : IValidatableObject
             WriteupRequired = game.WriteupRequired,
             BloodBonusValue = game.BloodBonus.Val,
             AdWarmupSeconds = game.AdWarmupSeconds,
-            AdSnapshotRetentionDays = game.AdSnapshotRetentionDays
+            AdSnapshotRetentionDays = game.AdSnapshotRetentionDays,
+            AdTickSeconds = game.AdTickSeconds,
+            AdFlagLifetimeTicks = game.AdFlagLifetimeTicks,
+            AdResetCooldownMinutes = game.AdResetCooldownMinutes,
+            AdAllowSnapshotDownload = game.AdAllowSnapshotDownload
         };
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)

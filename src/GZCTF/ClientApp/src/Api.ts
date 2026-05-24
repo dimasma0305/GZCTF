@@ -1298,6 +1298,23 @@ export interface GameInfoModel {
    * @format int32
    */
   adSnapshotRetentionDays?: number | null;
+  /**
+   * A&D — seconds per tick (global scoring unit; default 120).
+   * @format int32
+   */
+  adTickSeconds?: number | null;
+  /**
+   * A&D — ticks a planted flag stays valid (attack window; default 5).
+   * @format int32
+   */
+  adFlagLifetimeTicks?: number | null;
+  /**
+   * A&D — minutes between a team's self-resets (default 5).
+   * @format int32
+   */
+  adResetCooldownMinutes?: number | null;
+  /** A&D — snapshot team containers at game end for download (default true). */
+  adAllowSnapshotDownload?: boolean | null;
 }
 
 /** List response */
@@ -1770,18 +1787,10 @@ export interface ChallengeUpdateModel {
   difficulty?: number | null;
   /** A&D — Docker image for the per-challenge checker container. */
   adCheckerImage?: string | null;
-  /** A&D — Seconds per tick (default 120). */
-  adTickSeconds?: number | null;
-  /** A&D — Ticks a planted flag stays valid (default 5). */
-  adFlagLifetimeTicks?: number | null;
   /** A&D — When true, team containers can reach the public internet. */
   adAllowEgress?: boolean | null;
   /** A&D — When true, teams can self-reset to baseline (default true). */
   adAllowSelfReset?: boolean | null;
-  /** A&D — Minimum minutes between consecutive self-resets (default 5). */
-  adResetCooldownMinutes?: number | null;
-  /** A&D — When true, snapshot the team container at game end (default true). */
-  adAllowSnapshotDownload?: boolean | null;
   /** A&D — putflag jitter window as a fraction of tick (default 0.4). */
   adPutflagWindowFraction?: number | null;
   /** A&D — getflag jitter window as a fraction of tick (default 0.5). */

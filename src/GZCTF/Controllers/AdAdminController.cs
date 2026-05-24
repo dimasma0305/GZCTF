@@ -119,13 +119,16 @@ public class AdAdminController(
             }).ToList()
         }).ToList();
 
+        // Tick + flag lifetime are game-wide now — same value for every row.
+        var gameTickSeconds = game.AdTickSeconds ?? 120;
+        var gameFlagLifetimeTicks = game.AdFlagLifetimeTicks ?? 5;
         var challengeStates = adChallenges.Select(c => new AdChallengeStateModel
         {
             ChallengeId = c.Id,
             Title = c.Title,
             IsEnabled = c.IsEnabled,
-            TickSeconds = c.AdTickSeconds ?? 120,
-            FlagLifetimeTicks = c.AdFlagLifetimeTicks ?? 5,
+            TickSeconds = gameTickSeconds,
+            FlagLifetimeTicks = gameFlagLifetimeTicks,
             TeamsWithLiveContainer = services.Count(s => s.ChallengeId == c.Id && s.ContainerId is not null)
         }).ToList();
 

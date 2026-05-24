@@ -88,14 +88,15 @@ public sealed class AdContainerManager(
             .Where(ts => ts.Participation.Game.EndTimeUtc < now)
             .Include(ts => ts.Container)
             .Include(ts => ts.Challenge)
-            .Include(ts => ts.Participation)
+            .Include(ts => ts.Participation).ThenInclude(p => p.Game)
             .ToListAsync(token);
 
         foreach (var ts in endedGameTeamServices.Where(ts => ts.Container is not null))
         {
             try
             {
-                if (ts.Challenge.AdAllowSnapshotDownload && ts.SnapshotBlobKey is null)
+                // Snapshot-download is game-wide policy.
+                if (ts.Participation.Game.AdAllowSnapshotDownload && ts.SnapshotBlobKey is null)
                 {
                     var key = await TrySnapshotAsync(scope.ServiceProvider, ts, token);
                     if (key is not null)

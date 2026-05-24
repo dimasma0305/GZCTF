@@ -44,7 +44,7 @@ public class AdTeamService
 
     /// <summary>
     /// Blob storage key for the post-game snapshot tarball (<c>docker save</c>
-    /// gzipped). Set at game end if <see cref="Challenge.AdAllowSnapshotDownload"/>
+    /// gzipped). Set at game end if the game's <c>AdAllowSnapshotDownload</c>
     /// is true. Null otherwise.
     /// </summary>
     [MaxLength(256)]
