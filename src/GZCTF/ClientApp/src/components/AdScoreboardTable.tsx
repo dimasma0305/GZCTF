@@ -352,68 +352,67 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
               </Text>
             </Center>
           )}
-
-          {/* Stats legend — mirrors the jeopardy bloods legend overlay */}
-          <Box className={classes.legend}>
-            <Stack gap="xs">
-              <Tooltip.Group>
-                <Group gap="lg">
-                  <Tooltip
-                    label={t(
-                      'game.content.scoreboard.ad.legend.attack_tip',
-                      'Points gained from flags captured from other teams.'
-                    )}
-                    transitionProps={{ transition: 'pop' }}
-                  >
-                    <Group justify="left" gap={4}>
-                      <Icon path={mdiSwordCross} size={0.8} color={theme.colors.teal[6]} />
-                      <Text size="sm" c="teal">
-                        {t('game.content.scoreboard.ad.legend.attack', 'Attack')}
-                      </Text>
-                    </Group>
-                  </Tooltip>
-                  <Tooltip
-                    label={t(
-                      'game.content.scoreboard.ad.legend.defense_tip',
-                      'Points lost from your services being captured by others.'
-                    )}
-                    transitionProps={{ transition: 'pop' }}
-                  >
-                    <Group justify="left" gap={4}>
-                      <Icon path={mdiShieldHalfFull} size={0.8} color={theme.colors.red[6]} />
-                      <Text size="sm" c="red">
-                        {t('game.content.scoreboard.ad.legend.defense', 'Defense loss')}
-                      </Text>
-                    </Group>
-                  </Tooltip>
-                  <Tooltip
-                    label={t(
-                      'game.content.scoreboard.ad.legend.sla_tip',
-                      'Service-level availability points from passing checks.'
-                    )}
-                    transitionProps={{ transition: 'pop' }}
-                  >
-                    <Group justify="left" gap={4}>
-                      <Icon path={mdiTimerSandComplete} size={0.8} color={theme.colors.blue[6]} />
-                      <Text size="sm" c="blue">
-                        {t('game.content.scoreboard.ad.legend.sla', 'SLA')}
-                      </Text>
-                    </Group>
-                  </Tooltip>
-                </Group>
-              </Tooltip.Group>
-            </Stack>
-          </Box>
         </Box>
 
-        {/* Footer — pagination + tip, mirrors jeopardy ScoreboardTable.tsx:449-459 */}
-        <Group justify="space-between">
-          <Text size="sm" c="dimmed">
-            {t(
-              'game.content.scoreboard.ad.tip',
-              'Total = Attack + SLA − Defense loss. Updated after every check + every accepted attack.'
-            )}
-          </Text>
+        {/* Footer — stats legend + tip on the left, pagination on the right.
+            Jeopardy floats its bloods legend absolutely over the top-left empty
+            header cells, but A&D has only one header row so an inline footer
+            keeps the legend visible without obscuring the table. */}
+        <Group justify="space-between" align="flex-start" wrap="wrap" gap="md">
+          <Stack gap={4}>
+            <Tooltip.Group>
+              <Group gap="lg">
+                <Tooltip
+                  label={t(
+                    'game.content.scoreboard.ad.legend.attack_tip',
+                    'Points gained from flags captured from other teams.'
+                  )}
+                  transitionProps={{ transition: 'pop' }}
+                >
+                  <Group justify="left" gap={4}>
+                    <Icon path={mdiSwordCross} size={0.8} color={theme.colors.teal[6]} />
+                    <Text size="sm" c="teal">
+                      {t('game.content.scoreboard.ad.legend.attack', 'Attack')}
+                    </Text>
+                  </Group>
+                </Tooltip>
+                <Tooltip
+                  label={t(
+                    'game.content.scoreboard.ad.legend.defense_tip',
+                    'Points lost from your services being captured by others.'
+                  )}
+                  transitionProps={{ transition: 'pop' }}
+                >
+                  <Group justify="left" gap={4}>
+                    <Icon path={mdiShieldHalfFull} size={0.8} color={theme.colors.red[6]} />
+                    <Text size="sm" c="red">
+                      {t('game.content.scoreboard.ad.legend.defense', 'Defense loss')}
+                    </Text>
+                  </Group>
+                </Tooltip>
+                <Tooltip
+                  label={t(
+                    'game.content.scoreboard.ad.legend.sla_tip',
+                    'Service-level availability points from passing checks.'
+                  )}
+                  transitionProps={{ transition: 'pop' }}
+                >
+                  <Group justify="left" gap={4}>
+                    <Icon path={mdiTimerSandComplete} size={0.8} color={theme.colors.blue[6]} />
+                    <Text size="sm" c="blue">
+                      {t('game.content.scoreboard.ad.legend.sla', 'SLA')}
+                    </Text>
+                  </Group>
+                </Tooltip>
+              </Group>
+            </Tooltip.Group>
+            <Text size="xs" c="dimmed">
+              {t(
+                'game.content.scoreboard.ad.tip',
+                'Total = Attack + SLA − Defense loss. Updated after every check + every accepted attack.'
+              )}
+            </Text>
+          </Stack>
           <Pagination
             value={activePage}
             onChange={setPage}
