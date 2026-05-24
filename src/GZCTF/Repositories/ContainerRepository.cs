@@ -27,13 +27,41 @@ public class ContainerRepository(
             .Include(c => c.GameInstance).ThenInclude(i => i!.Participation).ThenInclude(p => p.Team)
             .FirstOrDefaultAsync(i => i.Id == guid, token);
 
-    public async Task<ContainerInstanceModel[]> GetContainerInstances(CancellationToken token = default) =>
-        (await Context.Containers
-            .Where(c => c.GameInstance != null)
-            .Include(c => c.GameInstance).ThenInclude(i => i!.Participation)
-            .OrderBy(c => c.StartedAt).ToArrayAsync(token))
-        .Select(ContainerInstanceModel.FromContainer)
-        .ToArray();
+    public async Task<ContainerInstanceModel[]> GetContainerInstances(CancellationToken token = default)
+    {
+        // Pull every container with either a jeopardy GameInstance or an
+        // ExerciseInstance attachment. A&D containers come in via the
+        // separate AdTeamService → ContainerId relationship and are merged in
+        // below. (Exercise containers were silently dropped by the previous
+        // `.Where(c => c.GameInstance != null)` filter too — same fix.)
+        var containers = await Context.Containers
+            .Include(c => c.GameInstance).ThenInclude(i => i!.Participation).ThenInclude(p => p.Team)
+            .Include(c => c.GameInstance).ThenInclude(i => i!.Challenge)
+            .OrderBy(c => c.StartedAt)
+            .ToArrayAsync(token);
+
+        // A&D containers: AdTeamService points at Container via ContainerId.
+        // One query pulls every active A&D-side mapping so we can render
+        // team + challenge for the rows whose GameInstance is null.
+        var orphanIds = containers
+            .Where(c => c.GameInstance is null)
+            .Select(c => c.Id)
+            .ToArray();
+        var adServices = orphanIds.Length == 0
+            ? new Dictionary<Guid, AdTeamService>()
+            : await Context.AdTeamServices
+                .Include(s => s.Challenge)
+                .Include(s => s.Participation).ThenInclude(p => p.Team)
+                .Where(s => s.ContainerId != null && orphanIds.Contains(s.ContainerId.Value))
+                .ToDictionaryAsync(s => s.ContainerId!.Value, token);
+
+        return containers
+            .Where(c => c.GameInstance is not null || adServices.ContainsKey(c.Id))
+            .Select(c => ContainerInstanceModel.FromContainer(
+                c,
+                c.GameInstance is null ? adServices.GetValueOrDefault(c.Id) : null))
+            .ToArray();
+    }
 
     public Task<Container[]> GetDyingContainers(CancellationToken token = default) =>
         Context.Containers.Where(c => c.ExpectStopAt < DateTimeOffset.UtcNow).ToArrayAsync(token);

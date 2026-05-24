@@ -50,10 +50,17 @@ public class ContainerInstanceModel
     /// </summary>
     public int Port { get; set; }
 
-    internal static ContainerInstanceModel FromContainer(Container container)
+    internal static ContainerInstanceModel FromContainer(
+        Container container, GZCTF.Models.Data.AdTeamService? adService = null)
     {
-        var team = container.GameInstance?.Participation.Team;
-        var chal = container.GameInstance?.Challenge;
+        // Prefer the GameInstance side (jeopardy + exercise); fall back to
+        // the A&D AdTeamService when provided. Callers from the admin list
+        // path pass adService for orphan-from-GameInstance rows so A&D
+        // containers also surface team + challenge metadata.
+        var team = container.GameInstance?.Participation.Team
+                   ?? adService?.Participation.Team;
+        var chal = container.GameInstance?.Challenge
+                   ?? adService?.Challenge;
 
         var model = new ContainerInstanceModel
         {
