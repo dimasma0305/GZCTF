@@ -13,16 +13,16 @@ import {
   alpha,
   useMantineTheme,
 } from '@mantine/core'
-import { mdiFlag, mdiThumbUp } from '@mdi/js'
+import { mdiFlag, mdiSwordCross, mdiThumbUp } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import cx from 'clsx'
 import dayjs from 'dayjs'
 import { FC, useMemo } from 'react'
-import { Trans } from 'react-i18next'
+import { Trans, useTranslation } from 'react-i18next'
 import { ScrollingText } from '@Components/ScrollingText'
 import { useLanguage } from '@Utils/I18n'
 import { BloodsTypes, PartialIconProps, useChallengeCategoryLabelMap } from '@Utils/Shared'
-import { ChallengeInfo, SubmissionType } from '@Api'
+import { ChallengeInfo, ChallengeType, SubmissionType } from '@Api'
 import classes from '@Styles/ChallengeCard.module.css'
 import misc from '@Styles/Misc.module.css'
 
@@ -42,6 +42,8 @@ export const ChallengeCard: FC<ChallengeCardProps> = (props: ChallengeCardProps)
   const cateData = challengeCategoryLabelMap.get(challenge.category!)
   const theme = useMantineTheme()
   const { locale } = useLanguage()
+  const { t } = useTranslation()
+  const isAd = challenge.type === ChallengeType.AttackDefense
 
   const isFaded = useMemo(() => {
     if (!challenge.deadline) return false
@@ -69,25 +71,46 @@ export const ChallengeCard: FC<ChallengeCardProps> = (props: ChallengeCardProps)
       <Stack gap="xs" pos="relative" style={{ zIndex: 99 }}>
         <Group h="30px" wrap="nowrap" justify="space-between" gap={2}>
           <ScrollingText text={challenge.title || ''} size="lg" />
-          {ratingBadge && (
-            <Tooltip label={`${rating!.likes}👍 / ${rating!.dislikes}👎`} position="top" withArrow>
-              <Badge
-                size="xs"
-                color={ratingBadge.color}
-                variant="light"
-                leftSection={<Icon path={mdiThumbUp} size={0.5} />}
-                style={{ flexShrink: 0, cursor: 'default' }}
-              >
-                {ratingBadge.pct}%
-              </Badge>
-            </Tooltip>
-          )}
+          <Group gap={4} wrap="nowrap">
+            {isAd && (
+              <Tooltip label={t('challenge.tooltip.ad_card', 'Attack & Defense — live scoring, submit via API')} position="top" withArrow>
+                <Badge
+                  size="xs"
+                  color="red"
+                  variant="light"
+                  leftSection={<Icon path={mdiSwordCross} size={0.5} />}
+                  style={{ flexShrink: 0, cursor: 'default' }}
+                >
+                  {t('challenge.badge.ad', 'A&D')}
+                </Badge>
+              </Tooltip>
+            )}
+            {ratingBadge && (
+              <Tooltip label={`${rating!.likes}👍 / ${rating!.dislikes}👎`} position="top" withArrow>
+                <Badge
+                  size="xs"
+                  color={ratingBadge.color}
+                  variant="light"
+                  leftSection={<Icon path={mdiThumbUp} size={0.5} />}
+                  style={{ flexShrink: 0, cursor: 'default' }}
+                >
+                  {ratingBadge.pct}%
+                </Badge>
+              </Tooltip>
+            )}
+          </Group>
         </Group>
-        <Divider size="sm" color={cateData?.color} />
+        <Divider size="sm" color={isAd ? 'red' : cateData?.color} />
         <Group wrap="nowrap" justify="space-between" align="center" gap={2}>
-          <Text ta="center" fw="bold" fz="lg" ff="monospace">
-            {challenge.score}&nbsp;pts
-          </Text>
+          {isAd ? (
+            <Text ta="center" fw="bold" fz="lg" c="red" className={misc.ffmono}>
+              {t('challenge.content.ad_live', 'LIVE')}
+            </Text>
+          ) : (
+            <Text ta="center" fw="bold" fz="lg" ff="monospace">
+              {challenge.score}&nbsp;pts
+            </Text>
+          )}
           <Stack gap="xs">
             <Title order={6} ta="center" mt={`calc(${theme.spacing.xs} / 2)`}>
               <Trans

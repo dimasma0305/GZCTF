@@ -5,6 +5,7 @@ import {
   Divider,
   Group,
   ScrollArea,
+  SegmentedControl,
   SimpleGrid,
   Skeleton,
   Stack,
@@ -27,7 +28,7 @@ import { GameChallengeModal } from '@Components/GameChallengeModal'
 import { WriteupSubmitModal } from '@Components/WriteupSubmitModal'
 import { useChallengeCategoryLabelMap, SubmissionTypeIconMap } from '@Utils/Shared'
 import { useGame, useGameTeamInfo } from '@Hooks/useGame'
-import { ChallengeInfo, ChallengeCategory, SubmissionType } from '@Api'
+import { ChallengeInfo, ChallengeCategory, ChallengeType, SubmissionType } from '@Api'
 import classes from '@Styles/ChallengePanel.module.css'
 
 interface RatingSummary {
@@ -79,11 +80,35 @@ export const ChallengePanel: FC = () => {
     getInitialValueInEffect: false,
   })
 
+  // 'all' | 'jeopardy' | 'ad' — visible only when the game has both kinds.
+  const [challengeKind, setChallengeKind] = useLocalStorage<'all' | 'jeopardy' | 'ad'>({
+    key: 'challenge-kind-filter',
+    defaultValue: 'all',
+    getInitialValueInEffect: false,
+  })
+
+  const matchesKind = (c: ChallengeInfo) => {
+    if (challengeKind === 'all') return true
+    const isAd = c.type === ChallengeType.AttackDefense
+    return challengeKind === 'ad' ? isAd : !isAd
+  }
+
   const allChallenges = useMemo(() => {
     const all = Object.values(challenges ?? {}).flat()
     // Stable sort by ID first
     return all.sort((a, b) => a.id - b.id)
   }, [challenges])
+
+  // For deciding whether to render the kind switcher (only when both exist).
+  const { hasJeopardy, hasAd } = useMemo(() => {
+    let j = false, a = false
+    for (const c of allChallenges) {
+      if (c.type === ChallengeType.AttackDefense) a = true
+      else j = true
+      if (j && a) break
+    }
+    return { hasJeopardy: j, hasAd: a }
+  }, [allChallenges])
 
   const currentChallenges = useMemo(() => {
     if (!challenges) return []
@@ -115,7 +140,8 @@ export const ChallengePanel: FC = () => {
     const processList = (list: ChallengeInfo[]) => {
       const filtered = list.filter(
         (chal) =>
-          !hideSolved || (teamInfo && teamInfo.rank?.solvedChallenges?.find((c) => c.id === chal.id)) === undefined
+          matchesKind(chal) &&
+          (!hideSolved || (teamInfo && teamInfo.rank?.solvedChallenges?.find((c) => c.id === chal.id)) === undefined)
       )
       // Ensure base order is stable (by ID) before shuffling
       filtered.sort((a, b) => a.id - b.id)
@@ -134,7 +160,7 @@ export const ChallengePanel: FC = () => {
       }
     })
     return result
-  }, [challenges, activeTab, allChallenges, hideSolved, teamInfo, categories])
+  }, [challenges, activeTab, allChallenges, hideSolved, teamInfo, categories, challengeKind])
 
   const [challenge, setChallenge] = useState<ChallengeInfo | null>(null)
   const [detailOpened, setDetailOpened] = useState(false)
@@ -237,6 +263,19 @@ export const ChallengePanel: FC = () => {
             </Button>
             <Divider />
           </>
+        )}
+        {hasJeopardy && hasAd && (
+          <SegmentedControl
+            size="xs"
+            w="10.5rem"
+            value={challengeKind}
+            onChange={(v) => setChallengeKind(v as 'all' | 'jeopardy' | 'ad')}
+            data={[
+              { value: 'all', label: t('game.button.kind.all', 'All') },
+              { value: 'jeopardy', label: t('game.button.kind.jeopardy', 'CTF') },
+              { value: 'ad', label: t('game.button.kind.ad', 'A&D') },
+            ]}
+          />
         )}
         <Switch
           w="10.5rem"

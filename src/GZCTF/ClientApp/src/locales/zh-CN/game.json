@@ -17,6 +17,11 @@
     "finished": "比赛结束",
     "hide_solved": "隐藏已解出",
     "join": "报名参赛",
+    "kind": {
+      "all": "全部",
+      "jeopardy": "解题",
+      "ad": "攻防"
+    },
     "leave": "取消报名",
     "login_required": "请先登录",
     "scoreboard": "查看榜单",

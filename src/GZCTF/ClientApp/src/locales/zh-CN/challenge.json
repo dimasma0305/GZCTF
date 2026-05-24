@@ -34,7 +34,14 @@
     "reverse": "逆向工程",
     "web": "网络安全"
   },
+  "badge": {
+    "ad": "攻防"
+  },
+  "tooltip": {
+    "ad_card": "攻防对抗 — 实时计分，仅通过 API 提交 flag"
+  },
   "content": {
+    "ad_live": "实时",
     "already_solved": "该题目已被解出",
     "attempts": {
       "count": "已经尝试提交 {{count}} 次",

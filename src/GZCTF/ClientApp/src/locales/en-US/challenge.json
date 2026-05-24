@@ -34,7 +34,14 @@
     "reverse": "Reverse engineering",
     "web": "Web security"
   },
+  "badge": {
+    "ad": "A&D"
+  },
+  "tooltip": {
+    "ad_card": "Attack & Defense — live scoring, submit via API"
+  },
   "content": {
+    "ad_live": "LIVE",
     "already_solved": "This challenge has been solved",
     "attempts": {
       "count": "You've tried {{count}} times already!",

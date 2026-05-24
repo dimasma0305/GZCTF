@@ -17,6 +17,11 @@
     "finished": "Game Ended",
     "hide_solved": "Hide Solved",
     "join": "Join",
+    "kind": {
+      "all": "All",
+      "jeopardy": "CTF",
+      "ad": "A&D"
+    },
     "leave": "Leave Game",
     "login_required": "Please Login",
     "scoreboard": "Scoreboard",
