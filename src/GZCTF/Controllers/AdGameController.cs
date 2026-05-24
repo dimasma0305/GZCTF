@@ -740,6 +740,114 @@ public class AdGameController(
     }
 
     /// <summary>
+    /// Download a per-user WireGuard config (.conf) for accessing the A&amp;D
+    /// network. Generates a fresh X25519 keypair + assigns a /32 from the
+    /// configured client CIDR on first call; subsequent calls return the
+    /// same peer's .conf so the operator-side WG server config stays valid.
+    /// Server endpoint/pubkey/CIDR/DNS/AllowedIPs come from IConfiguration
+    /// (env vars: <c>Ad__Vpn__ServerEndpoint</c>, <c>Ad__Vpn__ServerPublicKey</c>,
+    /// <c>Ad__Vpn__ClientCidr</c>, <c>Ad__Vpn__Dns</c>, <c>Ad__Vpn__AllowedIps</c>).
+    /// When the server isn't configured the .conf still downloads with clear
+    /// <c>&lt;unconfigured&gt;</c> placeholders so the operator can fill them in.
+    /// </summary>
+    [RequireUser]
+    [HttpGet("Vpn/Config")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> DownloadVpnConfig(
+        int id,
+        [FromServices] IConfiguration config,
+        CancellationToken token)
+    {
+        var user = await userManager.GetUserAsync(User);
+        if (user is null) return Unauthorized();
+
+        var participation = await db.Participations
+            .FirstOrDefaultAsync(p => p.GameId == id
+                && p.Status == ParticipationStatus.Accepted
+                && p.Members.Any(m => m.UserId == user.Id), token);
+        if (participation is null) return Forbid();
+
+        var hasAd = await db.GameChallenges.AnyAsync(
+            c => c.GameId == id && c.Type == ChallengeType.AttackDefense, token);
+        if (!hasAd) return NotFound(new RequestResponse("This game has no A&D challenges"));
+
+        var serverEndpoint = config["Ad:Vpn:ServerEndpoint"] ?? "<unconfigured-server:51820>";
+        var serverPublicKey = config["Ad:Vpn:ServerPublicKey"] ?? "<unconfigured-server-public-key>";
+        var clientCidr = config["Ad:Vpn:ClientCidr"] ?? "10.13.37.0/24";
+        var dns = config["Ad:Vpn:Dns"] ?? "1.1.1.1";
+        var allowedIps = config["Ad:Vpn:AllowedIps"] ?? clientCidr;
+
+        var peer = await db.AdVpnPeers
+            .FirstOrDefaultAsync(p => p.UserId == user.Id && p.ParticipationId == participation.Id, token);
+
+        string privKeyBase64;
+        var xorKey = configService.GetXorKey();
+
+        if (peer is null)
+        {
+            var (pub, priv) = AdVpnKeys.GenerateX25519KeyPair();
+            var usedIps = await db.AdVpnPeers
+                .Where(p => p.Participation.GameId == id)
+                .Select(p => p.AssignedIp)
+                .ToListAsync(token);
+
+            string assignedIp;
+            try { assignedIp = AdVpnKeys.AssignNextIp(clientCidr, usedIps); }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new RequestResponse(ex.Message));
+            }
+
+            peer = new AdVpnPeer
+            {
+                UserId = user.Id,
+                ParticipationId = participation.Id,
+                PublicKey = Convert.ToBase64String(pub),
+                PrivateKey = AdVpnKeys.WrapPrivateKey(priv, xorKey),
+                AssignedIp = assignedIp,
+            };
+            await db.AdVpnPeers.AddAsync(peer, token);
+            await db.SaveChangesAsync(token);
+
+            privKeyBase64 = Convert.ToBase64String(priv);
+
+            logger.SystemLog(
+                $"A&D VPN peer provisioned: user={user.Id} participation={participation.Id} ip={assignedIp}",
+                TaskStatus.Success, LogLevel.Information);
+        }
+        else
+        {
+            privKeyBase64 = AdVpnKeys.UnwrapPrivateKey(peer.PrivateKey, xorKey);
+        }
+
+        var safeUserName = string.Concat((user.UserName ?? "player")
+            .Where(c => char.IsLetterOrDigit(c) || c == '-' || c == '_'));
+        if (string.IsNullOrEmpty(safeUserName)) safeUserName = "player";
+
+        var conf =
+$"""
+# WireGuard config for {user.UserName} — A&D game {id}
+# Generated {DateTimeOffset.UtcNow:u}
+# Pubkey: {peer.PublicKey}
+# Assigned IP: {peer.AssignedIp}
+
+[Interface]
+PrivateKey = {privKeyBase64}
+Address = {peer.AssignedIp}/32
+DNS = {dns}
+
+[Peer]
+PublicKey = {serverPublicKey}
+Endpoint = {serverEndpoint}
+AllowedIPs = {allowedIps}
+PersistentKeepalive = 25
+""";
+
+        var bytes = System.Text.Encoding.UTF8.GetBytes(conf);
+        return File(bytes, "text/plain", $"ad-game-{id}-{safeUserName}.conf");
+    }
+
+    /// <summary>
     /// Download the post-game container snapshot tarball for one of the
     /// caller's team services. Available only after game end + if the
     /// challenge has AdAllowSnapshotDownload=true + a snapshot was actually
