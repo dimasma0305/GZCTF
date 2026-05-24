@@ -123,6 +123,24 @@ public static class TransferExtensions
                 };
             }
 
+            // Attack & Defense per-challenge config
+            if (challenge.Type.IsAttackDefense())
+            {
+                transfer.Ad = new AdSection
+                {
+                    CheckerImage = challenge.AdCheckerImage ?? string.Empty,
+                    TickSeconds = challenge.AdTickSeconds,
+                    FlagLifetimeTicks = challenge.AdFlagLifetimeTicks,
+                    AllowEgress = challenge.AdAllowEgress,
+                    AllowSelfReset = challenge.AdAllowSelfReset,
+                    ResetCooldownMinutes = challenge.AdResetCooldownMinutes,
+                    AllowSnapshotDownload = challenge.AdAllowSnapshotDownload,
+                    PutflagWindowFraction = challenge.AdPutflagWindowFraction,
+                    GetflagWindowFraction = challenge.AdGetflagWindowFraction,
+                    MinGracePeriodSeconds = challenge.AdMinGracePeriodSeconds
+                };
+            }
+
             return transfer;
         }
     }
@@ -267,16 +285,33 @@ public static class TransferExtensions
             };
 
             // Container configuration
-            if (transfer.Container == null)
-                return challenge;
+            if (transfer.Container != null)
+            {
+                challenge.ContainerImage = transfer.Container.Image;
+                challenge.MemoryLimit = transfer.Container.MemoryLimit;
+                challenge.CPUCount = transfer.Container.CpuCount;
+                challenge.StorageLimit = transfer.Container.StorageLimit;
+                challenge.ExposePort = transfer.Container.ExposePort;
+                challenge.FileName = transfer.Container.FileName;
+                challenge.NetworkMode = transfer.Container.NetworkMode;
+            }
 
-            challenge.ContainerImage = transfer.Container.Image;
-            challenge.MemoryLimit = transfer.Container.MemoryLimit;
-            challenge.CPUCount = transfer.Container.CpuCount;
-            challenge.StorageLimit = transfer.Container.StorageLimit;
-            challenge.ExposePort = transfer.Container.ExposePort;
-            challenge.FileName = transfer.Container.FileName;
-            challenge.NetworkMode = transfer.Container.NetworkMode;
+            // Attack & Defense config — only when type is AttackDefense AND ad
+            // section was provided. Validation in TransferChallenge.Validate()
+            // catches the AttackDefense-without-ad case before we get here.
+            if (transfer.Type.IsAttackDefense() && transfer.Ad is { } ad)
+            {
+                challenge.AdCheckerImage = ad.CheckerImage;
+                if (ad.TickSeconds is { } ts) challenge.AdTickSeconds = ts;
+                if (ad.FlagLifetimeTicks is { } lt) challenge.AdFlagLifetimeTicks = lt;
+                if (ad.AllowEgress is { } ae) challenge.AdAllowEgress = ae;
+                if (ad.AllowSelfReset is { } asr) challenge.AdAllowSelfReset = asr;
+                if (ad.ResetCooldownMinutes is { } cm) challenge.AdResetCooldownMinutes = cm;
+                if (ad.AllowSnapshotDownload is { } asd) challenge.AdAllowSnapshotDownload = asd;
+                if (ad.PutflagWindowFraction is { } pw) challenge.AdPutflagWindowFraction = pw;
+                if (ad.GetflagWindowFraction is { } gw) challenge.AdGetflagWindowFraction = gw;
+                if (ad.MinGracePeriodSeconds is { } mg) challenge.AdMinGracePeriodSeconds = mg;
+            }
 
             return challenge;
         }

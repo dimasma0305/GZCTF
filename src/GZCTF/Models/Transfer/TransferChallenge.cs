@@ -74,6 +74,12 @@ public class TransferChallenge : IValidatableObject
     /// </summary>
     public ContainerSection? Container { get; set; }
 
+    /// <summary>
+    /// Attack &amp; Defense configuration (null = not an A&amp;D challenge).
+    /// Required when <see cref="Type"/> is <see cref="ChallengeType.AttackDefense"/>.
+    /// </summary>
+    public AdSection? Ad { get; set; }
+
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         // Note: Flags may be completely unset for imported challenges.
@@ -82,11 +88,72 @@ public class TransferChallenge : IValidatableObject
         if (Type.IsAttachment())
             yield break;
 
+        // A&D challenges need both container (for the service image) and ad (for
+        // the checker + tick config).
+        if (Type.IsAttackDefense())
+        {
+            if (Container is null)
+                yield return new ValidationResult("A&D challenges must have container configuration (service image + ports)",
+                    [nameof(Container)]);
+            if (Ad is null)
+                yield return new ValidationResult("A&D challenges must have ad configuration (checker_image, tick_seconds, etc.)",
+                    [nameof(Ad)]);
+            yield break;
+        }
+
         // Validate container challenges have container config
         if (Container is null)
             yield return new ValidationResult("Container challenges must have container configuration",
                 [nameof(Container)]);
     }
+}
+
+/// <summary>
+/// Attack &amp; Defense per-challenge configuration. Mirrors the GameChallenge.Ad*
+/// fields. All numeric values nullable so operators can omit fields and accept
+/// the platform defaults.
+/// </summary>
+public class AdSection
+{
+    /// <summary>
+    /// Docker image for the per-challenge checker container. Must speak the
+    /// enochecker3 HTTP contract.
+    /// </summary>
+    [Required(ErrorMessage = "A&D checker image is required")]
+    public string CheckerImage { get; set; } = string.Empty;
+
+    /// <summary>Seconds per tick. Default 120.</summary>
+    [Range(30, 600, ErrorMessage = "tick_seconds must be 30..600")]
+    public int? TickSeconds { get; set; }
+
+    /// <summary>How many ticks a planted flag stays valid. Default 5.</summary>
+    [Range(1, 50, ErrorMessage = "flag_lifetime_ticks must be 1..50")]
+    public int? FlagLifetimeTicks { get; set; }
+
+    /// <summary>Whether the team's container can reach the public internet. Default false.</summary>
+    public bool? AllowEgress { get; set; }
+
+    /// <summary>Whether teams can self-reset their own container. Default true.</summary>
+    public bool? AllowSelfReset { get; set; }
+
+    /// <summary>Cooldown between consecutive self-resets, minutes. Default 5.</summary>
+    [Range(0, 60, ErrorMessage = "reset_cooldown_minutes must be 0..60")]
+    public int? ResetCooldownMinutes { get; set; }
+
+    /// <summary>Whether to snapshot the team's container at game end and offer the tarball for download. Default true.</summary>
+    public bool? AllowSnapshotDownload { get; set; }
+
+    /// <summary>Putflag jitter window as a fraction of the tick. Default 0.4.</summary>
+    [Range(0.01, 0.9, ErrorMessage = "putflag_window_fraction must be 0.01..0.9")]
+    public double? PutflagWindowFraction { get; set; }
+
+    /// <summary>Getflag jitter window as a fraction of the tick. Default 0.5.</summary>
+    [Range(0.01, 0.9, ErrorMessage = "getflag_window_fraction must be 0.01..0.9")]
+    public double? GetflagWindowFraction { get; set; }
+
+    /// <summary>Min seconds between putflag and getflag. Default 3.</summary>
+    [Range(1, 60, ErrorMessage = "min_grace_period_seconds must be 1..60")]
+    public int? MinGracePeriodSeconds { get; set; }
 }
 
 public class ScoringSection
