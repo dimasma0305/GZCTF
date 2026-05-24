@@ -3,28 +3,34 @@ import {
   Avatar,
   Badge,
   Box,
+  Button,
   Center,
+  Grid,
   Group,
+  Pagination,
   Paper,
+  Select,
   Stack,
   Table,
   Text,
+  TextInput,
   useMantineTheme,
 } from '@mantine/core'
-import { mdiSwordCross, mdiTrophyOutline } from '@mdi/js'
+import { useDebouncedValue } from '@mantine/hooks'
+import { mdiAccountGroup, mdiCrosshairsGps, mdiMagnify, mdiSwordCross } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import cx from 'clsx'
-import React, { FC } from 'react'
+import React, { FC, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ScrollingText } from '@Components/ScrollingText'
-import { useAdScoreboard } from '@Hooks/useGame'
+import { useAdScoreboard, useGame } from '@Hooks/useGame'
 import misc from '@Styles/Misc.module.css'
 import classes from '@Styles/ScoreboardTable.module.css'
 
-// Mirrors the jeopardy ScoreboardTable.tsx Widths/Lefts pattern so the
-// pinned-left columns line up visually with the jeopardy board.
-// Columns: [Rank, Team(name+avatar+division), Total, Attack, Defense Loss, SLA, Captures, Times Captured]
-const Widths = [70, 240, 90, 90, 110, 80, 80, 110]
+// Same Widths/Lefts cumulative-sticky math as jeopardy ScoreboardTable so the
+// pinned-left columns visually line up with the jeopardy board.
+// Columns: [Rank, Team(avatar+name+division), Total, Attack, Defense Loss, SLA, Captures, Times Captured]
+const Widths = [60, 240, 90, 90, 110, 80, 80, 110]
 const Lefts = Widths.reduce(
   (acc, cur) => {
     acc.push(acc[acc.length - 1] + cur)
@@ -33,16 +39,62 @@ const Lefts = Widths.reduce(
   [0]
 )
 
+const ITEM_COUNT_PER_PAGE = 30
+
 interface AdScoreboardTableProps {
   numId: number
-  /** Highlight this participation's row (the viewer's own team). */
-  myParticipationId?: number | null
 }
 
-export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId, myParticipationId }) => {
+export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
   const { t } = useTranslation()
   const theme = useMantineTheme()
   const { adScoreboard } = useAdScoreboard(numId)
+  const { game } = useGame(numId)
+  const myTeamName = game?.teamName ?? null
+
+  const [activePage, setPage] = useState(1)
+  const [divisionName, setDivisionName] = useState<string | null>(null)
+  const [keyword, setKeyword] = useState('')
+  const [debouncedKeyword] = useDebouncedValue(keyword, 400)
+  const [highlightedTeam, setHighlightedTeam] = useState<string | null>(null)
+
+  // Divisions appear on rows; the player's A&D scoreboard endpoint doesn't
+  // expose a divisions array (unlike the jeopardy scoreboard), so derive from rows.
+  const divisionOptions = useMemo(() => {
+    if (!adScoreboard) return []
+    const seen = new Set<string>()
+    const out: { value: string; label: string }[] = []
+    for (const row of adScoreboard.teams) {
+      if (row.division && !seen.has(row.division)) {
+        seen.add(row.division)
+        out.push({ value: row.division, label: row.division })
+      }
+    }
+    return out
+  }, [adScoreboard])
+
+  const selectValue = divisionName ?? 'all'
+
+  const filteredList = useMemo(() => {
+    if (!adScoreboard?.teams) return []
+    const kw = debouncedKeyword.trim().toLowerCase()
+    let list = adScoreboard.teams
+    if (kw.length > 0) {
+      list = list.filter((s) => s.teamName?.toLowerCase().includes(kw))
+    } else if (divisionName !== null) {
+      list = list.filter((s) => s.division === divisionName)
+    }
+    return list
+  }, [adScoreboard, debouncedKeyword, divisionName])
+
+  useEffect(() => {
+    setPage(1)
+  }, [debouncedKeyword, divisionName])
+
+  const base = (activePage - 1) * ITEM_COUNT_PER_PAGE
+  const currentItems = filteredList.slice(base, base + ITEM_COUNT_PER_PAGE)
+
+  const hasDivisionFilter = divisionOptions.length > 0
 
   if (!adScoreboard || adScoreboard.teams.length === 0 || adScoreboard.latestRound === 0) {
     return (
@@ -77,22 +129,63 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId, myPartici
   return (
     <Paper shadow="md" p="md">
       <Stack gap="xs">
-        <Group justify="space-between">
-          <Group gap="xs">
-            <Icon path={mdiTrophyOutline} size={1} />
-            <Text fw="bold" size="sm">
-              {t('game.content.scoreboard.ad.title', 'Attack & Defense scoreboard')}
-            </Text>
-          </Group>
-          <Text size="xs" c="dimmed">
-            {t('game.content.scoreboard.ad.latest_round', {
-              round: adScoreboard.latestRound,
-              defaultValue: 'through round {{round}}',
-            })}
-          </Text>
-        </Group>
+        {/* Toolbar — mirrors jeopardy ScoreboardTable.tsx:343-398 */}
+        <Grid>
+          <Grid.Col span={3}>
+            <Select
+              defaultValue="all"
+              data={[{ value: 'all', label: t('game.label.score_table.all_teams', 'All teams') }, ...divisionOptions]}
+              value={selectValue}
+              readOnly={!hasDivisionFilter}
+              onChange={(div) => setDivisionName(!div || div === 'all' ? null : div)}
+              leftSection={<Icon path={mdiAccountGroup} size={1} />}
+            />
+          </Grid.Col>
+          <Grid.Col span={4}>
+            {myTeamName && (
+              <Button
+                variant="light"
+                leftSection={<Icon path={mdiCrosshairsGps} size={0.9} />}
+                onClick={() => {
+                  const idx = filteredList.findIndex((it) => it.teamName === myTeamName)
+                  if (idx < 0) return
+                  const page = Math.floor(idx / ITEM_COUNT_PER_PAGE) + 1
+                  setPage(page)
+                  setHighlightedTeam(myTeamName)
+                  requestAnimationFrame(() => {
+                    const el = document.querySelector(
+                      `[data-team-name="${CSS.escape(myTeamName)}"]`
+                    )
+                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                  })
+                  setTimeout(() => setHighlightedTeam(null), 2500)
+                }}
+              >
+                {t('game.button.find_my_team', 'Find My Team')}
+              </Button>
+            )}
+          </Grid.Col>
+          <Grid.Col span={2}>
+            <Group justify="flex-end" gap="xs" h="100%">
+              <Text size="xs" c="dimmed">
+                {t('game.content.scoreboard.ad.latest_round', {
+                  round: adScoreboard.latestRound,
+                  defaultValue: 'through round {{round}}',
+                })}
+              </Text>
+            </Group>
+          </Grid.Col>
+          <Grid.Col span={3}>
+            <TextInput
+              placeholder={t('game.placeholder.search_team', 'Search Team')}
+              value={keyword}
+              onChange={(e) => setKeyword(e.currentTarget.value)}
+              leftSection={<Icon path={mdiMagnify} size={1} />}
+            />
+          </Grid.Col>
+        </Grid>
 
-        <Box pos="relative" mih="calc(100vh - 18rem)">
+        <Box pos="relative" mih="calc(100vh - 14rem)">
           <Table.ScrollContainer
             minWidth="100%"
             classNames={{ scrollContainer: misc.noScrollBars }}
@@ -117,14 +210,14 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId, myPartici
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {adScoreboard.teams.map((row) => {
-                  const isMine = myParticipationId === row.participationId
+                {currentItems.map((row) => {
+                  const isHighlighted = highlightedTeam === row.teamName
                   return (
                     <Table.Tr
                       key={row.participationId}
                       data-team-name={row.teamName}
                       style={
-                        isMine
+                        isHighlighted
                           ? {
                               outline: `2px solid ${theme.colors[theme.primaryColor][4]}`,
                               outlineOffset: -2,
@@ -151,7 +244,7 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId, myPartici
                         )}
                       </Table.Td>
 
-                      {/* Team — avatar + scrolling name + division line, identical layout to jeopardy */}
+                      {/* Team — avatar + scrolling name + division, identical layout to jeopardy */}
                       <Table.Td className={classes.left} style={{ left: Lefts[1] }}>
                         <Group justify="left" gap={5} wrap="nowrap" maw={Widths[1] - 10}>
                           <Avatar
@@ -229,8 +322,7 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId, myPartici
             </Table>
           </Table.ScrollContainer>
 
-          {/* If no rows at all yet, show inline empty state */}
-          {adScoreboard.teams.length === 0 && (
+          {filteredList.length === 0 && (
             <Center mih="6rem">
               <Text size="sm" c="dimmed">
                 {t('game.content.scoreboard.ad.no_teams', 'No teams ranked yet.')}
@@ -238,6 +330,22 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId, myPartici
             </Center>
           )}
         </Box>
+
+        {/* Footer — pagination + tip, mirrors jeopardy ScoreboardTable.tsx:449-459 */}
+        <Group justify="space-between">
+          <Text size="sm" c="dimmed">
+            {t(
+              'game.content.scoreboard.ad.tip',
+              'A&D ranking updates after every check + every accepted attack.'
+            )}
+          </Text>
+          <Pagination
+            value={activePage}
+            onChange={setPage}
+            total={Math.max(1, Math.ceil(filteredList.length / ITEM_COUNT_PER_PAGE))}
+            boundaries={2}
+          />
+        </Group>
       </Stack>
     </Paper>
   )
