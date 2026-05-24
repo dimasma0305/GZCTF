@@ -74,15 +74,7 @@ export const ChallengeCard: FC<ChallengeCardProps> = (props: ChallengeCardProps)
           <Group gap={4} wrap="nowrap">
             {isAd && (
               <Tooltip label={t('challenge.tooltip.ad_card', 'Attack & Defense — live scoring, submit via API')} position="top" withArrow>
-                <Badge
-                  size="xs"
-                  color="red"
-                  variant="light"
-                  leftSection={<Icon path={mdiSwordCross} size={0.5} />}
-                  style={{ flexShrink: 0, cursor: 'default' }}
-                >
-                  {t('challenge.badge.ad', 'A&D')}
-                </Badge>
+                <Icon path={mdiSwordCross} size={0.7} color="var(--mantine-color-red-6)" />
               </Tooltip>
             )}
             {ratingBadge && (
@@ -101,12 +93,8 @@ export const ChallengeCard: FC<ChallengeCardProps> = (props: ChallengeCardProps)
           </Group>
         </Group>
         <Divider size="sm" color={isAd ? 'red' : cateData?.color} />
-        <Group wrap="nowrap" justify="space-between" align="center" gap={2}>
-          {isAd ? (
-            <Text ta="center" fw="bold" fz="lg" c="red" className={misc.ffmono}>
-              {t('challenge.content.ad_live', 'LIVE')}
-            </Text>
-          ) : (
+        <Group wrap="nowrap" justify={isAd ? 'center' : 'space-between'} align="center" gap={2}>
+          {!isAd && (
             <Text ta="center" fw="bold" fz="lg" ff="monospace">
               {challenge.score}&nbsp;pts
             </Text>
