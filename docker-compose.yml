@@ -91,8 +91,13 @@ services:
     volumes:
       - "wg-config:/config"
     networks:
+      # Join every network the platform might land A&D containers on so the
+      # sidecar has a direct kernel route to challenge IPs. AdContainerManager
+      # picks between the *-open and *-isolated networks based on each
+      # challenge's AdAllowEgress flag.
       - default
       - z-test-challenges-open
+      - z-test-challenges-isolated
     restart: unless-stopped
 
   postgres:
@@ -119,3 +124,9 @@ volumes:
 
 networks:
   z-test-challenges-open:
+  # The isolated challenge network is created by GZCTF's container manager
+  # outside compose; declare it external so the sidecar can attach to the same
+  # bridge the A&D containers live on.
+  z-test-challenges-isolated:
+    external: true
+    name: z-test-challenges-isolated

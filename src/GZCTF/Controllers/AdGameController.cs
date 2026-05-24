@@ -792,7 +792,12 @@ public class AdGameController(
         var serverEndpoint = config["Ad:Vpn:ServerEndpoint"] ?? "127.0.0.1:51820";
         var clientCidr = config["Ad:Vpn:ClientCidr"] ?? "10.13.37.0/24";
         var dns = config["Ad:Vpn:Dns"] ?? "1.1.1.1";
-        var allowedIps = config["Ad:Vpn:AllowedIps"] ?? clientCidr;
+        // Default AllowedIps covers the VPN subnet itself + the Docker bridge
+        // range used by GZCTF's challenge networks (172.0.0.0/16 by default).
+        // Without the challenge range in AllowedIps the client OS routes
+        // challenge IPs via its default gateway instead of through wg0 and
+        // the user can't reach their container. Operator can override per-game.
+        var allowedIps = config["Ad:Vpn:AllowedIps"] ?? $"{clientCidr}, 172.0.0.0/16";
 
         var peer = await db.AdVpnPeers
             .FirstOrDefaultAsync(p => p.UserId == user.Id && p.ParticipationId == participation.Id, token);

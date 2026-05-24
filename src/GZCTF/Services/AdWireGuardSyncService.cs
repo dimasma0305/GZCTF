@@ -112,10 +112,13 @@ public sealed class AdWireGuardSyncService(
         sb.AppendLine($"Address = {serverIp}/{ParsePrefix(ClientCidr)}");
         sb.AppendLine($"ListenPort = {ListenPort}");
         sb.AppendLine($"PrivateKey = {serverPriv}");
-        // NAT VPN traffic out so packets to the A&D challenge subnet can return.
-        // eth0 is the default Docker bridge interface inside the sidecar.
-        sb.AppendLine("PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE");
-        sb.AppendLine("PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE");
+        // NAT VPN traffic source-side, not bound to a specific outbound
+        // interface, so packets to challenge containers on either of the
+        // -open / -isolated networks get masqueraded regardless of which
+        // sidecar interface they egress through. Without this, the return
+        // path is broken and clients can't reach challenge IPs.
+        sb.AppendLine($"PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT; iptables -t nat -A POSTROUTING -s {ClientCidr} -j MASQUERADE");
+        sb.AppendLine($"PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT; iptables -t nat -D POSTROUTING -s {ClientCidr} -j MASQUERADE");
         sb.AppendLine();
 
         foreach (var peer in peers)
