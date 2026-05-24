@@ -62,6 +62,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) :
     public DbSet<AdCheckResult> AdCheckResults { get; set; } = null!;
     public DbSet<AdAttack> AdAttacks { get; set; } = null!;
     public DbSet<AdVpnPeer> AdVpnPeers { get; set; } = null!;
+    public DbSet<AdTeamApiToken> AdTeamApiTokens { get; set; } = null!;
 
     private static ValueConverter<T?, string> GetJsonConverter<T>() where T : class, new() =>
         new(

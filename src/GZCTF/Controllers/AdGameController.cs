@@ -5,6 +5,7 @@ using GZCTF.Models.Data;
 using GZCTF.Models.Request.Game;
 using GZCTF.Models.Response.Admin;
 using GZCTF.Services;
+using GZCTF.Services.Config;
 using GZCTF.Storage.Interface;
 using GZCTF.Utils;
 using Microsoft.AspNetCore.Identity;
@@ -32,90 +33,130 @@ public class AdGameController(
     UserManager<UserInfo> userManager,
     AdContainerManager adContainerManager,
     IBlobStorage blobStorage,
+    IConfigService configService,
     IStringLocalizer<Program> localizer,
     ILogger<AdGameController> logger) : ControllerBase
 {
     /// <summary>
-    /// Submit a captured flag from another team's service.
+    /// Submit one or more captured flags from other teams' services. Accepts
+    /// session-cookie auth (for the web tooling) OR <c>Authorization: Bearer
+    /// ad_...</c> for scripted exploits. Returns per-flag results in input
+    /// order so callers can correlate.
     /// </summary>
-    [RequireUser]
     [HttpPost("Submit")]
     [EnableRateLimiting(nameof(RateLimiter.LimitPolicy.Submit))]
-    [ProducesResponseType(typeof(AdSubmitResultModel), StatusCodes.Status200OK)]
-    public async Task<IActionResult> Submit(int id, [FromBody] AdSubmitModel model, CancellationToken token)
+    [ProducesResponseType(typeof(AdBatchSubmitResultModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> SubmitBatch(int id, [FromBody] AdBatchSubmitModel model, CancellationToken token)
     {
-        var user = await userManager.GetUserAsync(User);
-        if (user is null)
-            return Unauthorized();
+        if (!ModelState.IsValid)
+            return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Model_ValidationFailed)]));
 
-        // Caller's participation in the target game.
-        var attackerPart = await db.Participations
-            .FirstOrDefaultAsync(p => p.GameId == id
-                && p.Status == ParticipationStatus.Accepted
-                && p.Members.Any(m => m.UserId == user.Id), token);
+        var attackerPart = await ResolveTeamApiTokenAsync(id, token)
+                           ?? await ResolveUserParticipationAsync(id, token);
 
         if (attackerPart is null)
-            return Forbid();
+            return Unauthorized();
 
-        // Current round.
         var currentRound = await db.AdRounds
             .Where(r => r.GameId == id)
             .OrderByDescending(r => r.Number)
             .FirstOrDefaultAsync(token);
 
         if (currentRound is null)
-            return Ok(new AdSubmitResultModel
+        {
+            var notStarted = model.Flags.Select(f => new AdSubmitResultModel
             {
+                Flag = f,
                 Status = "not_started",
                 Message = "No A&D round has started yet for this game"
-            });
+            }).ToList();
 
-        var submittedFlag = model.Flag.Trim();
+            return Ok(new AdBatchSubmitResultModel { Results = notStarted });
+        }
+
+        var results = new List<AdSubmitResultModel>(model.Flags.Count);
+        double totalPoints = 0;
+        var acceptedCount = 0;
+
+        foreach (var raw in model.Flags)
+        {
+            var result = await ProcessSingleFlagAsync(attackerPart, currentRound, raw, token);
+            results.Add(result);
+            if (result.Status == "accepted")
+            {
+                acceptedCount++;
+                totalPoints += result.Points ?? 0;
+            }
+        }
+
+        return Ok(new AdBatchSubmitResultModel
+        {
+            AcceptedCount = acceptedCount,
+            TotalPoints = totalPoints,
+            Results = results
+        });
+    }
+
+    private async Task<AdSubmitResultModel> ProcessSingleFlagAsync(
+        Participation attackerPart, AdRound currentRound, string raw, CancellationToken token)
+    {
+        var submittedFlag = (raw ?? string.Empty).Trim();
+        var result = new AdSubmitResultModel { Flag = submittedFlag };
+
         if (string.IsNullOrEmpty(submittedFlag))
-            return Ok(new AdSubmitResultModel { Status = "wrong", Message = "empty flag" });
+        {
+            result.Status = "wrong";
+            result.Message = "empty flag";
+            return result;
+        }
 
-        // Find the AdFlag by exact flag string. Indexed on Flag column.
         var adFlag = await db.AdFlags
             .Include(f => f.AdTeamService)
             .FirstOrDefaultAsync(f => f.Flag == submittedFlag, token);
 
         if (adFlag is null)
-            return Ok(new AdSubmitResultModel { Status = "wrong", Message = "flag not recognized" });
+        {
+            result.Status = "wrong";
+            result.Message = "flag not recognized";
+            return result;
+        }
 
-        // Same-game guard.
         var victimPart = await db.Participations
             .FirstOrDefaultAsync(p => p.Id == adFlag.AdTeamService.ParticipationId, token);
-        if (victimPart is null || victimPart.GameId != id)
-            return Ok(new AdSubmitResultModel { Status = "wrong", Message = "flag from another game" });
+        if (victimPart is null || victimPart.GameId != attackerPart.GameId)
+        {
+            result.Status = "wrong";
+            result.Message = "flag from another game";
+            return result;
+        }
 
-        // Self-attack guard.
         if (victimPart.Id == attackerPart.Id)
-            return Ok(new AdSubmitResultModel { Status = "self_attack", Message = "cannot submit your own flag" });
+        {
+            result.Status = "self_attack";
+            result.Message = "cannot submit your own flag";
+            return result;
+        }
 
-        // Flag-lifetime guard.
         var challenge = await db.GameChallenges.FirstAsync(c => c.Id == adFlag.AdTeamService.ChallengeId, token);
         var lifetimeTicks = challenge.AdFlagLifetimeTicks ?? 5;
         if (adFlag.PlantedAtRound < currentRound.Number - lifetimeTicks + 1)
-            return Ok(new AdSubmitResultModel
-            {
-                Status = "expired",
-                FlagPlantedAtRound = adFlag.PlantedAtRound,
-                Message = $"flag was planted {currentRound.Number - adFlag.PlantedAtRound} ticks ago (lifetime {lifetimeTicks})"
-            });
+        {
+            result.Status = "expired";
+            result.FlagPlantedAtRound = adFlag.PlantedAtRound;
+            result.Message = $"flag was planted {currentRound.Number - adFlag.PlantedAtRound} ticks ago (lifetime {lifetimeTicks})";
+            return result;
+        }
 
-        // Duplicate guard — unique index (AttackerParticipationId, AdFlagId) will
-        // also catch this; pre-check for a friendly response.
         var alreadySubmitted = await db.AdAttacks.AnyAsync(
             a => a.AttackerParticipationId == attackerPart.Id && a.AdFlagId == adFlag.Id, token);
         if (alreadySubmitted)
-            return Ok(new AdSubmitResultModel
-            {
-                Status = "duplicate",
-                FlagPlantedAtRound = adFlag.PlantedAtRound,
-                Message = "you've already submitted this flag"
-            });
+        {
+            result.Status = "duplicate";
+            result.FlagPlantedAtRound = adFlag.PlantedAtRound;
+            result.Message = "you've already submitted this flag";
+            return result;
+        }
 
-        // FAUST-ish scoring: base 10 points / sqrt(distinct capturers including this one).
         var priorCapturers = await db.AdAttacks.CountAsync(a => a.AdFlagId == adFlag.Id, token);
         var points = 10.0 / Math.Sqrt(priorCapturers + 1);
 
@@ -136,25 +177,200 @@ public class AdGameController(
         }
         catch (DbUpdateException)
         {
-            // Hit the unique constraint via race — treat as duplicate.
-            return Ok(new AdSubmitResultModel
-            {
-                Status = "duplicate",
-                FlagPlantedAtRound = adFlag.PlantedAtRound,
-                Message = "already submitted"
-            });
+            result.Status = "duplicate";
+            result.FlagPlantedAtRound = adFlag.PlantedAtRound;
+            result.Message = "already submitted";
+            return result;
         }
 
         logger.SystemLog(
             $"A&D attack landed: attacker={attackerPart.Id} victim={victimPart.Id} chal={adFlag.AdTeamService.ChallengeId} round={currentRound.Number} pts={points:F2}",
             TaskStatus.Success, LogLevel.Information);
 
-        return Ok(new AdSubmitResultModel
+        result.Status = "accepted";
+        result.Points = points;
+        result.FlagPlantedAtRound = adFlag.PlantedAtRound;
+        return result;
+    }
+
+    private async Task<Participation?> ResolveTeamApiTokenAsync(int gameId, CancellationToken token)
+    {
+        var auth = Request.Headers.Authorization.ToString();
+        const string scheme = "Bearer ";
+        if (!auth.StartsWith(scheme, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var presented = auth[scheme.Length..].Trim();
+        if (!presented.StartsWith(AdTokenUtils.TokenPrefix, StringComparison.Ordinal))
+            return null;
+
+        var hash = AdTokenUtils.Hash(presented, configService.GetXorKey());
+
+        var row = await db.AdTeamApiTokens
+            .Include(t => t.Participation)
+            .FirstOrDefaultAsync(t => t.TokenHash == hash, token);
+
+        if (row is null || row.Participation.GameId != gameId
+            || row.Participation.Status != ParticipationStatus.Accepted)
+            return null;
+
+        row.LastUsedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(token);
+        return row.Participation;
+    }
+
+    private async Task<Participation?> ResolveUserParticipationAsync(int gameId, CancellationToken token)
+    {
+        var user = await userManager.GetUserAsync(User);
+        if (user is null) return null;
+
+        return await db.Participations
+            .FirstOrDefaultAsync(p => p.GameId == gameId
+                && p.Status == ParticipationStatus.Accepted
+                && p.Members.Any(m => m.UserId == user.Id), token);
+    }
+
+    /// <summary>
+    /// Generate or rotate the team's A&amp;D API token. Captain only.
+    /// Returns the plaintext token exactly once.
+    /// </summary>
+    [RequireUser]
+    [HttpPost("Token")]
+    [ProducesResponseType(typeof(AdTokenGenerateResultModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> RotateToken(int id, CancellationToken token)
+    {
+        var user = await userManager.GetUserAsync(User);
+        if (user is null) return Unauthorized();
+
+        var participation = await db.Participations
+            .Include(p => p.Team)
+            .FirstOrDefaultAsync(p => p.GameId == id
+                && p.Status == ParticipationStatus.Accepted
+                && p.Members.Any(m => m.UserId == user.Id), token);
+
+        if (participation is null) return Forbid();
+
+        if (participation.Team.CaptainId != user.Id)
+            return Forbid();
+
+        var plaintext = AdTokenUtils.GeneratePlaintext();
+        var hint = AdTokenUtils.BuildHint(plaintext);
+        var hash = AdTokenUtils.Hash(plaintext, configService.GetXorKey());
+        var now = DateTimeOffset.UtcNow;
+
+        var existing = await db.AdTeamApiTokens
+            .FirstOrDefaultAsync(t => t.ParticipationId == participation.Id, token);
+
+        if (existing is null)
         {
-            Status = "accepted",
-            Points = points,
-            FlagPlantedAtRound = adFlag.PlantedAtRound
+            existing = new AdTeamApiToken
+            {
+                ParticipationId = participation.Id,
+                TokenHash = hash,
+                Hint = hint,
+                CreatedAt = now,
+                LastRotatedAt = now
+            };
+            await db.AdTeamApiTokens.AddAsync(existing, token);
+        }
+        else
+        {
+            existing.TokenHash = hash;
+            existing.Hint = hint;
+            existing.LastRotatedAt = now;
+            existing.LastUsedAt = null;
+        }
+
+        await db.SaveChangesAsync(token);
+
+        logger.SystemLog(
+            $"A&D team token rotated: participation={participation.Id} by user={user.Id}",
+            TaskStatus.Success, LogLevel.Information);
+
+        return Ok(new AdTokenGenerateResultModel
+        {
+            Token = plaintext,
+            Hint = hint,
+            RotatedAt = now
         });
+    }
+
+    /// <summary>
+    /// Read the hint for the team's A&amp;D API token. Visible to all members
+    /// of the participating team; never reveals the plaintext.
+    /// </summary>
+    [RequireUser]
+    [HttpGet("Token")]
+    [ProducesResponseType(typeof(AdTokenHintModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetTokenHint(int id, CancellationToken token)
+    {
+        var user = await userManager.GetUserAsync(User);
+        if (user is null) return Unauthorized();
+
+        var participation = await db.Participations
+            .Include(p => p.Team)
+            .FirstOrDefaultAsync(p => p.GameId == id
+                && p.Status == ParticipationStatus.Accepted
+                && p.Members.Any(m => m.UserId == user.Id), token);
+
+        if (participation is null) return Forbid();
+
+        var canManage = participation.Team.CaptainId == user.Id;
+
+        var existing = await db.AdTeamApiTokens
+            .FirstOrDefaultAsync(t => t.ParticipationId == participation.Id, token);
+
+        if (existing is null)
+            return Ok(new AdTokenHintModel { Exists = false, CanManage = canManage });
+
+        return Ok(new AdTokenHintModel
+        {
+            Exists = true,
+            Hint = existing.Hint,
+            CreatedAt = existing.CreatedAt,
+            LastRotatedAt = existing.LastRotatedAt,
+            LastUsedAt = existing.LastUsedAt,
+            CanManage = canManage
+        });
+    }
+
+    /// <summary>
+    /// Revoke the team's A&amp;D API token. Captain only. After this call,
+    /// no Bearer-token submission will succeed until a new token is generated.
+    /// </summary>
+    [RequireUser]
+    [HttpDelete("Token")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> RevokeToken(int id, CancellationToken token)
+    {
+        var user = await userManager.GetUserAsync(User);
+        if (user is null) return Unauthorized();
+
+        var participation = await db.Participations
+            .Include(p => p.Team)
+            .FirstOrDefaultAsync(p => p.GameId == id
+                && p.Status == ParticipationStatus.Accepted
+                && p.Members.Any(m => m.UserId == user.Id), token);
+
+        if (participation is null) return Forbid();
+
+        if (participation.Team.CaptainId != user.Id)
+            return Forbid();
+
+        var existing = await db.AdTeamApiTokens
+            .FirstOrDefaultAsync(t => t.ParticipationId == participation.Id, token);
+
+        if (existing is null)
+            return NoContent();
+
+        db.AdTeamApiTokens.Remove(existing);
+        await db.SaveChangesAsync(token);
+
+        logger.SystemLog(
+            $"A&D team token revoked: participation={participation.Id} by user={user.Id}",
+            TaskStatus.Success, LogLevel.Information);
+
+        return NoContent();
     }
 
     /// <summary>
