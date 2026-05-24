@@ -122,12 +122,12 @@
       },
       "guide": {
         "title": "Attack & Defense — Toolkit",
-        "intro": "Everything you need to play A&D: your team token, your VPN config, the API contract, and the rules. The first two sections are actionable — token rotation and VPN config download.",
+        "intro": "Everything you need to play A&D: your personal API token, your VPN config, the API contract, and the rules. The first two sections are actionable — token rotation and VPN config download.",
         "footer": "Endpoint base: ",
         "token": {
-          "title": "Team API token",
-          "intro": "A team-scoped Bearer token. Your exploit scripts pass it as Authorization: Bearer <token> when submitting captured flags. Captains can generate / rotate; non-captains see the hint only.",
-          "current": "Current token"
+          "title": "Your API token",
+          "intro": "A personal Bearer token scoped to you + this game. Your exploit scripts pass it as Authorization: Bearer <token> when submitting captured flags. Every team member manages their own — rotating yours does not affect anyone else, and if you get kicked from the team your token stops working immediately.",
+          "current": "Your current token"
         },
         "vpn": {
           "title": "VPN config",

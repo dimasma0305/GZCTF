@@ -143,7 +143,7 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
             <Text size="sm" c="dimmed">
               {t(
                 'game.content.ad.guide.intro',
-                'Everything you need to play A&D: your team token, your VPN config, the API contract, and the rules. The first two sections are actionable — token rotation and VPN config download.'
+                'Everything you need to play A&D: your personal API token, your VPN config, the API contract, and the rules. The first two sections are actionable — token rotation and VPN config download.'
               )}
             </Text>
 
@@ -153,20 +153,20 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
                 <Accordion.Control
                   icon={<Icon path={mdiKeyChain} size={1} color="var(--mantine-color-orange-6)" />}
                 >
-                  <Text fw={600}>{t('game.content.ad.guide.token.title', 'Team API token')}</Text>
+                  <Text fw={600}>{t('game.content.ad.guide.token.title', 'Your API token')}</Text>
                 </Accordion.Control>
                 <Accordion.Panel>
                   <Stack gap="sm">
                     <Text size="sm">
                       {t(
                         'game.content.ad.guide.token.intro',
-                        'A team-scoped Bearer token. Your exploit scripts pass it as Authorization: Bearer <token> when submitting captured flags. Captains can generate / rotate; non-captains see the hint only.'
+                        'A personal Bearer token scoped to you + this game. Your exploit scripts pass it as Authorization: Bearer <token> when submitting captured flags. Every team member manages their own — rotating yours does not affect anyone else, and if you get kicked from the team your token stops working immediately.'
                       )}
                     </Text>
                     <Group justify="space-between" wrap="wrap" gap="xs">
                       <Group gap="xs">
                         <Text size="sm" fw={600}>
-                          {t('game.content.ad.guide.token.current', 'Current token')}:
+                          {t('game.content.ad.guide.token.current', 'Your current token')}:
                         </Text>
                         {adTokenHint?.exists ? (
                           <Text size="sm" className={misc.ffmono}>
@@ -178,28 +178,18 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
                           </Text>
                         )}
                       </Group>
-                      {adTokenHint?.canManage && (
-                        <Button
-                          size="xs"
-                          variant="default"
-                          leftSection={<Icon path={mdiKeyChain} size={0.7} />}
-                          loading={rotating}
-                          onClick={onRotate}
-                        >
-                          {adTokenHint.exists
-                            ? t('game.button.ad.rotate_token', 'Rotate token')
-                            : t('game.button.ad.generate_token', 'Generate token')}
-                        </Button>
-                      )}
+                      <Button
+                        size="xs"
+                        variant="default"
+                        leftSection={<Icon path={mdiKeyChain} size={0.7} />}
+                        loading={rotating}
+                        onClick={onRotate}
+                      >
+                        {adTokenHint?.exists
+                          ? t('game.button.ad.rotate_token', 'Rotate token')
+                          : t('game.button.ad.generate_token', 'Generate token')}
+                      </Button>
                     </Group>
-                    {!adTokenHint?.canManage && !adTokenHint?.exists && (
-                      <Text size="xs" c="dimmed">
-                        {t(
-                          'game.content.ad.token_captain_only',
-                          'Only your team captain can generate the API token. Ask them to open this panel and click Generate token.'
-                        )}
-                      </Text>
-                    )}
                     {adTokenHint?.exists && (
                       <Text size="xs" c="dimmed">
                         {t('game.content.ad.last_used', 'Last used')}:{' '}

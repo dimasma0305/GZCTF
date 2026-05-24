@@ -207,12 +207,20 @@ public class AdGameController(
         var hash = AdTokenUtils.Hash(presented, configService.GetXorKey());
 
         var row = await db.AdTeamApiTokens
-            .Include(t => t.Participation)
+            .Include(t => t.Participation).ThenInclude(p => p.Members)
             .FirstOrDefaultAsync(t => t.TokenHash == hash, token);
 
-        if (row is null || row.Participation.GameId != gameId
+        if (row is null
+            || row.Participation.GameId != gameId
             || row.Participation.Status != ParticipationStatus.Accepted)
             return null;
+
+        // Verify the user this token belongs to is *still* on the team. This
+        // is what makes member-kick an instant revocation: even if the kicked
+        // member kept their token, their UserParticipation row was removed by
+        // the kick flow and this lookup fails.
+        var stillAMember = row.Participation.Members.Any(m => m.UserId == row.UserId);
+        if (!stillAMember) return null;
 
         row.LastUsedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(token);
@@ -231,7 +239,8 @@ public class AdGameController(
     }
 
     /// <summary>
-    /// Generate or rotate the team's A&amp;D API token. Captain only.
+    /// Generate or rotate the caller's own A&amp;D API token for this game.
+    /// Any team member can manage their own token — no captain check.
     /// Returns the plaintext token exactly once.
     /// </summary>
     [RequireUser]
@@ -243,15 +252,11 @@ public class AdGameController(
         if (user is null) return Unauthorized();
 
         var participation = await db.Participations
-            .Include(p => p.Team)
             .FirstOrDefaultAsync(p => p.GameId == id
                 && p.Status == ParticipationStatus.Accepted
                 && p.Members.Any(m => m.UserId == user.Id), token);
 
         if (participation is null) return Forbid();
-
-        if (participation.Team.CaptainId != user.Id)
-            return Forbid();
 
         var plaintext = AdTokenUtils.GeneratePlaintext();
         var hint = AdTokenUtils.BuildHint(plaintext);
@@ -259,12 +264,13 @@ public class AdGameController(
         var now = DateTimeOffset.UtcNow;
 
         var existing = await db.AdTeamApiTokens
-            .FirstOrDefaultAsync(t => t.ParticipationId == participation.Id, token);
+            .FirstOrDefaultAsync(t => t.UserId == user.Id && t.ParticipationId == participation.Id, token);
 
         if (existing is null)
         {
             existing = new AdTeamApiToken
             {
+                UserId = user.Id,
                 ParticipationId = participation.Id,
                 TokenHash = hash,
                 Hint = hint,
@@ -284,7 +290,7 @@ public class AdGameController(
         await db.SaveChangesAsync(token);
 
         logger.SystemLog(
-            $"A&D team token rotated: participation={participation.Id} by user={user.Id}",
+            $"A&D user token rotated: user={user.Id} participation={participation.Id}",
             TaskStatus.Success, LogLevel.Information);
 
         return Ok(new AdTokenGenerateResultModel
@@ -296,8 +302,9 @@ public class AdGameController(
     }
 
     /// <summary>
-    /// Read the hint for the team's A&amp;D API token. Visible to all members
-    /// of the participating team; never reveals the plaintext.
+    /// Read the hint for the caller's own A&amp;D API token. Per-user; no
+    /// captain check needed (each user manages their own token). Never
+    /// reveals the plaintext.
     /// </summary>
     [RequireUser]
     [HttpGet("Token")]
@@ -308,20 +315,17 @@ public class AdGameController(
         if (user is null) return Unauthorized();
 
         var participation = await db.Participations
-            .Include(p => p.Team)
             .FirstOrDefaultAsync(p => p.GameId == id
                 && p.Status == ParticipationStatus.Accepted
                 && p.Members.Any(m => m.UserId == user.Id), token);
 
         if (participation is null) return Forbid();
 
-        var canManage = participation.Team.CaptainId == user.Id;
-
         var existing = await db.AdTeamApiTokens
-            .FirstOrDefaultAsync(t => t.ParticipationId == participation.Id, token);
+            .FirstOrDefaultAsync(t => t.UserId == user.Id && t.ParticipationId == participation.Id, token);
 
         if (existing is null)
-            return Ok(new AdTokenHintModel { Exists = false, CanManage = canManage });
+            return Ok(new AdTokenHintModel { Exists = false, CanManage = true });
 
         return Ok(new AdTokenHintModel
         {
@@ -330,13 +334,14 @@ public class AdGameController(
             CreatedAt = existing.CreatedAt,
             LastRotatedAt = existing.LastRotatedAt,
             LastUsedAt = existing.LastUsedAt,
-            CanManage = canManage
+            CanManage = true
         });
     }
 
     /// <summary>
-    /// Revoke the team's A&amp;D API token. Captain only. After this call,
-    /// no Bearer-token submission will succeed until a new token is generated.
+    /// Revoke the caller's own A&amp;D API token. Per-user — does not affect
+    /// other team members' tokens. After this call, the caller's Bearer-token
+    /// submissions stop working until they generate a new one.
     /// </summary>
     [RequireUser]
     [HttpDelete("Token")]
@@ -347,18 +352,14 @@ public class AdGameController(
         if (user is null) return Unauthorized();
 
         var participation = await db.Participations
-            .Include(p => p.Team)
             .FirstOrDefaultAsync(p => p.GameId == id
                 && p.Status == ParticipationStatus.Accepted
                 && p.Members.Any(m => m.UserId == user.Id), token);
 
         if (participation is null) return Forbid();
 
-        if (participation.Team.CaptainId != user.Id)
-            return Forbid();
-
         var existing = await db.AdTeamApiTokens
-            .FirstOrDefaultAsync(t => t.ParticipationId == participation.Id, token);
+            .FirstOrDefaultAsync(t => t.UserId == user.Id && t.ParticipationId == participation.Id, token);
 
         if (existing is null)
             return NoContent();
@@ -367,7 +368,7 @@ public class AdGameController(
         await db.SaveChangesAsync(token);
 
         logger.SystemLog(
-            $"A&D team token revoked: participation={participation.Id} by user={user.Id}",
+            $"A&D user token revoked: user={user.Id} participation={participation.Id}",
             TaskStatus.Success, LogLevel.Information);
 
         return NoContent();

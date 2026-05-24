@@ -122,12 +122,12 @@
       },
       "guide": {
         "title": "攻防对抗 — 工具箱",
-        "intro": "玩攻防所需的一切：队伍 Token、VPN 配置、API 协议、规则说明。前两部分是可操作项 — Token 重置与 VPN 配置下载。",
+        "intro": "玩攻防所需的一切：你的个人 API Token、VPN 配置、API 协议、规则说明。前两部分是可操作项 — Token 重置与 VPN 配置下载。",
         "footer": "接口前缀：",
         "token": {
-          "title": "队伍 API Token",
-          "intro": "队伍范围的 Bearer Token。利用脚本通过 Authorization: Bearer <token> 提交捕获的 flag。仅队长可生成 / 重置；其他成员仅可查看 Hint。",
-          "current": "当前 Token"
+          "title": "你的 API Token",
+          "intro": "范围为你 + 本场比赛的个人 Bearer Token。利用脚本通过 Authorization: Bearer <token> 提交捕获的 flag。每个队员管理各自的 Token — 重置你的不会影响其他成员，被踢出队伍后你的 Token 会立即失效。",
+          "current": "你当前的 Token"
         },
         "vpn": {
           "title": "VPN 配置",
