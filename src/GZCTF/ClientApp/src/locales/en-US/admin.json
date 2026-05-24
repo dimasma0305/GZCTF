@@ -247,6 +247,50 @@
         "type": {
           "description": "Cannot be changed after creation",
           "label": "Type"
+        },
+        "ad": {
+          "title": "Attack & Defense",
+          "description": "Per-challenge A&D configuration. Container image + port + resource caps above are reused; the fields here drive the checker, flag rotation, and player-facing options.",
+          "checker_image": {
+            "label": "Checker image",
+            "description": "Docker image speaking the enochecker3 HTTP contract (PUT /putflag, /getflag, /havoc). Phase 1 stores this for later — the auto-checker scheduler ships in Phase 2."
+          },
+          "tick_seconds": {
+            "label": "Tick seconds",
+            "description": "Seconds per round. 60–180s is the industry norm."
+          },
+          "flag_lifetime_ticks": {
+            "label": "Flag lifetime (ticks)",
+            "description": "How many ticks a planted flag remains valid for attack submission. Default 5."
+          },
+          "reset_cooldown_minutes": {
+            "label": "Reset cooldown (min)",
+            "description": "Minimum minutes between consecutive self-resets per team."
+          },
+          "putflag_window_fraction": {
+            "label": "Putflag jitter window",
+            "description": "Fraction of the tick within which the checker may plant flags. Defeats timing-based fingerprinting."
+          },
+          "getflag_window_fraction": {
+            "label": "Getflag jitter window",
+            "description": "Fraction of the tick within which the checker may retrieve flags."
+          },
+          "min_grace_period_seconds": {
+            "label": "Min grace period (s)",
+            "description": "Seconds after putflag before getflag may fire."
+          },
+          "allow_egress": {
+            "label": "Allow external internet",
+            "description": "Default off — A&D containers are sandboxed from the public internet. Enable only if your service genuinely needs an external API call."
+          },
+          "allow_self_reset": {
+            "label": "Allow self-reset",
+            "description": "Lets the team rebuild their own container to baseline (e.g. when fully owned). Subject to the cooldown above."
+          },
+          "allow_snapshot_download": {
+            "label": "Snapshot at game end",
+            "description": "Commit + save the team's container as a tarball at end-of-game; teams download for post-mortem study (Docker provider only)."
+          }
         }
       },
       "divisions": {
@@ -776,7 +820,9 @@
         "not_applicable": "Registry",
         "not_applicable_help": "This challenge ships a published registry image — no auto-build runs.",
         "missing_dockerfile": "Dockerfile missing",
-        "missing_dockerfile_help": "The challenge.yaml pointed at a local Dockerfile path that didn't exist in the archive. Open Audit for the resolved path, fix the source, and trigger a rebuild."
+        "missing_dockerfile_help": "The challenge.yaml pointed at a local Dockerfile path that didn't exist in the archive. Open Audit for the resolved path, fix the source, and trigger a rebuild.",
+        "attack_defense": "A&D",
+        "attack_defense_help": "Attack & Defense challenge — each team gets a persistent container; players attack other teams and defend their own."
       },
       "title": "Challenges awaiting review",
       "empty": {

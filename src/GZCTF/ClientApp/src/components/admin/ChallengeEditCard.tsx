@@ -118,6 +118,13 @@ export const ChallengeEditCard: FC<ChallengeEditCardProps> = ({ challenge, onTog
             <Text truncate fw="bold">
               {challenge.title}
             </Text>
+            {challenge.type === 'AttackDefense' && (
+              <Tooltip label={t('admin.content.review.badge.attack_defense_help')} multiline w={260}>
+                <Badge size="xs" color="red" variant="filled">
+                  {t('admin.content.review.badge.attack_defense')}
+                </Badge>
+              </Tooltip>
+            )}
             {challenge.reviewStatus === 'Pending' && (
               <Badge size="xs" color="yellow" variant="filled">
                 {t('admin.content.review.badge.pending')}

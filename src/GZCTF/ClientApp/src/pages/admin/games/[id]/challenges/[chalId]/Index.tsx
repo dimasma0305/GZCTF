@@ -3,6 +3,7 @@ import {
   Button,
   Code,
   ComboboxItem,
+  Divider,
   Grid,
   Group,
   Input,
@@ -165,7 +166,9 @@ const GameChallengeEdit: FC = () => {
   const [building, setBuilding] = useState(false)
   const inFlightBuild = challenge?.buildStatus === 'Queued' || challenge?.buildStatus === 'Building'
   const isBuildable =
-    (challenge?.type === 'StaticContainer' || challenge?.type === 'DynamicContainer')
+    (challenge?.type === 'StaticContainer'
+      || challenge?.type === 'DynamicContainer'
+      || challenge?.type === 'AttackDefense')
     && challenge?.buildStatus !== 'NotApplicable'
 
   // While a build is in flight, the worker streams the docker output
@@ -561,7 +564,9 @@ const GameChallengeEdit: FC = () => {
             onChange={(e) => setChallengeInfo({ ...challengeInfo, fileName: e.target.value })}
           />
         )}
-        {(type === ChallengeType.StaticContainer || type === ChallengeType.DynamicContainer) && (
+        {(type === ChallengeType.StaticContainer
+          || type === ChallengeType.DynamicContainer
+          || type === ChallengeType.AttackDefense) && (
           <Grid columns={12}>
             <Grid.Col span={8}>
               <Group justify="space-between" align="flex-end">
@@ -708,6 +713,152 @@ const GameChallengeEdit: FC = () => {
               />
             </Grid.Col>
           </Grid>
+        )}
+
+        {/* Attack & Defense — per-challenge config */}
+        {type === ChallengeType.AttackDefense && (
+          <Stack gap="sm">
+            <Divider
+              label={t('admin.content.games.challenges.ad.title')}
+              labelPosition="left"
+            />
+            <Text size="sm" c="dimmed">
+              {t('admin.content.games.challenges.ad.description')}
+            </Text>
+            <Grid columns={12}>
+              <Grid.Col span={6}>
+                <TextInput
+                  label={t('admin.content.games.challenges.ad.checker_image.label')}
+                  description={t('admin.content.games.challenges.ad.checker_image.description')}
+                  placeholder="ghcr.io/myorg/vuln-flask-checker:1.0"
+                  disabled={disabled}
+                  value={challengeInfo.adCheckerImage ?? ''}
+                  onChange={(e) => setChallengeInfo({ ...challengeInfo, adCheckerImage: e.target.value })}
+                />
+              </Grid.Col>
+              <Grid.Col span={2}>
+                <NumberInput
+                  label={t('admin.content.games.challenges.ad.tick_seconds.label')}
+                  description={t('admin.content.games.challenges.ad.tick_seconds.description')}
+                  min={30}
+                  max={600}
+                  disabled={disabled}
+                  value={challengeInfo.adTickSeconds ?? 120}
+                  onChange={(e) => {
+                    const n = getInputNumber(e)
+                    if (!isNaN(n)) setChallengeInfo({ ...challengeInfo, adTickSeconds: n })
+                  }}
+                />
+              </Grid.Col>
+              <Grid.Col span={2}>
+                <NumberInput
+                  label={t('admin.content.games.challenges.ad.flag_lifetime_ticks.label')}
+                  description={t('admin.content.games.challenges.ad.flag_lifetime_ticks.description')}
+                  min={1}
+                  max={50}
+                  disabled={disabled}
+                  value={challengeInfo.adFlagLifetimeTicks ?? 5}
+                  onChange={(e) => {
+                    const n = getInputNumber(e)
+                    if (!isNaN(n)) setChallengeInfo({ ...challengeInfo, adFlagLifetimeTicks: n })
+                  }}
+                />
+              </Grid.Col>
+              <Grid.Col span={2}>
+                <NumberInput
+                  label={t('admin.content.games.challenges.ad.reset_cooldown_minutes.label')}
+                  description={t('admin.content.games.challenges.ad.reset_cooldown_minutes.description')}
+                  min={0}
+                  max={60}
+                  disabled={disabled}
+                  value={challengeInfo.adResetCooldownMinutes ?? 5}
+                  onChange={(e) => {
+                    const n = getInputNumber(e)
+                    if (!isNaN(n)) setChallengeInfo({ ...challengeInfo, adResetCooldownMinutes: n })
+                  }}
+                />
+              </Grid.Col>
+              <Grid.Col span={2}>
+                <NumberInput
+                  label={t('admin.content.games.challenges.ad.putflag_window_fraction.label')}
+                  description={t('admin.content.games.challenges.ad.putflag_window_fraction.description')}
+                  min={0.05}
+                  max={0.9}
+                  step={0.05}
+                  decimalScale={2}
+                  disabled={disabled}
+                  value={challengeInfo.adPutflagWindowFraction ?? 0.4}
+                  onChange={(e) => {
+                    const n = getInputNumber(e)
+                    if (!isNaN(n)) setChallengeInfo({ ...challengeInfo, adPutflagWindowFraction: n })
+                  }}
+                />
+              </Grid.Col>
+              <Grid.Col span={2}>
+                <NumberInput
+                  label={t('admin.content.games.challenges.ad.getflag_window_fraction.label')}
+                  description={t('admin.content.games.challenges.ad.getflag_window_fraction.description')}
+                  min={0.05}
+                  max={0.9}
+                  step={0.05}
+                  decimalScale={2}
+                  disabled={disabled}
+                  value={challengeInfo.adGetflagWindowFraction ?? 0.5}
+                  onChange={(e) => {
+                    const n = getInputNumber(e)
+                    if (!isNaN(n)) setChallengeInfo({ ...challengeInfo, adGetflagWindowFraction: n })
+                  }}
+                />
+              </Grid.Col>
+              <Grid.Col span={2}>
+                <NumberInput
+                  label={t('admin.content.games.challenges.ad.min_grace_period_seconds.label')}
+                  description={t('admin.content.games.challenges.ad.min_grace_period_seconds.description')}
+                  min={1}
+                  max={60}
+                  disabled={disabled}
+                  value={challengeInfo.adMinGracePeriodSeconds ?? 3}
+                  onChange={(e) => {
+                    const n = getInputNumber(e)
+                    if (!isNaN(n)) setChallengeInfo({ ...challengeInfo, adMinGracePeriodSeconds: n })
+                  }}
+                />
+              </Grid.Col>
+              <Grid.Col span={4} display="flex" className={misc.alignCenter}>
+                <Switch
+                  disabled={disabled}
+                  checked={challengeInfo.adAllowEgress ?? false}
+                  label={SwitchLabel(
+                    t('admin.content.games.challenges.ad.allow_egress.label'),
+                    t('admin.content.games.challenges.ad.allow_egress.description')
+                  )}
+                  onChange={(e) => setChallengeInfo({ ...challengeInfo, adAllowEgress: e.target.checked })}
+                />
+              </Grid.Col>
+              <Grid.Col span={4} display="flex" className={misc.alignCenter}>
+                <Switch
+                  disabled={disabled}
+                  checked={challengeInfo.adAllowSelfReset ?? true}
+                  label={SwitchLabel(
+                    t('admin.content.games.challenges.ad.allow_self_reset.label'),
+                    t('admin.content.games.challenges.ad.allow_self_reset.description')
+                  )}
+                  onChange={(e) => setChallengeInfo({ ...challengeInfo, adAllowSelfReset: e.target.checked })}
+                />
+              </Grid.Col>
+              <Grid.Col span={4} display="flex" className={misc.alignCenter}>
+                <Switch
+                  disabled={disabled}
+                  checked={challengeInfo.adAllowSnapshotDownload ?? true}
+                  label={SwitchLabel(
+                    t('admin.content.games.challenges.ad.allow_snapshot_download.label'),
+                    t('admin.content.games.challenges.ad.allow_snapshot_download.description')
+                  )}
+                  onChange={(e) => setChallengeInfo({ ...challengeInfo, adAllowSnapshotDownload: e.target.checked })}
+                />
+              </Grid.Col>
+            </Grid>
+          </Stack>
         )}
 
         {isBuildable && challenge?.buildStatus && challenge.buildStatus !== 'None' && (

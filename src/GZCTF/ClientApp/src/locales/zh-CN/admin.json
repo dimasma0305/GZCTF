@@ -247,6 +247,50 @@
         "type": {
           "description": "创建后不可更改",
           "label": "题目类型"
+        },
+        "ad": {
+          "title": "攻防对抗",
+          "description": "攻防题目的专属配置。上方的镜像 / 端口 / 资源配额会被复用；这里的字段用于配置 checker、Flag 轮换以及面向玩家的开关。",
+          "checker_image": {
+            "label": "Checker 镜像",
+            "description": "符合 enochecker3 HTTP 协议的 Docker 镜像（PUT /putflag、/getflag、/havoc）。Phase 1 仅保存此值，自动调度器将在 Phase 2 上线。"
+          },
+          "tick_seconds": {
+            "label": "Tick 时长（秒）",
+            "description": "每个回合的秒数。业界常用 60–180 秒。"
+          },
+          "flag_lifetime_ticks": {
+            "label": "Flag 有效 tick 数",
+            "description": "Flag 自种植起多少 tick 内仍可被提交。默认 5。"
+          },
+          "reset_cooldown_minutes": {
+            "label": "自重置冷却（分钟）",
+            "description": "团队连续重置容器的最小间隔。"
+          },
+          "putflag_window_fraction": {
+            "label": "Putflag 抖动窗口",
+            "description": "Checker 可在 tick 内的哪段比例投放 Flag。用于打乱基于时间的指纹。"
+          },
+          "getflag_window_fraction": {
+            "label": "Getflag 抖动窗口",
+            "description": "Checker 可在 tick 内的哪段比例读取 Flag。"
+          },
+          "min_grace_period_seconds": {
+            "label": "最小宽限期（秒）",
+            "description": "putflag 与 getflag 之间的最小间隔。"
+          },
+          "allow_egress": {
+            "label": "允许访问外网",
+            "description": "默认关闭——A&D 容器与公网隔离。仅在服务必须调用外部 API 时启用。"
+          },
+          "allow_self_reset": {
+            "label": "允许自行重置",
+            "description": "允许团队在容器被打穿后重置回基线。受上方冷却约束。"
+          },
+          "allow_snapshot_download": {
+            "label": "终局快照",
+            "description": "比赛结束时将团队容器提交为镜像 tar 包供下载，便于赛后复盘（仅 Docker 提供商）。"
+          }
         }
       },
       "divisions": {
@@ -776,7 +820,9 @@
         "not_applicable": "仓库镜像",
         "not_applicable_help": "该题目使用了已发布的镜像，不会触发自动构建。",
         "missing_dockerfile": "缺少 Dockerfile",
-        "missing_dockerfile_help": "challenge.yaml 指向的本地 Dockerfile 路径在压缩包中不存在。打开「审查」查看解析路径，修正后再重建。"
+        "missing_dockerfile_help": "challenge.yaml 指向的本地 Dockerfile 路径在压缩包中不存在。打开「审查」查看解析路径，修正后再重建。",
+        "attack_defense": "攻防",
+        "attack_defense_help": "攻防对抗题目——每支队伍获得长驻容器，互相攻击并防御自身。"
       },
       "title": "待审核题目",
       "empty": {
