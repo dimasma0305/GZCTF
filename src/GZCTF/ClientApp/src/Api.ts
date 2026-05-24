@@ -1879,6 +1879,30 @@ export interface AdScoreboardModel {
   teams: AdTeamScoreRow[];
 }
 
+/** A&D — one point in a team's score timeline. */
+export interface AdTimelinePoint {
+  round: number;
+  time: string;
+  score: number;
+}
+
+/** A&D — one team's full score timeline. */
+export interface AdTeamTimeline {
+  participationId: number;
+  teamId: number;
+  teamName: string;
+  division?: string | null;
+  items: AdTimelinePoint[];
+}
+
+/** A&D — GET /api/Game/{id}/Ad/Timeline response. */
+export interface AdScoreTimelineModel {
+  latestRound: number;
+  startedAt?: string | null;
+  endsAt?: string | null;
+  teams: AdTeamTimeline[];
+}
+
 /** A&D admin — POST /api/edit/games/{id}/ad/AdvanceRound response. */
 export interface AdAdvanceRoundResult {
   roundNumber: number;
@@ -7859,6 +7883,36 @@ export class Api<
         method: "POST",
         ...params,
       }),
+
+    /**
+     * @description A&D — per-round per-team cumulative score timeline.
+     * @tags Game
+     * @name GameAdTimeline
+     * @request GET:/api/Game/{id}/Ad/Timeline
+     */
+    gameAdTimeline: (id: number, params: RequestParams = {}) =>
+      this.request<AdScoreTimelineModel, RequestResponse>({
+        path: `/api/Game/${id}/Ad/Timeline`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description A&D — SWR variant of gameAdTimeline.
+     * @tags Game
+     * @name GameAdTimeline
+     * @request GET:/api/Game/{id}/Ad/Timeline
+     */
+    useGameAdTimeline: (
+      id: number,
+      options?: SWRConfiguration,
+      doFetch: boolean = true,
+    ) =>
+      useSWR<AdScoreTimelineModel, RequestResponse>(
+        doFetch ? `/api/Game/${id}/Ad/Timeline` : null,
+        options,
+      ),
 
     /**
      * @description A&D — generate or rotate the team API token. Captain only.

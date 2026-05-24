@@ -612,6 +612,134 @@ public class AdGameController(
     }
 
     /// <summary>
+    /// Per-round, per-team cumulative score timeline for the A&amp;D scoreboard
+    /// chart. Mirrors what GameRepository builds for the jeopardy ScoreTimeLine
+    /// component. Public; respects the game's hidden flag.
+    /// </summary>
+    [HttpGet("Timeline")]
+    [ProducesResponseType(typeof(AdScoreTimelineModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Timeline(int id, CancellationToken token)
+    {
+        var game = await db.Games.FirstOrDefaultAsync(g => g.Id == id, token);
+        if (game is null || game.Hidden) return NotFound();
+
+        var hasAd = await db.GameChallenges.AnyAsync(
+            c => c.GameId == id && c.Type == ChallengeType.AttackDefense, token);
+        if (!hasAd) return NotFound();
+
+        var rounds = await db.AdRounds
+            .Where(r => r.GameId == id)
+            .OrderBy(r => r.Number)
+            .ToListAsync(token);
+
+        var teams = await db.Participations
+            .Where(p => p.GameId == id && p.Status == ParticipationStatus.Accepted)
+            .Include(p => p.Team)
+            .Include(p => p.Division)
+            .ToListAsync(token);
+
+        var result = new AdScoreTimelineModel
+        {
+            LatestRound = rounds.LastOrDefault()?.Number ?? 0,
+            StartedAt = rounds.FirstOrDefault()?.StartedAt,
+            EndsAt = rounds.LastOrDefault()?.EndsAt,
+        };
+
+        if (rounds.Count == 0 || teams.Count == 0)
+            return Ok(result);
+
+        var partIds = teams.Select(p => p.Id).ToHashSet();
+
+        // Pre-aggregate attacks by (attacker, round) and (victim, round) once.
+        var attacks = await db.AdAttacks
+            .Where(a => partIds.Contains(a.AttackerParticipationId))
+            .Select(a => new
+            {
+                a.AttackerParticipationId,
+                a.VictimParticipationId,
+                a.SubmittedAtRound,
+                a.Points
+            })
+            .ToListAsync(token);
+
+        var attackByTeamRound = attacks
+            .GroupBy(a => (a.AttackerParticipationId, a.SubmittedAtRound))
+            .ToDictionary(g => g.Key, g => g.Sum(a => a.Points));
+
+        var capturesByTeamRound = attacks
+            .GroupBy(a => (a.VictimParticipationId, a.SubmittedAtRound))
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        // Map each AdCheckResult to (participationId, status, time) once.
+        var checks = await db.AdCheckResults
+            .Join(db.AdTeamServices,
+                c => c.AdTeamServiceId, ts => ts.Id,
+                (c, ts) => new { ts.ParticipationId, c.Status, c.CheckedAt })
+            .Where(x => partIds.Contains(x.ParticipationId))
+            .ToListAsync(token);
+
+        // Index checks per team for fast per-round window queries.
+        var checksByTeam = checks
+            .GroupBy(c => c.ParticipationId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderBy(c => c.CheckedAt).ToList()
+            );
+
+        const double slaScale = 10.0;
+        const double defensePenaltyScale = 2.0;
+
+        foreach (var team in teams)
+        {
+            var timeline = new AdTeamTimeline
+            {
+                ParticipationId = team.Id,
+                TeamId = team.TeamId,
+                TeamName = team.Team.Name,
+                Division = team.Division?.Name,
+            };
+
+            double cumAttack = 0;
+            int cumTimesCaptured = 0;
+            int cumOkChecks = 0;
+            int cumTotalChecks = 0;
+
+            // Walk team's checks in order; advance pointer per round.
+            var teamChecks = checksByTeam.GetValueOrDefault(team.Id) ?? [];
+            var checkIdx = 0;
+
+            foreach (var round in rounds)
+            {
+                cumAttack += attackByTeamRound.GetValueOrDefault((team.Id, round.Number), 0);
+                cumTimesCaptured += capturesByTeamRound.GetValueOrDefault((team.Id, round.Number), 0);
+
+                while (checkIdx < teamChecks.Count && teamChecks[checkIdx].CheckedAt < round.EndsAt)
+                {
+                    cumTotalChecks++;
+                    if (teamChecks[checkIdx].Status == AdCheckStatus.Ok) cumOkChecks++;
+                    checkIdx++;
+                }
+
+                var defenseLoss = Math.Pow(cumTimesCaptured, 0.75) * defensePenaltyScale;
+                var slaFraction = cumTotalChecks > 0 ? (double)cumOkChecks / cumTotalChecks : 0;
+                var slaPoints = slaFraction * slaScale * round.Number;
+                var total = cumAttack - defenseLoss + slaPoints;
+
+                timeline.Items.Add(new AdTimelinePoint
+                {
+                    Round = round.Number,
+                    Time = round.EndsAt,
+                    Score = total
+                });
+            }
+
+            result.Teams.Add(timeline);
+        }
+
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Download the post-game container snapshot tarball for one of the
     /// caller's team services. Available only after game end + if the
     /// challenge has AdAllowSnapshotDownload=true + a snapshot was actually

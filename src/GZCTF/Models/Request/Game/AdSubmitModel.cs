@@ -73,6 +73,40 @@ public class AdTokenGenerateResultModel
 }
 
 /// <summary>
+/// Response for GET /api/game/{id}/ad/Timeline — per-round per-team cumulative
+/// score, used by the player A&amp;D scoreboard to render an echarts line chart
+/// that mirrors the jeopardy ScoreTimeLine.
+/// </summary>
+public class AdScoreTimelineModel
+{
+    public int LatestRound { get; set; }
+    public DateTimeOffset? StartedAt { get; set; }
+    public DateTimeOffset? EndsAt { get; set; }
+    public List<AdTeamTimeline> Teams { get; set; } = [];
+}
+
+public class AdTeamTimeline
+{
+    public int ParticipationId { get; set; }
+    public int TeamId { get; set; }
+    public string TeamName { get; set; } = string.Empty;
+    public string? Division { get; set; }
+    public List<AdTimelinePoint> Items { get; set; } = [];
+}
+
+public class AdTimelinePoint
+{
+    /// <summary>1-indexed round number.</summary>
+    public int Round { get; set; }
+
+    /// <summary>End-of-round timestamp — what the chart's x-axis uses.</summary>
+    public DateTimeOffset Time { get; set; }
+
+    /// <summary>Cumulative total score at end of this round (Attack + SLA − DefenseLoss).</summary>
+    public double Score { get; set; }
+}
+
+/// <summary>
 /// Response for the hint endpoint — visible to all team members.
 /// </summary>
 public class AdTokenHintModel

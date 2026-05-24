@@ -10,6 +10,7 @@ import { ScoreboardTable } from '@Components/ScoreboardTable'
 import { TeamRank } from '@Components/TeamRank'
 import { WithGameTab } from '@Components/WithGameTab'
 import { WithNavBar } from '@Components/WithNavbar'
+import { AdScoreTimeLine } from '@Components/charts/AdScoreTimeLine'
 import { ScoreTimeLine } from '@Components/charts/ScoreTimeLine'
 import { MobileScoreboardTable } from '@Components/mobile/ScoreboardTable'
 import { useIsMobile } from '@Utils/ThemeOverride'
@@ -90,7 +91,10 @@ const Scoreboard: FC = () => {
           {teamInfo && !error && <TeamRank />}
           {tabNavbar}
           {showAd ? (
-            <AdScoreboardTable numId={numId} />
+            <>
+              <AdScoreTimeLine divisionName={null} />
+              <AdScoreboardTable numId={numId} />
+            </>
           ) : isVertical ? (
             <MobileScoreboardTable divisionId={divisionId} setDivisionId={setDivisionId} />
           ) : (
@@ -103,7 +107,10 @@ const Scoreboard: FC = () => {
             {freezeBanner}
             {tabNavbar}
             {showAd ? (
-              <AdScoreboardTable numId={numId} />
+              <>
+                <AdScoreTimeLine divisionName={null} />
+                <AdScoreboardTable numId={numId} />
+              </>
             ) : (
               <>
                 {showJeopardy && <ScoreTimeLine divisionId={divisionId} />}

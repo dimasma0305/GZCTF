@@ -121,6 +121,17 @@ export const useAdScoreboard = (numId: number) => {
   return { adScoreboard, error, mutate }
 }
 
+/** A&D — per-round per-team timeline for the scoreboard chart. */
+export const useAdTimeline = (numId: number) => {
+  const { game } = useGame(numId)
+  const { status } = getGameStatus(game)
+  const { data: adTimeline, error, mutate } = api.game.useGameAdTimeline(numId, {
+    ...OnceSWRConfig,
+    refreshInterval: status === GameStatus.OnGoing ? 30 * 1000 : 0,
+  })
+  return { adTimeline, error, mutate }
+}
+
 /** A&D — team API token hint (never plaintext); used by the per-challenge modal. */
 export const useAdTokenHint = (numId: number, doFetch: boolean = true) => {
   const { data: adTokenHint, error, mutate } = api.game.useGameAdTokenHint(numId, {
