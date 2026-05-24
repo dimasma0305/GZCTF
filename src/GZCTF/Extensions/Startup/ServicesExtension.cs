@@ -160,6 +160,8 @@ internal static class ServicesExtension
             builder.Services.AddHostedService(sp => sp.GetRequiredService<Services.AdContainerManager>());
             builder.Services.AddSingleton<Services.AdVpnTopology>();
             builder.Services.AddHostedService<Services.AdWireGuardSyncService>();
+            builder.Services.AddScoped<Services.AdRoundService>();
+            builder.Services.AddHostedService<Services.AdRoundScheduler>();
         }
 
         internal void AddWebServices()

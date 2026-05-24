@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using GZCTF.Extensions;
 using GZCTF.Middlewares;
 using GZCTF.Models;
@@ -25,15 +24,17 @@ namespace GZCTF.Controllers;
 public class AdAdminController(
     AppDbContext db,
     AdContainerManager adContainerManager,
+    AdRoundService adRoundService,
     IStringLocalizer<Program> localizer,
     ILogger<AdAdminController> logger) : ControllerBase
 {
-    private const int FlagRandomBytes = 24;
-
     /// <summary>
     /// Manually advance to the next A&amp;D round, planting fresh flags for
-    /// every (team, A&amp;D challenge). Used in Phase 1 (no auto-checker yet)
-    /// AND by the operator's emergency "force advance" button.
+    /// every (team, A&amp;D challenge). Same code path the
+    /// <see cref="AdRoundScheduler"/> background service uses for auto
+    /// tick-end advance — exposed here for the operator's "Force advance"
+    /// button when they want to skip ahead or seed round 1 before warmup
+    /// elapses.
     /// </summary>
     [RequireGameAdmin]
     [HttpPost("AdvanceRound")]
@@ -43,71 +44,16 @@ public class AdAdminController(
         var game = await db.Games.FirstOrDefaultAsync(g => g.Id == id, token);
         if (game is null) return NotFound();
 
-        var adChallenges = await db.GameChallenges
-            .Where(c => c.GameId == id && c.Type == ChallengeType.AttackDefense && c.IsEnabled)
-            .ToListAsync(token);
-
-        if (adChallenges.Count == 0)
+        var result = await adRoundService.AdvanceAsync(id, token);
+        if (result is null)
             return BadRequest(new RequestResponse("Game has no enabled A&D challenges"));
-
-        var prev = await db.AdRounds
-            .Where(r => r.GameId == id)
-            .OrderByDescending(r => r.Number)
-            .FirstOrDefaultAsync(token);
-
-        var nextNumber = (prev?.Number ?? 0) + 1;
-
-        // Pick the shortest tick across enabled A&D challenges so the round
-        // window honors the most-aggressive checker.
-        var tickSeconds = adChallenges.Min(c => c.AdTickSeconds ?? 120);
-
-        var now = DateTimeOffset.UtcNow;
-        var round = new AdRound
-        {
-            GameId = id,
-            Number = nextNumber,
-            StartedAt = now,
-            EndsAt = now.AddSeconds(tickSeconds)
-        };
-        await db.AdRounds.AddAsync(round, token);
-        await db.SaveChangesAsync(token);
-
-        // Plant a fresh flag for every (team, challenge) with a live container.
-        var services = await db.AdTeamServices
-            .Where(ts => ts.Participation.GameId == id)
-            .ToListAsync(token);
-
-        var flagsPlanted = 0;
-        foreach (var ts in services)
-        {
-            var bytes = new byte[FlagRandomBytes];
-            RandomNumberGenerator.Fill(bytes);
-            var payload = Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '_').Replace('/', '-');
-            var flag = $"flag{{{payload}}}";
-
-            await db.AdFlags.AddAsync(new AdFlag
-            {
-                AdRoundId = round.Id,
-                AdTeamServiceId = ts.Id,
-                PlantedAtRound = nextNumber,
-                Flag = flag,
-                PlantedAt = now
-            }, token);
-            flagsPlanted++;
-        }
-
-        await db.SaveChangesAsync(token);
-
-        logger.SystemLog(
-            $"A&D round advanced: game={id} round={nextNumber} flags_planted={flagsPlanted}",
-            TaskStatus.Success, LogLevel.Information);
 
         return Ok(new AdAdvanceRoundResult
         {
-            RoundNumber = round.Number,
-            FlagsPlanted = flagsPlanted,
-            StartedAt = round.StartedAt,
-            EndsAt = round.EndsAt
+            RoundNumber = result.Round.Number,
+            FlagsPlanted = result.FlagsPlanted,
+            StartedAt = result.Round.StartedAt,
+            EndsAt = result.Round.EndsAt
         });
     }
 
