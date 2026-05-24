@@ -446,7 +446,8 @@
         },
         "ad_snapshot_retention_days": {
           "label": "A&D snapshot retention (days)",
-          "description": "How long the per-team container snapshots stay available for download after game end."
+          "description": "How long the per-team container snapshots stay available for download after game end. Leave empty to keep forever (the default).",
+          "placeholder": "∞ (keep forever)"
         }
       },
       "managers": {

@@ -421,13 +421,20 @@ const GameInfoEdit: FC = () => {
         <NumberInput
           label={t('admin.content.games.info.ad_snapshot_retention_days.label')}
           description={t('admin.content.games.info.ad_snapshot_retention_days.description')}
+          placeholder={t('admin.content.games.info.ad_snapshot_retention_days.placeholder')}
           disabled={disabled}
           min={1}
-          max={365}
-          value={game?.adSnapshotRetentionDays ?? 30}
+          max={3650}
+          // Empty input = null = keep snapshots forever (default).
+          value={game?.adSnapshotRetentionDays ?? ''}
           onChange={(e) => {
+            if (!game) return
+            if (e === '' || e === null || e === undefined) {
+              setGame({ ...game, adSnapshotRetentionDays: null })
+              return
+            }
             const n = getInputNumber(e)
-            if (!isNaN(n)) game && setGame({ ...game, adSnapshotRetentionDays: n })
+            if (!isNaN(n)) setGame({ ...game, adSnapshotRetentionDays: n })
           }}
         />
       </Group>

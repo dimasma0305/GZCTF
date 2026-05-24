@@ -452,7 +452,8 @@
         },
         "ad_snapshot_retention_days": {
           "label": "攻防快照保留（天）",
-          "description": "终局快照在赛后保留下载的天数。"
+          "description": "终局快照在赛后保留下载的天数。留空即永久保留（默认）。",
+          "placeholder": "∞（永久保留）"
         }
       },
       "managers": {

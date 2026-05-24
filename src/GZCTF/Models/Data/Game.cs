@@ -310,8 +310,10 @@ public partial class Game
     /// <summary>
     /// How long to retain per-team container snapshots (the tarballs produced
     /// at game end when <see cref="Challenge.AdAllowSnapshotDownload"/>) before
-    /// the cleanup job expires them. Default 30 days.
+    /// the cleanup job expires them. Null (default) = keep forever — operators
+    /// opt-in to expiration explicitly. Any positive integer = retain N days
+    /// after game end.
     /// </summary>
-    public int? AdSnapshotRetentionDays { get; set; } = 30;
+    public int? AdSnapshotRetentionDays { get; set; }
     #endregion
 }
