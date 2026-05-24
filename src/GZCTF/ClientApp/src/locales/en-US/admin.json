@@ -142,6 +142,7 @@
       "challenges_active": "Challenges",
       "teams_with_container_one": "{{count}} live container",
       "teams_with_container_other": "{{count}} live containers",
+      "tick_summary": "tick {{tick}}s · lifetime {{lifetime}} ticks",
       "grid_title": "Team status",
       "grid_legend": "Click a cell IP to copy. Restart bypasses the player cooldown.",
       "column_team": "Team",

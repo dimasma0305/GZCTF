@@ -52,6 +52,7 @@
           "description": "The board will fill in once the first round completes."
         },
         "column": {
+          "rank": "#",
           "team": "Team",
           "division": "Division",
           "total": "Total",
@@ -60,7 +61,8 @@
           "sla": "SLA",
           "captures": "Captures",
           "times_captured": "Times captured"
-        }
+        },
+        "no_teams": "No teams ranked yet."
       }
     },
     "ad": {

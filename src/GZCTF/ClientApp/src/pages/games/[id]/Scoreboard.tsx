@@ -1,4 +1,4 @@
-import { Alert, Stack, Tabs } from '@mantine/core'
+import { Alert, Center, SegmentedControl, Stack } from '@mantine/core'
 import { mdiFlagOutline, mdiSnowflake, mdiSwordCross } from '@mdi/js'
 import Icon from '@mdi/react'
 import dayjs from 'dayjs'
@@ -50,16 +50,33 @@ const Scoreboard: FC = () => {
   ) : null
 
   const tabNavbar = showTabs ? (
-    <Tabs value={effectiveTab} onChange={(v) => v && setActiveTab(v)}>
-      <Tabs.List>
-        <Tabs.Tab value="jeopardy" leftSection={<Icon path={mdiFlagOutline} size={0.9} />}>
-          {t('game.content.scoreboard.tab.jeopardy', 'Jeopardy')}
-        </Tabs.Tab>
-        <Tabs.Tab value="ad" leftSection={<Icon path={mdiSwordCross} size={0.9} />}>
-          {t('game.content.scoreboard.tab.ad', 'Attack & Defense')}
-        </Tabs.Tab>
-      </Tabs.List>
-    </Tabs>
+    <Center mb="xs" mt="xs">
+      <SegmentedControl
+        size="sm"
+        value={effectiveTab}
+        onChange={(v) => v && setActiveTab(v)}
+        data={[
+          {
+            value: 'jeopardy',
+            label: (
+              <Center style={{ gap: 4 }}>
+                <Icon path={mdiFlagOutline} size={0.8} />
+                <span>{t('game.content.scoreboard.tab.jeopardy', 'Jeopardy')}</span>
+              </Center>
+            ),
+          },
+          {
+            value: 'ad',
+            label: (
+              <Center style={{ gap: 4 }}>
+                <Icon path={mdiSwordCross} size={0.8} />
+                <span>{t('game.content.scoreboard.tab.ad', 'Attack & Defense')}</span>
+              </Center>
+            ),
+          },
+        ]}
+      />
+    </Center>
   ) : null
 
   const showJeopardy = effectiveTab === 'jeopardy' && hasJeopardyChallenges

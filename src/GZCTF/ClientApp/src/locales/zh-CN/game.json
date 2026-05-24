@@ -52,6 +52,7 @@
           "description": "完成首个回合后会显示成绩。"
         },
         "column": {
+          "rank": "#",
           "team": "队伍",
           "division": "分组",
           "total": "总分",
@@ -60,7 +61,8 @@
           "sla": "SLA",
           "captures": "捕获次数",
           "times_captured": "被捕获次数"
-        }
+        },
+        "no_teams": "暂无排名"
       }
     },
     "ad": {

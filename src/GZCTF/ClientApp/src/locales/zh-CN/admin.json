@@ -148,6 +148,7 @@
       "round_ended": "回合已结束",
       "challenges_active": "题目",
       "teams_with_container_other": "{{count}} 个运行中的容器",
+      "tick_summary": "周期 {{tick}}s · 持续 {{lifetime}} 回合",
       "grid_title": "队伍状态",
       "grid_legend": "点击单元格 IP 复制。重启会绕过玩家冷却。",
       "column_team": "队伍",

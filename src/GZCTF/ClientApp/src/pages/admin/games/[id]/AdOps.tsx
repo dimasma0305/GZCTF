@@ -36,8 +36,11 @@ import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router'
 import { WithGameEditTab } from '@Components/admin/WithGameEditTab'
 import { showErrorMsg } from '@Utils/Shared'
+import { useIsMobile } from '@Utils/ThemeOverride'
 import { useAdminAdState } from '@Hooks/useGame'
 import api, { AdTeamCellModel } from '@Api'
+import misc from '@Styles/Misc.module.css'
+import tableClasses from '@Styles/AdOpsTable.module.css'
 
 const statusColor = (s?: string | null) => {
   switch (s) {
@@ -60,6 +63,7 @@ const AdOps: FC = () => {
   const { t } = useTranslation()
   const { adminAdState: state, error, mutate } = useAdminAdState(numId)
   const [busy, setBusy] = useState(false)
+  const isMobile = useIsMobile(1080)
 
   const isLoading = !state && !error
 
@@ -166,8 +170,8 @@ const AdOps: FC = () => {
       <Stack gap="md">
         {/* Top status bar */}
         <Paper p="md" withBorder>
-          <Group justify="space-between" align="center" wrap="nowrap">
-            <Group gap="xl" wrap="nowrap">
+          <Group justify="space-between" align="center" wrap="wrap" gap="md">
+            <Group gap="xl" wrap="wrap">
               <Stack gap={0}>
                 <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
                   {t('admin.content.ad_ops.current_round', 'Round')}
@@ -197,11 +201,11 @@ const AdOps: FC = () => {
                 </Text>
               </Stack>
             </Group>
-            <Group gap="sm" wrap="nowrap">
+            <Group gap="sm" wrap="wrap" justify={isMobile ? 'flex-end' : undefined}>
               <Button
                 leftSection={<Icon path={mdiRefresh} size={0.9} />}
                 variant="default"
-                size="sm"
+                size={isMobile ? 'xs' : 'sm'}
                 disabled={busy}
                 onClick={() => mutate()}
               >
@@ -210,7 +214,7 @@ const AdOps: FC = () => {
               <Button
                 leftSection={<Icon path={mdiPlayCircle} size={0.9} />}
                 variant="default"
-                size="sm"
+                size={isMobile ? 'xs' : 'sm'}
                 disabled={busy}
                 onClick={ensureContainers}
               >
@@ -218,7 +222,7 @@ const AdOps: FC = () => {
               </Button>
               <Button
                 leftSection={<Icon path={mdiPlayCircle} size={0.9} />}
-                size="sm"
+                size={isMobile ? 'xs' : 'sm'}
                 color="red"
                 loading={busy}
                 onClick={advanceRound}
@@ -239,7 +243,11 @@ const AdOps: FC = () => {
                     {c.title}
                   </Text>
                   <Text size="xs" c="dimmed">
-                    tick {c.tickSeconds}s · lifetime {c.flagLifetimeTicks} ticks
+                    {t('admin.content.ad_ops.tick_summary', {
+                      tick: c.tickSeconds,
+                      lifetime: c.flagLifetimeTicks,
+                      defaultValue: 'tick {{tick}}s · lifetime {{lifetime}} ticks',
+                    })}
                   </Text>
                   <Text size="xs" c="dimmed">
                     {t('admin.content.ad_ops.teams_with_container', {
@@ -282,11 +290,11 @@ const AdOps: FC = () => {
                 'No accepted teams yet. Once you accept teams from the participations page, their containers will spin up automatically.')}
             </Alert>
           ) : (
-            <ScrollArea>
+            <ScrollArea h="55vh" type="auto">
               <Table verticalSpacing="xs" striped highlightOnHover withColumnBorders>
-                <Table.Thead>
+                <Table.Thead className={tableClasses.thead}>
                   <Table.Tr>
-                    <Table.Th style={{ position: 'sticky', left: 0, zIndex: 1 }}>
+                    <Table.Th className={tableClasses.corner}>
                       {t('admin.content.ad_ops.column_team', 'Team')}
                     </Table.Th>
                     {state.challenges.map((c) => (
@@ -301,10 +309,8 @@ const AdOps: FC = () => {
                 <Table.Tbody>
                   {state.teams.map((row) => (
                     <Table.Tr key={row.participationId}>
-                      <Table.Td
-                        style={{ position: 'sticky', left: 0, zIndex: 1, background: 'var(--mantine-color-body)' }}
-                      >
-                        <Text truncate fw="bold" size="sm">
+                      <Table.Td className={tableClasses.left}>
+                        <Text truncate fw="bold" size="sm" maw="12rem">
                           {row.teamName}
                         </Text>
                       </Table.Td>
@@ -325,9 +331,15 @@ const AdOps: FC = () => {
                                   {cell.containerIp && (
                                     <CopyButton value={`${cell.containerIp}:${cell.containerPort ?? ''}`}>
                                       {({ copied, copy }) => (
-                                        <Tooltip label={copied ? 'Copied' : 'Copy IP:port'}>
+                                        <Tooltip
+                                          label={
+                                            copied
+                                              ? t('game.tooltip.copy.copied', 'Copied')
+                                              : t('game.tooltip.copy.ip_port', 'Copy IP:port')
+                                          }
+                                        >
                                           <Text
-                                            ff="monospace"
+                                            className={misc.ffmono}
                                             size="xs"
                                             style={{ cursor: 'pointer' }}
                                             onClick={copy}
@@ -343,10 +355,14 @@ const AdOps: FC = () => {
                                   <CopyButton value={cell.currentFlag}>
                                     {({ copied, copy }) => (
                                       <Tooltip
-                                        label={copied ? 'Copied' : t('admin.tooltip.ad_ops.copy_flag', 'Copy current flag')}
+                                        label={
+                                          copied
+                                            ? t('game.tooltip.copy.copied', 'Copied')
+                                            : t('admin.tooltip.ad_ops.copy_flag', 'Copy current flag')
+                                        }
                                       >
                                         <Text
-                                          ff="monospace"
+                                          className={misc.ffmono}
                                           size="xs"
                                           c="dimmed"
                                           truncate
