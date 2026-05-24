@@ -1,7 +1,6 @@
 import {
   alpha,
   Avatar,
-  Badge,
   Box,
   Button,
   Center,
@@ -14,10 +13,11 @@ import {
   Table,
   Text,
   TextInput,
+  Tooltip,
   useMantineTheme,
 } from '@mantine/core'
 import { useDebouncedValue } from '@mantine/hooks'
-import { mdiAccountGroup, mdiCrosshairsGps, mdiMagnify, mdiSwordCross } from '@mdi/js'
+import { mdiAccountGroup, mdiCrosshairsGps, mdiMagnify, mdiShieldHalfFull, mdiSwordCross, mdiTimerSandComplete } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import cx from 'clsx'
 import React, { FC, useEffect, useMemo, useState } from 'react'
@@ -29,8 +29,8 @@ import classes from '@Styles/ScoreboardTable.module.css'
 
 // Same Widths/Lefts cumulative-sticky math as jeopardy ScoreboardTable so the
 // pinned-left columns visually line up with the jeopardy board.
-// Columns: [Rank, Team(avatar+name+division), Total, Attack, Defense Loss, SLA, Captures, Times Captured]
-const Widths = [60, 240, 90, 90, 110, 80, 80, 110]
+// Pinned columns: [Rank overall, Rank division, Team, Captures, Total]
+const Widths = [60, 60, 175, 60, 70]
 const Lefts = Widths.reduce(
   (acc, cur) => {
     acc.push(acc[acc.length - 1] + cur)
@@ -58,8 +58,8 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
   const [debouncedKeyword] = useDebouncedValue(keyword, 400)
   const [highlightedTeam, setHighlightedTeam] = useState<string | null>(null)
 
-  // Divisions appear on rows; the player's A&D scoreboard endpoint doesn't
-  // expose a divisions array (unlike the jeopardy scoreboard), so derive from rows.
+  // Divisions appear on rows; the A&D scoreboard endpoint doesn't expose a
+  // divisions array (unlike the jeopardy scoreboard), so derive from rows.
   const divisionOptions = useMemo(() => {
     if (!adScoreboard) return []
     const seen = new Set<string>()
@@ -95,6 +95,7 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
   const currentItems = filteredList.slice(base, base + ITEM_COUNT_PER_PAGE)
 
   const hasDivisionFilter = divisionOptions.length > 0
+  const allRank = divisionName === null
 
   if (!adScoreboard || adScoreboard.teams.length === 0 || adScoreboard.latestRound === 0) {
     return (
@@ -115,17 +116,6 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
     )
   }
 
-  const headers = [
-    t('game.content.scoreboard.ad.column.rank', '#'),
-    t('game.content.scoreboard.ad.column.team', 'Team'),
-    t('game.content.scoreboard.ad.column.total', 'Total'),
-    t('game.content.scoreboard.ad.column.attack', 'Attack'),
-    t('game.content.scoreboard.ad.column.defense_loss', 'Defense loss'),
-    t('game.content.scoreboard.ad.column.sla', 'SLA'),
-    t('game.content.scoreboard.ad.column.captures', 'Captures'),
-    t('game.content.scoreboard.ad.column.times_captured', 'Times captured'),
-  ]
-
   return (
     <Paper shadow="md" p="md">
       <Stack gap="xs">
@@ -134,7 +124,10 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
           <Grid.Col span={3}>
             <Select
               defaultValue="all"
-              data={[{ value: 'all', label: t('game.label.score_table.all_teams', 'All teams') }, ...divisionOptions]}
+              data={[
+                { value: 'all', label: t('game.label.score_table.all_teams', 'All teams') },
+                ...divisionOptions,
+              ]}
               value={selectValue}
               readOnly={!hasDivisionFilter}
               onChange={(div) => setDivisionName(!div || div === 'all' ? null : div)}
@@ -193,7 +186,13 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
             <Table className={classes.table}>
               <Table.Thead className={classes.thead}>
                 <Table.Tr>
-                  {headers.map((header, idx) => (
+                  {[
+                    t('game.label.score_table.rank_total', 'Rank'),
+                    t('game.label.score_table.rank_division', 'Division'),
+                    t('common.label.team', 'Team'),
+                    t('game.content.scoreboard.ad.column.captures', 'Captures'),
+                    t('game.content.scoreboard.ad.column.total', 'Total'),
+                  ].map((header, idx) => (
                     <Table.Th
                       key={idx}
                       className={cx(classes.left, classes.header)}
@@ -207,11 +206,24 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                       {header}
                     </Table.Th>
                   ))}
+                  <Table.Th className={classes.mono}>
+                    {t('game.content.scoreboard.ad.column.attack', 'Attack')}
+                  </Table.Th>
+                  <Table.Th className={classes.mono}>
+                    {t('game.content.scoreboard.ad.column.defense_loss', 'Defense loss')}
+                  </Table.Th>
+                  <Table.Th className={classes.mono}>
+                    {t('game.content.scoreboard.ad.column.sla', 'SLA')}
+                  </Table.Th>
+                  <Table.Th className={classes.mono}>
+                    {t('game.content.scoreboard.ad.column.times_captured', 'Times captured')}
+                  </Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {currentItems.map((row) => {
+                {currentItems.map((row, idx) => {
                   const isHighlighted = highlightedTeam === row.teamName
+                  const tableRank = base + idx + 1
                   return (
                     <Table.Tr
                       key={row.participationId}
@@ -227,26 +239,26 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                           : undefined
                       }
                     >
-                      {/* Rank — top 3 get colored badge, rest mono */}
+                      {/* Overall rank — plain mono (same as jeopardy, no colored badge) */}
                       <Table.Td
                         className={cx(classes.mono, classes.left)}
                         style={{ left: Lefts[0] }}
                       >
-                        {row.rank <= 3 ? (
-                          <Badge
-                            color={['yellow', 'gray', 'orange'][row.rank - 1]}
-                            variant="filled"
-                          >
-                            {row.rank}
-                          </Badge>
-                        ) : (
-                          row.rank
-                        )}
+                        {row.rank || '-'}
                       </Table.Td>
 
-                      {/* Team — avatar + scrolling name + division, identical layout to jeopardy */}
-                      <Table.Td className={classes.left} style={{ left: Lefts[1] }}>
-                        <Group justify="left" gap={5} wrap="nowrap" maw={Widths[1] - 10}>
+                      {/* Division / table rank — when filtered by division, sequence within the page;
+                          otherwise mirror the overall rank, matching jeopardy's behavior. */}
+                      <Table.Td
+                        className={cx(classes.mono, classes.left)}
+                        style={{ left: Lefts[1] }}
+                      >
+                        {allRank ? row.rank : tableRank}
+                      </Table.Td>
+
+                      {/* Team — avatar + scrolling name + division line */}
+                      <Table.Td className={classes.left} style={{ left: Lefts[2] }}>
+                        <Group justify="left" gap={5} wrap="nowrap" maw={Widths[2] - 10}>
                           <Avatar
                             imageProps={{ loading: 'lazy' }}
                             alt="avatar"
@@ -256,10 +268,16 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                           >
                             {row.teamName?.slice(0, 1) ?? 'T'}
                           </Avatar>
-                          <Stack gap={0} h="2.5rem" justify="center" w={Widths[1] - 45}>
+                          <Stack gap={0} h="2.5rem" justify="center" w={Widths[2] - 45}>
                             <ScrollingText size="sm" text={row.teamName || ''} />
                             {!!row.division && (
-                              <Text size="xs" c="dimmed" ta="start" truncate className={classes.text}>
+                              <Text
+                                size="xs"
+                                c="dimmed"
+                                ta="start"
+                                truncate
+                                className={classes.text}
+                              >
                                 {row.division}
                               </Text>
                             )}
@@ -267,10 +285,18 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                         </Group>
                       </Table.Td>
 
-                      {/* Total — bold mono (the headline number) */}
+                      {/* Captures — plain mono (the "solved count" equivalent) */}
                       <Table.Td
                         className={cx(classes.mono, classes.left)}
-                        style={{ left: Lefts[2] }}
+                        style={{ left: Lefts[3] }}
+                      >
+                        {row.flagsCaptured}
+                      </Table.Td>
+
+                      {/* Total — bold mono (the headline score, mirrors jeopardy score_total) */}
+                      <Table.Td
+                        className={cx(classes.mono, classes.left)}
+                        style={{ left: Lefts[4] }}
                       >
                         {row.total.toFixed(1)}
                       </Table.Td>
@@ -301,9 +327,6 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                         </Text>
                       </Table.Td>
 
-                      {/* Flags captured — plain mono */}
-                      <Table.Td className={classes.mono}>{row.flagsCaptured}</Table.Td>
-
                       {/* Times captured — red when >0 */}
                       <Table.Td className={classes.mono}>
                         <Text
@@ -329,6 +352,58 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
               </Text>
             </Center>
           )}
+
+          {/* Stats legend — mirrors the jeopardy bloods legend overlay */}
+          <Box className={classes.legend}>
+            <Stack gap="xs">
+              <Tooltip.Group>
+                <Group gap="lg">
+                  <Tooltip
+                    label={t(
+                      'game.content.scoreboard.ad.legend.attack_tip',
+                      'Points gained from flags captured from other teams.'
+                    )}
+                    transitionProps={{ transition: 'pop' }}
+                  >
+                    <Group justify="left" gap={4}>
+                      <Icon path={mdiSwordCross} size={0.8} color={theme.colors.teal[6]} />
+                      <Text size="sm" c="teal">
+                        {t('game.content.scoreboard.ad.legend.attack', 'Attack')}
+                      </Text>
+                    </Group>
+                  </Tooltip>
+                  <Tooltip
+                    label={t(
+                      'game.content.scoreboard.ad.legend.defense_tip',
+                      'Points lost from your services being captured by others.'
+                    )}
+                    transitionProps={{ transition: 'pop' }}
+                  >
+                    <Group justify="left" gap={4}>
+                      <Icon path={mdiShieldHalfFull} size={0.8} color={theme.colors.red[6]} />
+                      <Text size="sm" c="red">
+                        {t('game.content.scoreboard.ad.legend.defense', 'Defense loss')}
+                      </Text>
+                    </Group>
+                  </Tooltip>
+                  <Tooltip
+                    label={t(
+                      'game.content.scoreboard.ad.legend.sla_tip',
+                      'Service-level availability points from passing checks.'
+                    )}
+                    transitionProps={{ transition: 'pop' }}
+                  >
+                    <Group justify="left" gap={4}>
+                      <Icon path={mdiTimerSandComplete} size={0.8} color={theme.colors.blue[6]} />
+                      <Text size="sm" c="blue">
+                        {t('game.content.scoreboard.ad.legend.sla', 'SLA')}
+                      </Text>
+                    </Group>
+                  </Tooltip>
+                </Group>
+              </Tooltip.Group>
+            </Stack>
+          </Box>
         </Box>
 
         {/* Footer — pagination + tip, mirrors jeopardy ScoreboardTable.tsx:449-459 */}
@@ -336,7 +411,7 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
           <Text size="sm" c="dimmed">
             {t(
               'game.content.scoreboard.ad.tip',
-              'A&D ranking updates after every check + every accepted attack.'
+              'Total = Attack + SLA − Defense loss. Updated after every check + every accepted attack.'
             )}
           </Text>
           <Pagination

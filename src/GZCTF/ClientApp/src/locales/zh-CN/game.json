@@ -62,6 +62,15 @@
           "captures": "捕获次数",
           "times_captured": "被捕获次数"
         },
+        "legend": {
+          "attack": "进攻得分",
+          "attack_tip": "从其他队伍服务捕获 flag 获得的分数。",
+          "defense": "防守损失",
+          "defense_tip": "你的服务被他人捕获造成的扣分。",
+          "sla": "SLA",
+          "sla_tip": "通过检测获得的服务可用性分数。"
+        },
+        "tip": "总分 = 进攻 + SLA − 防守损失。每次检测或攻击成功后更新。",
         "no_teams": "暂无排名"
       }
     },

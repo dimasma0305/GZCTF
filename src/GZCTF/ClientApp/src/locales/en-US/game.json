@@ -62,6 +62,15 @@
           "captures": "Captures",
           "times_captured": "Times captured"
         },
+        "legend": {
+          "attack": "Attack",
+          "attack_tip": "Points gained from flags captured from other teams.",
+          "defense": "Defense loss",
+          "defense_tip": "Points lost from your services being captured by others.",
+          "sla": "SLA",
+          "sla_tip": "Service-level availability points from passing checks."
+        },
+        "tip": "Total = Attack + SLA − Defense loss. Updated after every check + every accepted attack.",
         "no_teams": "No teams ranked yet."
       }
     },
