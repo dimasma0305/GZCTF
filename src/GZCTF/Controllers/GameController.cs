@@ -9,6 +9,7 @@ using GZCTF.Models;
 using GZCTF.Models.Internal;
 using GZCTF.Models.Request.Admin;
 using GZCTF.Models.Request.Game;
+using GZCTF.Models.Request.Shared;
 using GZCTF.Models.Response.Game;
 using GZCTF.Repositories.Interface;
 using GZCTF.Services.Cache;
@@ -1170,19 +1171,51 @@ public class GameController(
             return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Challenge_NotFound)],
                 StatusCodes.Status404NotFound));
 
-        var instance = await gameInstanceRepository.GetInstance(context.Participation!, challengeId, token);
+        // A&D challenges don't live in the GameInstance table — they're managed
+        // through AdTeamService. Synthesize a minimal detail model so the
+        // player's challenge modal can render the description + the
+        // AdChallengePanel (which fetches its own per-team A&D state).
+        var rawChallenge = await challengeRepository.GetChallenge(id, challengeId, token);
 
-        if (instance is null)
+        if (rawChallenge is null)
             return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Game_ChallengeNotFound)],
                 StatusCodes.Status404NotFound));
 
-        var scoreboard = await gameRepository.GetScoreboard(context.Game!, token);
-        var scoreboardChallenge =
-            scoreboard.ChallengeMap.TryGetValue(challengeId, out var challenge) ? challenge : null;
+        ChallengeDetailModel model;
+        GameInstance? instance = null;
 
-        var attempts = await submissionRepository.CountSubmissions(context.Participation!.Id, challengeId, token);
+        if (rawChallenge.Type == ChallengeType.AttackDefense)
+        {
+            model = new ChallengeDetailModel
+            {
+                Id = rawChallenge.Id,
+                Title = rawChallenge.Title,
+                Content = rawChallenge.Content,
+                Hints = rawChallenge.Hints,
+                Category = rawChallenge.Category,
+                Type = rawChallenge.Type,
+                Score = 0,
+                Limit = 0,
+                Deadline = rawChallenge.DeadlineUtc,
+                Context = new ClientFlagContext()
+            };
+        }
+        else
+        {
+            instance = await gameInstanceRepository.GetInstance(context.Participation!, challengeId, token);
 
-        var model = ChallengeDetailModel.FromInstance(instance, attempts, scoreboardChallenge);
+            if (instance is null)
+                return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Game_ChallengeNotFound)],
+                    StatusCodes.Status404NotFound));
+
+            var scoreboard = await gameRepository.GetScoreboard(context.Game!, token);
+            var scoreboardChallenge =
+                scoreboard.ChallengeMap.TryGetValue(challengeId, out var challenge) ? challenge : null;
+
+            var attempts = await submissionRepository.CountSubmissions(context.Participation!.Id, challengeId, token);
+
+            model = ChallengeDetailModel.FromInstance(instance, attempts, scoreboardChallenge);
+        }
 
         if (context.User != null)
         {
@@ -1193,9 +1226,10 @@ public class GameController(
                 model.UserComment = review.Comment;
             }
         }
-        
+
         // Route remote attachments through internal redirect endpoint so token checks and download logs still apply.
-        if (instance.Attachment is { Type: FileType.Remote, Id: > 0 } remoteAttachment)
+        // Only applies to non-A&D challenges — A&D doesn't ship attachments through GameInstance.
+        if (instance is not null && instance.Attachment is { Type: FileType.Remote, Id: > 0 } remoteAttachment)
         {
             var remoteFileName = string.IsNullOrWhiteSpace(instance.Challenge.FileName)
                 ? "attachment"
@@ -1259,7 +1293,7 @@ public class GameController(
                     UserId = context.User?.Id,
                     Type = EventType.ChallengeOpened,
                     PublishTimeUtc = DateTimeOffset.UtcNow,
-                    Values = [challengeId.ToString(), instance.Challenge.Title]
+                    Values = [challengeId.ToString(), rawChallenge.Title]
                 };
                 await gameEventRepository.AddEvent(evt, token);
             }
