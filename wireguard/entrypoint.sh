@@ -32,6 +32,19 @@ fi
 
 echo "[wg-sidecar] server pubkey: $(cat "$SERVER_PUB")"
 
+# Hand our container ID to GZCTF's AdVpnTopology so it can auto-attach us to
+# the discovered challenge networks. Docker sets the container's hostname to
+# the short container ID by default. We write the full ID via /proc when
+# available (works inside Docker; gracefully falls back to /etc/hostname).
+SIDECAR_ID_FILE="${CONFIG_DIR}/sidecar.id"
+if [[ -r /proc/self/cgroup ]] && grep -oE '[a-f0-9]{64}' /proc/self/cgroup | head -1 > "$SIDECAR_ID_FILE" 2>/dev/null \
+   && [[ -s "$SIDECAR_ID_FILE" ]]; then
+  :
+else
+  cat /etc/hostname > "$SIDECAR_ID_FILE"
+fi
+echo "[wg-sidecar] container ID written to $SIDECAR_ID_FILE: $(cat "$SIDECAR_ID_FILE")"
+
 # Pre-flight: enable IPv4 forwarding inside the netns so traffic from VPN
 # clients can route into the A&D challenge network.
 if [[ -w /proc/sys/net/ipv4/ip_forward ]]; then

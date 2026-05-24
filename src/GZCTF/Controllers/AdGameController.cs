@@ -759,6 +759,7 @@ public class AdGameController(
     public async Task<IActionResult> DownloadVpnConfig(
         int id,
         [FromServices] IConfiguration config,
+        [FromServices] AdVpnTopology topology,
         CancellationToken token)
     {
         var user = await userManager.GetUserAsync(User);
@@ -792,14 +793,26 @@ public class AdGameController(
         var serverEndpoint = config["Ad:Vpn:ServerEndpoint"] ?? "127.0.0.1:51820";
         var clientCidr = config["Ad:Vpn:ClientCidr"] ?? "10.13.37.0/24";
         var dns = config["Ad:Vpn:Dns"] ?? "1.1.1.1";
-        // Default AllowedIps covers the VPN subnet itself + the platform's two
-        // challenge subnets. Operator MUST override Ad__Vpn__AllowedIps if
-        // their challenge networks use different CIDRs — keeping the default
-        // narrow (instead of the whole 172.0.0.0/16) prevents VPN clients from
-        // routing control-plane traffic into the tunnel (where it would dead-
-        // end at the sidecar anyway, since the sidecar deliberately has no
-        // route to the gzctf default network).
-        var allowedIps = config["Ad:Vpn:AllowedIps"] ?? $"{clientCidr}, 172.0.5.0/24, 172.0.9.0/24";
+
+        // AllowedIps order of precedence:
+        //   1. explicit Ad__Vpn__AllowedIps env override (operator knows best)
+        //   2. live-discovered challenge subnets via AdVpnTopology (the path
+        //      that "just works" without manual compose / env config)
+        //   3. fallback to just the VPN subnet (degraded mode — clients can
+        //      only reach each other, not challenges; the operator should
+        //      notice + investigate)
+        string allowedIps;
+        if (config["Ad:Vpn:AllowedIps"] is { Length: > 0 } configured)
+        {
+            allowedIps = configured;
+        }
+        else
+        {
+            var discovered = await topology.GetChallengeSubnetsAsync(configDir, token);
+            allowedIps = discovered.Count > 0
+                ? $"{clientCidr}, {string.Join(", ", discovered)}"
+                : clientCidr;
+        }
 
         var peer = await db.AdVpnPeers
             .FirstOrDefaultAsync(p => p.UserId == user.Id && p.ParticipationId == participation.Id, token);

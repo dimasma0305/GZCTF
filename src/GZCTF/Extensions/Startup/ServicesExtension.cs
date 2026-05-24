@@ -158,6 +158,7 @@ internal static class ServicesExtension
             builder.Services.AddHostedService<Services.Container.Build.ChallengeBuildQueueService>();
             builder.Services.AddSingleton<Services.AdContainerManager>();
             builder.Services.AddHostedService(sp => sp.GetRequiredService<Services.AdContainerManager>());
+            builder.Services.AddSingleton<Services.AdVpnTopology>();
             builder.Services.AddHostedService<Services.AdWireGuardSyncService>();
         }
 

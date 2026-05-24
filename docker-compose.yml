@@ -72,9 +72,13 @@ services:
     depends_on:
       - postgres
       - redis
+    # No explicit challenge networks here either — DockerProvider's
+    # EnsureNetworkCreated calls AttachSelfToNetwork on startup, so gzctf
+    # auto-joins the platform-managed z-test-challenges-{open,isolated} bridges
+    # right after the Docker provider initializes. Compose only needs to give
+    # it the default network for control-plane connectivity (postgres + redis).
     networks:
       - default
-      - z-test-challenges-open
 
   wireguard:
     build:
@@ -92,13 +96,15 @@ services:
     volumes:
       - "wg-config:/config"
     networks:
-      # Intentionally NOT on `default`: the default network is where postgres,
-      # redis, and the gzctf control plane live, and the sidecar must not have
-      # a kernel route from VPN clients to those hosts. Sidecar joins only the
-      # challenge subnets so MASQUERADE'd VPN traffic can only reach challenge
-      # containers, never the control plane.
-      - z-test-challenges-open
-      - z-test-challenges-isolated
+      # Dedicated bootstrap network — nothing else is on it. Just gives the
+      # sidecar an eth + lets docker NAT UDP 51820 from the host into it.
+      # AdVpnTopology (in gzctf) inspects + attaches the sidecar to the
+      # platform's challenge networks at runtime; adding / renaming a
+      # challenge network needs no compose change. The sidecar deliberately
+      # has no eth on the gzctf default network (postgres + redis live
+      # there), so even if iptables FORWARD is wide open there's no route
+      # from a VPN client into the control plane.
+      - wg-bootstrap
     restart: unless-stopped
 
   postgres:
@@ -124,10 +130,8 @@ volumes:
   wg-config:
 
 networks:
-  z-test-challenges-open:
-  # The isolated challenge network is created by GZCTF's container manager
-  # outside compose; declare it external so the sidecar can attach to the same
-  # bridge the A&D containers live on.
-  z-test-challenges-isolated:
-    external: true
-    name: z-test-challenges-isolated
+  # Sidecar's bootstrap network — intentionally lonely so VPN clients can't
+  # bridge through it to anything. AdVpnTopology attaches the sidecar to
+  # the challenge networks at runtime.
+  wg-bootstrap:
+    driver: bridge

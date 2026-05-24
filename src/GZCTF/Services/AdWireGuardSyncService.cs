@@ -30,6 +30,7 @@ namespace GZCTF.Services;
 /// </summary>
 public sealed class AdWireGuardSyncService(
     IServiceScopeFactory scopeFactory,
+    AdVpnTopology topology,
     IConfiguration config,
     ILogger<AdWireGuardSyncService> logger) : BackgroundService
 {
@@ -91,6 +92,12 @@ public sealed class AdWireGuardSyncService(
         var serverPriv = (await File.ReadAllTextAsync(ServerPrivKeyPath, token)).Trim();
         if (string.IsNullOrEmpty(serverPriv))
             return;
+
+        // Discover challenge subnets + attach the sidecar to them if it isn't
+        // already. Side-effect-OK: no-ops once the sidecar is up to date.
+        // Doing this every tick covers the late-create case (a new
+        // challenge network appears mid-event).
+        await topology.GetChallengeSubnetsAsync(ConfigDir, token);
 
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
