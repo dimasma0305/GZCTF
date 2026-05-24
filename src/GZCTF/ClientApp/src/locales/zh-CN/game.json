@@ -29,6 +29,30 @@
     "find_my_team": "找我的队伍"
   },
   "content": {
+    "scoreboard": {
+      "tab": {
+        "jeopardy": "解题",
+        "ad": "攻防对抗"
+      },
+      "ad": {
+        "title": "攻防对抗总榜",
+        "latest_round": "截止第 {{round}} 回合",
+        "empty": {
+          "title": "暂无完成的回合",
+          "description": "完成首个回合后会显示成绩。"
+        },
+        "column": {
+          "team": "队伍",
+          "division": "分组",
+          "total": "总分",
+          "attack": "进攻",
+          "defense_loss": "防守损失",
+          "sla": "SLA",
+          "captures": "捕获次数",
+          "times_captured": "被捕获次数"
+        }
+      }
+    },
     "ad": {
       "round": "回合",
       "round_ends": "回合结束于",

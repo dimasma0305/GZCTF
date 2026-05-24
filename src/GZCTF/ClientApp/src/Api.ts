@@ -2315,6 +2315,8 @@ export interface ChallengeInfo {
   title: string;
   /** Challenge category */
   category: ChallengeCategory;
+  /** Challenge type — frontend branches on AttackDefense. */
+  type: ChallengeType;
   /**
    * Challenge score
    * @format int32

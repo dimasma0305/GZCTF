@@ -1,10 +1,11 @@
-import { Alert, Stack } from '@mantine/core'
-import { mdiSnowflake } from '@mdi/js'
+import { Alert, Stack, Tabs } from '@mantine/core'
+import { mdiFlagOutline, mdiSnowflake, mdiSwordCross } from '@mdi/js'
 import Icon from '@mdi/react'
 import dayjs from 'dayjs'
-import { FC, useState } from 'react'
+import { FC, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router'
+import { AdScoreboardTable } from '@Components/AdScoreboardTable'
 import { ScoreboardTable } from '@Components/ScoreboardTable'
 import { TeamRank } from '@Components/TeamRank'
 import { WithGameTab } from '@Components/WithGameTab'
@@ -25,6 +26,21 @@ const Scoreboard: FC = () => {
   const isMobile = useIsMobile(1080)
   const isVertical = useIsMobile()
 
+  // Derive challenge-type presence from teamInfo.challenges (grouped by category;
+  // each ChallengeInfo carries `type`). No new backend endpoint needed.
+  const { hasJeopardyChallenges, hasAdChallenges } = useMemo(() => {
+    const all = Object.values(teamInfo?.challenges ?? {}).flat()
+    return {
+      hasJeopardyChallenges: all.some((c) => c.type !== 'AttackDefense'),
+      hasAdChallenges: all.some((c) => c.type === 'AttackDefense'),
+    }
+  }, [teamInfo])
+
+  const showTabs = hasJeopardyChallenges && hasAdChallenges
+  const [activeTab, setActiveTab] = useState<string>('jeopardy')
+  // When game is A&D-only, force the A&D view.
+  const effectiveTab = !hasJeopardyChallenges && hasAdChallenges ? 'ad' : activeTab
+
   const freezeBanner = scoreboard?.isFrozenView ? (
     <Alert color="blue" icon={<Icon path={mdiSnowflake} size={1} />}>
       {t('game.content.frozen_banner', {
@@ -33,13 +49,32 @@ const Scoreboard: FC = () => {
     </Alert>
   ) : null
 
+  const tabNavbar = showTabs ? (
+    <Tabs value={effectiveTab} onChange={(v) => v && setActiveTab(v)}>
+      <Tabs.List>
+        <Tabs.Tab value="jeopardy" leftSection={<Icon path={mdiFlagOutline} size={0.9} />}>
+          {t('game.content.scoreboard.tab.jeopardy', 'Jeopardy')}
+        </Tabs.Tab>
+        <Tabs.Tab value="ad" leftSection={<Icon path={mdiSwordCross} size={0.9} />}>
+          {t('game.content.scoreboard.tab.ad', 'Attack & Defense')}
+        </Tabs.Tab>
+      </Tabs.List>
+    </Tabs>
+  ) : null
+
+  const showJeopardy = effectiveTab === 'jeopardy' && hasJeopardyChallenges
+  const showAd = effectiveTab === 'ad' && hasAdChallenges
+
   return (
     <WithNavBar width="90%" minWidth={0}>
       {isMobile ? (
         <Stack pt="md">
           {freezeBanner}
           {teamInfo && !error && <TeamRank />}
-          {isVertical ? (
+          {tabNavbar}
+          {showAd ? (
+            <AdScoreboardTable numId={numId} />
+          ) : isVertical ? (
             <MobileScoreboardTable divisionId={divisionId} setDivisionId={setDivisionId} />
           ) : (
             <ScoreboardTable divisionId={divisionId} setDivisionId={setDivisionId} />
@@ -49,8 +84,15 @@ const Scoreboard: FC = () => {
         <WithGameTab>
           <Stack pb="2rem">
             {freezeBanner}
-            <ScoreTimeLine divisionId={divisionId} />
-            <ScoreboardTable divisionId={divisionId} setDivisionId={setDivisionId} />
+            {tabNavbar}
+            {showAd ? (
+              <AdScoreboardTable numId={numId} />
+            ) : (
+              <>
+                {showJeopardy && <ScoreTimeLine divisionId={divisionId} />}
+                <ScoreboardTable divisionId={divisionId} setDivisionId={setDivisionId} />
+              </>
+            )}
           </Stack>
         </WithGameTab>
       )}

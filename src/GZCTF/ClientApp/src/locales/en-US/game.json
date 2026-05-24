@@ -29,6 +29,30 @@
     "find_my_team": "Find My Team"
   },
   "content": {
+    "scoreboard": {
+      "tab": {
+        "jeopardy": "Jeopardy",
+        "ad": "Attack & Defense"
+      },
+      "ad": {
+        "title": "Attack & Defense scoreboard",
+        "latest_round": "through round {{round}}",
+        "empty": {
+          "title": "No A&D rounds yet",
+          "description": "The board will fill in once the first round completes."
+        },
+        "column": {
+          "team": "Team",
+          "division": "Division",
+          "total": "Total",
+          "attack": "Attack",
+          "defense_loss": "Defense loss",
+          "sla": "SLA",
+          "captures": "Captures",
+          "times_captured": "Times captured"
+        }
+      }
+    },
     "ad": {
       "round": "Round",
       "round_ends": "Round ends",

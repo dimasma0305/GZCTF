@@ -349,6 +349,13 @@ public partial class ChallengeInfo
     public ChallengeCategory Category { get; set; }
 
     /// <summary>
+    /// Challenge type. Frontend uses this to branch UI for AttackDefense
+    /// (own tab, different scoreboard, no per-challenge solve interaction).
+    /// </summary>
+    [Required]
+    public ChallengeType Type { get; set; }
+
+    /// <summary>
     /// Challenge score
     /// </summary>
     [Required]
