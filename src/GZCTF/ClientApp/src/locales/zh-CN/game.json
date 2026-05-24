@@ -3,7 +3,11 @@
     "ad": {
       "reset": "重置",
       "submit": "提交攻击",
-      "snapshot": "下载快照"
+      "snapshot": "下载快照",
+      "rotate_token": "重置 Token",
+      "generate_token": "生成 Token",
+      "copy_curl": "复制 curl",
+      "copy_token": "复制 Token"
     },
     "challenges": "进入比赛",
     "delete": {
@@ -66,6 +70,21 @@
       "no_checks_yet": "尚未检测",
       "target": "目标",
       "flag_to_defend": "需防守",
+      "defend_target": "你的服务",
+      "no_service": {
+        "title": "你的队伍尚未分配服务",
+        "description": "如果你预期看到容器，可能是尚未配置完成。请管理员在 A&D Ops 控制台中点击 \"Ensure containers\"。"
+      },
+      "submit_via_api": "通过 API 提交 flag",
+      "no_token_yet": "尚未生成 Token",
+      "token_captain_only": "只有队长可以生成 API Token。请联系你的队长打开此面板并点击\"生成 Token\"。",
+      "api_note": "仅支持批量提交 — 一次请求可包含多个捕获的 flag（最多 100 个），返回结果按提交顺序排列。",
+      "last_used": "最近使用",
+      "never_used": "从未",
+      "token_modal": {
+        "title": "新的 A&D API Token",
+        "warning": "请立即保存此 Token — 它不会再次显示。之前的 Token（如有）已失效。"
+      },
       "empty": {
         "title": "本场比赛没有 A&D 题目",
         "description": "如果你预期看到服务，可能是管理员尚未创建 A&D 题目，或你的队伍容器还未就绪。"
@@ -254,6 +273,11 @@
     "ad": {
       "reset": "将此容器重建为初始镜像（重建期间会损失 SLA）",
       "reset_cooldown": "冷却中 — 剩余 {{seconds}} 秒"
+    },
+    "copy": {
+      "copied": "已复制",
+      "ip_port": "复制 IP:端口",
+      "flag": "复制 flag"
     }
   },
   "notification": {

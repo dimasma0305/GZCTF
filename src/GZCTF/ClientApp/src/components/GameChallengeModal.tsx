@@ -320,6 +320,7 @@ export const GameChallengeModal: FC<GameChallengeModalProps> = (props) => {
       onExtend={onExtend}
       gameEnded={gameEnded}
       practiceMode={practiceMode}
+      gameId={gameId}
     />
   )
 }

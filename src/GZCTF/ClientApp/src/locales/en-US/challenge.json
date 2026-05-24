@@ -42,6 +42,7 @@
   },
   "content": {
     "ad_live": "LIVE",
+    "ad_live_caption": "Per-round scoring",
     "already_solved": "This challenge has been solved",
     "attempts": {
       "count": "You've tried {{count}} times already!",

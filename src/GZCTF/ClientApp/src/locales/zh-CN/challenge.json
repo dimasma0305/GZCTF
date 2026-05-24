@@ -42,6 +42,7 @@
   },
   "content": {
     "ad_live": "实时",
+    "ad_live_caption": "按回合计分",
     "already_solved": "该题目已被解出",
     "attempts": {
       "count": "已经尝试提交 {{count}} 次",

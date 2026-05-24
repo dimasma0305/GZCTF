@@ -26,6 +26,7 @@ import relativeTime from 'dayjs/plugin/relativeTime'
 dayjs.extend(relativeTime)
 import { FC, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { AdChallengePanel } from '@Components/AdChallengePanel'
 import { InstanceEntry } from '@Components/InstanceEntry'
 import { ContentPlaceholder, InlineMarkdown, Markdown } from '@Components/MarkdownRenderer'
 import { ScrollingText } from '@Components/ScrollingText'
@@ -113,6 +114,9 @@ export interface ChallengeModalProps extends ModalProps {
   /** True only when the flag was accepted in this browser session (not a pre-existing solve). */
   justSolved?: boolean
   solvers?: SolverInfo[]
+  /** When set, the modal is rendering an A&D challenge — switches the footer
+   *  from the flag-submit form to the AdChallengePanel (status + API docs). */
+  gameId?: number
 }
 
 export const ChallengeModal: FC<ChallengeModalProps> = (props) => {
@@ -135,8 +139,10 @@ export const ChallengeModal: FC<ChallengeModalProps> = (props) => {
     onSubmitFlag,
     onReviewSubmit,
     solvers,
+    gameId,
     ...modalProps
   } = props
+  const isAd = challenge?.type === ChallengeType.AttackDefense
   const { t } = useTranslation()
   const theme = useMantineTheme()
   const { locale } = useLanguage()
@@ -203,11 +209,17 @@ export const ChallengeModal: FC<ChallengeModalProps> = (props) => {
             {challenge?.title ?? ''}
           </Title>
         </Group>
-        <Text miw="6rem" fw="bold" ff="monospace" ta="right">
-          {challenge?.score ?? 0} pts
-        </Text>
+        {isAd ? (
+          <Text miw="6rem" fw="bold" c="red" ff="monospace" ta="right">
+            {t('challenge.content.ad_live', 'LIVE')}
+          </Text>
+        ) : (
+          <Text miw="6rem" fw="bold" ff="monospace" ta="right">
+            {challenge?.score ?? 0} pts
+          </Text>
+        )}
       </Group>
-      <Divider size="md" color={cateData?.color} />
+      <Divider size="md" color={isAd ? 'red' : cateData?.color} />
     </Stack>
   )
 
@@ -462,7 +474,12 @@ export const ChallengeModal: FC<ChallengeModalProps> = (props) => {
     </Stack>
   )
 
-  const footer = (
+  const footer = isAd && gameId ? (
+    <Stack gap="xs" className={classes.footer}>
+      <Divider />
+      <AdChallengePanel gameId={gameId} challengeId={challenge?.id ?? 0} />
+    </Stack>
+  ) : (
     <Stack gap="xs" className={classes.footer}>
       {(withAttachment || withInstance || withDeadline) && (
         <>

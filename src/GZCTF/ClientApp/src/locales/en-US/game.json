@@ -3,7 +3,11 @@
     "ad": {
       "reset": "Reset",
       "submit": "Submit attack",
-      "snapshot": "Snapshot"
+      "snapshot": "Snapshot",
+      "rotate_token": "Rotate token",
+      "generate_token": "Generate token",
+      "copy_curl": "Copy curl",
+      "copy_token": "Copy token"
     },
     "challenges": "Challenges",
     "delete": {
@@ -66,6 +70,21 @@
       "no_checks_yet": "no checks yet",
       "target": "Target",
       "flag_to_defend": "Defending",
+      "defend_target": "Your service",
+      "no_service": {
+        "title": "No service for your team yet",
+        "description": "If you expected a container here, it hasn't been provisioned yet. Ask the operator to run \"Ensure containers\" from the A&D Ops console."
+      },
+      "submit_via_api": "Submit flags via API",
+      "no_token_yet": "No token yet",
+      "token_captain_only": "Only your team captain can generate the API token. Ask them to open this panel and click Generate token.",
+      "api_note": "Batch submission only — pass one or more captured flags in a single request (max 100). Per-flag results are returned in input order.",
+      "last_used": "Last used",
+      "never_used": "never",
+      "token_modal": {
+        "title": "Your new A&D API token",
+        "warning": "Save this token now — it will not be shown again. The previous token (if any) has been invalidated."
+      },
       "empty": {
         "title": "No A&D challenges in this game",
         "description": "If you expected to see services here, the operator hasn't created any A&D challenges or your team's containers haven't been provisioned yet."
@@ -330,6 +349,11 @@
     "ad": {
       "reset": "Rebuild this container to baseline (you lose SLA during the rebuild)",
       "reset_cooldown": "On cooldown — {{seconds}}s remaining"
+    },
+    "copy": {
+      "copied": "Copied",
+      "ip_port": "Copy IP:port",
+      "flag": "Copy flag"
     }
   },
   "tab": {

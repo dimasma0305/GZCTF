@@ -112,20 +112,26 @@ export const ChallengeCard: FC<ChallengeCardProps> = (props: ChallengeCardProps)
             </Text>
           )}
           <Stack gap="xs">
-            <Title order={6} ta="center" mt={`calc(${theme.spacing.xs} / 2)`}>
-              <Trans
-                i18nKey={'challenge.content.solved'}
-                values={{
-                  solved: challenge.solved,
-                }}
-              >
-                _
-                <Code fz="sm" fw="bolder" bg="transparent">
+            {isAd ? (
+              <Title order={6} ta="center" mt={`calc(${theme.spacing.xs} / 2)`} c="dimmed">
+                {t('challenge.content.ad_live_caption', 'Per-round scoring')}
+              </Title>
+            ) : (
+              <Title order={6} ta="center" mt={`calc(${theme.spacing.xs} / 2)`}>
+                <Trans
+                  i18nKey={'challenge.content.solved'}
+                  values={{
+                    solved: challenge.solved,
+                  }}
+                >
                   _
-                </Code>
-                _
-              </Trans>
-            </Title>
+                  <Code fz="sm" fw="bolder" bg="transparent">
+                    _
+                  </Code>
+                  _
+                </Trans>
+              </Title>
+            )}
             <Group justify="center" gap="md" h={20} wrap="nowrap">
               {challenge.bloods &&
                 challenge.bloods.map((blood, idx) => {
