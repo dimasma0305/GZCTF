@@ -272,6 +272,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) :
                 .OnDelete(DeleteBehavior.SetNull);
         });
 
+        builder.Entity<AdTeamService>(entity =>
+        {
+            // SetNull so the admin "Stop" button (and any other Container
+            // deletion path) doesn't blow up with an FK violation. After
+            // delete, AdContainerManager's reconcile loop sees ContainerId
+            // == null and spawns a fresh container for the team — same
+            // semantics as the player-side "Reset to baseline" button.
+            entity.HasOne(e => e.Container)
+                .WithMany()
+                .HasForeignKey(e => e.ContainerId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
         builder.Entity<GameChallenge>(entity =>
         {
             entity.Property(e => e.Hints)
