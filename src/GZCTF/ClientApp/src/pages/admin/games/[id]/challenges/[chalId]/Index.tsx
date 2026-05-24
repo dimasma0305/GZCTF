@@ -466,7 +466,11 @@ const GameChallengeEdit: FC = () => {
               />
             </Stack>
           </Grid.Col>
-          <Grid.Col span={1}>
+          {/* Hints column stretches to fill the row when the score /
+              difficulty / ScoreFunc columns are hidden (A&D mode), so
+              the grid doesn't leave two empty 1/3-width slots staring
+              at the user. */}
+          <Grid.Col span={type === ChallengeType.AttackDefense ? 3 : 1}>
             <Stack gap="sm">
               <HintList
                 label={
