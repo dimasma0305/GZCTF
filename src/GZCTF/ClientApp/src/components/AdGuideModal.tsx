@@ -153,9 +153,18 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
     }
   }
 
+  // The DB stores only an HMAC hash of the token, so the live UI never
+  // has the plaintext after the rotation modal closes — only the
+  // `ad_aDQR…ykTM` recognizer hint. Putting that hint into the curl
+  // example is misleading (users copy + paste and get 401). Use the
+  // session-fresh plaintext if we still have it; otherwise emit a
+  // placeholder + a note so it's obvious they need to drop their saved
+  // token in.
+  const exampleBearer = freshToken ?? '<your-token>'
+
   const curlExample = [
     `curl -X POST ${apiUrl}/Submit \\`,
-    `  -H "Authorization: Bearer ${adTokenHint?.exists ? adTokenHint.hint : '<your-token>'}" \\`,
+    `  -H "Authorization: Bearer ${exampleBearer}" \\`,
     `  -H "Content-Type: application/json" \\`,
     `  -d '{"flags":["flag{captured_from_team_b}","flag{another}"]}'`,
   ].join('\n')
@@ -175,7 +184,7 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
 
   const targetsCurlExample = [
     `curl -sS ${apiUrl}/Targets \\`,
-    `  -H "Authorization: Bearer ${adTokenHint?.exists ? adTokenHint.hint : '<your-token>'}"`,
+    `  -H "Authorization: Bearer ${exampleBearer}"`,
   ].join('\n')
 
   const targetsResponseExample = `{
@@ -569,6 +578,14 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
                     <Code block className={misc.ffmono} style={{ fontSize: '0.75rem' }}>
                       {targetsCurlExample}
                     </Code>
+                    {!freshToken && adTokenHint?.exists && (
+                      <Text size="xs" c="orange">
+                        {t(
+                          'game.content.ad.guide.token_placeholder_note',
+                          'Replace <your-token> with the full ad_… string shown when you rotated. The hint above (e.g. ad_aDQR…ykTM) is just a recognizer — the server never has the full token after rotation.'
+                        )}
+                      </Text>
+                    )}
                     <Group justify="space-between">
                       <Text size="sm" c="dimmed">
                         {t(
@@ -628,6 +645,14 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
                     <Code block className={misc.ffmono} style={{ fontSize: '0.75rem' }}>
                       {curlExample}
                     </Code>
+                    {!freshToken && adTokenHint?.exists && (
+                      <Text size="xs" c="orange">
+                        {t(
+                          'game.content.ad.guide.token_placeholder_note',
+                          'Replace <your-token> with the full ad_… string shown when you rotated. The hint above (e.g. ad_aDQR…ykTM) is just a recognizer — the server never has the full token after rotation.'
+                        )}
+                      </Text>
+                    )}
                     <Group justify="space-between">
                       <Text size="sm" c="dimmed">
                         {t(
@@ -779,13 +804,14 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
         </ScrollArea>
       </Modal>
 
-      {/* Fresh-token reveal modal — shows plaintext exactly once */}
+      {/* Fresh-token reveal modal — shows plaintext exactly once. We
+          keep `freshToken` in React state past the modal close so the
+          curl examples above can render with the real Bearer token for
+          the rest of the session. Cleared on page reload (the only
+          truly-stored copy is whatever the user saved). */}
       <Modal
         opened={tokenModalOpen}
-        onClose={() => {
-          closeTokenModal()
-          setFreshToken(null)
-        }}
+        onClose={closeTokenModal}
         title={t('game.content.ad.token_modal.title', 'Your new A&D API token')}
         centered
       >
@@ -793,7 +819,7 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
           <Alert color="orange" icon={<Icon path={mdiAlertCircleOutline} size={1} />}>
             {t(
               'game.content.ad.token_modal.warning',
-              'Save this token now — it will not be shown again. The previous token (if any) has been invalidated.'
+              'Save this token now — it will not be shown again after this tab closes. The previous token (if any) has been invalidated.'
             )}
           </Alert>
           <Box style={{ position: 'relative' }}>
@@ -815,12 +841,7 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
                 </Button>
               )}
             </CopyButton>
-            <Button
-              onClick={() => {
-                closeTokenModal()
-                setFreshToken(null)
-              }}
-            >
+            <Button onClick={closeTokenModal}>
               {t('common.modal.confirm', 'Confirm')}
             </Button>
           </Group>
