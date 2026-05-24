@@ -70,6 +70,11 @@ services:
       - Ad__Ssh__InternalSecret=${AD_SSH_INTERNAL_SECRET:-dev-only-rotate-me-before-prod}
       - Ad__Ssh__PublicHost=${AD_SSH_PUBLIC_HOST:-1pc.tf}
       - Ad__Ssh__PublicPort=${AD_SSH_PUBLIC_PORT:-22022}
+      # A&D checker: how many checker container runs in flight at once,
+      # and the hard timeout per run. Defaults are sized for ~50 teams ×
+      # ~5 challenges; raise MaxParallel if SLA badges lag the round.
+      - Ad__Checker__MaxParallel=${AD_CHECKER_MAX_PARALLEL:-10}
+      - Ad__Checker__TimeoutSeconds=${AD_CHECKER_TIMEOUT_SECONDS:-30}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - "gzctf-files:/app/files"

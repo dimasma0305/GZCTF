@@ -162,6 +162,8 @@ internal static class ServicesExtension
             builder.Services.AddHostedService<Services.AdWireGuardSyncService>();
             builder.Services.AddScoped<Services.AdRoundService>();
             builder.Services.AddHostedService<Services.AdRoundScheduler>();
+            builder.Services.AddScoped<Services.AdCheckerExecutor>();
+            builder.Services.AddHostedService<Services.AdCheckerService>();
         }
 
         internal void AddWebServices()
