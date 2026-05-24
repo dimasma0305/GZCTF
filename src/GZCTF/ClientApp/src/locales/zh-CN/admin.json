@@ -1,6 +1,19 @@
 {
+  "tooltip": {
+    "ad_ops": {
+      "enable_challenge": "重新启用此题目的计分与 Flag 轮换",
+      "disable_challenge": "暂停此题目的计分与 Flag 轮换",
+      "copy_flag": "复制当前 Flag"
+    }
+  },
   "button": {
     "back": "返回上级",
+    "ad_ops": {
+      "refresh": "刷新",
+      "ensure_containers": "重建缺失容器",
+      "advance_round": "推进回合",
+      "restart": "重启"
+    },
     "challenges": {
       "attachment": {
         "save_url": "保存链接",
@@ -128,6 +141,21 @@
   "content": {
     "exec": {
       "title": "容器终端"
+    },
+    "ad_ops": {
+      "current_round": "回合",
+      "round_ends": "回合结束于",
+      "round_ended": "回合已结束",
+      "challenges_active": "题目",
+      "teams_with_container_other": "{{count}} 个运行中的容器",
+      "grid_title": "队伍状态",
+      "grid_legend": "点击单元格 IP 复制。重启会绕过玩家冷却。",
+      "column_team": "队伍",
+      "no_teams": "暂无已通过的队伍。一旦在参赛页通过队伍，其容器会自动启动。",
+      "empty": {
+        "title": "本场比赛没有 A&D 题目",
+        "description": "在题目类型中选择「攻防对抗」即可使用本控制台。"
+      }
     },
     "games": {
       "challenges": {
@@ -973,6 +1001,20 @@
     }
   },
   "notification": {
+    "ad_ops": {
+      "round_advanced": {
+        "title": "回合已推进",
+        "message": "第 {{round}} 回合开始，已投放 {{flags}} 个 Flag。"
+      },
+      "ensure_queued": {
+        "title": "容器同步已排队",
+        "message": "缺失的 A&D 容器将很快启动。"
+      },
+      "restart_queued": {
+        "title": "重启已排队",
+        "message": "容器将在数秒后重启。"
+      }
+    },
     "games": {
       "challenges": {
         "attachment": {
@@ -1144,7 +1186,8 @@
       "notices": "比赛公告",
       "review": "队伍审核",
       "writeups": "Writeups",
-      "health": "Health"
+      "health": "Health",
+      "ad_ops": "攻防对抗"
     },
     "instances": "实例管理",
     "logs": "系统日志",

@@ -1,6 +1,12 @@
 {
   "button": {
     "back": "Go Back",
+    "ad_ops": {
+      "refresh": "Refresh",
+      "ensure_containers": "Ensure containers",
+      "advance_round": "Advance round",
+      "restart": "Restart"
+    },
     "challenges": {
       "attachment": {
         "save_url": "Save Link",
@@ -128,6 +134,22 @@
   "content": {
     "exec": {
       "title": "Container console"
+    },
+    "ad_ops": {
+      "current_round": "Round",
+      "round_ends": "Round ends",
+      "round_ended": "Round ended",
+      "challenges_active": "Challenges",
+      "teams_with_container_one": "{{count}} live container",
+      "teams_with_container_other": "{{count}} live containers",
+      "grid_title": "Team status",
+      "grid_legend": "Click a cell IP to copy. Restart bypasses the player cooldown.",
+      "column_team": "Team",
+      "no_teams": "No accepted teams yet. Once you accept teams from the participations page, their containers will spin up automatically.",
+      "empty": {
+        "title": "No A&D challenges in this game",
+        "description": "Add a challenge with type Attack & Defense to use this console."
+      }
     },
     "games": {
       "challenges": {
@@ -972,7 +994,28 @@
       "role": "User Roles"
     }
   },
+  "tooltip": {
+    "ad_ops": {
+      "enable_challenge": "Re-enable scoring + flag rotation",
+      "disable_challenge": "Disable scoring + flag rotation",
+      "copy_flag": "Copy current flag"
+    }
+  },
   "notification": {
+    "ad_ops": {
+      "round_advanced": {
+        "title": "Round advanced",
+        "message": "Round {{round}} started — {{flags}} flags planted."
+      },
+      "ensure_queued": {
+        "title": "Container reconcile queued",
+        "message": "Missing A&D containers will spin up shortly."
+      },
+      "restart_queued": {
+        "title": "Restart queued",
+        "message": "Container will restart in seconds."
+      }
+    },
     "games": {
       "challenges": {
         "attachment": {
@@ -1144,7 +1187,8 @@
       "notices": "Notices",
       "review": "Teams",
       "writeups": "Writeups",
-      "health": "Health"
+      "health": "Health",
+      "ad_ops": "A&D Ops"
     },
     "instances": "Instances",
     "logs": "Logs",
