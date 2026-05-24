@@ -188,6 +188,10 @@
     "static_container": {
       "desrc": "共用容器，任意 flag 均可提交",
       "label": "静态容器"
+    },
+    "attack_defense": {
+      "desrc": "每支队伍获得一个长驻容器，互相攻击并防御自身。按每回合的进攻、防守、SLA 综合计分。",
+      "label": "攻防对抗"
     }
   }
 }

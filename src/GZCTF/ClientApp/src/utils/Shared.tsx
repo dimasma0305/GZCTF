@@ -87,6 +87,13 @@ export const useChallengeTypeLabelMap = () => {
         desrc: t('challenge.type.dynamic_container.desrc'),
       },
     ],
+    [
+      ChallengeType.AttackDefense,
+      {
+        name: t('challenge.type.attack_defense.label'),
+        desrc: t('challenge.type.attack_defense.desrc'),
+      },
+    ],
   ])
 }
 

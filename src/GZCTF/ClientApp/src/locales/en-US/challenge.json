@@ -188,6 +188,10 @@
     "static_container": {
       "desrc": "Shared containers, any flag can be submitted",
       "label": "Static Container"
+    },
+    "attack_defense": {
+      "desrc": "Each team gets a persistent container; players attack other teams and defend their own. Scored on attack + defense + SLA per round.",
+      "label": "Attack & Defense"
     }
   }
 }
