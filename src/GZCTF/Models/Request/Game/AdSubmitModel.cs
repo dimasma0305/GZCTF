@@ -73,6 +73,40 @@ public class AdTokenGenerateResultModel
 }
 
 /// <summary>
+/// Response for GET /api/game/{id}/ad/Targets — the canonical list of every
+/// other team's container IP per challenge. Without this an attacker has no
+/// way to aim their exploit, which makes A&amp;D unplayable.
+///
+/// <para>Auth: same dual-auth as Submit — cookie session OR Bearer
+/// <c>ad_...</c> token. Excludes the caller's own team's rows. Excludes
+/// pre-warmup state (returns empty teams[] when no round has started).</para>
+/// </summary>
+public class AdTargetsModel
+{
+    public int CurrentRound { get; set; }
+    public List<AdChallengeTargets> Challenges { get; set; } = [];
+}
+
+public class AdChallengeTargets
+{
+    public int ChallengeId { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public int TickSeconds { get; set; }
+    public List<AdTeamTarget> Teams { get; set; } = [];
+}
+
+public class AdTeamTarget
+{
+    public int ParticipationId { get; set; }
+    public string TeamName { get; set; } = string.Empty;
+    public string? Division { get; set; }
+    public string? Ip { get; set; }
+    public int? Port { get; set; }
+    /// <summary>Last check verdict — Ok / Mumble / Offline / null if not checked yet.</summary>
+    public string? LastCheckStatus { get; set; }
+}
+
+/// <summary>
 /// Response for GET /api/game/{id}/ad/Timeline — per-round per-team cumulative
 /// score, used by the player A&amp;D scoreboard to render an echarts line chart
 /// that mirrors the jeopardy ScoreTimeLine.

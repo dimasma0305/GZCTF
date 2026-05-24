@@ -1879,6 +1879,31 @@ export interface AdScoreboardModel {
   teams: AdTeamScoreRow[];
 }
 
+/** A&D — one team's container for a given challenge (Targets endpoint). */
+export interface AdTeamTarget {
+  participationId: number;
+  teamName: string;
+  division?: string | null;
+  ip?: string | null;
+  port?: number | null;
+  /** Last check verdict — Ok / Mumble / Offline / null if not checked yet. */
+  lastCheckStatus?: string | null;
+}
+
+/** A&D — every team's container per enabled challenge. */
+export interface AdChallengeTargets {
+  challengeId: number;
+  title: string;
+  tickSeconds: number;
+  teams: AdTeamTarget[];
+}
+
+/** A&D — GET /api/Game/{id}/Ad/Targets response (excludes caller's own team). */
+export interface AdTargetsModel {
+  currentRound: number;
+  challenges: AdChallengeTargets[];
+}
+
 /** A&D — one point in a team's score timeline. */
 export interface AdTimelinePoint {
   round: number;
@@ -7883,6 +7908,37 @@ export class Api<
         method: "POST",
         ...params,
       }),
+
+    /**
+     * @description A&D — list every other team's container IP per challenge.
+     *   Excludes the caller's own team; respects warmup (currentRound==0
+     *   returns empty teams[]). Dual auth: cookie session OR Bearer ad_…
+     * @tags Game
+     * @name GameAdTargets
+     * @request GET:/api/Game/{id}/Ad/Targets
+     */
+    gameAdTargets: (id: number, params: RequestParams = {}) =>
+      this.request<AdTargetsModel, RequestResponse>({
+        path: `/api/Game/${id}/Ad/Targets`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description A&D — SWR variant of gameAdTargets.
+     * @tags Game
+     * @name GameAdTargets
+     */
+    useGameAdTargets: (
+      id: number,
+      options?: SWRConfiguration,
+      doFetch: boolean = true,
+    ) =>
+      useSWR<AdTargetsModel, RequestResponse>(
+        doFetch ? `/api/Game/${id}/Ad/Targets` : null,
+        options,
+      ),
 
     /**
      * @description A&D — URL to download the per-user WireGuard config (.conf).

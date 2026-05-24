@@ -153,6 +153,14 @@
           "sla": "The platform checks your service every tick. Failed checks (Mumble / Offline) shrink the fraction. Keep your service responding.",
           "total_formula": "Total = Attack + SLA − Defense loss"
         },
+        "targets": {
+          "title": "Find your targets",
+          "intro": "A&D is attack-first — you need to know every other team's container IP per service. This endpoint is the canonical list. Excludes your own team and waits until the warmup round has elapsed (currentRound > 0).",
+          "request": "List request",
+          "response": "Response shape",
+          "poll_note": "Poll once per round (~tickSeconds). Container IPs are stable across rounds unless a team Resets or an admin Stops the container — then a fresh IP shows up here within ~15s.",
+          "tip": "lastCheckStatus tells you which targets are healthy: Ok / Mumble / Offline. Prioritize Ok ones — Offline containers won't accept your exploit, and Mumble usually means the service is broken in a way that won't expose the flag."
+        },
         "submit": {
           "title": "How to submit captured flags",
           "api_only": "Flag submission is API-only — there is no web form for A&D. Your exploit scripts batch the flags they collected and POST them in one request.",

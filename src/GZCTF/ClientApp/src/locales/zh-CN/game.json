@@ -153,6 +153,14 @@
           "sla": "平台每个 tick 对你的服务做检测。失败（Mumble / Offline）会降低分数比例。保持服务可用。",
           "total_formula": "总分 = 进攻 + SLA − 防守损失"
         },
+        "targets": {
+          "title": "查找攻击目标",
+          "intro": "A&D 以攻为先 — 你需要知道其他每支队伍每个服务的容器 IP。本接口是攻击目标的唯一来源。返回结果会排除你自己的队伍，并在预热回合（currentRound > 0）结束后才返回。",
+          "request": "查询请求",
+          "response": "响应结构",
+          "poll_note": "建议每个回合（约 tickSeconds 秒）轮询一次。容器 IP 在跨回合时保持稳定，除非有队伍触发 Reset 或管理员 Stop — 之后新的 IP 会在约 15s 内出现在此处。",
+          "tip": "lastCheckStatus 表明目标的健康状态：Ok / Mumble / Offline。优先攻击 Ok 的目标 — Offline 的容器不会接受你的 exploit，Mumble 通常意味着服务以无法返回 flag 的方式损坏。"
+        },
         "submit": {
           "title": "如何提交捕获到的 flag",
           "api_only": "A&D 仅支持 API 提交 — 没有网页表单。利用脚本批量将捕获的 flag 一次性 POST 提交。",

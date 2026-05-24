@@ -97,6 +97,30 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
   ]
 }`
 
+  const targetsCurlExample = [
+    `curl -sS ${apiUrl}/Targets \\`,
+    `  -H "Authorization: Bearer ${adTokenHint?.exists ? adTokenHint.hint : '<your-token>'}"`,
+  ].join('\n')
+
+  const targetsResponseExample = `{
+  "currentRound": 7,
+  "challenges": [
+    {
+      "challengeId": 76,
+      "title": "Test A&D — nginx",
+      "tickSeconds": 60,
+      "teams": [
+        { "participationId": 2, "teamName": "Team Bravo",
+          "division": null, "ip": "172.0.9.4", "port": 80,
+          "lastCheckStatus": "Ok" },
+        { "participationId": 3, "teamName": "Team Charlie",
+          "division": null, "ip": "172.0.9.5", "port": 80,
+          "lastCheckStatus": "Mumble" }
+      ]
+    }
+  ]
+}`
+
   return (
     <>
       <Modal
@@ -310,6 +334,65 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
                     <Divider />
                     <Text size="sm" fw={600}>
                       {t('game.content.ad.guide.scoring.total_formula', 'Total = Attack + SLA − Defense loss')}
+                    </Text>
+                  </Stack>
+                </Accordion.Panel>
+              </Accordion.Item>
+
+              {/* TARGETS */}
+              <Accordion.Item value="targets">
+                <Accordion.Control
+                  icon={<Icon path={mdiSwordCross} size={1} color="var(--mantine-color-red-6)" />}
+                >
+                  <Text fw={600}>{t('game.content.ad.guide.targets.title', 'Find your targets')}</Text>
+                </Accordion.Control>
+                <Accordion.Panel>
+                  <Stack gap="sm">
+                    <Text size="sm">
+                      {t(
+                        'game.content.ad.guide.targets.intro',
+                        "A&D is attack-first — you need to know every other team's container IP per service. This endpoint is the canonical list. Excludes your own team and waits until the warmup round has elapsed (currentRound > 0)."
+                      )}
+                    </Text>
+                    <Text size="sm" fw={600}>
+                      {t('game.content.ad.guide.targets.request', 'List request')}
+                    </Text>
+                    <Code block className={misc.ffmono} style={{ fontSize: '0.75rem' }}>
+                      {targetsCurlExample}
+                    </Code>
+                    <Group justify="space-between">
+                      <Text size="sm" c="dimmed">
+                        {t(
+                          'game.content.ad.guide.targets.poll_note',
+                          "Poll once per round (~tickSeconds). Container IPs are stable across rounds unless a team Resets or an admin Stops the container — then a fresh IP shows up here within ~15s."
+                        )}
+                      </Text>
+                      <CopyButton value={targetsCurlExample}>
+                        {({ copied, copy }) => (
+                          <Button
+                            size="compact-xs"
+                            variant="subtle"
+                            leftSection={<Icon path={mdiContentCopy} size={0.7} />}
+                            onClick={copy}
+                          >
+                            {copied
+                              ? t('game.tooltip.copy.copied', 'Copied')
+                              : t('game.button.ad.copy_curl', 'Copy curl')}
+                          </Button>
+                        )}
+                      </CopyButton>
+                    </Group>
+                    <Text size="sm" fw={600}>
+                      {t('game.content.ad.guide.targets.response', 'Response shape')}
+                    </Text>
+                    <Code block className={misc.ffmono} style={{ fontSize: '0.75rem' }}>
+                      {targetsResponseExample}
+                    </Code>
+                    <Text size="sm" c="dimmed">
+                      {t(
+                        'game.content.ad.guide.targets.tip',
+                        "lastCheckStatus tells you which targets are healthy: Ok / Mumble / Offline. Prioritize Ok ones — Offline containers won't accept your exploit, and Mumble usually means the service is broken in a way that won't expose the flag."
+                      )}
                     </Text>
                   </Stack>
                 </Accordion.Panel>

@@ -504,6 +504,87 @@ public class AdGameController(
     }
 
     /// <summary>
+    /// List every other team's container IP per enabled A&amp;D challenge,
+    /// plus the last health-check verdict for each. Attack-first players need
+    /// this to know where to aim — without it A&amp;D is unplayable. Caller's
+    /// own team rows are excluded so the response is directly usable as a
+    /// targets list. Empty teams[] until the warmup round has elapsed.
+    /// </summary>
+    /// <remarks>
+    /// Dual auth (same shape as Submit): cookie session OR
+    /// <c>Authorization: Bearer ad_...</c> token. Wired up so exploit
+    /// scripts can poll without a browser.
+    /// </remarks>
+    [HttpGet("Targets")]
+    [ProducesResponseType(typeof(AdTargetsModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Targets(int id, CancellationToken token)
+    {
+        var caller = await ResolveTeamApiTokenAsync(id, token)
+                     ?? await ResolveUserParticipationAsync(id, token);
+        if (caller is null) return Unauthorized();
+
+        var currentRound = await db.AdRounds
+            .Where(r => r.GameId == id)
+            .OrderByDescending(r => r.Number)
+            .Select(r => r.Number)
+            .FirstOrDefaultAsync(token);
+
+        var enabledChallenges = await db.GameChallenges
+            .Where(c => c.GameId == id && c.Type == ChallengeType.AttackDefense && c.IsEnabled)
+            .OrderBy(c => c.Id)
+            .ToListAsync(token);
+
+        var result = new AdTargetsModel { CurrentRound = currentRound };
+        if (currentRound == 0)
+            return Ok(result); // warmup — no targets yet
+
+        var services = await db.AdTeamServices
+            .Where(ts => ts.Participation.GameId == id
+                && ts.ParticipationId != caller.Id
+                && ts.Container != null
+                && ts.Participation.Status == ParticipationStatus.Accepted)
+            .Include(ts => ts.Container)
+            .Include(ts => ts.Participation).ThenInclude(p => p.Team)
+            .Include(ts => ts.Participation).ThenInclude(p => p.Division)
+            .ToListAsync(token);
+
+        var serviceIds = services.Select(s => s.Id).ToList();
+        var lastChecks = serviceIds.Count == 0 ? [] :
+            await db.AdCheckResults
+                .Where(c => serviceIds.Contains(c.AdTeamServiceId))
+                .GroupBy(c => c.AdTeamServiceId)
+                .Select(g => g.OrderByDescending(c => c.CheckedAt).First())
+                .ToListAsync(token);
+        var lastChecksByService = lastChecks.ToDictionary(c => c.AdTeamServiceId);
+
+        foreach (var chal in enabledChallenges)
+        {
+            var row = new AdChallengeTargets
+            {
+                ChallengeId = chal.Id,
+                Title = chal.Title,
+                TickSeconds = chal.AdTickSeconds ?? 120,
+                Teams = services
+                    .Where(s => s.ChallengeId == chal.Id)
+                    .OrderBy(s => s.Participation.Team.Name, StringComparer.OrdinalIgnoreCase)
+                    .Select(s => new AdTeamTarget
+                    {
+                        ParticipationId = s.ParticipationId,
+                        TeamName = s.Participation.Team.Name,
+                        Division = s.Participation.Division?.Name,
+                        Ip = s.Container?.IP,
+                        Port = s.Container?.Port,
+                        LastCheckStatus = lastChecksByService.GetValueOrDefault(s.Id)?.Status.ToString(),
+                    })
+                    .ToList()
+            };
+            result.Challenges.Add(row);
+        }
+
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Get the A&amp;D scoreboard for this game — independent of the jeopardy
     /// scoreboard. Public; respects the game's hidden flag.
     /// </summary>
