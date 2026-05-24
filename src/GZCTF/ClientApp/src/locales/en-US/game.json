@@ -8,7 +8,8 @@
       "generate_token": "Generate token",
       "copy_curl": "Copy curl",
       "copy_token": "Copy token",
-      "open_guide": "A&D Player Guide"
+      "download_vpn": "Download .conf",
+      "open_toolkit": "A&D Toolkit"
     },
     "challenges": "Challenges",
     "delete": {
@@ -120,9 +121,20 @@
         "not_started": "Game hasn't started rounds yet"
       },
       "guide": {
-        "title": "Attack & Defense — Player Guide",
-        "intro": "Every team gets one container per A&D challenge. Each round the platform plants a fresh flag in your container, runs a health check, and lets every team try to steal flags from every other team. Keep your service alive, patch the vulnerability, and exfiltrate the rest.",
+        "title": "Attack & Defense — Toolkit",
+        "intro": "Everything you need to play A&D: your team token, your VPN config, the API contract, and the rules. The first two sections are actionable — token rotation and VPN config download.",
         "footer": "Endpoint base: ",
+        "token": {
+          "title": "Team API token",
+          "intro": "A team-scoped Bearer token. Your exploit scripts pass it as Authorization: Bearer <token> when submitting captured flags. Captains can generate / rotate; non-captains see the hint only.",
+          "current": "Current token"
+        },
+        "vpn": {
+          "title": "VPN config",
+          "intro": "Per-user WireGuard config. The first download generates a fresh keypair + assigns you an IP from the game subnet; subsequent downloads return the same file. Drop the .conf into wg-quick (or wireguard-tools / the WireGuard app) to join the A&D network.",
+          "operator_note": "If the downloaded file contains <unconfigured-server:...> placeholders, your operator has not finished provisioning the WireGuard server. The keypair + assigned IP in your .conf are still valid; the operator just needs to set the server endpoint + server pubkey for the connection to come up.",
+          "linux_hint": "Linux: sudo wg-quick up ./ad-game-….conf. macOS / Windows: import via the official WireGuard app."
+        },
         "rounds": {
           "title": "Rounds & flags",
           "tick": "A round (tick) is the scoring unit. Length is per-challenge (the operator sets it — typically 60–180s).",

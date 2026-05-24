@@ -7885,6 +7885,14 @@ export class Api<
       }),
 
     /**
+     * @description A&D — URL to download the per-user WireGuard config (.conf).
+     *   The endpoint generates / fetches the user's peer on demand. Use
+     *   <a href={url} download> rather than fetch() so the browser writes the
+     *   file straight to disk.
+     */
+    gameAdVpnConfigUrl: (id: number) => `/api/Game/${id}/Ad/Vpn/Config`,
+
+    /**
      * @description A&D — per-round per-team cumulative score timeline.
      * @tags Game
      * @name GameAdTimeline

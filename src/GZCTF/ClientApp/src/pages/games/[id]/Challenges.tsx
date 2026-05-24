@@ -1,6 +1,6 @@
 import { Badge, Button, Group, Paper, Stack, Text } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { mdiBookOpenPageVariantOutline, mdiOpenInNew, mdiSword } from '@mdi/js'
+import { mdiOpenInNew, mdiSword, mdiToolboxOutline } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import dayjs from 'dayjs'
 import { FC, useMemo } from 'react'
@@ -89,10 +89,10 @@ const Challenges: FC = () => {
                   <Button
                     variant="default"
                     fullWidth
-                    leftSection={<Icon path={mdiBookOpenPageVariantOutline} size={1} />}
+                    leftSection={<Icon path={mdiToolboxOutline} size={1} />}
                     onClick={guideHandlers.open}
                   >
-                    {t('game.button.ad.open_guide', 'A&D Player Guide')}
+                    {t('game.button.ad.open_toolkit', 'A&D Toolkit')}
                   </Button>
                 </>
               )}
