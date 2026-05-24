@@ -1047,7 +1047,7 @@ PersistentKeepalive = 25
                 UserId = user.Id,
                 ParticipationId = participation.Id,
                 PublicKey = model.PublicKey.Trim(),
-                PrivateKey = string.Empty,
+                PrivateKey = null,
                 Algorithm = parsed.Algorithm,
                 Fingerprint = parsed.Fingerprint,
                 PlatformGenerated = false,
@@ -1058,7 +1058,7 @@ PersistentKeepalive = 25
         else
         {
             existing.PublicKey = model.PublicKey.Trim();
-            existing.PrivateKey = string.Empty;
+            existing.PrivateKey = null;
             existing.Algorithm = parsed.Algorithm;
             existing.Fingerprint = parsed.Fingerprint;
             existing.PlatformGenerated = false;

@@ -1,0 +1,62 @@
+# GZCTF A&D jump-host sshd config.
+#
+# The jump host accepts SSH connections like `ssh <challenge-id>@host` from
+# players. There are no real shell accounts here — the username encodes
+# WHICH challenge container the player wants to land in, and the SSH key
+# encodes WHO they are. /etc/passwd holds one alias per active challenge
+# id, all pointing at UID 1001, refreshed every 60s by refresh-users.sh.
+#
+# After auth, the ForceCommand in authorized_keys (emitted by
+# lookup-key.sh) takes over — exec.sh opens a WebSocket to gzctf and
+# proxies stdio into the right container's `docker exec` session. No
+# shell, no scp, no port-forwarding ever runs on this box.
+
+Port 22
+ListenAddress 0.0.0.0
+Protocol 2
+
+HostKey /etc/ssh/ssh_host_ed25519_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+
+# Pubkey only. The whole point of this box is "your pubkey identifies you".
+# Alpine's openssh build omits PAM + GSSAPI support; those options would
+# trip "unsupported option" warnings, so we just leave them out and rely
+# on the explicit auth-method toggles below.
+PasswordAuthentication no
+PermitEmptyPasswords no
+ChallengeResponseAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+
+PubkeyAuthentication yes
+# AuthorizedKeysFile must be empty so sshd doesn't pre-load .ssh/authorized_keys
+# from the (shared, empty) home dir before consulting our command.
+AuthorizedKeysFile none
+AuthorizedKeysCommand /usr/local/bin/lookup-key.sh %u %k %t %f
+AuthorizedKeysCommandUser nobody
+
+# All sessions go straight to the ForceCommand wrapper. The PTY is
+# allocated by sshd when the client requests one (default for an
+# interactive `ssh user@host`); exec.sh handles raw mode + binary
+# byte pump.
+AllowTcpForwarding no
+AllowAgentForwarding no
+AllowStreamLocalForwarding no
+X11Forwarding no
+PermitTunnel no
+GatewayPorts no
+PermitUserEnvironment no
+
+# Reasonable per-session limits — there's nothing for an attacker to
+# pivot from here even if they get in, but tight defaults keep noise
+# down.
+MaxAuthTries 3
+MaxSessions 4
+LoginGraceTime 30s
+ClientAliveInterval 60
+ClientAliveCountMax 3
+
+LogLevel INFO
+SyslogFacility AUTH
+PrintMotd no
+StrictModes no

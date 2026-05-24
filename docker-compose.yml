@@ -64,6 +64,12 @@ services:
       # at the same hostname players use to reach the web UI; override via
       # AD_VPN_SERVER_ENDPOINT env when deploying to a different host.
       - Ad__Vpn__ServerEndpoint=${AD_VPN_SERVER_ENDPOINT:-1pc.tf:51820}
+      # Shared secret authenticating the ssh-jump sidecar to gzctf's
+      # internal lookup/exec endpoints. ssh-jump uses the same value.
+      # Generate with `openssl rand -hex 32` for production deploys.
+      - Ad__Ssh__InternalSecret=${AD_SSH_INTERNAL_SECRET:-dev-only-rotate-me-before-prod}
+      - Ad__Ssh__PublicHost=${AD_SSH_PUBLIC_HOST:-1pc.tf}
+      - Ad__Ssh__PublicPort=${AD_SSH_PUBLIC_PORT:-22022}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - "gzctf-files:/app/files"
@@ -79,6 +85,26 @@ services:
     # it the default network for control-plane connectivity (postgres + redis).
     networks:
       - default
+
+  ssh-jump:
+    build:
+      context: ./ssh-jump
+    environment:
+      # gzctf control-plane URL the AuthorizedKeysCommand + WS relay
+      # talk to. Uses the docker DNS name so traffic stays on the
+      # internal compose network (postgres/redis live here too — the
+      # shared secret is the only thing standing between this box and
+      # the lookup endpoints, so keep the secret strong).
+      - GZCTF_URL=http://gzctf:8080
+      - INTERNAL_SECRET=${AD_SSH_INTERNAL_SECRET:-dev-only-rotate-me-before-prod}
+    ports:
+      # 2222 on the host → 22 inside; players ssh user@host -p 2222
+      - "${AD_SSH_PUBLIC_PORT:-22022}:22"
+    depends_on:
+      - gzctf
+    networks:
+      - default
+    restart: unless-stopped
 
   wireguard:
     build:

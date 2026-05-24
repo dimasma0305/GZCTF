@@ -43,12 +43,12 @@ public class AdTeamSshKey
     /// <summary>
     /// SSH private key when the platform generated the keypair on the
     /// user's behalf, XOR-obfuscated at rest via
-    /// <c>IConfigService.GetXorKey()</c>. Empty when the user uploaded
+    /// <c>IConfigService.GetXorKey()</c>. NULL when the user uploaded
     /// their own public key (the preferred path — private half never
     /// touches the server).
     /// </summary>
     [MaxLength(8192)]
-    public string PrivateKey { get; set; } = string.Empty;
+    public string? PrivateKey { get; set; }
 
     /// <summary>
     /// SHA256 fingerprint in OpenSSH-canonical <c>SHA256:&lt;base64&gt;</c>
