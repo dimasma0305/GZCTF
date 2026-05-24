@@ -1,6 +1,6 @@
 import { Card, LoadingOverlay, Stack, Text, Title } from '@mantine/core'
 import { showNotification } from '@mantine/notifications'
-import { mdiChartLine, mdiExclamationThick, mdiFlagOutline, mdiMonitorEye, mdiUpload } from '@mdi/js'
+import { mdiChartLine, mdiExclamationThick, mdiFlagOutline, mdiMonitorEye, mdiSwordCross, mdiUpload } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import dayjs from 'dayjs'
 import duration from 'dayjs/plugin/duration'
@@ -82,6 +82,14 @@ export const WithGameTab: FC<React.PropsWithChildren> = ({ children }) => {
       requireJoin: false,
       requireRole: Role.User,
       hidden: game?.allowUserSubmissions === false,
+    },
+    {
+      icon: mdiSwordCross,
+      title: t('game.tab.ad', 'Attack & Defense'),
+      path: 'ad',
+      link: 'ad',
+      requireJoin: true,
+      requireRole: Role.User,
     },
     {
       icon: mdiMonitorEye,

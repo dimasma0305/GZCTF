@@ -1,5 +1,10 @@
 {
   "button": {
+    "ad": {
+      "reset": "重置",
+      "submit": "提交攻击",
+      "snapshot": "下载快照"
+    },
     "challenges": "进入比赛",
     "delete": {
       "all_traffic": "删除全部列出流量"
@@ -24,6 +29,37 @@
     "find_my_team": "找我的队伍"
   },
   "content": {
+    "ad": {
+      "round": "回合",
+      "round_ends": "回合结束于",
+      "no_round_yet": "尚未进入回合 — 预热阶段",
+      "warmup_pill": "预热中 — 暂未开始计分",
+      "no_checks_yet": "尚未检测",
+      "target": "目标",
+      "flag_to_defend": "需防守",
+      "empty": {
+        "title": "本场比赛没有 A&D 题目",
+        "description": "如果你预期看到服务，可能是管理员尚未创建 A&D 题目，或你的队伍容器还未就绪。"
+      },
+      "defend": {
+        "title": "防守",
+        "description": "你的队伍服务。保持其正常运行并修补漏洞。点击 IP 或 Flag 即可复制。"
+      },
+      "attack": {
+        "title": "进攻",
+        "description": "提交你从其他队伍捕获的 Flag。",
+        "placeholder": "flag{...}",
+        "recent": "最近提交"
+      },
+      "submit_status": {
+        "accepted": "已接受",
+        "duplicate": "已经提交过",
+        "wrong": "Flag 不被识别",
+        "expired": "Flag 已过期",
+        "self_attack": "这是你自己的 Flag",
+        "not_started": "回合尚未开始"
+      }
+    },
     "all_solved": {
       "comment": "或许还有更难的挑战在等着你……",
       "title": "题目都被解出啦！"
@@ -185,7 +221,20 @@
     "new_challenge": "题目 [{{title}}] 已开放",
     "new_hint": "题目 [{{title}}] 更新了提示"
   },
+  "tooltip": {
+    "ad": {
+      "reset": "将此容器重建为初始镜像（重建期间会损失 SLA）",
+      "reset_cooldown": "冷却中 — 剩余 {{seconds}} 秒"
+    }
+  },
   "notification": {
+    "ad": {
+      "attack_accepted": "攻击成功（+{{points}} 分）",
+      "reset_queued": {
+        "title": "重置已排队",
+        "message": "容器将在数秒后重建。"
+      }
+    },
     "connected": {
       "event": "实时事件连接成功",
       "submission": "实时提交连接成功"
@@ -265,7 +314,8 @@
       "traffic": "流量捕获"
     },
     "scoreboard": "积分总榜",
-    "submit": "提交题目"
+    "submit": "提交题目",
+    "ad": "攻防对抗"
   },
   "tag": {
     "hidden": "比赛已隐藏",

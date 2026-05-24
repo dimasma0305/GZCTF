@@ -1,5 +1,10 @@
 {
   "button": {
+    "ad": {
+      "reset": "Reset",
+      "submit": "Submit attack",
+      "snapshot": "Snapshot"
+    },
     "challenges": "Challenges",
     "delete": {
       "all_traffic": "Delete all listed traffic"
@@ -24,6 +29,37 @@
     "find_my_team": "Find My Team"
   },
   "content": {
+    "ad": {
+      "round": "Round",
+      "round_ends": "Round ends",
+      "no_round_yet": "No round yet — warmup",
+      "warmup_pill": "Warmup — scoring not yet active",
+      "no_checks_yet": "no checks yet",
+      "target": "Target",
+      "flag_to_defend": "Defending",
+      "empty": {
+        "title": "No A&D challenges in this game",
+        "description": "If you expected to see services here, the operator hasn't created any A&D challenges or your team's containers haven't been provisioned yet."
+      },
+      "defend": {
+        "title": "Defend",
+        "description": "Your team's services. Keep them healthy + patched. Click any IP or flag to copy."
+      },
+      "attack": {
+        "title": "Attack",
+        "description": "Submit a flag you captured from another team.",
+        "placeholder": "flag{...}",
+        "recent": "Recent submissions"
+      },
+      "submit_status": {
+        "accepted": "Accepted",
+        "duplicate": "Already submitted",
+        "wrong": "Flag not recognized",
+        "expired": "Flag expired",
+        "self_attack": "That's your own flag",
+        "not_started": "Game hasn't started rounds yet"
+      }
+    },
     "all_solved": {
       "comment": "Perhaps more difficult challenges are waiting for you...",
       "title": "All challenges were solved!"
@@ -186,6 +222,13 @@
     "new_hint": "Hints for [{{title}}] has been updated."
   },
   "notification": {
+    "ad": {
+      "attack_accepted": "Attack accepted (+{{points}} pts)",
+      "reset_queued": {
+        "title": "Reset queued",
+        "message": "Container will rebuild in seconds."
+      }
+    },
     "connected": {
       "event": "Real-time event connected",
       "submission": "Real-time submission connected"
@@ -254,6 +297,12 @@
     "no_solved": "Ouch! This team has not solved any challenges...",
     "search_team": "Search Team"
   },
+  "tooltip": {
+    "ad": {
+      "reset": "Rebuild this container to baseline (you lose SLA during the rebuild)",
+      "reset_cooldown": "On cooldown — {{seconds}}s remaining"
+    }
+  },
   "tab": {
     "challenge": "Challenges",
     "monitor": {
@@ -265,7 +314,8 @@
       "traffic": "Traffics"
     },
     "scoreboard": "Scoreboard",
-    "submit": "Submit"
+    "submit": "Submit",
+    "ad": "Attack & Defense"
   },
   "tag": {
     "hidden": "Hidden",
