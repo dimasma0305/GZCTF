@@ -5,6 +5,7 @@ using GZCTF.Models.Data;
 using GZCTF.Models.Request.Game;
 using GZCTF.Models.Response.Admin;
 using GZCTF.Services;
+using GZCTF.Storage.Interface;
 using GZCTF.Utils;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -30,6 +31,7 @@ public class AdGameController(
     AppDbContext db,
     UserManager<UserInfo> userManager,
     AdContainerManager adContainerManager,
+    IBlobStorage blobStorage,
     IStringLocalizer<Program> localizer,
     ILogger<AdGameController> logger) : ControllerBase
 {
@@ -391,5 +393,44 @@ public class AdGameController(
             LatestRound = latestRound,
             Teams = rows
         });
+    }
+
+    /// <summary>
+    /// Download the post-game container snapshot tarball for one of the
+    /// caller's team services. Available only after game end + if the
+    /// challenge has AdAllowSnapshotDownload=true + a snapshot was actually
+    /// taken (Docker provider only for v1).
+    /// </summary>
+    [RequireUser]
+    [HttpGet("Services/{adTeamServiceId:int}/Snapshot")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> DownloadSnapshot(int id, int adTeamServiceId, CancellationToken token)
+    {
+        var user = await userManager.GetUserAsync(User);
+        if (user is null) return Unauthorized();
+
+        var ts = await db.AdTeamServices
+            .Include(t => t.Participation)
+            .FirstOrDefaultAsync(t => t.Id == adTeamServiceId, token);
+
+        if (ts is null || ts.Participation.GameId != id) return NotFound();
+
+        var isMember = await db.Participations
+            .AnyAsync(p => p.Id == ts.ParticipationId && p.Members.Any(m => m.UserId == user.Id), token);
+        if (!isMember) return Forbid();
+
+        if (string.IsNullOrEmpty(ts.SnapshotBlobKey))
+            return NotFound(new RequestResponse("Snapshot not available (game still running, snapshot disabled, or snapshot failed)"));
+
+        if (!await blobStorage.ExistsAsync(ts.SnapshotBlobKey, token))
+        {
+            logger.SystemLog($"A&D snapshot blob missing: key={ts.SnapshotBlobKey}",
+                TaskStatus.Failed, LogLevel.Warning);
+            return NotFound(new RequestResponse("Snapshot blob is missing — may have been retained-out"));
+        }
+
+        var stream = await blobStorage.OpenReadAsync(ts.SnapshotBlobKey, token);
+        var filename = $"ad-snapshot-team{ts.ParticipationId}-challenge{ts.ChallengeId}.tar.gz";
+        return File(stream, "application/gzip", filename);
     }
 }

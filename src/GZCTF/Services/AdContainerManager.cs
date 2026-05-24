@@ -1,7 +1,12 @@
+using System.IO.Compression;
+using Docker.DotNet;
+using DockerModels = Docker.DotNet.Models;
 using GZCTF.Models;
 using GZCTF.Models.Data;
 using GZCTF.Models.Internal;
 using GZCTF.Services.Container.Manager;
+using GZCTF.Services.Container.Provider;
+using GZCTF.Storage.Interface;
 using GZCTF.Utils;
 using Microsoft.EntityFrameworkCore;
 
@@ -69,18 +74,25 @@ public sealed class AdContainerManager(
         foreach (var gameId in activeGames)
             await EnsureContainersForGameAsync(db, containerManager, gameId, token);
 
-        // Ended games: destroy any still-living A&D containers (snapshot teardown
-        // comes in Slice 1C; for now just kill them).
+        // Ended games: snapshot (if allowed) → destroy.
         var endedGameTeamServices = await db.AdTeamServices
             .Where(ts => ts.ContainerId != null)
             .Where(ts => ts.Participation.Game.EndTimeUtc < now)
             .Include(ts => ts.Container)
+            .Include(ts => ts.Challenge)
+            .Include(ts => ts.Participation)
             .ToListAsync(token);
 
         foreach (var ts in endedGameTeamServices.Where(ts => ts.Container is not null))
         {
             try
             {
+                if (ts.Challenge.AdAllowSnapshotDownload && ts.SnapshotBlobKey is null)
+                {
+                    var key = await TrySnapshotAsync(scope.ServiceProvider, ts, token);
+                    if (key is not null)
+                        ts.SnapshotBlobKey = key;
+                }
                 await containerManager.DestroyContainerAsync(ts.Container!, token);
                 logger.SystemLog($"A&D container destroyed (game ended): team={ts.ParticipationId} challenge={ts.ChallengeId}",
                     TaskStatus.Success, LogLevel.Information);
@@ -95,6 +107,71 @@ public sealed class AdContainerManager(
 
         if (endedGameTeamServices.Count > 0)
             await db.SaveChangesAsync(token);
+    }
+
+    /// <summary>
+    /// Snapshot a team's A&amp;D container to a gzipped Docker image tarball + upload
+    /// to <see cref="IBlobStorage"/>. Returns the blob key on success, null on
+    /// failure (including silently-skipped K8s deployments — snapshot is Docker-
+    /// only for v1; K8s parity is a future enhancement).
+    /// </summary>
+    public async Task<string?> TrySnapshotAsync(
+        IServiceProvider scopeServices, AdTeamService ts, CancellationToken token)
+    {
+        if (ts.Container is null) return null;
+
+        var dockerProvider = scopeServices.GetService<IContainerProvider<DockerClient, DockerMetadata>>();
+        if (dockerProvider is null)
+        {
+            logger.SystemLog(
+                "A&D snapshot skipped: Docker provider not registered (K8s deployment). Snapshot is Docker-only for v1.",
+                TaskStatus.Pending, LogLevel.Debug);
+            return null;
+        }
+
+        var docker = dockerProvider.GetProvider();
+        var blobStorage = scopeServices.GetRequiredService<IBlobStorage>();
+        var imageRef = $"ad-snapshot-{ts.Id}:{ts.Participation.GameId}";
+
+        try
+        {
+            await docker.Images.CommitContainerChangesAsync(new DockerModels.CommitContainerChangesParameters
+            {
+                ContainerID = ts.Container.ContainerId,
+                RepositoryName = $"ad-snapshot-{ts.Id}",
+                Tag = ts.Participation.GameId.ToString(),
+                Comment = $"A&D end-of-game snapshot: team={ts.ParticipationId} challenge={ts.ChallengeId}"
+            }, token);
+
+            await using var imageStream =
+                await docker.Images.SaveImageAsync(imageRef, token);
+
+            var blobKey = $"ad-snapshots/{ts.Participation.GameId}/{ts.ParticipationId}-{ts.ChallengeId}.tar.gz";
+            using var ms = new MemoryStream();
+            await using (var gz = new GZipStream(ms, CompressionLevel.Fastest, leaveOpen: true))
+                await imageStream.CopyToAsync(gz, token);
+            ms.Position = 0;
+            await blobStorage.WriteAsync(blobKey, ms, append: false, cancellationToken: token);
+
+            // Clean up the local image — the tarball is the deliverable.
+            try
+            {
+                await docker.Images.DeleteImageAsync(imageRef,
+                    new DockerModels.ImageDeleteParameters { Force = true }, token);
+            }
+            catch { /* best-effort cleanup */ }
+
+            logger.SystemLog(
+                $"A&D snapshot saved: team={ts.ParticipationId} challenge={ts.ChallengeId} blob={blobKey}",
+                TaskStatus.Success, LogLevel.Information);
+            return blobKey;
+        }
+        catch (Exception e)
+        {
+            logger.LogErrorMessage(e,
+                $"A&D snapshot failed: team={ts.ParticipationId} challenge={ts.ChallengeId}");
+            return null;
+        }
     }
 
     /// <summary>
