@@ -160,7 +160,7 @@ public class AdGameController(
         }
 
         var priorCapturers = await db.AdAttacks.CountAsync(a => a.AdFlagId == adFlag.Id, token);
-        var points = 10.0 / Math.Sqrt(priorCapturers + 1);
+        var points = AdScoring.AttackPoints(priorCapturers);
 
         var attack = new AdAttack
         {
@@ -650,37 +650,31 @@ public class AdGameController(
             .Select(g => new { PartId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(g => g.PartId, token);
 
-        // SLA: count of Ok checks vs total checks per team.
-        var checks = await db.AdCheckResults
+        // SLA: per-tick credit SUM per team (Ok=1.0, Recovering=0.5, else 0 —
+        // precomputed on each AdCheckResult). A sum, not a ratio, so a broken
+        // tick just earns 0 instead of dragging a percentage down. See AdScoring.
+        var slaCredit = await db.AdCheckResults
             .Where(c => db.AdTeamServices
                 .Where(ts => ts.Id == c.AdTeamServiceId)
                 .Any(ts => partIds.Contains(ts.ParticipationId)))
             .Join(db.AdTeamServices,
                 c => c.AdTeamServiceId, ts => ts.Id,
-                (c, ts) => new { ts.ParticipationId, c.Status })
+                (c, ts) => new { ts.ParticipationId, c.SlaCredit })
             .GroupBy(x => x.ParticipationId)
-            .Select(g => new
-            {
-                PartId = g.Key,
-                Ok = g.Count(x => x.Status == AdCheckStatus.Ok),
-                Total = g.Count()
-            })
-            .ToDictionaryAsync(g => g.PartId, token);
+            .Select(g => new { PartId = g.Key, Credit = g.Sum(x => x.SlaCredit) })
+            .ToDictionaryAsync(g => g.PartId, g => g.Credit, token);
 
-        const double slaScale = 10.0;
-        const double defensePenaltyScale = 2.0;
+        var activeTeams = teams.Count;
 
         var rows = teams.Select(p =>
         {
             var atk = attackAgg.GetValueOrDefault(p.Id);
             var def = defenseAgg.GetValueOrDefault(p.Id);
-            var sla = checks.GetValueOrDefault(p.Id);
 
             var attackPoints = atk?.Points ?? 0;
             var timesCaptured = def?.Count ?? 0;
-            var defenseLoss = Math.Pow(timesCaptured, 0.75) * defensePenaltyScale;
-            var slaFraction = sla is { Total: > 0 } ? (double)sla.Ok / sla.Total : 0;
-            var slaPoints = slaFraction * slaScale * Math.Max(1, latestRound);
+            var defenseLoss = AdScoring.DefenseLoss(timesCaptured);
+            var slaPoints = AdScoring.SlaPoints(slaCredit.GetValueOrDefault(p.Id), activeTeams);
 
             return new AdTeamScoreRow
             {
@@ -768,11 +762,11 @@ public class AdGameController(
             .GroupBy(a => (a.VictimParticipationId, a.SubmittedAtRound))
             .ToDictionary(g => g.Key, g => g.Count());
 
-        // Map each AdCheckResult to (participationId, status, time) once.
+        // Map each AdCheckResult to (participationId, credit, time) once.
         var checks = await db.AdCheckResults
             .Join(db.AdTeamServices,
                 c => c.AdTeamServiceId, ts => ts.Id,
-                (c, ts) => new { ts.ParticipationId, c.Status, c.CheckedAt })
+                (c, ts) => new { ts.ParticipationId, c.SlaCredit, c.CheckedAt })
             .Where(x => partIds.Contains(x.ParticipationId))
             .ToListAsync(token);
 
@@ -784,8 +778,7 @@ public class AdGameController(
                 g => g.OrderBy(c => c.CheckedAt).ToList()
             );
 
-        const double slaScale = 10.0;
-        const double defensePenaltyScale = 2.0;
+        var activeTeams = teams.Count;
 
         foreach (var team in teams)
         {
@@ -799,8 +792,7 @@ public class AdGameController(
 
             double cumAttack = 0;
             int cumTimesCaptured = 0;
-            int cumOkChecks = 0;
-            int cumTotalChecks = 0;
+            double cumSlaCredit = 0;
 
             // Walk team's checks in order; advance pointer per round.
             var teamChecks = checksByTeam.GetValueOrDefault(team.Id) ?? [];
@@ -813,14 +805,12 @@ public class AdGameController(
 
                 while (checkIdx < teamChecks.Count && teamChecks[checkIdx].CheckedAt < round.EndsAt)
                 {
-                    cumTotalChecks++;
-                    if (teamChecks[checkIdx].Status == AdCheckStatus.Ok) cumOkChecks++;
+                    cumSlaCredit += teamChecks[checkIdx].SlaCredit;
                     checkIdx++;
                 }
 
-                var defenseLoss = Math.Pow(cumTimesCaptured, 0.75) * defensePenaltyScale;
-                var slaFraction = cumTotalChecks > 0 ? (double)cumOkChecks / cumTotalChecks : 0;
-                var slaPoints = slaFraction * slaScale * round.Number;
+                var defenseLoss = AdScoring.DefenseLoss(cumTimesCaptured);
+                var slaPoints = AdScoring.SlaPoints(cumSlaCredit, activeTeams);
                 var total = cumAttack - defenseLoss + slaPoints;
 
                 timeline.Items.Add(new AdTimelinePoint

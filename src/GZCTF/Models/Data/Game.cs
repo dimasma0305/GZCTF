@@ -330,7 +330,7 @@ public partial class Game
     /// Minimum minutes between consecutive self-resets of a team's container.
     /// Event-wide anti-spam fairness policy. Default 5. (Whether a given
     /// service can be reset at all is the per-challenge
-    /// <see cref="Challenge.AdAllowSelfReset"/> flag.)
+    /// <c>GameChallenge.AdAllowSelfReset</c> flag.)
     /// </summary>
     public int? AdResetCooldownMinutes { get; set; } = 5;
 

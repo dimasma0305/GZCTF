@@ -28,6 +28,14 @@ public class AdCheckResult
     [Required]
     public AdCheckStatus Status { get; set; }
 
+    /// <summary>
+    /// Per-tick SLA credit, precomputed when the check lands (see
+    /// <c>AdScoring.TickCredit</c>): 1.0 (Ok), 0.5 (Recovering — Ok right
+    /// after a down/mumble tick), or 0.0. The scoreboard SUMs this rather
+    /// than recomputing the up/recovering/down sequence on every read.
+    /// </summary>
+    public double SlaCredit { get; set; }
+
     /// <summary>Free-form error text from the checker on Mumble / Offline / InternalError. Null on Ok.</summary>
     [MaxLength(4096)]
     public string? ErrorMessage { get; set; }

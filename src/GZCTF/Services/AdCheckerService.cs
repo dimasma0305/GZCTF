@@ -189,11 +189,21 @@ public sealed class AdCheckerService(
             .AnyAsync(cr => cr.AdRoundId == adRoundId && cr.AdTeamServiceId == adTeamServiceId, token);
         if (exists) return;
 
+        // Per-tick SLA credit is computed once, here, from this service's
+        // PREVIOUS verdict — "Ok right after a down tick" is the recovering
+        // (half-credit) case. The scoreboard then just SUMs SlaCredit.
+        var prevStatus = await db.AdCheckResults
+            .Where(cr => cr.AdTeamServiceId == adTeamServiceId && cr.AdRoundId < adRoundId)
+            .OrderByDescending(cr => cr.AdRoundId)
+            .Select(cr => (AdCheckStatus?)cr.Status)
+            .FirstOrDefaultAsync(token);
+
         await db.AdCheckResults.AddAsync(new AdCheckResult
         {
             AdTeamServiceId = adTeamServiceId,
             AdRoundId = adRoundId,
             Status = outcome.Status,
+            SlaCredit = AdScoring.TickCredit(outcome.Status, prevStatus),
             ErrorMessage = outcome.ErrorMessage,
             SourceIp = outcome.SourceIp,
             CheckedAt = DateTimeOffset.UtcNow

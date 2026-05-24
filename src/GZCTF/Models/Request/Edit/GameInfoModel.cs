@@ -129,36 +129,36 @@ public class GameInfoModel : IValidatableObject
     public long BloodBonusValue { get; set; } = BloodBonus.DefaultValue;
 
     /// <summary>
-    /// A&D — warmup seconds before round 1 starts (default 1800 = 30 min).
+    /// A&amp;D — warmup seconds before round 1 starts (default 1800 = 30 min).
     /// Teams get this gap to SSH in + write initial patches before scoring.
     /// Only consulted by games containing AttackDefense challenges.
     /// </summary>
     public int? AdWarmupSeconds { get; set; }
 
     /// <summary>
-    /// A&D — how long to retain per-team container snapshots after game end.
+    /// A&amp;D — how long to retain per-team container snapshots after game end.
     /// </summary>
     public int? AdSnapshotRetentionDays { get; set; }
 
     /// <summary>
-    /// A&D — seconds per tick (the global scoring unit). Every A&amp;D service
+    /// A&amp;D — seconds per tick (the global scoring unit). Every A&amp;D service
     /// in the game shares one tick. Default 120.
     /// </summary>
     public int? AdTickSeconds { get; set; }
 
     /// <summary>
-    /// A&D — how many ticks a planted flag stays valid for attack submission
+    /// A&amp;D — how many ticks a planted flag stays valid for attack submission
     /// (the uniform attack window). Default 5.
     /// </summary>
     public int? AdFlagLifetimeTicks { get; set; }
 
     /// <summary>
-    /// A&D — minimum minutes between a team's self-resets (anti-spam). Default 5.
+    /// A&amp;D — minimum minutes between a team's self-resets (anti-spam). Default 5.
     /// </summary>
     public int? AdResetCooldownMinutes { get; set; }
 
     /// <summary>
-    /// A&D — whether team containers are snapshotted at game end for download.
+    /// A&amp;D — whether team containers are snapshotted at game end for download.
     /// Default true.
     /// </summary>
     public bool? AdAllowSnapshotDownload { get; set; }
