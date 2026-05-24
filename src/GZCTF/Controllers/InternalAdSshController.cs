@@ -1,0 +1,246 @@
+using System.Net.WebSockets;
+using GZCTF.Models;
+using GZCTF.Models.Data;
+using GZCTF.Repositories.Interface;
+using GZCTF.Services.Container.Exec;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+
+namespace GZCTF.Controllers;
+
+/// <summary>
+/// East-west endpoints called by the A&amp;D jump-host sidecar — never
+/// exposed to the public internet. Auth is a single shared secret
+/// (<c>Ad:Ssh:InternalSecret</c>) sent in
+/// <c>X-Gzctf-Internal-Auth</c>; the secret is generated at deploy time
+/// and only the gzctf + jump-host containers ever see it (compose
+/// docker network is the only routable path).
+///
+/// <para>Endpoints:</para>
+/// <list type="bullet">
+///   <item><c>GET /Challenges</c> — sidecar bootstraps
+///         <c>/etc/passwd</c> entries from this list, one user per
+///         A&amp;D challenge id, so sshd will accept connections to
+///         <c>ssh &lt;challengeId&gt;@host</c>.</item>
+///   <item><c>GET /Lookup</c> — pubkey fingerprint + challengeId →
+///         (userId, participationId, containerId). Drives the
+///         <c>AuthorizedKeysCommand</c>: returns an
+///         <c>authorized_keys</c> line shape, or 404 to reject the
+///         connection.</item>
+///   <item><c>GET /Exec</c> (WebSocket) — accepts the
+///         <c>ForceCommand</c>'s websocat connection, opens
+///         <c>docker exec sh</c> against the resolved container, pipes
+///         bytes both ways until either side closes.</item>
+/// </list>
+/// </summary>
+[ApiController]
+[Route("api/Internal/Ad/Ssh")]
+public class InternalAdSshController(
+    AppDbContext db,
+    IConfiguration configuration,
+    IContainerRepository containerRepository,
+    IContainerExecChannel execChannel,
+    ILogger<InternalAdSshController> logger) : ControllerBase
+{
+    /// <summary>
+    /// All active A&amp;D challenge ids across every running game — the
+    /// sidecar materializes a passwd entry per id so sshd accepts
+    /// <c>ssh &lt;id&gt;@host</c> regardless of which game/participation
+    /// the requester ends up resolving to (that's the
+    /// <c>AuthorizedKeysCommand</c>'s job).
+    /// </summary>
+    [HttpGet("Challenges")]
+    public async Task<IActionResult> Challenges(CancellationToken token)
+    {
+        if (!AuthInternal()) return Unauthorized();
+
+        var ids = await db.GameChallenges
+            .Where(c => c.Type == ChallengeType.AttackDefense && c.IsEnabled)
+            .Select(c => c.Id)
+            .ToListAsync(token);
+
+        return Ok(new InternalAdChallengesModel { ChallengeIds = ids });
+    }
+
+    /// <summary>
+    /// Resolve <c>(fingerprint, challengeId)</c> to a live container.
+    /// 404 means "reject the SSH connection" — either the fingerprint
+    /// doesn't match any registered key, the user isn't on a team that
+    /// has access to that challenge, or no container is running yet.
+    /// </summary>
+    [HttpGet("Lookup")]
+    public async Task<IActionResult> Lookup(
+        [FromQuery] string fingerprint,
+        [FromQuery] int challenge,
+        CancellationToken token)
+    {
+        if (!AuthInternal()) return Unauthorized();
+        if (string.IsNullOrWhiteSpace(fingerprint) || challenge <= 0)
+            return BadRequest();
+
+        var challengeRow = await db.GameChallenges
+            .Where(c => c.Id == challenge && c.Type == ChallengeType.AttackDefense && c.IsEnabled)
+            .Select(c => new { c.Id, c.GameId, c.Title })
+            .FirstOrDefaultAsync(token);
+        if (challengeRow is null) return NotFound();
+
+        var keyRow = await db.AdTeamSshKeys
+            .Include(k => k.Participation).ThenInclude(p => p.Members)
+            .Where(k => k.Fingerprint == fingerprint
+                && k.RevokedAt == null
+                && k.Participation.GameId == challengeRow.GameId
+                && k.Participation.Status == ParticipationStatus.Accepted)
+            .FirstOrDefaultAsync(token);
+        if (keyRow is null) return NotFound();
+
+        // Member-kick = instant revocation (same as the API-token path):
+        // the user is only valid if they're still on the team roster.
+        if (keyRow.Participation.Members.All(m => m.UserId != keyRow.UserId))
+            return NotFound();
+
+        var service = await db.AdTeamServices
+            .Include(s => s.Container)
+            .FirstOrDefaultAsync(s => s.ParticipationId == keyRow.ParticipationId
+                && s.ChallengeId == challenge, token);
+        if (service?.Container?.ContainerId is not { Length: > 0 } cid)
+            return NotFound();
+
+        keyRow.LastUsedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(token);
+
+        return Ok(new InternalAdSshLookupModel
+        {
+            UserId = keyRow.UserId,
+            ParticipationId = keyRow.ParticipationId,
+            ChallengeId = challenge,
+            ChallengeTitle = challengeRow.Title,
+            GameId = challengeRow.GameId,
+            ContainerId = cid,
+            ContainerGuid = service.Container.Id,
+            PublicKey = keyRow.PublicKey
+        });
+    }
+
+    /// <summary>
+    /// WebSocket relay. The sidecar's <c>ForceCommand</c> opens a
+    /// websocat connection here; we hand the bytes to a Docker exec
+    /// session and proxy both directions. Auth is the same shared
+    /// secret, sent as the <c>auth</c> query param (browsers can't set
+    /// arbitrary WS headers from JS, but the sidecar is a server-side
+    /// client so it could — keeping it consistent with the curl-based
+    /// REST endpoints though, where header vs query is moot).
+    /// </summary>
+    [HttpGet("Exec")]
+    public async Task<IActionResult> Exec(
+        [FromQuery] string auth,
+        [FromQuery] Guid container,
+        [FromQuery] string shell = "sh",
+        CancellationToken token = default)
+    {
+        if (!AuthInternalValue(auth)) return Unauthorized();
+        if (!HttpContext.WebSockets.IsWebSocketRequest)
+            return BadRequest();
+
+        var c = await containerRepository.GetContainerById(container, token);
+        if (c is null) return NotFound();
+
+        using var ws = await HttpContext.WebSockets.AcceptWebSocketAsync();
+
+        IExecSession session;
+        try
+        {
+            session = await execChannel.OpenAsync(c, string.IsNullOrWhiteSpace(shell) ? "sh" : shell, token);
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "InternalAdSsh: exec open failed for container {Cid}", c.ContainerId);
+            try { await ws.CloseAsync(WebSocketCloseStatus.InternalServerError, "exec failed", CancellationToken.None); }
+            catch { /* socket already gone */ }
+            return new EmptyResult();
+        }
+
+        await using (session)
+        {
+            var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            var ctOut = PumpExecToSocketAsync(session, ws, cts.Token);
+            var ctIn = PumpSocketToExecAsync(ws, session, cts.Token);
+            await Task.WhenAny(ctOut, ctIn);
+            cts.Cancel();
+            try { await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "session ended", CancellationToken.None); }
+            catch { /* socket already gone */ }
+        }
+
+        return new EmptyResult();
+    }
+
+    private static async Task PumpExecToSocketAsync(IExecSession session, WebSocket ws, CancellationToken token)
+    {
+        var buf = new byte[4096];
+        while (!token.IsCancellationRequested && ws.State == WebSocketState.Open)
+        {
+            int n;
+            try { n = await session.ReadAsync(buf, token); }
+            catch (OperationCanceledException) { return; }
+            catch { return; }
+            if (n == 0) return;
+            try
+            {
+                await ws.SendAsync(buf.AsMemory(0, n), WebSocketMessageType.Binary, true, token);
+            }
+            catch { return; }
+        }
+    }
+
+    private static async Task PumpSocketToExecAsync(WebSocket ws, IExecSession session, CancellationToken token)
+    {
+        var buf = new byte[4096];
+        while (!token.IsCancellationRequested && ws.State == WebSocketState.Open)
+        {
+            WebSocketReceiveResult res;
+            try { res = await ws.ReceiveAsync(buf, token); }
+            catch (OperationCanceledException) { return; }
+            catch { return; }
+            if (res.MessageType == WebSocketMessageType.Close) return;
+            if (res.Count == 0) continue;
+            try { await session.WriteAsync(buf.AsMemory(0, res.Count), token); }
+            catch { return; }
+        }
+    }
+
+    private bool AuthInternal() =>
+        AuthInternalValue(Request.Headers["X-Gzctf-Internal-Auth"].ToString());
+
+    private bool AuthInternalValue(string presented)
+    {
+        var expected = configuration["Ad:Ssh:InternalSecret"];
+        if (string.IsNullOrEmpty(expected))
+        {
+            // Refuse to operate without a configured secret — otherwise
+            // the lookup endpoints would be reachable by anything on the
+            // docker network with curl. Operator must set this.
+            return false;
+        }
+        if (string.IsNullOrEmpty(presented)) return false;
+        var a = System.Text.Encoding.UTF8.GetBytes(presented);
+        var b = System.Text.Encoding.UTF8.GetBytes(expected);
+        if (a.Length != b.Length) return false;
+        return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(a, b);
+    }
+}
+
+public class InternalAdChallengesModel
+{
+    public List<int> ChallengeIds { get; set; } = [];
+}
+
+public class InternalAdSshLookupModel
+{
+    public Guid UserId { get; set; }
+    public int ParticipationId { get; set; }
+    public int ChallengeId { get; set; }
+    public string ChallengeTitle { get; set; } = string.Empty;
+    public int GameId { get; set; }
+    public string ContainerId { get; set; } = string.Empty;
+    public Guid ContainerGuid { get; set; }
+    public string PublicKey { get; set; } = string.Empty;
+}

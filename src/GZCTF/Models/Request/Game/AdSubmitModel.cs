@@ -187,3 +187,48 @@ public class AdTeamServiceStateModel
     public bool CanReset { get; set; }
     public int? ResetCooldownSecondsRemaining { get; set; }
 }
+
+/// <summary>
+/// Body for POST /api/Game/{id}/Ad/Ssh/Key — upload an OpenSSH public
+/// key (e.g. <c>ssh-ed25519 AAAA... user@host</c>). One line of
+/// <c>~/.ssh/id_*.pub</c>.
+/// </summary>
+public class AdSshKeyUploadModel
+{
+    [Required]
+    [MinLength(32)]
+    [MaxLength(8192)]
+    public string PublicKey { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Response from GET /api/Game/{id}/Ad/Ssh/Key — metadata about the
+/// caller's installed SSH key. <see cref="Exists"/> false on first call.
+/// </summary>
+public class AdSshKeyInfoModel
+{
+    public bool Exists { get; set; }
+    public string Algorithm { get; set; } = string.Empty;
+    public string Fingerprint { get; set; } = string.Empty;
+    public bool PlatformGenerated { get; set; }
+    public DateTimeOffset? CreatedAt { get; set; }
+    public DateTimeOffset? LastUsedAt { get; set; }
+
+    /// <summary>Public hostname:port the player <c>ssh</c>'s to (e.g. <c>1pc.tf:2222</c>).</summary>
+    public string? JumpHost { get; set; }
+}
+
+/// <summary>
+/// Response from POST /api/Game/{id}/Ad/Ssh/Key/Generate — server-
+/// generated keypair. <see cref="PrivateKey"/> is the only place the
+/// private half ever appears; the platform stores the ciphertext but
+/// the user is expected to save the file locally.
+/// </summary>
+public class AdSshKeyGeneratedModel
+{
+    public string Algorithm { get; set; } = "ssh-ed25519";
+    public string PublicKey { get; set; } = string.Empty;
+    public string PrivateKey { get; set; } = string.Empty;
+    public string Fingerprint { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; set; }
+}

@@ -1004,4 +1004,232 @@ PersistentKeepalive = 25
         var filename = $"ad-snapshot-team{ts.ParticipationId}-challenge{ts.ChallengeId}.tar.gz";
         return File(stream, "application/gzip", filename);
     }
+
+    /// <summary>
+    /// Upload an OpenSSH public key — the recommended path. The private
+    /// half never crosses the wire. Overwrites the caller's existing key
+    /// if present (rotation = re-upload). One slot per (User, Game) — the
+    /// (UserId, ParticipationId) unique index enforces this at the DB.
+    /// </summary>
+    [RequireUser]
+    [HttpPost("Ssh/Key")]
+    [ProducesResponseType(typeof(AdSshKeyInfoModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> UploadSshKey(
+        int id,
+        [FromBody] AdSshKeyUploadModel model,
+        [FromServices] IConfiguration config,
+        CancellationToken token)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Model_ValidationFailed)]));
+
+        var user = await userManager.GetUserAsync(User);
+        if (user is null) return Unauthorized();
+
+        var participation = await db.Participations
+            .FirstOrDefaultAsync(p => p.GameId == id
+                && p.Status == ParticipationStatus.Accepted
+                && p.Members.Any(m => m.UserId == user.Id), token);
+        if (participation is null) return Forbid();
+
+        AdSshKeyUtils.ParsedKey parsed;
+        try { parsed = AdSshKeyUtils.Parse(model.PublicKey); }
+        catch (FormatException e) { return BadRequest(new RequestResponse(e.Message)); }
+
+        var now = DateTimeOffset.UtcNow;
+        var existing = await db.AdTeamSshKeys
+            .FirstOrDefaultAsync(k => k.UserId == user.Id && k.ParticipationId == participation.Id, token);
+
+        if (existing is null)
+        {
+            existing = new AdTeamSshKey
+            {
+                UserId = user.Id,
+                ParticipationId = participation.Id,
+                PublicKey = model.PublicKey.Trim(),
+                PrivateKey = string.Empty,
+                Algorithm = parsed.Algorithm,
+                Fingerprint = parsed.Fingerprint,
+                PlatformGenerated = false,
+                CreatedAt = now
+            };
+            await db.AdTeamSshKeys.AddAsync(existing, token);
+        }
+        else
+        {
+            existing.PublicKey = model.PublicKey.Trim();
+            existing.PrivateKey = string.Empty;
+            existing.Algorithm = parsed.Algorithm;
+            existing.Fingerprint = parsed.Fingerprint;
+            existing.PlatformGenerated = false;
+            existing.RevokedAt = null;
+            existing.CreatedAt = now;
+            existing.LastUsedAt = null;
+        }
+
+        await db.SaveChangesAsync(token);
+
+        logger.SystemLog(
+            $"A&D SSH key uploaded: user={user.Id} game={id} fp={parsed.Fingerprint}",
+            TaskStatus.Success, LogLevel.Information);
+
+        return Ok(BuildSshInfo(existing, config));
+    }
+
+    /// <summary>
+    /// Server-generate an ed25519 keypair. The private key is returned
+    /// once in this response; the ciphertext is also stored at-rest so
+    /// the platform can re-emit it if the user loses the file before
+    /// the game ends (operator decision — disable later if undesired).
+    /// </summary>
+    [RequireUser]
+    [HttpPost("Ssh/Key/Generate")]
+    [ProducesResponseType(typeof(AdSshKeyGeneratedModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GenerateSshKey(
+        int id,
+        [FromServices] IConfiguration config,
+        CancellationToken token)
+    {
+        var user = await userManager.GetUserAsync(User);
+        if (user is null) return Unauthorized();
+
+        var participation = await db.Participations
+            .FirstOrDefaultAsync(p => p.GameId == id
+                && p.Status == ParticipationStatus.Accepted
+                && p.Members.Any(m => m.UserId == user.Id), token);
+        if (participation is null) return Forbid();
+
+        var comment = $"gzctf-ad-{user.UserName}-game{id}";
+        var kp = AdSshKeyUtils.GenerateEd25519(comment);
+        var xorKey = configService.GetXorKey();
+        var wrapped = AdSshKeyUtils.WrapPrivateKey(kp.PrivateKeyOpenSsh, xorKey);
+        var now = DateTimeOffset.UtcNow;
+
+        var existing = await db.AdTeamSshKeys
+            .FirstOrDefaultAsync(k => k.UserId == user.Id && k.ParticipationId == participation.Id, token);
+
+        if (existing is null)
+        {
+            existing = new AdTeamSshKey
+            {
+                UserId = user.Id,
+                ParticipationId = participation.Id,
+                PublicKey = kp.PublicKeyOpenSsh,
+                PrivateKey = wrapped,
+                Algorithm = "ssh-ed25519",
+                Fingerprint = kp.Fingerprint,
+                PlatformGenerated = true,
+                CreatedAt = now
+            };
+            await db.AdTeamSshKeys.AddAsync(existing, token);
+        }
+        else
+        {
+            existing.PublicKey = kp.PublicKeyOpenSsh;
+            existing.PrivateKey = wrapped;
+            existing.Algorithm = "ssh-ed25519";
+            existing.Fingerprint = kp.Fingerprint;
+            existing.PlatformGenerated = true;
+            existing.RevokedAt = null;
+            existing.CreatedAt = now;
+            existing.LastUsedAt = null;
+        }
+
+        await db.SaveChangesAsync(token);
+
+        logger.SystemLog(
+            $"A&D SSH keypair generated: user={user.Id} game={id} fp={kp.Fingerprint}",
+            TaskStatus.Success, LogLevel.Information);
+
+        return Ok(new AdSshKeyGeneratedModel
+        {
+            Algorithm = "ssh-ed25519",
+            PublicKey = kp.PublicKeyOpenSsh,
+            PrivateKey = kp.PrivateKeyOpenSsh,
+            Fingerprint = kp.Fingerprint,
+            CreatedAt = now
+        });
+    }
+
+    /// <summary>
+    /// Metadata for the caller's installed SSH key (no plaintext returned).
+    /// <see cref="AdSshKeyInfoModel.Exists"/> false on first call so the
+    /// UI can render the upload form.
+    /// </summary>
+    [RequireUser]
+    [HttpGet("Ssh/Key")]
+    [ProducesResponseType(typeof(AdSshKeyInfoModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetSshKey(
+        int id,
+        [FromServices] IConfiguration config,
+        CancellationToken token)
+    {
+        var user = await userManager.GetUserAsync(User);
+        if (user is null) return Unauthorized();
+
+        var participation = await db.Participations
+            .FirstOrDefaultAsync(p => p.GameId == id
+                && p.Status == ParticipationStatus.Accepted
+                && p.Members.Any(m => m.UserId == user.Id), token);
+        if (participation is null) return Forbid();
+
+        var existing = await db.AdTeamSshKeys
+            .FirstOrDefaultAsync(k => k.UserId == user.Id && k.ParticipationId == participation.Id, token);
+
+        if (existing is null || existing.RevokedAt is not null)
+            return Ok(new AdSshKeyInfoModel { Exists = false, JumpHost = ResolveJumpHost(config) });
+
+        return Ok(BuildSshInfo(existing, config));
+    }
+
+    /// <summary>
+    /// Revoke the caller's SSH key. Next jump-host connection from the
+    /// matching pubkey is refused at <c>AuthorizedKeysCommand</c> time.
+    /// </summary>
+    [RequireUser]
+    [HttpDelete("Ssh/Key")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> RevokeSshKey(int id, CancellationToken token)
+    {
+        var user = await userManager.GetUserAsync(User);
+        if (user is null) return Unauthorized();
+
+        var participation = await db.Participations
+            .FirstOrDefaultAsync(p => p.GameId == id
+                && p.Status == ParticipationStatus.Accepted
+                && p.Members.Any(m => m.UserId == user.Id), token);
+        if (participation is null) return Forbid();
+
+        var existing = await db.AdTeamSshKeys
+            .FirstOrDefaultAsync(k => k.UserId == user.Id && k.ParticipationId == participation.Id, token);
+        if (existing is null) return NoContent();
+
+        db.AdTeamSshKeys.Remove(existing);
+        await db.SaveChangesAsync(token);
+
+        logger.SystemLog(
+            $"A&D SSH key revoked: user={user.Id} game={id}",
+            TaskStatus.Success, LogLevel.Information);
+        return NoContent();
+    }
+
+    private static AdSshKeyInfoModel BuildSshInfo(AdTeamSshKey key, IConfiguration config) => new()
+    {
+        Exists = true,
+        Algorithm = key.Algorithm,
+        Fingerprint = key.Fingerprint,
+        PlatformGenerated = key.PlatformGenerated,
+        CreatedAt = key.CreatedAt,
+        LastUsedAt = key.LastUsedAt,
+        JumpHost = ResolveJumpHost(config)
+    };
+
+    private static string ResolveJumpHost(IConfiguration config)
+    {
+        var host = config["Ad:Ssh:PublicHost"];
+        if (string.IsNullOrWhiteSpace(host))
+            host = config["PublicEntry"] ?? "localhost";
+        var port = config["Ad:Ssh:PublicPort"];
+        return string.IsNullOrWhiteSpace(port) ? $"{host}:2222" : $"{host}:{port}";
+    }
 }
