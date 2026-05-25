@@ -299,7 +299,24 @@ public class DockerManager : IContainerManager
             {
                 Memory = config.MemoryLimit * 1024 * 1024,
                 CPUPercent = config.CPUCount * 10,
-                NetworkMode = _meta.NetworkNames[config.NetworkMode]
+                NetworkMode = _meta.NetworkNames[config.NetworkMode],
+
+                // A&D: bind the host-backed flag file in read-only. The mount
+                // layer enforces EROFS on write/unlink even for container-root,
+                // so the live /flag can't be deleted or tampered (unmounting
+                // needs CAP_SYS_ADMIN, which is dropped by default).
+                Mounts = string.IsNullOrEmpty(config.FlagBindSource)
+                    ? null
+                    : new List<Mount>
+                    {
+                        new()
+                        {
+                            Type = "bind",
+                            Source = config.FlagBindSource,
+                            Target = config.FlagFilePath ?? "/flag",
+                            ReadOnly = true
+                        }
+                    }
             }
         };
 

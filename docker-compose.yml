@@ -79,6 +79,10 @@ services:
       - "gzctf-files:/app/files"
       - "gzctf-repos:/app/repos"
       - "wg-config:/wg-config"
+      # Host-backed A&D flag files, bind-mounted read-only into each team's
+      # container so /flag can't be deleted/tampered by container-root. gzctf
+      # auto-derives this volume's host path to use as the bind source.
+      - "ad-flags:/app/ad-flags"
     depends_on:
       - postgres
       - redis
@@ -159,6 +163,7 @@ volumes:
   gzctf-files:
   gzctf-repos:
   wg-config:
+  ad-flags:
 
 networks:
   # Sidecar's bootstrap network — intentionally lonely so VPN clients can't

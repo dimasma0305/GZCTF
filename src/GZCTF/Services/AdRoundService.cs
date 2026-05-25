@@ -22,6 +22,7 @@ namespace GZCTF.Services;
 public sealed class AdRoundService(
     AppDbContext db,
     IServiceProvider serviceProvider,
+    AdFlagMountService flagMount,
     ILogger<AdRoundService> logger)
 {
     private const int FlagRandomBytes = 24;
@@ -99,30 +100,44 @@ public sealed class AdRoundService(
 
         await db.SaveChangesAsync(token);
 
-        // Push each flag into its container via `docker exec`. Best-effort —
-        // a failed exec only loses one tick of attackability for that team;
-        // the next round will retry. Skipped on K8s deploys (no Docker
-        // provider registered).
+        // Plant each flag. Best-effort — a failure only loses one tick of
+        // attackability for that team; the next round retries.
         var docker = serviceProvider
             .GetService<IContainerProvider<DockerClient, DockerMetadata>>()
             ?.GetProvider();
         int injected = 0;
-        if (docker is not null)
+        foreach (var (ts, flag) in toInject)
         {
-            foreach (var (ts, flag) in toInject)
+            // Preferred: rewrite the read-only host-backed file in place. The
+            // container's :ro bind mount picks up the new flag immediately, and
+            // container-root can't delete or tamper it. Works even on a Docker
+            // provider hiccup (it's a plain host file write).
+            if (flagMount.IsBindMounted(ts.ParticipationId, ts.ChallengeId))
             {
-                if (ts.Container?.ContainerId is not { Length: > 0 } cid) continue;
-                try
-                {
-                    await WriteFlagFileAsync(docker, cid, flag, token);
-                    injected++;
-                }
+                try { flagMount.Write(ts.ParticipationId, ts.ChallengeId, flag); injected++; }
                 catch (Exception e)
                 {
-                    logger.LogWarning(e,
-                        "A&D flag inject failed for team={Tid} challenge={Cid}",
+                    logger.LogWarning(e, "A&D flag write failed for team={Tid} challenge={Cid}",
                         ts.ParticipationId, ts.ChallengeId);
                 }
+                continue;
+            }
+
+            // Legacy fallback: docker exec into the (writable) /flag — used for
+            // containers launched before the bind-mount feature, or when the
+            // mount isn't available. Skipped on K8s (no Docker provider).
+            if (docker is null) continue;
+            if (ts.Container?.ContainerId is not { Length: > 0 } cid) continue;
+            try
+            {
+                await WriteFlagFileAsync(docker, cid, flag, token);
+                injected++;
+            }
+            catch (Exception e)
+            {
+                logger.LogWarning(e,
+                    "A&D flag inject failed for team={Tid} challenge={Cid}",
+                    ts.ParticipationId, ts.ChallengeId);
             }
         }
 

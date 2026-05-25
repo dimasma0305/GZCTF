@@ -42,13 +42,21 @@ public class ContainerConfig
     public string? Flag { get; set; } = string.Empty;
 
     /// <summary>
-    /// In-container path that AdRoundService writes the per-tick flag to
-    /// (via <c>docker exec</c>). Exposed to the running container as the
-    /// <c>GZCTF_FLAG_FILE</c> env var so challenge code knows where to
-    /// look without hard-coding the path. Only set for A&amp;D containers;
-    /// null for jeopardy + exercise.
+    /// In-container path of the per-tick flag. Exposed to the running container
+    /// as the <c>GZCTF_FLAG_FILE</c> env var so challenge code knows where to
+    /// look without hard-coding the path. Only set for A&amp;D containers; null
+    /// for jeopardy + exercise.
     /// </summary>
     public string? FlagFilePath { get; set; }
+
+    /// <summary>
+    /// Host path of a file to bind-mount <b>read-only</b> at
+    /// <see cref="FlagFilePath"/>. When set, the flag is served from this
+    /// host-backed file (rewritten in place each tick) instead of a
+    /// <c>docker exec</c> write — making <c>/flag</c> undeletable/untamperable
+    /// by container-root. Null = legacy exec plant. A&amp;D only.
+    /// </summary>
+    public string? FlagBindSource { get; set; }
 
     /// <summary>
     /// Whether to record traffic

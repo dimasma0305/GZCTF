@@ -38,6 +38,7 @@ namespace GZCTF.Services;
 /// </summary>
 public sealed class AdContainerManager(
     IServiceScopeFactory scopeFactory,
+    AdFlagMountService flagMount,
     ILogger<AdContainerManager> logger) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(15);
@@ -103,6 +104,7 @@ public sealed class AdContainerManager(
                         ts.SnapshotBlobKey = key;
                 }
                 await containerManager.DestroyContainerAsync(ts.Container!, token);
+                flagMount.Delete(ts.ParticipationId, ts.ChallengeId);
                 logger.SystemLog($"A&D container destroyed (game ended): team={ts.ParticipationId} challenge={ts.ChallengeId}",
                     TaskStatus.Success, LogLevel.Information);
                 ts.ContainerId = null;
@@ -309,6 +311,12 @@ public sealed class AdContainerManager(
         // the container's life, so it would go stale after the first rotation
         // and mislead challenge code. Only GZCTF_FLAG_FILE is surfaced (below);
         // read the live flag from that path.
+        // When the read-only flag-mount is available, ensure the host-backed
+        // file exists (warmup) BEFORE creating the container — docker bind-mounts
+        // a missing source as an empty *directory*, which would break /flag.
+        if (flagMount.Available)
+            flagMount.EnsureWarmup(participationId, challenge.Id);
+
         var config = new ContainerConfig
         {
             Image = challenge.ContainerImage,
@@ -319,6 +327,9 @@ public sealed class AdContainerManager(
             ExposedPort = challenge.ExposePort ?? 80,
             // Flag intentionally unset for A&D — see note above; /flag is the source of truth.
             FlagFilePath = "/flag",
+            // Read-only host-backed /flag (undeletable by container-root) when
+            // available; null falls back to the docker-exec plant.
+            FlagBindSource = flagMount.Available ? flagMount.BindSource(participationId, challenge.Id) : null,
             CPUCount = challenge.CPUCount ?? 1,
             MemoryLimit = challenge.MemoryLimit ?? 128,
             StorageLimit = challenge.StorageLimit ?? 256,
