@@ -452,8 +452,14 @@ public class GameController(
     /// </remarks>
     /// <param name="id">Game id</param>
     /// <param name="type">SubmissionType to simulate (default FirstBlood)</param>
-    /// <param name="teamName">Team label shown on the particle</param>
+    /// <param name="teamName">Team label shown on the particle (attacker)</param>
     /// <param name="challengeTitle">Challenge title shown on the banner</param>
+    /// <param name="victimTeamName">
+    /// Optional A&amp;D victim. When set to a team that's on the board, the
+    /// projectile flies at that team's node instead of the center HQ — use it
+    /// to preview the Attack &amp; Defense beam (pass real scoreboard team names
+    /// for both attacker and victim so they resolve to nodes).
+    /// </param>
     /// <param name="token"></param>
     /// <response code="200">Broadcast dispatched</response>
     /// <response code="404">Game not found</response>
@@ -466,6 +472,7 @@ public class GameController(
         [FromQuery] SubmissionType type = SubmissionType.FirstBlood,
         [FromQuery] string teamName = "TEST TEAM",
         [FromQuery] string challengeTitle = "debug-stinger",
+        [FromQuery] string? victimTeamName = null,
         CancellationToken token = default)
     {
         var game = await gameRepository.GetGameById(id, token);
@@ -480,7 +487,8 @@ public class GameController(
             challengeTitle,
             ChallengeCategory.Misc,
             type,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            victimTeamName);
 
         await attackHub.Clients.Group($"AttackGame_{id}").ReceivedAttack(evt);
         return Ok();
