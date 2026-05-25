@@ -1,4 +1,4 @@
-import { Alert, Button, Center, Checkbox, ComboboxItem, Group, Modal, ScrollArea, Select, SimpleGrid, Stack, Text, TextInput, Title } from '@mantine/core'
+import { ActionIcon, Alert, Button, Center, Checkbox, ComboboxItem, Group, Indicator, Modal, ScrollArea, Select, SimpleGrid, Stack, Text, TextInput, Title, Tooltip } from '@mantine/core'
 import { useModals } from '@mantine/modals'
 import { showNotification } from '@mantine/notifications'
 import { mdiAlertCircleOutline, mdiCheck, mdiHammerWrench, mdiHexagonSlice6, mdiPlus, mdiRefresh, mdiTrashCanOutline } from '@mdi/js'
@@ -225,16 +225,23 @@ const GameChallengeEdit: FC = () => {
                 they appear. */}
             {visibleSelected.length > 0 && (
               <>
-                <Button
-                  size="sm"
-                  leftSection={<Icon path={mdiTrashCanOutline} size={0.9} />}
-                  color="red"
-                  variant="light"
-                  disabled={disabled}
-                  onClick={onBatchDelete}
+                <Tooltip
+                  label={`${t('admin.button.challenges.delete_selected')} (${visibleSelected.length})`}
+                  withArrow
                 >
-                  {t('admin.button.challenges.delete_selected')} ({visibleSelected.length})
-                </Button>
+                  <Indicator label={visibleSelected.length} size={16} color="red">
+                    <ActionIcon
+                      size="lg"
+                      color="red"
+                      variant="light"
+                      disabled={disabled}
+                      onClick={onBatchDelete}
+                      aria-label={t('admin.button.challenges.delete_selected')}
+                    >
+                      <Icon path={mdiTrashCanOutline} size={0.9} />
+                    </ActionIcon>
+                  </Indicator>
+                </Tooltip>
                 <Button size="sm" variant="subtle" color="gray" disabled={disabled} onClick={clearSelection}>
                   {t('admin.button.challenges.clear_selection')}
                 </Button>
