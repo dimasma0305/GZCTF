@@ -71,8 +71,9 @@
           "sla": "SLA",
           "sla_tip": "Service-level availability points from passing checks."
         },
-        "tip": "Total = Attack + SLA − Defense loss. Updated after every check + every accepted attack.",
-        "no_teams": "No teams ranked yet."
+        "tip": "Total = Attack + SLA − Defense loss, summed per service. Updated after every check + every accepted attack.",
+        "no_teams": "No teams ranked yet.",
+        "no_service_cell": "no service"
       }
     },
     "ad": {

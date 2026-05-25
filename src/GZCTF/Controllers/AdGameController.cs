@@ -630,51 +630,94 @@ public class AdGameController(
 
         var partIds = teams.Select(p => p.Id).ToList();
 
-        // Attack stats per attacker.
-        var attackAgg = await db.AdAttacks
-            .Where(a => partIds.Contains(a.AttackerParticipationId))
-            .GroupBy(a => a.AttackerParticipationId)
-            .Select(g => new
-            {
-                PartId = g.Key,
-                Points = g.Sum(a => a.Points),
-                Count = g.Count()
-            })
-            .ToDictionaryAsync(g => g.PartId, token);
+        // The per-service columns: enabled A&D challenges in a stable order.
+        var challenges = await db.GameChallenges
+            .Where(c => c.GameId == id && c.Type == ChallengeType.AttackDefense && c.IsEnabled)
+            .OrderBy(c => c.Id)
+            .Select(c => new AdScoreboardChallenge { ChallengeId = c.Id, Title = c.Title })
+            .ToListAsync(token);
+        var challengeIds = challenges.Select(c => c.ChallengeId).ToList();
 
-        // Defense loss per victim: each distinct (AdFlagId) the victim was
-        // tagged for counts once (DB pre-aggregates).
-        var defenseAgg = await db.AdAttacks
-            .Where(a => partIds.Contains(a.VictimParticipationId))
-            .GroupBy(a => a.VictimParticipationId)
-            .Select(g => new { PartId = g.Key, Count = g.Count() })
-            .ToDictionaryAsync(g => g.PartId, token);
+        // Scoring is PER (team, service) — the FAUST/EnoEngine model. The team
+        // total is the sum of service nets. Defense in particular MUST be
+        // per-service: Σ caps_s^0.75 ≠ (Σ caps_s)^0.75, and being broken on
+        // two services should hurt more than the combined sub-linear curve.
 
-        // SLA: per-tick credit SUM per team (Ok=1.0, Recovering=0.5, else 0 —
-        // precomputed on each AdCheckResult). A sum, not a ratio, so a broken
-        // tick just earns 0 instead of dragging a percentage down. See AdScoring.
-        var slaCredit = await db.AdCheckResults
-            .Where(c => db.AdTeamServices
-                .Where(ts => ts.Id == c.AdTeamServiceId)
-                .Any(ts => partIds.Contains(ts.ParticipationId)))
+        // Attack points + flags captured, per (attacker, challenge).
+        var attackByCell = await db.AdAttacks
+            .Where(a => partIds.Contains(a.AttackerParticipationId) && challengeIds.Contains(a.ChallengeId))
+            .GroupBy(a => new { a.AttackerParticipationId, a.ChallengeId })
+            .Select(g => new { g.Key.AttackerParticipationId, g.Key.ChallengeId, Points = g.Sum(a => a.Points), Count = g.Count() })
+            .ToListAsync(token);
+        var attackLookup = attackByCell.ToDictionary(x => (x.AttackerParticipationId, x.ChallengeId), x => (x.Points, x.Count));
+
+        // Times captured, per (victim, challenge).
+        var defenseByCell = await db.AdAttacks
+            .Where(a => partIds.Contains(a.VictimParticipationId) && challengeIds.Contains(a.ChallengeId))
+            .GroupBy(a => new { a.VictimParticipationId, a.ChallengeId })
+            .Select(g => new { g.Key.VictimParticipationId, g.Key.ChallengeId, Count = g.Count() })
+            .ToListAsync(token);
+        var defenseLookup = defenseByCell.ToDictionary(x => (x.VictimParticipationId, x.ChallengeId), x => x.Count);
+
+        // SLA credit SUM per (team, challenge) — precomputed per tick (see AdScoring).
+        var slaByCell = await db.AdCheckResults
             .Join(db.AdTeamServices,
                 c => c.AdTeamServiceId, ts => ts.Id,
-                (c, ts) => new { ts.ParticipationId, c.SlaCredit })
-            .GroupBy(x => x.ParticipationId)
-            .Select(g => new { PartId = g.Key, Credit = g.Sum(x => x.SlaCredit) })
-            .ToDictionaryAsync(g => g.PartId, g => g.Credit, token);
+                (c, ts) => new { ts.ParticipationId, ts.ChallengeId, c.SlaCredit })
+            .Where(x => partIds.Contains(x.ParticipationId) && challengeIds.Contains(x.ChallengeId))
+            .GroupBy(x => new { x.ParticipationId, x.ChallengeId })
+            .Select(g => new { g.Key.ParticipationId, g.Key.ChallengeId, Credit = g.Sum(x => x.SlaCredit) })
+            .ToListAsync(token);
+        var slaLookup = slaByCell.ToDictionary(x => (x.ParticipationId, x.ChallengeId), x => x.Credit);
+
+        // Latest check status per (team, challenge), for the status dot on each cell.
+        var statusRows = await db.AdTeamServices
+            .Where(ts => partIds.Contains(ts.ParticipationId) && challengeIds.Contains(ts.ChallengeId))
+            .Select(ts => new
+            {
+                ts.ParticipationId,
+                ts.ChallengeId,
+                Last = db.AdCheckResults
+                    .Where(c => c.AdTeamServiceId == ts.Id)
+                    .OrderByDescending(c => c.CheckedAt)
+                    .Select(c => (AdCheckStatus?)c.Status)
+                    .FirstOrDefault()
+            })
+            .ToListAsync(token);
+        var statusLookup = statusRows.ToDictionary(x => (x.ParticipationId, x.ChallengeId), x => x.Last);
 
         var activeTeams = teams.Count;
 
         var rows = teams.Select(p =>
         {
-            var atk = attackAgg.GetValueOrDefault(p.Id);
-            var def = defenseAgg.GetValueOrDefault(p.Id);
+            var services = new List<AdServiceScore>(challenges.Count);
+            double tAttack = 0, tDefense = 0, tSla = 0;
+            int tFlags = 0, tCaptured = 0;
 
-            var attackPoints = atk?.Points ?? 0;
-            var timesCaptured = def?.Count ?? 0;
-            var defenseLoss = AdScoring.DefenseLoss(timesCaptured);
-            var slaPoints = AdScoring.SlaPoints(slaCredit.GetValueOrDefault(p.Id), activeTeams);
+            foreach (var ch in challenges)
+            {
+                var key = (p.Id, ch.ChallengeId);
+                var (atkPts, atkCnt) = attackLookup.GetValueOrDefault(key, (0d, 0));
+                var caps = defenseLookup.GetValueOrDefault(key, 0);
+                var defLoss = AdScoring.DefenseLoss(caps);
+                var sla = AdScoring.SlaPoints(slaLookup.GetValueOrDefault(key, 0), activeTeams);
+                var net = atkPts + sla - defLoss;
+
+                tAttack += atkPts; tDefense += defLoss; tSla += sla;
+                tFlags += atkCnt; tCaptured += caps;
+
+                services.Add(new AdServiceScore
+                {
+                    ChallengeId = ch.ChallengeId,
+                    AttackPoints = atkPts,
+                    DefenseLoss = defLoss,
+                    SlaPoints = sla,
+                    Net = net,
+                    FlagsCaptured = atkCnt,
+                    TimesCaptured = caps,
+                    LastCheckStatus = statusLookup.GetValueOrDefault(key)?.ToString()
+                });
+            }
 
             return new AdTeamScoreRow
             {
@@ -682,12 +725,13 @@ public class AdGameController(
                 TeamId = p.TeamId,
                 TeamName = p.Team.Name,
                 Division = p.Division?.Name,
-                AttackPoints = attackPoints,
-                DefenseLoss = defenseLoss,
-                SlaPoints = slaPoints,
-                Total = attackPoints - defenseLoss + slaPoints,
-                TimesCaptured = timesCaptured,
-                FlagsCaptured = atk?.Count ?? 0
+                AttackPoints = tAttack,
+                DefenseLoss = tDefense,
+                SlaPoints = tSla,
+                Total = tAttack + tSla - tDefense,
+                TimesCaptured = tCaptured,
+                FlagsCaptured = tFlags,
+                Services = services
             };
         })
         .OrderByDescending(r => r.Total)
@@ -699,6 +743,7 @@ public class AdGameController(
         return Ok(new AdScoreboardModel
         {
             LatestRound = latestRound,
+            Challenges = challenges,
             Teams = rows
         });
     }
@@ -742,25 +787,35 @@ public class AdGameController(
 
         var partIds = teams.Select(p => p.Id).ToHashSet();
 
-        // Pre-aggregate attacks by (attacker, round) and (victim, round) once.
+        // Pre-aggregate attacks once. Attack is linear → by (attacker, round).
+        // Defense is per-service (Σ caps_s^0.75) → by (victim, challenge, round)
+        // so the timeline's defense matches the scoreboard's per-service total.
         var attacks = await db.AdAttacks
-            .Where(a => partIds.Contains(a.AttackerParticipationId))
+            .Where(a => partIds.Contains(a.AttackerParticipationId)
+                     || partIds.Contains(a.VictimParticipationId))
             .Select(a => new
             {
                 a.AttackerParticipationId,
                 a.VictimParticipationId,
+                a.ChallengeId,
                 a.SubmittedAtRound,
                 a.Points
             })
             .ToListAsync(token);
 
         var attackByTeamRound = attacks
+            .Where(a => partIds.Contains(a.AttackerParticipationId))
             .GroupBy(a => (a.AttackerParticipationId, a.SubmittedAtRound))
             .ToDictionary(g => g.Key, g => g.Sum(a => a.Points));
 
-        var capturesByTeamRound = attacks
-            .GroupBy(a => (a.VictimParticipationId, a.SubmittedAtRound))
-            .ToDictionary(g => g.Key, g => g.Count());
+        // (victim, round) → list of (challengeId, captureCount) for that round.
+        var capturesByVictimRound = attacks
+            .Where(a => partIds.Contains(a.VictimParticipationId))
+            .GroupBy(a => (a.VictimParticipationId, a.SubmittedAtRound, a.ChallengeId))
+            .GroupBy(g => (g.Key.VictimParticipationId, g.Key.SubmittedAtRound))
+            .ToDictionary(
+                outer => outer.Key,
+                outer => outer.Select(g => (g.Key.ChallengeId, Count: g.Count())).ToList());
 
         // Map each AdCheckResult to (participationId, credit, time) once.
         var checks = await db.AdCheckResults
@@ -791,8 +846,11 @@ public class AdGameController(
             };
 
             double cumAttack = 0;
-            int cumTimesCaptured = 0;
             double cumSlaCredit = 0;
+            // Cumulative captures PER service — defense is Σ caps_s^0.75, so we
+            // can't collapse to a single running total (that would understate
+            // the penalty vs the per-service scoreboard).
+            var cumCapsByChallenge = new Dictionary<int, int>();
 
             // Walk team's checks in order; advance pointer per round.
             var teamChecks = checksByTeam.GetValueOrDefault(team.Id) ?? [];
@@ -801,7 +859,12 @@ public class AdGameController(
             foreach (var round in rounds)
             {
                 cumAttack += attackByTeamRound.GetValueOrDefault((team.Id, round.Number), 0);
-                cumTimesCaptured += capturesByTeamRound.GetValueOrDefault((team.Id, round.Number), 0);
+
+                foreach (var (challengeId, count) in
+                         capturesByVictimRound.GetValueOrDefault((team.Id, round.Number), []))
+                {
+                    cumCapsByChallenge[challengeId] = cumCapsByChallenge.GetValueOrDefault(challengeId) + count;
+                }
 
                 while (checkIdx < teamChecks.Count && teamChecks[checkIdx].CheckedAt < round.EndsAt)
                 {
@@ -809,7 +872,7 @@ public class AdGameController(
                     checkIdx++;
                 }
 
-                var defenseLoss = AdScoring.DefenseLoss(cumTimesCaptured);
+                var defenseLoss = cumCapsByChallenge.Values.Sum(AdScoring.DefenseLoss);
                 var slaPoints = AdScoring.SlaPoints(cumSlaCredit, activeTeams);
                 var total = cumAttack - defenseLoss + slaPoints;
 

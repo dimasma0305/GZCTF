@@ -41,6 +41,20 @@ const Lefts = Widths.reduce(
 
 const ITEM_COUNT_PER_PAGE = 30
 
+// Per-service status dot color, matching the challenge-panel badge palette.
+const statusColor = (s?: string | null) => {
+  switch (s) {
+    case 'Ok':
+      return 'teal'
+    case 'Mumble':
+      return 'yellow'
+    case 'Offline':
+      return 'red'
+    default:
+      return 'gray' // InternalError / never-checked
+  }
+}
+
 interface AdScoreboardTableProps {
   numId: number
 }
@@ -206,6 +220,15 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                       {header}
                     </Table.Th>
                   ))}
+                  {/* One column per service — mirrors the jeopardy board's
+                      per-challenge columns. Cell = net points + status dot. */}
+                  {(adScoreboard.challenges ?? []).map((ch) => (
+                    <Table.Th key={ch.challengeId} className={classes.mono} style={{ minWidth: 92 }}>
+                      <Box maw={96}>
+                        <ScrollingText size="xs" text={ch.title} />
+                      </Box>
+                    </Table.Th>
+                  ))}
                   <Table.Th className={classes.mono}>
                     {t('game.content.scoreboard.ad.column.attack', 'Attack')}
                   </Table.Th>
@@ -300,6 +323,41 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                       >
                         {row.total.toFixed(1)}
                       </Table.Td>
+
+                      {/* Per-service cells — net points + a status dot, in the
+                          same column order as the headers. */}
+                      {(adScoreboard.challenges ?? []).map((ch) => {
+                        const svc = row.services?.find((s) => s.challengeId === ch.challengeId)
+                        const net = svc?.net ?? 0
+                        return (
+                          <Table.Td key={ch.challengeId} className={classes.mono}>
+                            <Tooltip
+                              label={
+                                svc
+                                  ? `+${svc.attackPoints.toFixed(1)} atk · ${svc.slaPoints.toFixed(1)} sla · −${svc.defenseLoss.toFixed(1)} def · ${svc.lastCheckStatus ?? 'no check'}`
+                                  : t('game.content.scoreboard.ad.no_service_cell', 'no service')
+                              }
+                              transitionProps={{ transition: 'pop' }}
+                              withinPortal
+                            >
+                              <Group gap={5} wrap="nowrap" justify="flex-start">
+                                <Box
+                                  w={8}
+                                  h={8}
+                                  style={{
+                                    borderRadius: '50%',
+                                    backgroundColor: `var(--mantine-color-${statusColor(svc?.lastCheckStatus)}-6)`,
+                                    flexShrink: 0,
+                                  }}
+                                />
+                                <Text size="sm" className={misc.ffmono} fw={600}>
+                                  {net.toFixed(1)}
+                                </Text>
+                              </Group>
+                            </Tooltip>
+                          </Table.Td>
+                        )
+                      })}
 
                       {/* Attack points — teal */}
                       <Table.Td className={classes.mono}>

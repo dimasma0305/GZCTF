@@ -1892,6 +1892,18 @@ export interface AdStateModel {
   services: AdTeamServiceStateModel[];
 }
 
+/** A&D — one team's score on one service (scoreboard cell). */
+export interface AdServiceScore {
+  challengeId: number;
+  net: number;
+  attackPoints: number;
+  defenseLoss: number;
+  slaPoints: number;
+  flagsCaptured: number;
+  timesCaptured: number;
+  lastCheckStatus?: string | null;
+}
+
 /** A&D — one row in the A&D scoreboard. */
 export interface AdTeamScoreRow {
   rank: number;
@@ -1905,12 +1917,21 @@ export interface AdTeamScoreRow {
   slaPoints: number;
   timesCaptured: number;
   flagsCaptured: number;
+  /** Per-service breakdown, in AdScoreboardModel.challenges order. */
+  services: AdServiceScore[];
+}
+
+/** A&D — one service column on the scoreboard. */
+export interface AdScoreboardChallenge {
+  challengeId: number;
+  title: string;
 }
 
 /** A&D — GET /api/Game/{id}/Ad/Scoreboard response. */
 export interface AdScoreboardModel {
   latestRound: number;
   generatedAt: string;
+  challenges: AdScoreboardChallenge[];
   teams: AdTeamScoreRow[];
 }
 
