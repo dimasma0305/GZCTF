@@ -798,7 +798,7 @@ const GameChallengeEdit: FC = () => {
               <Grid.Col span={6} display="flex" className={misc.alignCenter}>
                 <Switch
                   disabled={disabled}
-                  checked={challengeInfo.adAllowEgress ?? false}
+                  checked={challengeInfo.adAllowEgress ?? true}
                   label={SwitchLabel(
                     t('admin.content.games.challenges.ad.allow_egress.label'),
                     t('admin.content.games.challenges.ad.allow_egress.description')

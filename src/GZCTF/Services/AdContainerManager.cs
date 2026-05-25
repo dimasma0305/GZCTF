@@ -298,9 +298,9 @@ public sealed class AdContainerManager(
         if (participation is null)
             return;
 
-        // Egress: when AdAllowEgress is false (default), restrict via NetworkMode.
-        // Phase 3 will add the proper firewall layer; for MVP we lean on the
-        // existing Open/Isolated knob.
+        // Egress: AdAllowEgress defaults true (open). When set false, restrict
+        // via NetworkMode. Phase 3 will add the proper firewall layer; for MVP
+        // we lean on the existing Open/Isolated knob.
         var networkMode = challenge.AdAllowEgress ? NetworkMode.Open : NetworkMode.Isolated;
 
         // Initial flag for GZCTF_FLAG env var — read whatever the latest

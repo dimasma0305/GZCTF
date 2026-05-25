@@ -142,11 +142,11 @@ public class GameChallenge : Challenge
     public string? AdCheckerImage { get; set; }
 
     /// <summary>
-    /// If true, team containers can reach the public internet. Default false
-    /// (sandboxed). Opt-in per challenge for services that genuinely need an
-    /// external API call.
+    /// If true, team containers can reach the public internet. Default true
+    /// (open) — most A&D services expect outbound access. Set false per
+    /// challenge to sandbox a service that should have no egress.
     /// </summary>
-    public bool AdAllowEgress { get; set; }
+    public bool AdAllowEgress { get; set; } = true;
 
     /// <summary>
     /// If true, teams can self-reset their own container to the baseline image

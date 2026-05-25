@@ -162,9 +162,10 @@ ad:
   # Checker image (enochecker3 exit-code contract: 0 Ok / 1 Mumble /
   # 2 Offline / 3 InternalError). Omit to fall back to a TCP-reachability
   # probe. A local ./checker path is NOT auto-built yet — push the checker
-  # to a registry and reference it here, or leave empty for the TCP probe.
-  checkerImage: ""
-  allowEgress: false
+  # to a registry and uncomment the ref below.
+  # checkerImage: "ghcr.io/your-org/attack-defense-checker:latest"
+  # Reach the public internet? Default true (open). Set false to sandbox.
+  allowEgress: true
   allowSelfReset: true
 `
 
