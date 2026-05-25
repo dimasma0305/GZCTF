@@ -73,7 +73,10 @@
         },
         "tip": "Total = Attack + SLA − Defense loss, summed per service. Updated after every check + every accepted attack.",
         "no_teams": "No teams ranked yet.",
-        "no_service_cell": "no service"
+        "no_service_cell": "no service",
+        "cell": {
+          "no_check": "no check"
+        }
       }
     },
     "ad": {

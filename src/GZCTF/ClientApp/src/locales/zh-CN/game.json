@@ -73,7 +73,10 @@
         },
         "tip": "总分 = 各服务（进攻 + SLA − 防守损失）之和。每次检测或攻击成功后更新。",
         "no_teams": "暂无排名",
-        "no_service_cell": "无服务"
+        "no_service_cell": "无服务",
+        "cell": {
+          "no_check": "未检测"
+        }
       }
     },
     "ad": {

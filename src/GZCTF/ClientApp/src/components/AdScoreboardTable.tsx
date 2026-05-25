@@ -1,6 +1,7 @@
 import {
   alpha,
   Avatar,
+  Badge,
   Box,
   Button,
   Center,
@@ -223,8 +224,8 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                   {/* One column per service — mirrors the jeopardy board's
                       per-challenge columns. Cell = net points + status dot. */}
                   {(adScoreboard.challenges ?? []).map((ch) => (
-                    <Table.Th key={ch.challengeId} className={classes.mono} style={{ minWidth: 92 }}>
-                      <Box maw={96}>
+                    <Table.Th key={ch.challengeId} className={classes.mono} style={{ minWidth: 150 }}>
+                      <Box maw={150}>
                         <ScrollingText size="xs" text={ch.title} />
                       </Box>
                     </Table.Th>
@@ -324,37 +325,67 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                         {row.total.toFixed(1)}
                       </Table.Td>
 
-                      {/* Per-service cells — net points + a status dot, in the
-                          same column order as the headers. */}
+                      {/* Per-service cells — container status badge + the three
+                          score components (attack / SLA / defense) with icons,
+                          in the same column order as the headers. */}
                       {(adScoreboard.challenges ?? []).map((ch) => {
                         const svc = row.services?.find((s) => s.challengeId === ch.challengeId)
-                        const net = svc?.net ?? 0
+                        if (!svc) {
+                          return (
+                            <Table.Td key={ch.challengeId} className={classes.mono}>
+                              <Text size="xs" c="dimmed">
+                                {t('game.content.scoreboard.ad.no_service_cell', 'no service')}
+                              </Text>
+                            </Table.Td>
+                          )
+                        }
                         return (
                           <Table.Td key={ch.challengeId} className={classes.mono}>
-                            <Tooltip
-                              label={
-                                svc
-                                  ? `+${svc.attackPoints.toFixed(1)} atk · ${svc.slaPoints.toFixed(1)} sla · −${svc.defenseLoss.toFixed(1)} def · ${svc.lastCheckStatus ?? 'no check'}`
-                                  : t('game.content.scoreboard.ad.no_service_cell', 'no service')
-                              }
-                              transitionProps={{ transition: 'pop' }}
-                              withinPortal
-                            >
-                              <Group gap={5} wrap="nowrap" justify="flex-start">
-                                <Box
-                                  w={8}
-                                  h={8}
-                                  style={{
-                                    borderRadius: '50%',
-                                    backgroundColor: `var(--mantine-color-${statusColor(svc?.lastCheckStatus)}-6)`,
-                                    flexShrink: 0,
-                                  }}
-                                />
-                                <Text size="sm" className={misc.ffmono} fw={600}>
-                                  {net.toFixed(1)}
-                                </Text>
+                            <Stack gap={3} align="flex-start">
+                              <Badge
+                                size="xs"
+                                variant="light"
+                                color={statusColor(svc.lastCheckStatus)}
+                              >
+                                {svc.lastCheckStatus ??
+                                  t('game.content.scoreboard.ad.cell.no_check', 'no check')}
+                              </Badge>
+                              <Group gap={8} wrap="nowrap">
+                                <Tooltip label={t('game.content.scoreboard.ad.legend.attack', 'Attack')} withinPortal>
+                                  <Group gap={2} wrap="nowrap">
+                                    <Icon path={mdiSwordCross} size={0.55} color={theme.colors.teal[6]} />
+                                    <Text size="xs" c="teal" className={misc.ffmono} fw={700}>
+                                      {svc.attackPoints.toFixed(1)}
+                                    </Text>
+                                  </Group>
+                                </Tooltip>
+                                <Tooltip label={t('game.content.scoreboard.ad.legend.sla', 'SLA')} withinPortal>
+                                  <Group gap={2} wrap="nowrap">
+                                    <Icon path={mdiTimerSandComplete} size={0.55} color={theme.colors.blue[6]} />
+                                    <Text size="xs" c="blue" className={misc.ffmono} fw={700}>
+                                      {svc.slaPoints.toFixed(1)}
+                                    </Text>
+                                  </Group>
+                                </Tooltip>
+                                <Tooltip label={t('game.content.scoreboard.ad.legend.defense', 'Defense loss')} withinPortal>
+                                  <Group gap={2} wrap="nowrap">
+                                    <Icon
+                                      path={mdiShieldHalfFull}
+                                      size={0.55}
+                                      color={svc.defenseLoss > 0 ? theme.colors.red[6] : 'var(--mantine-color-dimmed)'}
+                                    />
+                                    <Text
+                                      size="xs"
+                                      c={svc.defenseLoss > 0 ? 'red' : 'dimmed'}
+                                      className={misc.ffmono}
+                                      fw={700}
+                                    >
+                                      {svc.defenseLoss > 0 ? `−${svc.defenseLoss.toFixed(1)}` : '0.0'}
+                                    </Text>
+                                  </Group>
+                                </Tooltip>
                               </Group>
-                            </Tooltip>
+                            </Stack>
                           </Table.Td>
                         )
                       })}
