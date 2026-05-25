@@ -279,6 +279,11 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                       </Table.Th>
                     )
                   })}
+                  {/* Flexible spacer — soaks up the surplus when the table is
+                      forced to min-width:100% with few challenges, so the
+                      fixed-width pinned + metric columns don't stretch. Spans
+                      all three header rows. */}
+                  <Table.Th rowSpan={3} aria-hidden />
                 </Table.Tr>
                 {/* Tier 2 — challenge name, spanning its 4 metric sub-columns. */}
                 <Table.Tr>
@@ -468,6 +473,8 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                           </Table.Td>,
                         ]
                       })}
+                      {/* matches the flexible spacer column in the header */}
+                      <Table.Td aria-hidden />
                     </Table.Tr>
                   )
                 })}
