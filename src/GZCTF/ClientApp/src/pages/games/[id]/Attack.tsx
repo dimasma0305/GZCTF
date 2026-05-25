@@ -610,8 +610,13 @@ const Attack: FC = () => {
 
       if (evt.type === SubmissionType.FirstBlood) {
         lastFbEvtRef.current = evt
-        spawnFirstBlood(src.x, src.y, hqCenter.x, hqCenter.y, color, {
-          hexElement: hexRef.current,
+        // Strike the resolved target: the victim node for an A&D first blood,
+        // or the center HQ for jeopardy. The hex punch only makes sense when
+        // the laser actually hits the HQ hex, so skip it when hitting a node
+        // (the shatter cracks already land at the impact point).
+        const hitsHq = target === hqCenter
+        spawnFirstBlood(src.x, src.y, target.x, target.y, color, {
+          hexElement: hitsHq ? hexRef.current : null,
           onImpact: () => {
             if (audioEnabled && audioRef.current) {
               audioRef.current.currentTime = 0

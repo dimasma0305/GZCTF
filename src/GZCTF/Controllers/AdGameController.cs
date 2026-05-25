@@ -252,13 +252,22 @@ public class AdGameController(
                 .Select(c => new { c.Title, c.Category })
                 .FirstOrDefaultAsync(token);
 
+            // First blood = the first time this (victim, challenge) is breached
+            // all game — fires the dramatic laser at the victim's node, once per
+            // defending team. The attack row is already saved, so a count of 1
+            // means this capture is that first breach. Everything after is a
+            // plain Normal burst (no per-tick laser spam).
+            var breaches = await db.AdAttacks
+                .CountAsync(a => a.VictimParticipationId == victimPartId && a.ChallengeId == challengeId, token);
+            var type = breaches <= 1 ? SubmissionType.FirstBlood : SubmissionType.Normal;
+
             var evt = new AttackEvent(
                 attacker?.Name ?? string.Empty,
                 attacker?.AvatarHash is null ? null : $"/assets/{attacker.AvatarHash}/avatar",
                 null,
                 chal?.Title ?? string.Empty,
                 chal?.Category ?? ChallengeCategory.Misc,
-                SubmissionType.Normal,
+                type,
                 DateTimeOffset.UtcNow,
                 victim?.Name);
 
