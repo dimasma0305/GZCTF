@@ -283,6 +283,12 @@ export function unlockAudio(): void {
     comp.connect(limiter)
     limiter.connect(audioCtx.destination)
     masterOut = master
+    // A freshly created context can start 'suspended' (esp. after a prior
+    // context was closed on SPA navigation). Resume it now — we're inside the
+    // unlock gesture, so this is allowed — otherwise every procedural SFX
+    // (laser charge/beam, pew, shatter, impact) is silent while the separate
+    // first-blood <audio> element still plays.
+    void audioCtx.resume().catch(() => undefined)
   } catch {
     // Audio unavailable — silently continue
   }
@@ -303,6 +309,7 @@ function pewKindFor(type: SubmissionType): PewKind {
 
 export function playPew(type: SubmissionType): void {
   if (!audioCtx) return
+  if (audioCtx.state === 'suspended') void audioCtx.resume().catch(() => undefined)
   const now = performance.now()
   if (now - lastPewAt < 40) return
   lastPewAt = now
@@ -338,6 +345,7 @@ export function playPew(type: SubmissionType): void {
 
 function playLaser(chargeSec: number): void {
   if (!audioCtx) return
+  if (audioCtx.state === 'suspended') void audioCtx.resume().catch(() => undefined)
   const out = audioOut()
   if (!out) return
   const t0 = audioCtx.currentTime
@@ -521,6 +529,7 @@ function playLaser(chargeSec: number): void {
 
 function playShatter(): void {
   if (!audioCtx) return
+  if (audioCtx.state === 'suspended') void audioCtx.resume().catch(() => undefined)
   const out = audioOut()
   if (!out) return
   const t0 = audioCtx.currentTime
@@ -640,6 +649,7 @@ function playShatter(): void {
 
 function playBigImpact(): void {
   if (!audioCtx) return
+  if (audioCtx.state === 'suspended') void audioCtx.resume().catch(() => undefined)
   const out = audioOut()
   if (!out) return
   const t0 = audioCtx.currentTime
@@ -762,6 +772,7 @@ function playBigImpact(): void {
 
 function playAftershock(vol: number): void {
   if (!audioCtx) return
+  if (audioCtx.state === 'suspended') void audioCtx.resume().catch(() => undefined)
   const out = audioOut()
   if (!out) return
   const t0 = audioCtx.currentTime
