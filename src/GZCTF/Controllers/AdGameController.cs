@@ -504,10 +504,14 @@ public class AdGameController(
         var lastChecksByService = lastChecks.ToDictionary(c => c.AdTeamServiceId);
 
         // Reset cooldown is game-wide policy — fetch once, apply to every service.
-        var cooldownMinutes = await db.Games
+        // Also need the end time: the post-game snapshot must NOT be exposed to
+        // players before the game ends (it's their box's committed state).
+        var gameInfo = await db.Games
             .Where(g => g.Id == id)
-            .Select(g => g.AdResetCooldownMinutes)
-            .FirstOrDefaultAsync(token) ?? 5;
+            .Select(g => new { g.EndTimeUtc, g.AdResetCooldownMinutes })
+            .FirstOrDefaultAsync(token);
+        var cooldownMinutes = gameInfo?.AdResetCooldownMinutes ?? 5;
+        var gameEnded = gameInfo is not null && DateTimeOffset.UtcNow >= gameInfo.EndTimeUtc;
 
         var serviceModels = services.Select(s =>
         {
@@ -527,7 +531,8 @@ public class AdGameController(
                 LastResetAt = s.LastResetAt,
                 CanReset = s.Challenge.AdAllowSelfReset && cooldownRemaining == 0,
                 ResetCooldownSecondsRemaining = cooldownRemaining > 0 ? cooldownRemaining : null,
-                SnapshotAvailable = !string.IsNullOrEmpty(s.SnapshotBlobKey)
+                // Post-game only: never surface the snapshot while the game runs.
+                SnapshotAvailable = gameEnded && !string.IsNullOrEmpty(s.SnapshotBlobKey)
             };
         }).ToList();
 
@@ -1139,6 +1144,14 @@ PersistentKeepalive = 25
         var isMember = await db.Participations
             .AnyAsync(p => p.Id == ts.ParticipationId && p.Members.Any(m => m.UserId == user.Id), token);
         if (!isMember) return Forbid();
+
+        // Post-game only: a snapshot key may linger from a prior game-end while
+        // the game is running again (extended/restarted) — players must not pull
+        // their container image mid-game.
+        var endTime = await db.Games.Where(g => g.Id == id)
+            .Select(g => g.EndTimeUtc).FirstOrDefaultAsync(token);
+        if (DateTimeOffset.UtcNow < endTime)
+            return NotFound(new RequestResponse("Snapshot is only available after the game ends"));
 
         if (string.IsNullOrEmpty(ts.SnapshotBlobKey))
             return NotFound(new RequestResponse("Snapshot not available (game still running, snapshot disabled, or snapshot failed)"));
