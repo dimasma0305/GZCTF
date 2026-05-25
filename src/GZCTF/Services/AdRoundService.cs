@@ -139,6 +139,17 @@ public sealed class AdRoundService(
     /// safe base64 + the literal <c>flag{}</c> wrapper (see
     /// <c>AdvanceAsync</c>'s generator), so wrapping in single quotes is
     /// shell-safe — no escape needed.
+    ///
+    /// <para>Runs as <c>root</c> (<c>User = "0"</c>) regardless of the image's
+    /// USER, and leaves the file root-owned <c>644</c>. This is what secures
+    /// the flag against deletion/tampering: the platform can always re-plant
+    /// it every tick (a team can't block this host-initiated exec), and a
+    /// service that runs as a non-root user can <em>read</em> the flag (the
+    /// intended exploit target) but cannot delete it — removing <c>/flag</c>
+    /// needs write on <c>/</c>, which stays root-only — nor overwrite the
+    /// root-owned file. (If the service itself runs as root, a full RCE can
+    /// still wipe it for one tick; the next tick re-plants and the checker's
+    /// getflag scores the gap as SLA loss.)</para>
     /// </summary>
     private static async Task WriteFlagFileAsync(
         DockerClient docker, string containerId, string flag, CancellationToken token)
@@ -148,6 +159,7 @@ public sealed class AdRoundService(
             {
                 AttachStdout = false,
                 AttachStderr = false,
+                User = "0", // root — so the plant works even for non-root service images
                 Cmd = new[]
                 {
                     "sh", "-c",
