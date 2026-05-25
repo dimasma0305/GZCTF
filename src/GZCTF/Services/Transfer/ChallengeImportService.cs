@@ -202,6 +202,13 @@ public sealed class ChallengeImportService(
         if (model is null || string.IsNullOrWhiteSpace(model.Name))
             return new(OutcomeKind.Skipped, "challenge.yaml missing 'name'");
 
+        // `ignore: true` opts a challenge out of sync entirely — never
+        // created or updated. Lets an operator delete a repo-sourced
+        // challenge in the UI without it resurrecting on the next sync.
+        // Takes precedence over everything else (even an invalid type).
+        if (model.Ignore == true)
+            return new(OutcomeKind.Skipped, $"'{model.Name}' has ignore: true — not synced");
+
         if (!Enum.TryParse<ChallengeType>(model.Type ?? "", true, out var type))
             return new(OutcomeKind.Skipped, $"Unknown challenge type '{model.Type}'");
 

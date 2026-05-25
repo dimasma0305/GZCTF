@@ -49,6 +49,16 @@ public sealed class ChallengeYamlModel
     [YamlMember(Alias = "difficulty")]
     public double? Difficulty { get; set; }
 
+    /// <summary>
+    /// When true, the importer skips this challenge entirely — it is never
+    /// created or updated from the repo. Lets an operator delete a
+    /// repo-sourced challenge in the admin UI without it being re-imported
+    /// (resurrected) on the next sync. Does NOT delete an already-imported
+    /// copy; it just stops syncing, so deleting it once in the UI sticks.
+    /// </summary>
+    [YamlMember(Alias = "ignore")]
+    public bool? Ignore { get; set; }
+
     [YamlMember(Alias = "hints")]
     public List<string>? Hints { get; set; }
 
