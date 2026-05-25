@@ -782,6 +782,12 @@ const Attack: FC = () => {
     (type: SubmissionType) => {
       const teams = scoreboard?.items ?? []
       const team = teams[Math.floor(Math.random() * Math.max(teams.length, 1))]
+      // Pick a different team as the A&D victim so the preview fires team→team
+      // (the projectile/laser lands on the victim node, not the center HQ).
+      const others = teams.filter((t) => t.name !== team?.name)
+      const victim = others.length
+        ? others[Math.floor(Math.random() * others.length)]
+        : undefined
       const chall = CHALLS[Math.floor(Math.random() * CHALLS.length)]
       const evt: AttackEvent = {
         teamName: team?.name ?? 'MOCK-TEAM',
@@ -791,6 +797,7 @@ const Attack: FC = () => {
         category: chall[0],
         type,
         time: new Date().toISOString(),
+        victimTeamName: victim?.name ?? null,
       }
       handleAttack(evt)
     },
