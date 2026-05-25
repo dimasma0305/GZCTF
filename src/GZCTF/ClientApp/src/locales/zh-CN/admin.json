@@ -5,7 +5,8 @@
       "disable_challenge": "暂停此题目的计分与 Flag 轮换",
       "copy_flag": "复制当前 Flag",
       "restart": "重启容器（绕过选手冷却）",
-      "snapshot": "查看赛后快照"
+      "snapshot": "查看赛后快照",
+      "challenge_off": "已在「题目」页停用 — 不计分、不轮换 Flag"
     }
   },
   "button": {
@@ -162,6 +163,8 @@
       "live": "实时",
       "service_health": "服务健康度",
       "health_unchecked": "未检测",
+      "flag_cycle": "Flag 周期",
+      "challenge_off": "停用",
       "challenges_active": "题目",
       "teams_with_container_other": "{{count}} 个在线",
       "teams_count_other": "{{count}} 支队伍",

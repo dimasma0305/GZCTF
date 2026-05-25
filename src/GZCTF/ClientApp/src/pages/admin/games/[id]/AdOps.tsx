@@ -3,7 +3,6 @@ import {
   Alert,
   Badge,
   Button,
-  Card,
   Center,
   Code,
   CopyButton,
@@ -15,9 +14,7 @@ import {
   Paper,
   RingProgress,
   ScrollArea,
-  SimpleGrid,
   Stack,
-  Switch,
   Table,
   Text,
   TextInput,
@@ -292,15 +289,6 @@ const AdOps: FC = () => {
     }
   }
 
-  const toggleChallenge = async (challengeId: number) => {
-    try {
-      await api.edit.editAdToggleChallenge(numId, challengeId)
-      mutate()
-    } catch (e) {
-      showErrorMsg(e, t)
-    }
-  }
-
   const restartCell = async (cell: AdTeamCellModel) => {
     try {
       await api.edit.editAdForceRestart(numId, cell.adTeamServiceId)
@@ -445,6 +433,20 @@ const AdOps: FC = () => {
                 </Text>
               </Stack>
 
+              {/* Flag cycle — game-global tick + lifetime */}
+              <Stack gap={2}>
+                <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
+                  {t('admin.content.ad_ops.flag_cycle', 'Flag cycle')}
+                </Text>
+                <Text fw={600} size="sm" lh={1.3}>
+                  {t('admin.content.ad_ops.tick_summary', {
+                    tick: state.challenges[0].tickSeconds,
+                    lifetime: state.challenges[0].flagLifetimeTicks,
+                    defaultValue: 'tick {{tick}}s · lifetime {{lifetime}} ticks',
+                  })}
+                </Text>
+              </Stack>
+
               {/* Fleet-wide service health */}
               <Stack gap={4}>
                 <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
@@ -499,57 +501,6 @@ const AdOps: FC = () => {
           </Group>
         </Paper>
 
-        {/* Per-challenge enable/disable cards */}
-        <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
-          {state.challenges.map((c) => (
-            <Card
-              key={c.challengeId}
-              withBorder
-              p="sm"
-              style={{
-                borderLeft: `3px solid var(--mantine-color-${c.isEnabled ? 'teal' : 'gray'}-${c.isEnabled ? 6 : 4})`,
-                opacity: c.isEnabled ? 1 : 0.7,
-              }}
-            >
-              <Group justify="space-between" wrap="nowrap" align="flex-start">
-                <Stack gap={4} miw={0}>
-                  <Text truncate fw="bold">
-                    {c.title}
-                  </Text>
-                  <Group gap="xs">
-                    <Badge size="xs" variant="light" color={c.teamsWithLiveContainer ? 'blue' : 'gray'}>
-                      {t('admin.content.ad_ops.teams_with_container', {
-                        count: c.teamsWithLiveContainer ?? 0,
-                        defaultValue: '{{count}} live',
-                      })}
-                    </Badge>
-                    <Text size="xs" c="dimmed">
-                      {t('admin.content.ad_ops.tick_summary', {
-                        tick: c.tickSeconds,
-                        lifetime: c.flagLifetimeTicks,
-                        defaultValue: 'tick {{tick}}s · lifetime {{lifetime}} ticks',
-                      })}
-                    </Text>
-                  </Group>
-                </Stack>
-                <Tooltip
-                  label={
-                    c.isEnabled
-                      ? t('admin.tooltip.ad_ops.disable_challenge', 'Disable scoring + flag rotation')
-                      : t('admin.tooltip.ad_ops.enable_challenge', 'Re-enable scoring + flag rotation')
-                  }
-                >
-                  <Switch
-                    checked={c.isEnabled}
-                    onChange={() => toggleChallenge(c.challengeId)}
-                    disabled={busy}
-                  />
-                </Tooltip>
-              </Group>
-            </Card>
-          ))}
-        </SimpleGrid>
-
         {/* Team × challenge grid */}
         <Paper p="md" withBorder radius="md">
           <Group justify="space-between" mb="sm" wrap="wrap" gap="sm">
@@ -588,9 +539,44 @@ const AdOps: FC = () => {
                     </Table.Th>
                     {state.challenges.map((c) => (
                       <Table.Th key={c.challengeId}>
-                        <Text truncate fw="bold" size="sm">
-                          {c.title}
-                        </Text>
+                        <Group gap={6} wrap="nowrap" justify="space-between">
+                          <Text
+                            truncate
+                            fw="bold"
+                            size="sm"
+                            c={c.isEnabled ? undefined : 'dimmed'}
+                            style={{ flex: 1, minWidth: 0 }}
+                          >
+                            {c.title}
+                          </Text>
+                          {c.isEnabled ? (
+                            <Tooltip
+                              label={t('admin.content.ad_ops.teams_with_container', {
+                                count: c.teamsWithLiveContainer ?? 0,
+                                defaultValue: '{{count}} live',
+                              })}
+                              withArrow
+                            >
+                              <Badge
+                                size="xs"
+                                variant="light"
+                                color={c.teamsWithLiveContainer ? 'blue' : 'gray'}
+                              >
+                                {c.teamsWithLiveContainer ?? 0}
+                              </Badge>
+                            </Tooltip>
+                          ) : (
+                            <Tooltip
+                              label={t('admin.tooltip.ad_ops.challenge_off',
+                                'Disabled on the Challenges page — no scoring or flag rotation')}
+                              withArrow
+                            >
+                              <Badge size="xs" variant="light" color="gray">
+                                {t('admin.content.ad_ops.challenge_off', 'off')}
+                              </Badge>
+                            </Tooltip>
+                          )}
+                        </Group>
                       </Table.Th>
                     ))}
                   </Table.Tr>

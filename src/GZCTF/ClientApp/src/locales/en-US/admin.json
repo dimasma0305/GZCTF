@@ -153,6 +153,8 @@
       "live": "Live",
       "service_health": "Service health",
       "health_unchecked": "Unchecked",
+      "flag_cycle": "Flag cycle",
+      "challenge_off": "off",
       "challenges_active": "Challenges",
       "teams_with_container_one": "{{count}} live",
       "teams_with_container_other": "{{count}} live",
@@ -1053,7 +1055,8 @@
       "disable_challenge": "Disable scoring + flag rotation",
       "copy_flag": "Copy current flag",
       "restart": "Restart container (bypasses player cooldown)",
-      "snapshot": "Inspect post-game snapshot"
+      "snapshot": "Inspect post-game snapshot",
+      "challenge_off": "Disabled on the Challenges page — no scoring or flag rotation"
     }
   },
   "notification": {
