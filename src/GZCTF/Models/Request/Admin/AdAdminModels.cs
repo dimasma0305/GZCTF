@@ -44,6 +44,9 @@ public class AdTeamCellModel
     public int ChallengeId { get; set; }
     public string? ContainerIp { get; set; }
     public int? ContainerPort { get; set; }
+
+    /// <summary>Container GUID — target for the in-browser exec/shell terminal. Null if no live container.</summary>
+    public Guid? ContainerGuid { get; set; }
     public string? LastCheckStatus { get; set; }
 
     /// <summary>Id of the most recent check result for this service — the target of a judge override. Null if never checked.</summary>

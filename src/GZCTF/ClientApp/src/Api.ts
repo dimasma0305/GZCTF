@@ -2023,6 +2023,8 @@ export interface AdTeamCellModel {
   challengeId: number;
   containerIp?: string | null;
   containerPort?: number | null;
+  /** Container GUID — target for the in-browser exec/shell terminal. */
+  containerGuid?: string | null;
   lastCheckStatus?: string | null;
   /** Id of the most recent check result — target of a judge override. */
   lastCheckId?: number | null;

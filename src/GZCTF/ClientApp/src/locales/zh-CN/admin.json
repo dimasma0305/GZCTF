@@ -4,6 +4,7 @@
       "enable_challenge": "重新启用此题目的计分与 Flag 轮换",
       "disable_challenge": "暂停此题目的计分与 Flag 轮换",
       "copy_flag": "复制当前 Flag",
+      "shell": "在该容器中打开 Shell",
       "restart": "重启容器（绕过选手冷却）",
       "snapshot": "查看赛后快照",
       "challenge_off": "已在「题目」页停用 — 不计分、不轮换 Flag"

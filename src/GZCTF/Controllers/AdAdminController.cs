@@ -123,6 +123,7 @@ public class AdAdminController(
                 ChallengeId = s.ChallengeId,
                 ContainerIp = s.Container?.IP,
                 ContainerPort = s.Container?.Port,
+                ContainerGuid = s.ContainerId,
                 LastCheckStatus = lastChecksByService.GetValueOrDefault(s.Id)?.Status.ToString(),
                 LastCheckId = lastChecksByService.GetValueOrDefault(s.Id)?.Id,
                 CurrentFlag = currentFlags.GetValueOrDefault(s.Id),

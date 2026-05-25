@@ -32,6 +32,7 @@ import {
   mdiCheckCircle,
   mdiClose,
   mdiCloseCircle,
+  mdiConsole,
   mdiDownload,
   mdiFileTree,
   mdiHelpCircle,
@@ -47,6 +48,7 @@ import dayjs from 'dayjs'
 import { FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router'
+import { ContainerExecModal } from '@Components/admin/ContainerExecModal'
 import { WithGameEditTab } from '@Components/admin/WithGameEditTab'
 import { showErrorMsg } from '@Utils/Shared'
 import { useIsMobile } from '@Utils/ThemeOverride'
@@ -250,6 +252,7 @@ const AdOps: FC = () => {
   const { adminAdState: state, error, mutate } = useAdminAdState(numId)
   const [busy, setBusy] = useState(false)
   const [snapTarget, setSnapTarget] = useState<SnapTarget | null>(null)
+  const [execTarget, setExecTarget] = useState<{ guid: string; title: string } | null>(null)
   const [search, setSearch] = useState('')
   const [debouncedSearch] = useDebouncedValue(search, 200)
   const now = useTicker()
@@ -422,6 +425,12 @@ const AdOps: FC = () => {
   return (
     <WithGameEditTab>
       <SnapshotModal gameId={numId} target={snapTarget} onClose={() => setSnapTarget(null)} />
+      <ContainerExecModal
+        containerGuid={execTarget?.guid ?? null}
+        containerTitle={execTarget?.title}
+        opened={execTarget != null}
+        onClose={() => setExecTarget(null)}
+      />
       <Stack gap="md">
         {/* Mission-control bar: round timing, scoring state, fleet health, actions */}
         <Paper p="md" withBorder radius="md">
@@ -698,6 +707,27 @@ const AdOps: FC = () => {
                                     </Menu.Dropdown>
                                   </Menu>
                                   <Group gap={2} wrap="nowrap">
+                                    {cell.containerGuid && (
+                                      <Tooltip
+                                        label={t('admin.tooltip.ad_ops.shell',
+                                          'Open a shell in this container')}
+                                        withArrow
+                                      >
+                                        <ActionIcon
+                                          size="sm"
+                                          variant="subtle"
+                                          color="blue"
+                                          onClick={() =>
+                                            setExecTarget({
+                                              guid: cell.containerGuid!,
+                                              title: `${row.teamName} · ${c.title}`,
+                                            })
+                                          }
+                                        >
+                                          <Icon path={mdiConsole} size={0.7} />
+                                        </ActionIcon>
+                                      </Tooltip>
+                                    )}
                                     <Tooltip
                                       label={t('admin.tooltip.ad_ops.restart',
                                         'Restart container (bypasses player cooldown)')}
