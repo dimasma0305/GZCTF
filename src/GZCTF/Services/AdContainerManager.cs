@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO.Compression;
 using Docker.DotNet;
 using DockerModels = Docker.DotNet.Models;
@@ -43,6 +44,35 @@ public sealed class AdContainerManager(
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(15);
 
+    // Per-(participation, challenge) lock serializing all create/move/destroy
+    // for a single service, so the reconcile loop, the accept-time ensure, and
+    // self-reset/force-restart can't race into double-launches or orphans.
+    private static readonly ConcurrentDictionary<(int, int), SemaphoreSlim> _serviceLocks = new();
+
+    private static SemaphoreSlim LockFor(int participationId, int challengeId) =>
+        _serviceLocks.GetOrAdd((participationId, challengeId), _ => new SemaphoreSlim(1, 1));
+
+    /// <summary>
+    /// Authoritative single-container liveness check (fresh docker inspect).
+    /// Used under the per-service lock so we don't act on a stale tick-level
+    /// snapshot (a concurrent launch may have replaced the container since).
+    /// Returns true ("assume alive, don't relaunch") when liveness can't be
+    /// determined — no Docker provider (K8s) or an inspect error — so only a
+    /// definitive not-found / not-running triggers a relaunch.
+    /// </summary>
+    private static async Task<bool> IsContainerRunningAsync(
+        IContainerProvider<DockerClient, DockerMetadata>? provider, string containerId, CancellationToken token)
+    {
+        if (provider is null) return true;
+        try
+        {
+            var info = await provider.GetProvider().Containers.InspectContainerAsync(containerId, token);
+            return info.State?.Running == true;
+        }
+        catch (DockerContainerNotFoundException) { return false; }
+        catch { return true; }
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.SystemLog("AdContainerManager started; reconciling every 15s",
@@ -80,10 +110,11 @@ public sealed class AdContainerManager(
             .Select(g => g.Id)
             .ToListAsync(token);
 
-        var runningIds = await GetRunningContainerIdsAsync(scope.ServiceProvider, token);
+        var dockerProvider = scope.ServiceProvider.GetService<IContainerProvider<DockerClient, DockerMetadata>>();
+        var runningIds = await GetRunningContainerIdsAsync(dockerProvider, token);
 
         foreach (var gameId in activeGames)
-            await EnsureContainersForGameAsync(db, containerManager, gameId, runningIds, token);
+            await EnsureContainersForGameAsync(db, containerManager, dockerProvider, gameId, runningIds, token);
 
         // Ended games: snapshot (if allowed) → destroy.
         var endedGameTeamServices = await db.AdTeamServices
@@ -131,9 +162,8 @@ public sealed class AdContainerManager(
     /// relaunch storm.
     /// </summary>
     private async Task<HashSet<string>?> GetRunningContainerIdsAsync(
-        IServiceProvider scopeServices, CancellationToken token)
+        IContainerProvider<DockerClient, DockerMetadata>? dockerProvider, CancellationToken token)
     {
-        var dockerProvider = scopeServices.GetService<IContainerProvider<DockerClient, DockerMetadata>>();
         if (dockerProvider is null)
             return null;
 
@@ -248,13 +278,15 @@ public sealed class AdContainerManager(
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var containerManager = scope.ServiceProvider.GetRequiredService<IContainerManager>();
-        var runningIds = await GetRunningContainerIdsAsync(scope.ServiceProvider, token);
-        await EnsureContainersForGameAsync(db, containerManager, gameId, runningIds, token);
+        var dockerProvider = scope.ServiceProvider.GetService<IContainerProvider<DockerClient, DockerMetadata>>();
+        var runningIds = await GetRunningContainerIdsAsync(dockerProvider, token);
+        await EnsureContainersForGameAsync(db, containerManager, dockerProvider, gameId, runningIds, token);
     }
 
     private async Task EnsureContainersForGameAsync(
         AppDbContext db,
         IContainerManager containerManager,
+        IContainerProvider<DockerClient, DockerMetadata>? dockerProvider,
         int gameId,
         IReadOnlySet<string>? runningDockerIds,
         CancellationToken token)
@@ -284,21 +316,78 @@ public sealed class AdContainerManager(
 
         var keyed = existing.ToDictionary(ts => (ts.ParticipationId, ts.ChallengeId));
 
-        // For every (participation, challenge), ensure a live container.
+        // For every (participation, challenge): cheap, lock-free pre-check on the
+        // bulk-loaded state + tick-level running set. Only when something looks
+        // off do we take the per-service lock and re-verify authoritatively —
+        // so the common (healthy) case stays lock- and inspect-free.
         foreach (var participationId in participations)
         foreach (var challenge in adChallenges)
         {
             keyed.TryGetValue((participationId, challenge.Id), out var ts);
 
-            // Reconcile against REAL docker liveness, not just the stored Status.
-            // A container removed/exited out-of-band (crash, OOM, the dying-
-            // container cron, external rm, daemon blip) otherwise stays
-            // "Running" in the DB forever → never relaunched (team down), and
-            // its stale IP can be reused by another team's container → the
-            // checker hits the wrong box and reports Mumble.
-            var deadInDocker = runningDockerIds is not null
-                               && ts?.Container?.ContainerId is { Length: > 0 } cid
-                               && !runningDockerIds.Contains(cid);
+            var cid = ts?.Container?.ContainerId;
+            var maybeDead = runningDockerIds is not null && cid is { Length: > 0 }
+                            && !runningDockerIds.Contains(cid);
+            var maybeDrift = ts?.LaunchedWithEgress is { } le && le != challenge.AdAllowEgress;
+
+            var needsAction = ts is null
+                              || ts.ContainerId is null
+                              || ts.Container is null
+                              || ts.Container.Status == ContainerStatus.Destroyed
+                              || maybeDead
+                              || maybeDrift;
+
+            if (!needsAction)
+                continue;
+
+            await EnsureOneServiceAsync(db, containerManager, dockerProvider, participationId, challenge, token);
+        }
+    }
+
+    /// <summary>
+    /// Bring one (participation, challenge) service to the desired state under
+    /// its per-service lock. Re-reads fresh state inside the lock (a concurrent
+    /// reset / accept-ensure may have just acted) and uses an authoritative
+    /// docker inspect for liveness. Repairs:
+    /// <list type="bullet">
+    ///   <item><b>Missing / dead container</b> → relaunch (cleaning the dead record).</item>
+    ///   <item><b>Network drift</b> (egress toggled vs launch) on a live container
+    ///         → non-destructive live network move; recreate only if the move fails.</item>
+    /// </list>
+    /// </summary>
+    private async Task EnsureOneServiceAsync(
+        AppDbContext db,
+        IContainerManager containerManager,
+        IContainerProvider<DockerClient, DockerMetadata>? dockerProvider,
+        int participationId,
+        GameChallenge challenge,
+        CancellationToken token)
+    {
+        var sem = LockFor(participationId, challenge.Id);
+        await sem.WaitAsync(token);
+        try
+        {
+            var ts = await db.AdTeamServices
+                .Include(t => t.Container)
+                .FirstOrDefaultAsync(t => t.ParticipationId == participationId && t.ChallengeId == challenge.Id, token);
+
+            // Authoritative liveness via a fresh inspect (not the stale tick
+            // snapshot) — avoids relaunching a container another holder just
+            // created since the snapshot was taken.
+            var deadInDocker = ts?.Container?.ContainerId is { Length: > 0 } cid
+                               && !await IsContainerRunningAsync(dockerProvider, cid, token);
+
+            var networkDrift = ts?.LaunchedWithEgress is { } le && le != challenge.AdAllowEgress;
+
+            // Network drift on a LIVE container → move it between networks in
+            // place so the team keeps its patches. Recreate only if the move
+            // fails.
+            if (networkDrift && !deadInDocker && ts?.Container is not null && dockerProvider is not null)
+            {
+                if (await TryMoveContainerNetworkAsync(db, dockerProvider, ts, challenge, token))
+                    return;
+                deadInDocker = true; // move failed → fall through to recreate
+            }
 
             var needsLaunch = ts is null
                               || ts.ContainerId is null
@@ -307,22 +396,82 @@ public sealed class AdContainerManager(
                               || deadInDocker;
 
             if (!needsLaunch)
-                continue;
+                return;
 
             // Clean up the dead record before relaunching: mark it Destroyed so
             // its stale IP stops being treated as live, and best-effort remove
-            // any exited remnant so it can't linger / re-grab the IP.
+            // any remnant so it can't linger / re-grab the IP.
             if (deadInDocker && ts!.Container is not null)
             {
                 ts.Container.Status = ContainerStatus.Destroyed;
                 try { await containerManager.DestroyContainerAsync(ts.Container, token); }
                 catch { /* already gone, or remnant cleanup raced — fine */ }
                 logger.SystemLog(
-                    $"A&D container vanished from docker — relaunching: team={participationId} challenge={challenge.Id}",
+                    $"A&D container not running — relaunching: team={participationId} challenge={challenge.Id}",
                     TaskStatus.Failed, LogLevel.Warning);
             }
 
             await LaunchOneAsync(db, containerManager, participationId, challenge, ts, token);
+        }
+        finally
+        {
+            sem.Release();
+        }
+    }
+
+    /// <summary>
+    /// Move a live A&amp;D container between the Open/Isolated networks in place
+    /// (connect the new network, then disconnect the old) without destroying it,
+    /// then re-read its new IP and record the new egress. Returns false if the
+    /// move couldn't be performed (caller then recreates). Docker-only.
+    /// </summary>
+    private async Task<bool> TryMoveContainerNetworkAsync(
+        AppDbContext db,
+        IContainerProvider<DockerClient, DockerMetadata> dockerProvider,
+        AdTeamService ts,
+        GameChallenge challenge,
+        CancellationToken token)
+    {
+        if (ts.Container?.ContainerId is not { Length: > 0 } cid)
+            return false;
+
+        var meta = dockerProvider.GetMetadata();
+        var oldMode = (ts.LaunchedWithEgress ?? challenge.AdAllowEgress) ? NetworkMode.Open : NetworkMode.Isolated;
+        var newMode = challenge.AdAllowEgress ? NetworkMode.Open : NetworkMode.Isolated;
+        if (!meta.NetworkNames.TryGetValue(oldMode, out var oldName) ||
+            !meta.NetworkNames.TryGetValue(newMode, out var newName))
+            return false;
+
+        var docker = dockerProvider.GetProvider();
+        try
+        {
+            // Connect-before-disconnect so the container is never on zero networks.
+            await docker.Networks.ConnectNetworkAsync(newName,
+                new DockerModels.NetworkConnectParameters { Container = cid }, token);
+            await docker.Networks.DisconnectNetworkAsync(oldName,
+                new DockerModels.NetworkDisconnectParameters { Container = cid, Force = true }, token);
+
+            var info = await docker.Containers.InspectContainerAsync(cid, token);
+            var newIp = info.NetworkSettings?.Networks is { } nets && nets.TryGetValue(newName, out var ep)
+                ? ep.IPAddress
+                : null;
+            if (!string.IsNullOrEmpty(newIp))
+                ts.Container!.IP = newIp;
+
+            ts.LaunchedWithEgress = challenge.AdAllowEgress;
+            await db.SaveChangesAsync(token);
+
+            logger.SystemLog(
+                $"A&D container moved {oldName} → {newName} (egress changed): team={ts.ParticipationId} challenge={challenge.Id} ip={newIp}",
+                TaskStatus.Success, LogLevel.Information);
+            return true;
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e,
+                "A&D network move failed for team={Tid} challenge={Cid}; will recreate",
+                ts.ParticipationId, challenge.Id);
+            return false;
         }
     }
 
@@ -429,12 +578,14 @@ public sealed class AdContainerManager(
                 {
                     ParticipationId = participationId,
                     ChallengeId = challenge.Id,
-                    ContainerId = container.Id
+                    ContainerId = container.Id,
+                    LaunchedWithEgress = challenge.AdAllowEgress
                 }, token);
             }
             else
             {
                 existing.ContainerId = container.Id;
+                existing.LaunchedWithEgress = challenge.AdAllowEgress;
             }
 
             await db.SaveChangesAsync(token);
@@ -468,25 +619,43 @@ public sealed class AdContainerManager(
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var containerManager = scope.ServiceProvider.GetRequiredService<IContainerManager>();
 
-        var ts = await db.AdTeamServices
-            .Include(t => t.Container)
-            .Include(t => t.Challenge)
-            .FirstOrDefaultAsync(t => t.Id == adTeamServiceId, token);
-
-        if (ts is null)
+        // Need the (participation, challenge) key to take the per-service lock
+        // before mutating — otherwise a concurrent reset/reconcile could race.
+        var key = await db.AdTeamServices
+            .Where(t => t.Id == adTeamServiceId)
+            .Select(t => new { t.ParticipationId, t.ChallengeId })
+            .FirstOrDefaultAsync(token);
+        if (key is null)
             return false;
 
-        if (ts.Container is not null)
+        var sem = LockFor(key.ParticipationId, key.ChallengeId);
+        await sem.WaitAsync(token);
+        try
         {
-            try { await containerManager.DestroyContainerAsync(ts.Container, token); }
-            catch (Exception e) { logger.LogErrorMessage(e, $"Restart: destroy failed for {ts.Container.LogId}"); }
-            ts.ContainerId = null;
-            await db.SaveChangesAsync(token);
-        }
+            var ts = await db.AdTeamServices
+                .Include(t => t.Container)
+                .Include(t => t.Challenge)
+                .FirstOrDefaultAsync(t => t.Id == adTeamServiceId, token);
 
-        await LaunchOneAsync(db, containerManager, ts.ParticipationId, ts.Challenge, ts, token);
-        ts.LastResetAt = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync(token);
-        return true;
+            if (ts is null)
+                return false;
+
+            if (ts.Container is not null)
+            {
+                try { await containerManager.DestroyContainerAsync(ts.Container, token); }
+                catch (Exception e) { logger.LogErrorMessage(e, $"Restart: destroy failed for {ts.Container.LogId}"); }
+                ts.ContainerId = null;
+                await db.SaveChangesAsync(token);
+            }
+
+            await LaunchOneAsync(db, containerManager, ts.ParticipationId, ts.Challenge, ts, token);
+            ts.LastResetAt = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(token);
+            return true;
+        }
+        finally
+        {
+            sem.Release();
+        }
     }
 }

@@ -59,4 +59,15 @@ public class AdTeamService
     /// they change" diff view. Null when no snapshot / no changes.
     /// </summary>
     public string? SnapshotChanges { get; set; }
+
+    /// <summary>
+    /// The <see cref="GameChallenge.AdAllowEgress"/> value the current container
+    /// was launched with — i.e. which docker network (Open vs Isolated) it sits
+    /// on. The reconciler compares this against the challenge's <em>current</em>
+    /// egress to detect "network drift" (egress toggled mid-game) and move the
+    /// live container to the matching network. Comparing this bool is robust
+    /// where matching the docker network-name string is not. Null until the
+    /// next launch records it.
+    /// </summary>
+    public bool? LaunchedWithEgress { get; set; }
 }
