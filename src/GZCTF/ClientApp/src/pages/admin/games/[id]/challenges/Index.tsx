@@ -1,7 +1,7 @@
 import { ActionIcon, Alert, Button, Center, Checkbox, ComboboxItem, Group, Indicator, Modal, ScrollArea, Select, SimpleGrid, Stack, Text, TextInput, Title, Tooltip } from '@mantine/core'
 import { useModals } from '@mantine/modals'
 import { showNotification } from '@mantine/notifications'
-import { mdiAlertCircleOutline, mdiCheck, mdiHammerWrench, mdiHexagonSlice6, mdiPlus, mdiRefresh, mdiTrashCanOutline } from '@mdi/js'
+import { mdiAlertCircleOutline, mdiCheck, mdiHammerWrench, mdiHexagonSlice6, mdiPauseCircleOutline, mdiPlayCircleOutline, mdiPlus, mdiRefresh, mdiTrashCanOutline } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import { Dispatch, FC, SetStateAction, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -92,6 +92,58 @@ const GameChallengeEdit: FC = () => {
           failed > 0
             ? t('admin.notification.games.challenges.batch_deleted_partial', { ok, failed })
             : t('admin.notification.games.challenges.batch_deleted', { count: ok }),
+        icon: <Icon path={mdiCheck} size={1} />,
+      })
+      clearSelection()
+      mutate()
+    } catch (e) {
+      showErrorMsg(e, t)
+    } finally {
+      setDisabled(false)
+    }
+  }
+
+  // Batch enable/disable of the selected challenges. Reversible, so a single
+  // click-to-confirm (not the type-"delete" guard) is enough. allSettled so a
+  // challenge that can't flip (e.g. enabling one with no flag) doesn't abort
+  // the rest — it's reported as a skip.
+  const onBatchSetEnabled = (enable: boolean) => {
+    if (visibleSelected.length === 0) return
+    modals.openConfirmModal({
+      title: enable
+        ? t('admin.button.challenges.activate_selected')
+        : t('admin.button.challenges.deactivate_selected'),
+      children: (
+        <Text size="sm">
+          {enable
+            ? t('admin.content.games.challenges.activate_selected_confirm', { count: visibleSelected.length })
+            : t('admin.content.games.challenges.deactivate_selected_confirm', { count: visibleSelected.length })}
+        </Text>
+      ),
+      onConfirm: () => performBatchSetEnabled(enable),
+      confirmProps: { color: enable ? 'teal' : 'orange' },
+    })
+  }
+
+  const performBatchSetEnabled = async (enable: boolean) => {
+    const ids = filteredIds.filter((id) => selectedIds.has(id))
+    if (ids.length === 0) return
+    setDisabled(true)
+    try {
+      const results = await Promise.allSettled(
+        ids.map((cid) => api.edit.editUpdateGameChallenge(numId, cid, { isEnabled: enable })),
+      )
+      const failed = results.filter((r) => r.status === 'rejected').length
+      const ok = ids.length - failed
+      showNotification({
+        color: failed > 0 ? 'orange' : 'teal',
+        message: enable
+          ? failed > 0
+            ? t('admin.notification.games.challenges.batch_enabled_partial', { ok, failed })
+            : t('admin.notification.games.challenges.batch_enabled', { count: ok })
+          : failed > 0
+            ? t('admin.notification.games.challenges.batch_disabled_partial', { ok, failed })
+            : t('admin.notification.games.challenges.batch_disabled', { count: ok }),
         icon: <Icon path={mdiCheck} size={1} />,
       })
       clearSelection()
@@ -225,6 +277,36 @@ const GameChallengeEdit: FC = () => {
                 they appear. */}
             {visibleSelected.length > 0 && (
               <>
+                <Tooltip
+                  label={`${t('admin.button.challenges.activate_selected')} (${visibleSelected.length})`}
+                  withArrow
+                >
+                  <ActionIcon
+                    size="lg"
+                    color="teal"
+                    variant="light"
+                    disabled={disabled}
+                    onClick={() => onBatchSetEnabled(true)}
+                    aria-label={t('admin.button.challenges.activate_selected')}
+                  >
+                    <Icon path={mdiPlayCircleOutline} size={0.9} />
+                  </ActionIcon>
+                </Tooltip>
+                <Tooltip
+                  label={`${t('admin.button.challenges.deactivate_selected')} (${visibleSelected.length})`}
+                  withArrow
+                >
+                  <ActionIcon
+                    size="lg"
+                    color="orange"
+                    variant="light"
+                    disabled={disabled}
+                    onClick={() => onBatchSetEnabled(false)}
+                    aria-label={t('admin.button.challenges.deactivate_selected')}
+                  >
+                    <Icon path={mdiPauseCircleOutline} size={0.9} />
+                  </ActionIcon>
+                </Tooltip>
                 <Tooltip
                   label={`${t('admin.button.challenges.delete_selected')} (${visibleSelected.length})`}
                   withArrow

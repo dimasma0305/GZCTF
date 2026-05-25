@@ -55,6 +55,8 @@
       "select": "选择题目",
       "select_all": "全选",
       "delete_selected": "删除所选",
+      "activate_selected": "启用所选",
+      "deactivate_selected": "停用所选",
       "clear_selection": "取消选择",
       "build_now": "构建镜像",
       "build_in_flight": "构建进行中…",
@@ -243,6 +245,8 @@
         "enable": "你确定要启用题目 {{name}} 吗？",
         "bulk_rebuild_confirm": "是否对 {{count}} 个失败或缺少 Dockerfile 的题目重新触发构建？",
         "delete_selected_confirm": "确定删除所选的 {{count}} 个题目吗？这会永久删除它们及其 flag/实例，且不可恢复。",
+        "activate_selected_confirm": "启用所选的 {{count}} 个题目？未设置 flag 的题目将被跳过。",
+        "deactivate_selected_confirm": "停用所选的 {{count}} 个题目？在重新启用前它们将停止计分。",
         "delete_type_to_confirm": "请在下方输入 “delete” 以确认。",
         "flag": {
           "create": "创建 flag，多个 flag 按行分割，每行一个。<br/>每道题目可以拥有多个 flag，获取任意 flag 均可得分。",
@@ -1077,7 +1081,11 @@
         },
         "updated": "题目已更新",
         "batch_deleted": "已删除 {{count}} 个题目",
-        "batch_deleted_partial": "已删除 {{ok}} 个，{{failed}} 个失败"
+        "batch_deleted_partial": "已删除 {{ok}} 个，{{failed}} 个失败",
+        "batch_enabled": "已启用 {{count}} 个题目",
+        "batch_enabled_partial": "已启用 {{ok}} 个，{{failed}} 个跳过（如未设置 flag）",
+        "batch_disabled": "已停用 {{count}} 个题目",
+        "batch_disabled_partial": "已停用 {{ok}} 个，{{failed}} 个失败"
       },
       "created": "比赛已创建",
       "divisions": {

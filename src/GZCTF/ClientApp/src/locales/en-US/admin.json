@@ -45,6 +45,8 @@
       "select": "Select challenge",
       "select_all": "Select all",
       "delete_selected": "Delete selected",
+      "activate_selected": "Activate selected",
+      "deactivate_selected": "Deactivate selected",
       "clear_selection": "Clear",
       "build_now": "Build image",
       "build_in_flight": "Build in progress…",
@@ -236,6 +238,8 @@
         "enable": "Are you sure you want to enable challenge {{name}}?",
         "bulk_rebuild_confirm": "Enqueue rebuilds for the {{count}} challenge(s) with a Failed or Missing-Dockerfile status?",
         "delete_selected_confirm": "Delete {{count}} selected challenge(s)? This permanently removes them and their flags/instances and cannot be undone.",
+        "activate_selected_confirm": "Activate {{count}} selected challenge(s)? Any without a flag set will be skipped.",
+        "deactivate_selected_confirm": "Deactivate {{count}} selected challenge(s)? Scoring stops for them until re-activated.",
         "delete_type_to_confirm": "Type \"delete\" below to confirm.",
         "flag": {
           "create": "Create flags. Multiple flags should be separated by lines, one flag per line.<br/> Each challenge can have multiple flags. Any configured flags can be accepted.",
@@ -1096,7 +1100,11 @@
         },
         "updated": "Challenge updated",
         "batch_deleted": "Deleted {{count}} challenge(s)",
-        "batch_deleted_partial": "Deleted {{ok}}, {{failed}} failed"
+        "batch_deleted_partial": "Deleted {{ok}}, {{failed}} failed",
+        "batch_enabled": "Activated {{count}} challenge(s)",
+        "batch_enabled_partial": "Activated {{ok}}, {{failed}} skipped (e.g. no flag set)",
+        "batch_disabled": "Deactivated {{count}} challenge(s)",
+        "batch_disabled_partial": "Deactivated {{ok}}, {{failed}} failed"
       },
       "created": "Game created",
       "divisions": {
