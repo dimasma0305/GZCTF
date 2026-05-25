@@ -1,7 +1,7 @@
-import { Button, Center, Checkbox, ComboboxItem, Group, ScrollArea, Select, SimpleGrid, Stack, Text, Title } from '@mantine/core'
+import { Alert, Button, Center, Checkbox, ComboboxItem, Group, Modal, ScrollArea, Select, SimpleGrid, Stack, Text, TextInput, Title } from '@mantine/core'
 import { useModals } from '@mantine/modals'
 import { showNotification } from '@mantine/notifications'
-import { mdiCheck, mdiHammerWrench, mdiHexagonSlice6, mdiPlus, mdiRefresh, mdiTrashCanOutline } from '@mdi/js'
+import { mdiAlertCircleOutline, mdiCheck, mdiHammerWrench, mdiHexagonSlice6, mdiPlus, mdiRefresh, mdiTrashCanOutline } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import { Dispatch, FC, SetStateAction, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -63,43 +63,44 @@ const GameChallengeEdit: FC = () => {
 
   const clearSelection = () => setSelectedIds(new Set())
 
+  // Type-to-confirm: the operator must type "delete" before the batch
+  // delete fires — guards against an accidental click wiping challenges.
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false)
+  const [confirmText, setConfirmText] = useState('')
+  const canConfirmDelete = confirmText.trim().toLowerCase() === 'delete'
+
   const onBatchDelete = () => {
+    if (visibleSelected.length === 0) return
+    setConfirmText('')
+    setDeleteModalOpen(true)
+  }
+
+  const performBatchDelete = async () => {
     const ids = filteredIds.filter((id) => selectedIds.has(id))
-    if (ids.length === 0) return
-    modals.openConfirmModal({
-      title: t('admin.button.challenges.delete_selected'),
-      children: (
-        <Text size="sm">
-          {t('admin.content.games.challenges.delete_selected_confirm', { count: ids.length })}
-        </Text>
-      ),
-      labels: { confirm: t('admin.button.challenges.delete_selected'), cancel: t('common.modal.cancel') },
-      confirmProps: { color: 'red' },
-      onConfirm: async () => {
-        setDisabled(true)
-        try {
-          const results = await Promise.allSettled(
-            ids.map((cid) => api.edit.editRemoveGameChallenge(numId, cid)),
-          )
-          const failed = results.filter((r) => r.status === 'rejected').length
-          const ok = ids.length - failed
-          showNotification({
-            color: failed > 0 ? 'orange' : 'teal',
-            message:
-              failed > 0
-                ? t('admin.notification.games.challenges.batch_deleted_partial', { ok, failed })
-                : t('admin.notification.games.challenges.batch_deleted', { count: ok }),
-            icon: <Icon path={mdiCheck} size={1} />,
-          })
-          clearSelection()
-          mutate()
-        } catch (e) {
-          showErrorMsg(e, t)
-        } finally {
-          setDisabled(false)
-        }
-      },
-    })
+    if (ids.length === 0 || !canConfirmDelete) return
+    setDeleteModalOpen(false)
+    setDisabled(true)
+    try {
+      const results = await Promise.allSettled(
+        ids.map((cid) => api.edit.editRemoveGameChallenge(numId, cid)),
+      )
+      const failed = results.filter((r) => r.status === 'rejected').length
+      const ok = ids.length - failed
+      showNotification({
+        color: failed > 0 ? 'orange' : 'teal',
+        message:
+          failed > 0
+            ? t('admin.notification.games.challenges.batch_deleted_partial', { ok, failed })
+            : t('admin.notification.games.challenges.batch_deleted', { count: ok }),
+        icon: <Icon path={mdiCheck} size={1} />,
+      })
+      clearSelection()
+      mutate()
+    } catch (e) {
+      showErrorMsg(e, t)
+    } finally {
+      setDisabled(false)
+    }
   }
 
   const onToggle = (challenge: ChallengeInfoModel, setDisabled: Dispatch<SetStateAction<boolean>>) => {
@@ -197,7 +198,7 @@ const GameChallengeEdit: FC = () => {
       isLoading={!challenges}
       head={
         <>
-          <Group gap="md">
+          <Group gap="sm" wrap="nowrap">
             <Select
               placeholder={t('admin.content.show_all')}
               clearable
@@ -219,12 +220,14 @@ const GameChallengeEdit: FC = () => {
               disabled={filteredIds.length === 0}
               onChange={toggleSelectAll}
             />
-          </Group>
-          <Group justify="right">
+            {/* Batch actions live with the selection controls (left) so the
+                right-side buttons — New Challenge etc. — never shift when
+                they appear. */}
             {visibleSelected.length > 0 && (
               <>
                 <Button
-                  leftSection={<Icon path={mdiTrashCanOutline} size={1} />}
+                  size="sm"
+                  leftSection={<Icon path={mdiTrashCanOutline} size={0.9} />}
                   color="red"
                   variant="light"
                   disabled={disabled}
@@ -232,11 +235,13 @@ const GameChallengeEdit: FC = () => {
                 >
                   {t('admin.button.challenges.delete_selected')} ({visibleSelected.length})
                 </Button>
-                <Button variant="subtle" color="gray" disabled={disabled} onClick={clearSelection}>
+                <Button size="sm" variant="subtle" color="gray" disabled={disabled} onClick={clearSelection}>
                   {t('admin.button.challenges.clear_selection')}
                 </Button>
               </>
             )}
+          </Group>
+          <Group justify="right" wrap="nowrap">
             {failedBuildCount > 0 && (
               <Button
                 leftSection={<Icon path={mdiHammerWrench} size={1} />}
@@ -299,6 +304,42 @@ const GameChallengeEdit: FC = () => {
         opened={bonusOpened}
         onClose={() => setBonusOpened(false)}
       />
+      <Modal
+        opened={deleteModalOpen}
+        onClose={() => setDeleteModalOpen(false)}
+        title={t('admin.button.challenges.delete_selected')}
+        centered
+      >
+        <Stack gap="sm">
+          <Alert color="red" variant="light" icon={<Icon path={mdiAlertCircleOutline} size={1} />}>
+            {t('admin.content.games.challenges.delete_selected_confirm', { count: visibleSelected.length })}
+          </Alert>
+          <Text size="sm">{t('admin.content.games.challenges.delete_type_to_confirm')}</Text>
+          <TextInput
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.currentTarget.value)}
+            placeholder="delete"
+            data-autofocus
+            autoComplete="off"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && canConfirmDelete) performBatchDelete()
+            }}
+          />
+          <Group justify="flex-end" gap="sm">
+            <Button variant="default" onClick={() => setDeleteModalOpen(false)}>
+              {t('common.modal.cancel', 'Cancel')}
+            </Button>
+            <Button
+              color="red"
+              leftSection={<Icon path={mdiTrashCanOutline} size={0.9} />}
+              disabled={!canConfirmDelete || disabled}
+              onClick={performBatchDelete}
+            >
+              {t('admin.button.challenges.delete_selected')} ({visibleSelected.length})
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </WithGameEditTab>
   )
 }

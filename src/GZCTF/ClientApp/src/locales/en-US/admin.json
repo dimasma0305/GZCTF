@@ -213,6 +213,7 @@
         "enable": "Are you sure you want to enable challenge {{name}}?",
         "bulk_rebuild_confirm": "Enqueue rebuilds for the {{count}} challenge(s) with a Failed or Missing-Dockerfile status?",
         "delete_selected_confirm": "Delete {{count}} selected challenge(s)? This permanently removes them and their flags/instances and cannot be undone.",
+        "delete_type_to_confirm": "Type \"delete\" below to confirm.",
         "flag": {
           "create": "Create flags. Multiple flags should be separated by lines, one flag per line.<br/> Each challenge can have multiple flags. Any configured flags can be accepted.",
           "delete": "Are you sure you want to delete this flag?",

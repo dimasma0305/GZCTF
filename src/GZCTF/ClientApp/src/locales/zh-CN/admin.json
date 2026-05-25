@@ -219,6 +219,7 @@
         "enable": "你确定要启用题目 {{name}} 吗？",
         "bulk_rebuild_confirm": "是否对 {{count}} 个失败或缺少 Dockerfile 的题目重新触发构建？",
         "delete_selected_confirm": "确定删除所选的 {{count}} 个题目吗？这会永久删除它们及其 flag/实例，且不可恢复。",
+        "delete_type_to_confirm": "请在下方输入 “delete” 以确认。",
         "flag": {
           "create": "创建 flag，多个 flag 按行分割，每行一个。<br/>每道题目可以拥有多个 flag，获取任意 flag 均可得分。",
           "delete": "确定删除此 flag 吗？",
