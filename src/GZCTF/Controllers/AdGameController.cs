@@ -430,11 +430,21 @@ public class AdGameController(
         if (!ts.Challenge.AdAllowSelfReset)
             return BadRequest(new RequestResponse("Self-reset is disabled for this challenge by the operator"));
 
-        // Cooldown check — game-wide policy.
-        var cooldownMinutes = await db.Games
+        // Reset only inside the game window. A post-game reset would recreate a
+        // container for a finished game and race the reconciler's end-of-game
+        // teardown; a pre-start reset has nothing to reset.
+        var gameWindow = await db.Games
             .Where(g => g.Id == id)
-            .Select(g => g.AdResetCooldownMinutes)
-            .FirstOrDefaultAsync(token) ?? 5;
+            .Select(g => new { g.StartTimeUtc, g.EndTimeUtc, g.AdResetCooldownMinutes })
+            .FirstOrDefaultAsync(token);
+        if (gameWindow is null)
+            return NotFound();
+        var nowReset = DateTimeOffset.UtcNow;
+        if (nowReset < gameWindow.StartTimeUtc || nowReset > gameWindow.EndTimeUtc)
+            return BadRequest(new RequestResponse("Reset is only available while the game is running"));
+
+        // Cooldown check — game-wide policy.
+        var cooldownMinutes = gameWindow.AdResetCooldownMinutes ?? 5;
         if (ts.LastResetAt is { } last)
         {
             var elapsed = DateTimeOffset.UtcNow - last;

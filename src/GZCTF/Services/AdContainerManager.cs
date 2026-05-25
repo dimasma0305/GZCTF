@@ -116,41 +116,54 @@ public sealed class AdContainerManager(
         foreach (var gameId in activeGames)
             await EnsureContainersForGameAsync(db, containerManager, dockerProvider, gameId, runningIds, token);
 
-        // Ended games: snapshot (if allowed) → destroy.
-        var endedGameTeamServices = await db.AdTeamServices
-            .Where(ts => ts.ContainerId != null)
-            .Where(ts => ts.Participation.Game.EndTimeUtc < now)
-            .Include(ts => ts.Container)
-            .Include(ts => ts.Challenge)
-            .Include(ts => ts.Participation).ThenInclude(p => p.Game)
+        // Ended games: snapshot (if allowed) → destroy. Each under the
+        // per-service lock so it can't race a concurrent self-reset /
+        // force-restart for the same service (which could orphan a container at
+        // the game-end boundary), with a fresh re-read inside the lock.
+        var endedServices = await db.AdTeamServices
+            .Where(ts => ts.ContainerId != null && ts.Participation.Game.EndTimeUtc < now)
+            .Select(ts => new { ts.Id, ts.ParticipationId, ts.ChallengeId })
             .ToListAsync(token);
 
-        foreach (var ts in endedGameTeamServices.Where(ts => ts.Container is not null))
+        foreach (var ended in endedServices)
         {
+            var sem = LockFor(ended.ParticipationId, ended.ChallengeId);
+            await sem.WaitAsync(token);
             try
             {
-                // Snapshot-download is game-wide policy.
+                var ts = await db.AdTeamServices
+                    .Include(t => t.Container)
+                    .Include(t => t.Participation).ThenInclude(p => p.Game)
+                    .FirstOrDefaultAsync(t => t.Id == ended.Id, token);
+
+                // Re-check under the lock: a concurrent reset may have changed
+                // it, or the game may no longer be ended (extended).
+                if (ts?.Container is null || ts.Participation.Game.EndTimeUtc >= now)
+                    continue;
+
                 if (ts.Participation.Game.AdAllowSnapshotDownload && ts.SnapshotBlobKey is null)
                 {
                     var key = await TrySnapshotAsync(scope.ServiceProvider, ts, token);
                     if (key is not null)
                         ts.SnapshotBlobKey = key;
                 }
-                await containerManager.DestroyContainerAsync(ts.Container!, token);
+                await containerManager.DestroyContainerAsync(ts.Container, token);
                 flagMount.Delete(ts.ParticipationId, ts.ChallengeId);
+                ts.ContainerId = null;
+                await db.SaveChangesAsync(token);
                 logger.SystemLog($"A&D container destroyed (game ended): team={ts.ParticipationId} challenge={ts.ChallengeId}",
                     TaskStatus.Success, LogLevel.Information);
-                ts.ContainerId = null;
             }
             catch (Exception e)
             {
                 logger.LogErrorMessage(e,
-                    $"Failed to destroy A&D container for team={ts.ParticipationId} challenge={ts.ChallengeId}");
+                    $"Failed to destroy A&D container (game ended) for service={ended.Id}");
+            }
+            finally
+            {
+                sem.Release();
             }
         }
-
-        if (endedGameTeamServices.Count > 0)
-            await db.SaveChangesAsync(token);
     }
 
     /// <summary>
