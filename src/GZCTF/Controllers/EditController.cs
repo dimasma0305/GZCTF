@@ -852,8 +852,13 @@ public class EditController(
             return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Challenge_NotFound)],
                 StatusCodes.Status404NotFound));
 
-        // NOTE: IsEnabled can only be updated outside the edit page
-        if (model.IsEnabled is true && !res.IsEnabled && res.Type != ChallengeType.DynamicContainer)
+        // NOTE: IsEnabled can only be updated outside the edit page.
+        // DynamicContainer and AttackDefense generate their flags at runtime
+        // (per-team flag templates / round-planted A&D flags), so they have no
+        // FlagContext rows and must be exempt from the flag-presence guard.
+        if (model.IsEnabled is true && !res.IsEnabled
+            && res.Type != ChallengeType.DynamicContainer
+            && res.Type != ChallengeType.AttackDefense)
         {
             await challengeRepository.LoadFlags(res, token);
 
@@ -880,8 +885,11 @@ public class EditController(
         {
             case true:
                 {
-                    // Will also update IsEnabled
-                    await challengeRepository.EnsureInstances(res, game, token);
+                    // A&D manages its own per-team containers via AdTeamService,
+                    // not GameInstance rows, so skip instance materialization for
+                    // it. IsEnabled itself is already applied by res.Update above.
+                    if (!res.Type.IsAttackDefense())
+                        await challengeRepository.EnsureInstances(res, game, token);
 
                     if (game.IsActive)
                         await gameNoticeRepository.AddNotice(
