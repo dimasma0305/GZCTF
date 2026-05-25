@@ -2066,6 +2066,8 @@ export interface AdGameStateModel {
   roundStartedAt?: string | null;
   roundEndsAt?: string | null;
   scoringPaused: boolean;
+  /** When scoring was paused (null if running) — the UI freezes the round timer at this instant. */
+  scoringPausedAt?: string | null;
   challenges: AdChallengeStateModel[];
   teams: AdTeamRowModel[];
 }

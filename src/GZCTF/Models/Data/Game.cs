@@ -357,5 +357,14 @@ public partial class Game
     /// infrastructure incident). Default false.
     /// </summary>
     public bool AdScoringPaused { get; set; }
+
+    /// <summary>
+    /// Instant scoring was paused (null when running). On resume, the current
+    /// round's <c>StartedAt</c>/<c>EndsAt</c> are shifted forward by the paused
+    /// duration so the round keeps its full remaining time instead of expiring
+    /// (and instantly advancing) the moment scoring resumes. Also lets the UI
+    /// freeze the round-timer display at the pause instant.
+    /// </summary>
+    public DateTimeOffset? AdScoringPausedAt { get; set; }
     #endregion
 }

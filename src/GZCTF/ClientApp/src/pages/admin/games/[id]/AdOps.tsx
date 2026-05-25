@@ -382,8 +382,12 @@ const AdOps: FC = () => {
     )
   }
 
+  // While paused, freeze the countdown at the pause instant — the round isn't
+  // burning time (resume shifts its end forward), so the timer must stop too.
+  const timerRef =
+    state.scoringPaused && state.scoringPausedAt ? dayjs(state.scoringPausedAt) : now
   const roundEndsIn =
-    state.roundEndsAt ? Math.max(0, dayjs(state.roundEndsAt).diff(now, 'second')) : null
+    state.roundEndsAt ? Math.max(0, dayjs(state.roundEndsAt).diff(timerRef, 'second')) : null
   const roundTotal =
     state.roundStartedAt && state.roundEndsAt
       ? Math.max(1, dayjs(state.roundEndsAt).diff(state.roundStartedAt, 'second'))

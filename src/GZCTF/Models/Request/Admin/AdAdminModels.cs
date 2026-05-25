@@ -17,6 +17,9 @@ public class AdGameStateModel
     public DateTimeOffset? RoundStartedAt { get; set; }
     public DateTimeOffset? RoundEndsAt { get; set; }
     public bool ScoringPaused { get; set; }
+
+    /// <summary>When scoring was paused (null if running) — the UI freezes the round timer at this instant.</summary>
+    public DateTimeOffset? ScoringPausedAt { get; set; }
     public List<AdChallengeStateModel> Challenges { get; set; } = [];
     public List<AdTeamRowModel> Teams { get; set; } = [];
 }

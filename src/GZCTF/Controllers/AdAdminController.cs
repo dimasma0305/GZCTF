@@ -151,6 +151,7 @@ public class AdAdminController(
             RoundStartedAt = currentRound?.StartedAt,
             RoundEndsAt = currentRound?.EndsAt,
             ScoringPaused = game.AdScoringPaused,
+            ScoringPausedAt = game.AdScoringPausedAt,
             Challenges = challengeStates,
             Teams = rows
         });
@@ -196,7 +197,40 @@ public class AdAdminController(
         var game = await db.Games.FirstOrDefaultAsync(g => g.Id == id, token);
         if (game is null) return NotFound();
 
-        game.AdScoringPaused = !game.AdScoringPaused;
+        var now = DateTimeOffset.UtcNow;
+
+        if (!game.AdScoringPaused)
+        {
+            // Pausing — remember when, so the UI freezes the timer and resume
+            // can give the round back its remaining time.
+            game.AdScoringPaused = true;
+            game.AdScoringPausedAt = now;
+        }
+        else
+        {
+            // Resuming — shift the current round forward by the paused duration
+            // so it doesn't instantly expire (and skip a round) on resume; the
+            // remaining time at pause is preserved.
+            if (game.AdScoringPausedAt is { } pausedAt)
+            {
+                var pausedFor = now - pausedAt;
+                if (pausedFor > TimeSpan.Zero)
+                {
+                    var current = await db.AdRounds
+                        .Where(r => r.GameId == id)
+                        .OrderByDescending(r => r.Number)
+                        .FirstOrDefaultAsync(token);
+                    if (current is not null)
+                    {
+                        current.StartedAt += pausedFor;
+                        current.EndsAt += pausedFor;
+                    }
+                }
+            }
+            game.AdScoringPaused = false;
+            game.AdScoringPausedAt = null;
+        }
+
         await db.SaveChangesAsync(token);
 
         logger.SystemLog(
