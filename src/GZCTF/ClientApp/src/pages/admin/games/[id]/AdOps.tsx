@@ -470,7 +470,9 @@ const AdOps: FC = () => {
                         {t('admin.content.ad_ops.scoring_paused', 'Scoring paused')}
                       </Badge>
                     ) : (
-                      roundEndsIn !== 0 &&
+                      // Stay "Live" between ticks too (countdown hitting 0 is a
+                      // ~5s gap before the scheduler advances) — toggling the
+                      // badge there reflowed the whole header row.
                       state.currentRound != null && (
                         <Badge color="teal" variant="dot">
                           {t('admin.content.ad_ops.live', 'Live')}
