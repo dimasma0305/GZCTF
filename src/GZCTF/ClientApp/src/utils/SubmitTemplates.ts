@@ -173,8 +173,10 @@ const AD_DOCKERFILE = `FROM alpine:3.21
 
 RUN apk add --no-cache socat
 
-# Warmup flag — the platform overwrites /flag every tick via docker exec,
-# and also injects the first round's flag through the GZCTF_FLAG env var.
+# Warmup flag — the platform overwrites /flag every tick via docker exec.
+# Read the flag from /flag at request time (path is also in GZCTF_FLAG_FILE).
+# There is NO GZCTF_FLAG env var for A&D services: an env is frozen at
+# container start and would go stale after the first rotation.
 RUN echo 'flag{warmup-no-round-yet}' > /flag && chmod 644 /flag
 
 COPY serve.sh /serve.sh
@@ -190,8 +192,8 @@ CMD ["socat", "-T", "5", "TCP-LISTEN:80,reuseaddr,fork", "SYSTEM:/serve.sh"]
 const AD_SERVE_SH = `#!/bin/sh
 # Toy vulnerable service: echoes /flag to anyone who asks. Replace this
 # with your real service — the only platform contract is that the round's
-# flag lives at /flag (and \\$GZCTF_FLAG holds the first round's flag).
-# Defenders patch the bug; attackers exploit it to read another team's /flag.
+# flag lives at /flag (path also exposed as \\$GZCTF_FLAG_FILE), refreshed
+# every tick. Defenders patch the bug; attackers exploit it to read /flag.
 while IFS= read -r line; do
     line="\${line%$'\\r'}"
     [ -z "$line" ] && break

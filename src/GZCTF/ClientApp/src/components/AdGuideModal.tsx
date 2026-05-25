@@ -715,7 +715,7 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
                     <List.Item>
                       {t(
                         'game.content.ad.guide.container.flag_env',
-                        "GZCTF_FLAG is also set as an env var, but only contains the flag from the round when your container was created — env vars in a running process are immutable, so subsequent rounds only update /flag. Read the file for the live value."
+                        "There is NO GZCTF_FLAG env var for A&D services — an env is frozen at container start and would go stale after the first round. Always read the live flag from /flag (path in GZCTF_FLAG_FILE)."
                       )}
                     </List.Item>
                     <List.Item>

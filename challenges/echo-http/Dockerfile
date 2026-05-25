@@ -2,8 +2,8 @@ FROM alpine:3.21
 
 RUN apk add --no-cache socat
 
-# Default "warmup" flag — overwritten by the platform at round start (env
-# GZCTF_FLAG) and rotated each tick via docker exec into /flag.
+# Default "warmup" flag — the platform rotates /flag each tick via docker
+# exec. serve.sh reads /flag fresh per request (no GZCTF_FLAG env var).
 RUN echo 'flag{warmup-no-round-yet}' > /flag && chmod 644 /flag
 
 COPY serve.sh /serve.sh

@@ -303,19 +303,12 @@ public sealed class AdContainerManager(
         // we lean on the existing Open/Isolated knob.
         var networkMode = challenge.AdAllowEgress ? NetworkMode.Open : NetworkMode.Isolated;
 
-        // Initial flag for GZCTF_FLAG env var — read whatever the latest
-        // round planted for this (team, challenge). On first spawn before
-        // any round has run, this is null and the env var is omitted; the
-        // file at FlagFilePath will be populated on the next AdRoundService
-        // tick. Subsequent ticks update only the file (env is frozen at exec).
-        var initialFlag = existing is not null
-            ? await db.AdFlags
-                .Where(f => f.AdTeamServiceId == existing.Id)
-                .OrderByDescending(f => f.PlantedAtRound)
-                .Select(f => f.Flag)
-                .FirstOrDefaultAsync(token)
-            : null;
-
+        // A&D flags rotate every tick and live at FlagFilePath (/flag), written
+        // by AdRoundService via docker exec. We deliberately do NOT set the
+        // GZCTF_FLAG env var: an env baked at container creation is frozen for
+        // the container's life, so it would go stale after the first rotation
+        // and mislead challenge code. Only GZCTF_FLAG_FILE is surfaced (below);
+        // read the live flag from that path.
         var config = new ContainerConfig
         {
             Image = challenge.ContainerImage,
@@ -324,7 +317,7 @@ public sealed class AdContainerManager(
             GameId = participation.GameId,
             UserId = participation.FirstUserId,
             ExposedPort = challenge.ExposePort ?? 80,
-            Flag = initialFlag,
+            // Flag intentionally unset for A&D — see note above; /flag is the source of truth.
             FlagFilePath = "/flag",
             CPUCount = challenge.CPUCount ?? 1,
             MemoryLimit = challenge.MemoryLimit ?? 128,
