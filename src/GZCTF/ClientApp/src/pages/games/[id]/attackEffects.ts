@@ -154,17 +154,15 @@ export async function initEffects(canvas: HTMLCanvasElement): Promise<void> {
 
 function onVisibility(): void {
   if (!app) return
-  if (document.hidden) {
-    app.ticker.stop()
-    if (audioCtx && audioCtx.state === 'running') {
-      void audioCtx.suspend().catch(() => undefined)
-    }
-  } else {
-    app.ticker.start()
-    if (audioCtx && audioCtx.state === 'suspended') {
-      void audioCtx.resume().catch(() => undefined)
-    }
-  }
+  // Pause only the renderer when the tab is hidden — the browser throttles
+  // requestAnimationFrame in background tabs regardless, so this just saves
+  // wasted work. Deliberately DO NOT suspend the AudioContext: keep attack
+  // SFX audible when the attack page is a background tab (e.g. on a second
+  // screen / projector while you operate from another tab). An already-
+  // running context keeps rendering audio in the background; suspending it
+  // here is exactly why the laser "didn't fire at all when in another page".
+  if (document.hidden) app.ticker.stop()
+  else app.ticker.start()
 }
 
 export function disposeEffects(): void {
