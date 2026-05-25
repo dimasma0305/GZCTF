@@ -286,6 +286,20 @@ export function unlockAudio(): void {
     comp.connect(limiter)
     limiter.connect(audioCtx.destination)
     masterOut = master
+
+    // Keep-alive: a permanently-running, inaudible (~-80 dB) source keeps the
+    // context actively rendering so the browser doesn't idle-park it when this
+    // tab is in the background. Without it, SFX triggered from another tab are
+    // only queued and don't actually sound until this tab is refocused — the
+    // "doesn't fire when I'm in another tab" symptom.
+    const keepAlive = audioCtx.createOscillator()
+    const keepGain = audioCtx.createGain()
+    keepGain.gain.value = 0.0001
+    keepAlive.frequency.value = 30
+    keepAlive.connect(keepGain)
+    keepGain.connect(audioCtx.destination)
+    keepAlive.start()
+
     // A freshly created context can start 'suspended' (esp. after a prior
     // context was closed on SPA navigation). Resume it now — we're inside the
     // unlock gesture, so this is allowed — otherwise every procedural SFX
