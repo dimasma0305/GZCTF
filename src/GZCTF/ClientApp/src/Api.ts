@@ -2011,6 +2011,24 @@ export interface AdTeamCellModel {
   containerPort?: number | null;
   lastCheckStatus?: string | null;
   currentFlag?: string | null;
+  /** True iff a post-game snapshot tarball is stored for this team-service. */
+  snapshotAvailable: boolean;
+  /** Number of files the team changed vs the baseline image (docker diff), if captured. */
+  changedFileCount?: number | null;
+}
+
+/** A&D admin — one filesystem change in a team's container vs the baseline image. */
+export interface AdSnapshotChange {
+  /** Path inside the container. */
+  path: string;
+  /** 0 = modified, 1 = added, 2 = deleted (docker diff semantics). */
+  kind: number;
+}
+
+/** A&D admin — GET /api/edit/games/{id}/ad/Services/{adTeamServiceId}/Snapshot/Changes response. */
+export interface AdSnapshotChangesModel {
+  snapshotAvailable: boolean;
+  changes: AdSnapshotChange[];
 }
 
 /** A&D admin — per-team row in the admin grid. */
@@ -6333,6 +6351,28 @@ export class Api<
       this.request<void, RequestResponse>({
         path: `/api/edit/games/${id}/ad/EnsureContainers`,
         method: "POST",
+        ...params,
+      }),
+
+    /**
+     * @description A&D — direct download URL for any team's post-game container snapshot tarball (admin forensics).
+     * @tags Edit
+     * @name EditAdSnapshotUrl
+     */
+    editAdSnapshotUrl: (id: number, adTeamServiceId: number) =>
+      `/api/edit/games/${id}/ad/Services/${adTeamServiceId}/Snapshot`,
+
+    /**
+     * @description A&D — the filesystem diff (docker diff) of a team's container vs the baseline image.
+     * @tags Edit
+     * @name EditAdSnapshotChanges
+     * @request GET:/api/edit/games/{id}/ad/Services/{adTeamServiceId}/Snapshot/Changes
+     */
+    editAdSnapshotChanges: (id: number, adTeamServiceId: number, params: RequestParams = {}) =>
+      this.request<AdSnapshotChangesModel, RequestResponse>({
+        path: `/api/edit/games/${id}/ad/Services/${adTeamServiceId}/Snapshot/Changes`,
+        method: "GET",
+        format: "json",
         ...params,
       }),
 

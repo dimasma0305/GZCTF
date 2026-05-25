@@ -5,7 +5,12 @@
       "refresh": "Refresh",
       "ensure_containers": "Ensure containers",
       "advance_round": "Advance round",
-      "restart": "Restart"
+      "restart": "Restart",
+      "snapshot": {
+        "label": "Snapshot",
+        "with_count": "Snapshot ({{count}})",
+        "download": "Download .tar.gz"
+      }
     },
     "challenges": {
       "attachment": {
@@ -154,6 +159,14 @@
       "empty": {
         "title": "No A&D challenges in this game",
         "description": "Add a challenge with type Attack & Defense to use this console."
+      },
+      "snapshot": {
+        "title": "Snapshot — {{team}} · {{challenge}}",
+        "changed_count_one": "{{count}} file changed vs original image",
+        "changed_count_other": "{{count}} files changed vs original image",
+        "diff_label": "Filesystem changes (docker diff)",
+        "no_changes": "No filesystem changes were recorded (snapshot may predate diff capture, or nothing changed).",
+        "inspect_label": "Inspect locally"
       }
     },
     "games": {

@@ -12,7 +12,12 @@
       "refresh": "刷新",
       "ensure_containers": "重建缺失容器",
       "advance_round": "推进回合",
-      "restart": "重启"
+      "restart": "重启",
+      "snapshot": {
+        "label": "快照",
+        "with_count": "快照（{{count}}）",
+        "download": "下载 .tar.gz"
+      }
     },
     "challenges": {
       "attachment": {
@@ -160,6 +165,13 @@
       "empty": {
         "title": "本场比赛没有 A&D 题目",
         "description": "在题目类型中选择「攻防对抗」即可使用本控制台。"
+      },
+      "snapshot": {
+        "title": "快照 — {{team}} · {{challenge}}",
+        "changed_count_other": "相较原始镜像改动了 {{count}} 个文件",
+        "diff_label": "文件系统改动（docker diff）",
+        "no_changes": "未记录到文件系统改动（快照可能早于改动捕获功能，或确实没有改动）。",
+        "inspect_label": "本地排查"
       }
     },
     "games": {

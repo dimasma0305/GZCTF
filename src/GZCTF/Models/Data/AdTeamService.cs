@@ -49,4 +49,14 @@ public class AdTeamService
     /// </summary>
     [MaxLength(256)]
     public string? SnapshotBlobKey { get; set; }
+
+    /// <summary>
+    /// JSON array of the filesystem changes the team made to their container
+    /// relative to the baseline image — captured via <c>docker diff</c>
+    /// (Docker's InspectChanges) at snapshot time, while the container is
+    /// still alive. Each entry is <c>{ "p": path, "k": kind }</c> where kind
+    /// is 0 = modified, 1 = added, 2 = deleted. Powers the admin "what did
+    /// they change" diff view. Null when no snapshot / no changes.
+    /// </summary>
+    public string? SnapshotChanges { get; set; }
 }

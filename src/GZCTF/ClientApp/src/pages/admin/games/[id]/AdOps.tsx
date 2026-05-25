@@ -5,9 +5,12 @@ import {
   Button,
   Card,
   Center,
+  Code,
   CopyButton,
+  Divider,
   Group,
   Loader,
+  Modal,
   Paper,
   ScrollArea,
   SimpleGrid,
@@ -24,6 +27,8 @@ import {
   mdiCheck,
   mdiClose,
   mdiContentCopy,
+  mdiDownload,
+  mdiFileTree,
   mdiPlayCircle,
   mdiRefresh,
   mdiRestart,
@@ -31,7 +36,7 @@ import {
 } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import dayjs from 'dayjs'
-import { FC, useState } from 'react'
+import { FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router'
 import { WithGameEditTab } from '@Components/admin/WithGameEditTab'
@@ -39,7 +44,7 @@ import { showErrorMsg } from '@Utils/Shared'
 import { useIsMobile } from '@Utils/ThemeOverride'
 import { useAdminAdState } from '@Hooks/useGame'
 import { useTicker } from '@Hooks/useTicker'
-import api, { AdTeamCellModel } from '@Api'
+import api, { AdSnapshotChange, AdTeamCellModel } from '@Api'
 import misc from '@Styles/Misc.module.css'
 import tableClasses from '@Styles/AdOpsTable.module.css'
 
@@ -58,12 +63,156 @@ const statusColor = (s?: string | null) => {
   }
 }
 
+// docker diff kind: 0 = modified (C), 1 = added (A), 2 = deleted (D)
+const kindMeta = (kind: number): { color: string; label: string } => {
+  switch (kind) {
+    case 1:
+      return { color: 'teal', label: 'A' }
+    case 2:
+      return { color: 'red', label: 'D' }
+    default:
+      return { color: 'yellow', label: 'M' }
+  }
+}
+
+interface SnapTarget {
+  cell: AdTeamCellModel
+  teamName: string
+  challengeTitle: string
+}
+
+const SnapshotModal: FC<{ gameId: number; target: SnapTarget | null; onClose: () => void }> = ({
+  gameId,
+  target,
+  onClose,
+}) => {
+  const { t } = useTranslation()
+  const [loading, setLoading] = useState(false)
+  const [changes, setChanges] = useState<AdSnapshotChange[]>([])
+  const sid = target?.cell.adTeamServiceId
+
+  useEffect(() => {
+    if (sid === undefined) return
+    let cancelled = false
+    setLoading(true)
+    setChanges([])
+    api.edit
+      .editAdSnapshotChanges(gameId, sid)
+      .then(({ data }) => {
+        if (!cancelled) setChanges(data.changes ?? [])
+      })
+      .catch(() => {
+        // changes are best-effort; the tarball download is the source of truth
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [gameId, sid])
+
+  const downloadUrl = target ? api.edit.editAdSnapshotUrl(gameId, target.cell.adTeamServiceId) : '#'
+  const filename = target
+    ? `ad-snapshot-team${target.cell.adTeamServiceId}-challenge${target.cell.challengeId}.tar.gz`
+    : 'snapshot.tar.gz'
+
+  const recipe = [
+    `# 1. Load the team's committed container image`,
+    `docker load -i ${filename}`,
+    `#    → note the printed "Loaded image: <repo:tag>"`,
+    ``,
+    `# 2. Shell in to inspect what they shipped`,
+    `docker run --rm -it <loaded-image> sh`,
+    ``,
+    `# 3. Diff their files against the original challenge image`,
+    `#    (the list above is docker diff; for content diffs:)`,
+    `docker run --rm <loaded-image> cat /path/from/list/above`,
+  ].join('\n')
+
+  return (
+    <Modal
+      opened={target !== null}
+      onClose={onClose}
+      size="xl"
+      title={
+        target
+          ? t('admin.content.ad_ops.snapshot.title', {
+              team: target.teamName,
+              challenge: target.challengeTitle,
+              defaultValue: 'Snapshot — {{team}} · {{challenge}}',
+            })
+          : ''
+      }
+    >
+      <Stack gap="md">
+        <Group justify="space-between" wrap="wrap" gap="sm">
+          <Button
+            component="a"
+            href={downloadUrl}
+            download={filename}
+            leftSection={<Icon path={mdiDownload} size={0.9} />}
+          >
+            {t('admin.button.ad_ops.snapshot.download', 'Download .tar.gz')}
+          </Button>
+          <Text size="sm" c="dimmed">
+            {t('admin.content.ad_ops.snapshot.changed_count', {
+              count: changes.length,
+              defaultValue: '{{count}} file(s) changed vs original image',
+            })}
+          </Text>
+        </Group>
+
+        <Divider
+          label={t('admin.content.ad_ops.snapshot.diff_label', 'Filesystem changes (docker diff)')}
+          labelPosition="left"
+        />
+        {loading ? (
+          <Center h={120}>
+            <Loader size="sm" />
+          </Center>
+        ) : changes.length === 0 ? (
+          <Text size="sm" c="dimmed">
+            {t('admin.content.ad_ops.snapshot.no_changes',
+              'No filesystem changes were recorded (snapshot may predate diff capture, or nothing changed).')}
+          </Text>
+        ) : (
+          <ScrollArea h={300} type="auto">
+            <Stack gap={2}>
+              {changes.map((ch, i) => {
+                const m = kindMeta(ch.kind)
+                return (
+                  <Group key={`${ch.path}-${i}`} gap="xs" wrap="nowrap">
+                    <Badge size="xs" color={m.color} variant="filled" w={22} p={0}>
+                      {m.label}
+                    </Badge>
+                    <Text className={misc.ffmono} size="xs" style={{ wordBreak: 'break-all' }}>
+                      {ch.path}
+                    </Text>
+                  </Group>
+                )
+              })}
+            </Stack>
+          </ScrollArea>
+        )}
+
+        <Divider
+          label={t('admin.content.ad_ops.snapshot.inspect_label', 'Inspect locally')}
+          labelPosition="left"
+        />
+        <Code block>{recipe}</Code>
+      </Stack>
+    </Modal>
+  )
+}
+
 const AdOps: FC = () => {
   const { id } = useParams()
   const numId = parseInt(id ?? '-1', 10)
   const { t } = useTranslation()
   const { adminAdState: state, error, mutate } = useAdminAdState(numId)
   const [busy, setBusy] = useState(false)
+  const [snapTarget, setSnapTarget] = useState<SnapTarget | null>(null)
   const isMobile = useIsMobile(1080)
 
   const isLoading = !state && !error
@@ -169,6 +318,7 @@ const AdOps: FC = () => {
 
   return (
     <WithGameEditTab>
+      <SnapshotModal gameId={numId} target={snapTarget} onClose={() => setSnapTarget(null)} />
       <Stack gap="md">
         {/* Top status bar */}
         <Paper p="md" withBorder>
@@ -378,14 +528,38 @@ const AdOps: FC = () => {
                                     )}
                                   </CopyButton>
                                 )}
-                                <Button
-                                  size="compact-xs"
-                                  variant="subtle"
-                                  leftSection={<Icon path={mdiRestart} size={0.7} />}
-                                  onClick={() => restartCell(cell)}
-                                >
-                                  {t('admin.button.ad_ops.restart', 'Restart')}
-                                </Button>
+                                <Group gap={4} wrap="nowrap">
+                                  <Button
+                                    size="compact-xs"
+                                    variant="subtle"
+                                    leftSection={<Icon path={mdiRestart} size={0.7} />}
+                                    onClick={() => restartCell(cell)}
+                                  >
+                                    {t('admin.button.ad_ops.restart', 'Restart')}
+                                  </Button>
+                                  {cell.snapshotAvailable && (
+                                    <Button
+                                      size="compact-xs"
+                                      variant="subtle"
+                                      color="grape"
+                                      leftSection={<Icon path={mdiFileTree} size={0.7} />}
+                                      onClick={() =>
+                                        setSnapTarget({
+                                          cell,
+                                          teamName: row.teamName,
+                                          challengeTitle: c.title,
+                                        })
+                                      }
+                                    >
+                                      {cell.changedFileCount != null
+                                        ? t('admin.button.ad_ops.snapshot.with_count', {
+                                            count: cell.changedFileCount,
+                                            defaultValue: 'Snapshot ({{count}})',
+                                          })
+                                        : t('admin.button.ad_ops.snapshot.label', 'Snapshot')}
+                                    </Button>
+                                  )}
+                                </Group>
                               </Stack>
                             ) : (
                               <Center>

@@ -4,6 +4,7 @@ using GZCTF.Models;
 using GZCTF.Models.Data;
 using GZCTF.Models.Request.Admin;
 using GZCTF.Services;
+using GZCTF.Storage.Interface;
 using GZCTF.Utils;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -25,9 +26,17 @@ public class AdAdminController(
     AppDbContext db,
     AdContainerManager adContainerManager,
     AdRoundService adRoundService,
+    IBlobStorage blobStorage,
     IStringLocalizer<Program> localizer,
     ILogger<AdAdminController> logger) : ControllerBase
 {
+    private static int? CountChanges(string? json)
+    {
+        if (string.IsNullOrEmpty(json)) return null;
+        try { return System.Text.Json.JsonDocument.Parse(json).RootElement.GetArrayLength(); }
+        catch { return null; }
+    }
+
     /// <summary>
     /// Manually advance to the next A&amp;D round, planting fresh flags for
     /// every (team, A&amp;D challenge). Same code path the
@@ -115,7 +124,9 @@ public class AdAdminController(
                 ContainerIp = s.Container?.IP,
                 ContainerPort = s.Container?.Port,
                 LastCheckStatus = lastChecksByService.GetValueOrDefault(s.Id)?.Status.ToString(),
-                CurrentFlag = currentFlags.GetValueOrDefault(s.Id)
+                CurrentFlag = currentFlags.GetValueOrDefault(s.Id),
+                SnapshotAvailable = !string.IsNullOrEmpty(s.SnapshotBlobKey),
+                ChangedFileCount = CountChanges(s.SnapshotChanges)
             }).ToList()
         }).ToList();
 
@@ -232,5 +243,74 @@ public class AdAdminController(
     {
         await adContainerManager.EnsureContainersForGameAsync(id, token);
         return Ok();
+    }
+
+    /// <summary>
+    /// Download any team's post-game container snapshot tarball (admin
+    /// forensics — "what did they ship"). Unlike the player endpoint this
+    /// isn't team-scoped: a game admin can pull any team's snapshot.
+    /// </summary>
+    [RequireGameAdmin]
+    [HttpGet("Services/{adTeamServiceId:int}/Snapshot")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> DownloadSnapshot(int id, int adTeamServiceId, CancellationToken token)
+    {
+        var ts = await db.AdTeamServices
+            .Include(t => t.Participation)
+            .FirstOrDefaultAsync(t => t.Id == adTeamServiceId, token);
+        if (ts is null || ts.Participation.GameId != id) return NotFound();
+
+        if (string.IsNullOrEmpty(ts.SnapshotBlobKey))
+            return NotFound(new RequestResponse("No snapshot for this team-service (game still running, snapshot disabled, or it failed)"));
+
+        if (!await blobStorage.ExistsAsync(ts.SnapshotBlobKey, token))
+            return NotFound(new RequestResponse("Snapshot blob is missing — may have been retained-out"));
+
+        var stream = await blobStorage.OpenReadAsync(ts.SnapshotBlobKey, token);
+        var filename = $"ad-snapshot-team{ts.ParticipationId}-challenge{ts.ChallengeId}.tar.gz";
+        return File(stream, "application/gzip", filename);
+    }
+
+    /// <summary>
+    /// The filesystem diff (docker diff) of a team's container vs the
+    /// baseline image, captured at snapshot time — the admin "what did they
+    /// change" view.
+    /// </summary>
+    [RequireGameAdmin]
+    [HttpGet("Services/{adTeamServiceId:int}/Snapshot/Changes")]
+    [ProducesResponseType(typeof(AdSnapshotChangesModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> SnapshotChanges(int id, int adTeamServiceId, CancellationToken token)
+    {
+        var ts = await db.AdTeamServices
+            .Include(t => t.Participation)
+            .FirstOrDefaultAsync(t => t.Id == adTeamServiceId, token);
+        if (ts is null || ts.Participation.GameId != id) return NotFound();
+
+        var model = new AdSnapshotChangesModel
+        {
+            SnapshotAvailable = !string.IsNullOrEmpty(ts.SnapshotBlobKey)
+        };
+
+        if (!string.IsNullOrEmpty(ts.SnapshotChanges))
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(ts.SnapshotChanges);
+                foreach (var el in doc.RootElement.EnumerateArray())
+                {
+                    model.Changes.Add(new AdSnapshotChange
+                    {
+                        Path = el.GetProperty("p").GetString() ?? string.Empty,
+                        Kind = el.TryGetProperty("k", out var k) ? k.GetInt32() : 0
+                    });
+                }
+            }
+            catch (Exception e)
+            {
+                logger.LogWarning(e, "A&D snapshot changes parse failed for service={Sid}", adTeamServiceId);
+            }
+        }
+
+        return Ok(model);
     }
 }

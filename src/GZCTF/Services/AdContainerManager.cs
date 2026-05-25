@@ -144,6 +144,29 @@ public sealed class AdContainerManager(
 
         try
         {
+            // Capture `docker diff` (writable-layer changes vs the baseline
+            // image) BEFORE committing/destroying — this is the "what did the
+            // team change" data. Best-effort: a failure here shouldn't abort
+            // the snapshot. Capped so a pathological container can't bloat the
+            // row.
+            try
+            {
+                var changes = await docker.Containers.InspectChangesAsync(ts.Container.ContainerId, token);
+                if (changes is { Count: > 0 })
+                {
+                    var trimmed = changes
+                        .Take(3000)
+                        .Select(c => new { p = c.Path, k = (int)c.Kind })
+                        .ToList();
+                    ts.SnapshotChanges = System.Text.Json.JsonSerializer.Serialize(trimmed);
+                }
+            }
+            catch (Exception e)
+            {
+                logger.LogWarning(e, "A&D snapshot: docker diff failed for team={Tid} challenge={Cid}",
+                    ts.ParticipationId, ts.ChallengeId);
+            }
+
             await docker.Images.CommitContainerChangesAsync(new DockerModels.CommitContainerChangesParameters
             {
                 ContainerID = ts.Container.ContainerId,

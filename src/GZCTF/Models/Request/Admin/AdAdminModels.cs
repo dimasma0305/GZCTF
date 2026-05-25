@@ -46,6 +46,29 @@ public class AdTeamCellModel
     public int? ContainerPort { get; set; }
     public string? LastCheckStatus { get; set; }
     public string? CurrentFlag { get; set; }
+
+    /// <summary>True iff a post-game snapshot tarball is stored for this team-service.</summary>
+    public bool SnapshotAvailable { get; set; }
+
+    /// <summary>Number of files the team changed vs the baseline image (docker diff), if captured.</summary>
+    public int? ChangedFileCount { get; set; }
+}
+
+/// <summary>One filesystem change in a team's container vs the baseline image.</summary>
+public class AdSnapshotChange
+{
+    /// <summary>Path inside the container.</summary>
+    public string Path { get; set; } = string.Empty;
+
+    /// <summary>0 = modified, 1 = added, 2 = deleted (docker diff semantics).</summary>
+    public int Kind { get; set; }
+}
+
+/// <summary>Response for the snapshot-changes endpoint.</summary>
+public class AdSnapshotChangesModel
+{
+    public bool SnapshotAvailable { get; set; }
+    public List<AdSnapshotChange> Changes { get; set; } = [];
 }
 
 public class AdOverrideCheckModel
