@@ -445,7 +445,7 @@ const GameInfoEdit: FC = () => {
           disabled={disabled}
           min={30}
           max={600}
-          value={game?.adTickSeconds ?? 120}
+          value={game?.adTickSeconds ?? 60}
           onChange={(e) => {
             const n = getInputNumber(e)
             if (!isNaN(n)) game && setGame({ ...game, adTickSeconds: n })

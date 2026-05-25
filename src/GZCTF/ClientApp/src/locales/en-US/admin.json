@@ -488,7 +488,7 @@
         },
         "ad_tick_seconds": {
           "label": "A&D tick (seconds)",
-          "description": "Length of one scoring tick. Every A&D service in the game shares this — flags rotate and the checker runs once per tick (default 120)."
+          "description": "Length of one scoring tick. Every A&D service in the game shares this — flags rotate and the checker runs once per tick (default 60)."
         },
         "ad_flag_lifetime_ticks": {
           "label": "A&D flag lifetime (ticks)",

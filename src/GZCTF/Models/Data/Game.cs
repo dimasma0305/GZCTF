@@ -318,7 +318,7 @@ public partial class Game
     /// span the whole game), so this is a game knob, not a per-challenge one.
     /// Default 120. Industry norm is 60–180s.
     /// </summary>
-    public int? AdTickSeconds { get; set; } = 120;
+    public int? AdTickSeconds { get; set; } = 60;
 
     /// <summary>
     /// Number of ticks a planted flag remains valid for attack submission —

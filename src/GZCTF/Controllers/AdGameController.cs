@@ -598,7 +598,7 @@ public class AdGameController(
         var tickSeconds = await db.Games
             .Where(g => g.Id == id)
             .Select(g => g.AdTickSeconds)
-            .FirstOrDefaultAsync(token) ?? 120;
+            .FirstOrDefaultAsync(token) ?? 60;
 
         foreach (var chal in enabledChallenges)
         {

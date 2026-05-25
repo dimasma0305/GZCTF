@@ -57,7 +57,7 @@ public sealed class AdRoundService(
         var tickSeconds = await db.Games
             .Where(g => g.Id == gameId)
             .Select(g => g.AdTickSeconds)
-            .FirstOrDefaultAsync(token) ?? 120;
+            .FirstOrDefaultAsync(token) ?? 60;
 
         var now = DateTimeOffset.UtcNow;
         var round = new AdRound
