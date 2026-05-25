@@ -15,6 +15,8 @@
       "refresh": "刷新",
       "ensure_containers": "重建缺失容器",
       "advance_round": "推进回合",
+      "pause_scoring": "暂停计分",
+      "resume_scoring": "恢复计分",
       "restart": "重启",
       "snapshot": {
         "label": "快照",
@@ -164,6 +166,7 @@
       "scoring_paused": "计分已暂停",
       "live": "实时",
       "service_health": "服务健康度",
+      "override_label": "覆盖 SLA 判定",
       "health_unchecked": "未检测",
       "flag_cycle": "Flag 周期",
       "challenge_off": "停用",
@@ -1057,7 +1060,10 @@
       "restart_queued": {
         "title": "重启已排队",
         "message": "容器将在数秒后重启。"
-      }
+      },
+      "scoring_paused": "计分已暂停 — 回合与检查已冻结。",
+      "scoring_resumed": "计分已恢复。",
+      "check_overridden": "检查结果已覆盖为 {{status}}。"
     },
     "games": {
       "challenges": {

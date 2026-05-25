@@ -186,6 +186,9 @@ public class AdTeamServiceStateModel
     public DateTimeOffset? LastResetAt { get; set; }
     public bool CanReset { get; set; }
     public int? ResetCooldownSecondsRemaining { get; set; }
+
+    /// <summary>True once a post-game snapshot tarball exists for this service — the team can download their own box.</summary>
+    public bool SnapshotAvailable { get; set; }
 }
 
 /// <summary>

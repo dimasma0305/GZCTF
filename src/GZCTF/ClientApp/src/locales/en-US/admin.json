@@ -5,6 +5,8 @@
       "refresh": "Refresh",
       "ensure_containers": "Ensure containers",
       "advance_round": "Advance round",
+      "pause_scoring": "Pause scoring",
+      "resume_scoring": "Resume scoring",
       "restart": "Restart",
       "snapshot": {
         "label": "Snapshot",
@@ -154,6 +156,7 @@
       "scoring_paused": "Scoring paused",
       "live": "Live",
       "service_health": "Service health",
+      "override_label": "Override SLA verdict",
       "health_unchecked": "Unchecked",
       "flag_cycle": "Flag cycle",
       "challenge_off": "off",
@@ -1076,7 +1079,10 @@
       "restart_queued": {
         "title": "Restart queued",
         "message": "Container will restart in seconds."
-      }
+      },
+      "scoring_paused": "Scoring paused — rounds + checks frozen.",
+      "scoring_resumed": "Scoring resumed.",
+      "check_overridden": "Check overridden to {{status}}."
     },
     "games": {
       "challenges": {

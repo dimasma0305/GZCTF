@@ -10,7 +10,7 @@ namespace GZCTF.Models.Data;
 /// team-member-add events for active A&amp;D games.
 /// </summary>
 [Index(nameof(UserId), nameof(ParticipationId), IsUnique = true)]
-[Index(nameof(AssignedIp))]
+[Index(nameof(GameId), nameof(AssignedIp), IsUnique = true)]
 public class AdVpnPeer
 {
     [Key]
@@ -25,6 +25,15 @@ public class AdVpnPeer
     public int ParticipationId { get; set; }
 
     public Participation Participation { get; set; } = null!;
+
+    /// <summary>
+    /// Denormalized game id (== Participation.GameId). Carried on the row so the
+    /// VPN client subnet — which is reused per game — can enforce a per-game
+    /// unique constraint on <see cref="AssignedIp"/>, closing the concurrent-
+    /// provisioning race where two members raced into the same IP.
+    /// </summary>
+    [Required]
+    public int GameId { get; set; }
 
     /// <summary>WireGuard public key — programmed into the WG server config.</summary>
     [Required]

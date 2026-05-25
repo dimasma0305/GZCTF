@@ -1534,6 +1534,18 @@ export interface ChallengeEditDetailModel {
    * @format double
    */
   difficulty: number;
+  /** A&D — Docker image for the per-challenge checker container. */
+  adCheckerImage?: string | null;
+  /** A&D — When true, team containers can reach the public internet. */
+  adAllowEgress?: boolean | null;
+  /** A&D — When true, teams can self-reset to baseline. */
+  adAllowSelfReset?: boolean | null;
+  /** A&D — putflag jitter window as a fraction of the tick. */
+  adPutflagWindowFraction?: number | null;
+  /** A&D — getflag jitter window as a fraction of the tick. */
+  adGetflagWindowFraction?: number | null;
+  /** A&D — seconds after putflag before getflag may fire. */
+  adMinGracePeriodSeconds?: number | null;
   /** Current build pipeline state */
   buildStatus?: ChallengeBuildStatus;
   /** Live-updated build log tail */
@@ -1882,6 +1894,8 @@ export interface AdTeamServiceStateModel {
   lastResetAt?: string | null;
   canReset: boolean;
   resetCooldownSecondsRemaining?: number | null;
+  /** True once a post-game snapshot exists for this service — team can download their own box. */
+  snapshotAvailable: boolean;
 }
 
 /** A&D — GET /api/Game/{id}/Ad/State response. */
@@ -2010,6 +2024,8 @@ export interface AdTeamCellModel {
   containerIp?: string | null;
   containerPort?: number | null;
   lastCheckStatus?: string | null;
+  /** Id of the most recent check result — target of a judge override. */
+  lastCheckId?: number | null;
   currentFlag?: string | null;
   /** True iff a post-game snapshot tarball is stored for this team-service. */
   snapshotAvailable: boolean;
@@ -6351,6 +6367,20 @@ export class Api<
       this.request<void, RequestResponse>({
         path: `/api/edit/games/${id}/ad/EnsureContainers`,
         method: "POST",
+        ...params,
+      }),
+
+    /**
+     * @description A&D — pause/resume scoring for the whole game (freezes round advance + checks).
+     * @tags Edit
+     * @name EditAdToggleScoringPause
+     * @request POST:/api/edit/games/{id}/ad/ScoringPause
+     */
+    editAdToggleScoringPause: (id: number, params: RequestParams = {}) =>
+      this.request<{ scoringPaused: boolean }, RequestResponse>({
+        path: `/api/edit/games/${id}/ad/ScoringPause`,
+        method: "POST",
+        format: "json",
         ...params,
       }),
 

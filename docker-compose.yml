@@ -6,7 +6,6 @@ services:
       dockerfile: GZCTF/Dockerfile.local
     ports:
       - "8080:8080"
-      # - "2222:2222"
       # - "3306:3306"
       # - "5432:5432"
       # - "6379:6379"
@@ -103,7 +102,8 @@ services:
       - GZCTF_URL=http://gzctf:8080
       - INTERNAL_SECRET=${AD_SSH_INTERNAL_SECRET:-dev-only-rotate-me-before-prod}
     ports:
-      # 2222 on the host → 22 inside; players ssh user@host -p 2222
+      # AD_SSH_PUBLIC_PORT (default 22022) on the host → 22 inside;
+      # players ssh <challenge-id>@host -p ${AD_SSH_PUBLIC_PORT:-22022}
       - "${AD_SSH_PUBLIC_PORT:-22022}:22"
     depends_on:
       - gzctf

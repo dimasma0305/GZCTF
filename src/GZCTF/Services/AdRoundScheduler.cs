@@ -60,7 +60,7 @@ public sealed class AdRoundScheduler(
         var now = DateTimeOffset.UtcNow;
 
         var activeGames = await db.Games
-            .Where(g => g.StartTimeUtc <= now && now <= g.EndTimeUtc)
+            .Where(g => g.StartTimeUtc <= now && now <= g.EndTimeUtc && !g.AdScoringPaused)
             .Where(g => g.Challenges.Any(c => c.Type == ChallengeType.AttackDefense && c.IsEnabled))
             .Select(g => new
             {

@@ -85,7 +85,7 @@ public sealed class AdCheckerService(
         var now = DateTimeOffset.UtcNow;
 
         var activeGameIds = await db.Games
-            .Where(g => g.StartTimeUtc <= now && now <= g.EndTimeUtc)
+            .Where(g => g.StartTimeUtc <= now && now <= g.EndTimeUtc && !g.AdScoringPaused)
             .Where(g => g.Challenges.Any(c => c.Type == ChallengeType.AttackDefense && c.IsEnabled))
             .Select(g => g.Id)
             .ToListAsync(token);

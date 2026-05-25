@@ -4,6 +4,7 @@
       "reset": "Reset",
       "submit": "Submit attack",
       "snapshot": "Snapshot",
+      "download_snapshot": "Download .tar.gz",
       "rotate_token": "Rotate token",
       "generate_token": "Generate token",
       "copy_curl": "Copy curl",
@@ -88,6 +89,7 @@
       "no_checks_yet": "no checks yet",
       "target": "Target",
       "flag_to_defend": "Defending",
+      "snapshot": "Post-game snapshot",
       "defend_target": "Your service",
       "no_service": {
         "title": "No service for your team yet",
@@ -437,7 +439,8 @@
   "tooltip": {
     "ad": {
       "reset": "Rebuild this container to baseline (you lose SLA during the rebuild)",
-      "reset_cooldown": "On cooldown — {{seconds}}s remaining"
+      "reset_cooldown": "On cooldown — {{seconds}}s remaining",
+      "snapshot": "Download your container as a loadable Docker image (docker load -i …)"
     },
     "copy": {
       "copied": "Copied",

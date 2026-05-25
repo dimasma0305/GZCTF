@@ -477,7 +477,7 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
                     <List.Item>
                       {t(
                         'game.content.ad.guide.rounds.tick',
-                        'A round (tick) is the scoring unit. Length is per-challenge (the operator sets it — typically 60–180s).'
+                        'A round (tick) is the scoring unit. Length is set once for the whole event (the operator sets it — typically 60–180s).'
                       )}
                     </List.Item>
                     <List.Item>

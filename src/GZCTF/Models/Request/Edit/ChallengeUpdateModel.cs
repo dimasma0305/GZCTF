@@ -121,6 +121,31 @@ public class ChallengeUpdateModel
     /// </summary>
     public double? Difficulty { get; set; }
 
+    #region Attack & Defense (per-challenge)
+
+    /// <summary>A&amp;D — Docker image for the per-challenge checker container (empty = TCP-reachability fallback).</summary>
+    public string? AdCheckerImage { get; set; }
+
+    /// <summary>A&amp;D — When true, team containers can reach the public internet.</summary>
+    public bool? AdAllowEgress { get; set; }
+
+    /// <summary>A&amp;D — When true, teams can self-reset to baseline.</summary>
+    public bool? AdAllowSelfReset { get; set; }
+
+    /// <summary>A&amp;D — putflag jitter window as a fraction of the tick.</summary>
+    [Range(0, 1)]
+    public double? AdPutflagWindowFraction { get; set; }
+
+    /// <summary>A&amp;D — getflag jitter window as a fraction of the tick.</summary>
+    [Range(0, 1)]
+    public double? AdGetflagWindowFraction { get; set; }
+
+    /// <summary>A&amp;D — seconds after putflag before getflag may fire.</summary>
+    [Range(0, 3600)]
+    public int? AdMinGracePeriodSeconds { get; set; }
+
+    #endregion
+
     /// <summary>
     /// Check if hints are updated
     /// </summary>

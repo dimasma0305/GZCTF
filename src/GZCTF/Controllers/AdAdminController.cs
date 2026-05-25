@@ -124,6 +124,7 @@ public class AdAdminController(
                 ContainerIp = s.Container?.IP,
                 ContainerPort = s.Container?.Port,
                 LastCheckStatus = lastChecksByService.GetValueOrDefault(s.Id)?.Status.ToString(),
+                LastCheckId = lastChecksByService.GetValueOrDefault(s.Id)?.Id,
                 CurrentFlag = currentFlags.GetValueOrDefault(s.Id),
                 SnapshotAvailable = !string.IsNullOrEmpty(s.SnapshotBlobKey),
                 ChangedFileCount = CountChanges(s.SnapshotChanges)
@@ -148,7 +149,7 @@ public class AdAdminController(
             CurrentRound = currentRound?.Number,
             RoundStartedAt = currentRound?.StartedAt,
             RoundEndsAt = currentRound?.EndsAt,
-            ScoringPaused = false, // wired in Phase 2 when scheduler exists
+            ScoringPaused = game.AdScoringPaused,
             Challenges = challengeStates,
             Teams = rows
         });
@@ -178,6 +179,30 @@ public class AdAdminController(
             TaskStatus.Success, LogLevel.Information);
 
         return Ok(new { c.IsEnabled });
+    }
+
+    /// <summary>
+    /// Pause / resume A&amp;D scoring for the whole game. While paused the round
+    /// scheduler stops advancing (no new flags) and the checker stops recording
+    /// (no SLA accrual); containers stay up. Toggles
+    /// <see cref="Game.AdScoringPaused"/>.
+    /// </summary>
+    [RequireGameAdmin]
+    [HttpPost("ScoringPause")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> ToggleScoringPause(int id, CancellationToken token)
+    {
+        var game = await db.Games.FirstOrDefaultAsync(g => g.Id == id, token);
+        if (game is null) return NotFound();
+
+        game.AdScoringPaused = !game.AdScoringPaused;
+        await db.SaveChangesAsync(token);
+
+        logger.SystemLog(
+            $"A&D scoring {(game.AdScoringPaused ? "paused" : "resumed")}: game={id}",
+            TaskStatus.Success, LogLevel.Information);
+
+        return Ok(new { scoringPaused = game.AdScoringPaused });
     }
 
     /// <summary>

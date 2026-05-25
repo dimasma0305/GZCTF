@@ -10,7 +10,7 @@ import {
   Tooltip,
 } from '@mantine/core'
 import { showNotification } from '@mantine/notifications'
-import { mdiAlertCircleOutline, mdiConsole, mdiRestart } from '@mdi/js'
+import { mdiAlertCircleOutline, mdiConsole, mdiDownload, mdiRestart } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import { FC, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -248,6 +248,29 @@ export const AdChallengePanel: FC<AdChallengePanelProps> = ({ gameId, challengeI
       )}
 
       {renderSshHint()}
+
+      {service.snapshotAvailable && (
+        <Group gap={6} align="center" wrap="nowrap">
+          <Text size="xs" c="dimmed">
+            {t('game.content.ad.snapshot', 'Post-game snapshot')}:
+          </Text>
+          <Tooltip
+            label={t('game.tooltip.ad.snapshot',
+              'Download your container as a loadable Docker image (docker load -i …)')}
+          >
+            <Button
+              component="a"
+              href={api.game.gameAdDownloadSnapshotUrl(gameId, service.adTeamServiceId)}
+              download
+              size="compact-xs"
+              variant="light"
+              leftSection={<Icon path={mdiDownload} size={0.7} />}
+            >
+              {t('game.button.ad.download_snapshot', 'Download .tar.gz')}
+            </Button>
+          </Tooltip>
+        </Group>
+      )}
     </Stack>
   )
 }

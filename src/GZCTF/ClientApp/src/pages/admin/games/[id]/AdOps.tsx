@@ -10,6 +10,7 @@ import {
   Group,
   Indicator,
   Loader,
+  Menu,
   Modal,
   Paper,
   RingProgress,
@@ -51,7 +52,7 @@ import { showErrorMsg } from '@Utils/Shared'
 import { useIsMobile } from '@Utils/ThemeOverride'
 import { useAdminAdState } from '@Hooks/useGame'
 import { useTicker } from '@Hooks/useTicker'
-import api, { AdSnapshotChange, AdTeamCellModel } from '@Api'
+import api, { AdCheckStatus, AdSnapshotChange, AdTeamCellModel } from '@Api'
 import misc from '@Styles/Misc.module.css'
 import tableClasses from '@Styles/AdOpsTable.module.css'
 
@@ -83,6 +84,14 @@ const kindMeta = (kind: number): { color: string; label: string } => {
       return { color: 'yellow', label: 'M' }
   }
 }
+
+// Statuses an operator can manually override a check verdict to.
+const OVERRIDE_STATUSES = [
+  { value: AdCheckStatus.Ok, icon: mdiCheckCircle, color: 'teal' },
+  { value: AdCheckStatus.Mumble, icon: mdiAlertCircle, color: 'yellow' },
+  { value: AdCheckStatus.Offline, icon: mdiCloseCircle, color: 'red' },
+  { value: AdCheckStatus.InternalError, icon: mdiHelpCircle, color: 'gray' },
+] as const
 
 interface SnapTarget {
   cell: AdTeamCellModel
@@ -305,6 +314,42 @@ const AdOps: FC = () => {
     }
   }
 
+  const toggleScoringPause = async () => {
+    setBusy(true)
+    try {
+      const { data } = await api.edit.editAdToggleScoringPause(numId)
+      showNotification({
+        color: data.scoringPaused ? 'orange' : 'teal',
+        icon: <Icon path={data.scoringPaused ? mdiPauseCircleOutline : mdiCheck} size={1} />,
+        message: data.scoringPaused
+          ? t('admin.notification.ad_ops.scoring_paused', 'Scoring paused — rounds + checks frozen.')
+          : t('admin.notification.ad_ops.scoring_resumed', 'Scoring resumed.'),
+      })
+      mutate()
+    } catch (e) {
+      showErrorMsg(e, t)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const overrideCheck = async (checkId: number, newStatus: AdCheckStatus) => {
+    try {
+      await api.edit.editAdOverrideCheck(numId, checkId, { newStatus })
+      showNotification({
+        color: 'teal',
+        icon: <Icon path={mdiCheck} size={1} />,
+        message: t('admin.notification.ad_ops.check_overridden', {
+          status: newStatus,
+          defaultValue: 'Check overridden to {{status}}.',
+        }),
+      })
+      mutate()
+    } catch (e) {
+      showErrorMsg(e, t)
+    }
+  }
+
   if (isLoading) {
     return (
       <WithGameEditTab isLoading>
@@ -489,6 +534,20 @@ const AdOps: FC = () => {
                 {t('admin.button.ad_ops.ensure_containers', 'Ensure containers')}
               </Button>
               <Button
+                leftSection={
+                  <Icon path={state.scoringPaused ? mdiPlayCircle : mdiPauseCircleOutline} size={0.9} />
+                }
+                variant="default"
+                color={state.scoringPaused ? 'teal' : 'orange'}
+                size={isMobile ? 'xs' : 'sm'}
+                disabled={busy}
+                onClick={toggleScoringPause}
+              >
+                {state.scoringPaused
+                  ? t('admin.button.ad_ops.resume_scoring', 'Resume scoring')
+                  : t('admin.button.ad_ops.pause_scoring', 'Pause scoring')}
+              </Button>
+              <Button
                 leftSection={<Icon path={mdiPlayCircle} size={0.9} />}
                 size={isMobile ? 'xs' : 'sm'}
                 color="red"
@@ -597,14 +656,47 @@ const AdOps: FC = () => {
                             {cell ? (
                               <Stack gap={6}>
                                 <Group justify="space-between" wrap="nowrap" gap={4}>
-                                  <Badge
-                                    size="sm"
-                                    color={sm.color}
-                                    variant={cell.lastCheckStatus ? 'light' : 'outline'}
-                                    leftSection={<Icon path={sm.icon} size={0.55} />}
+                                  <Menu
+                                    shadow="md"
+                                    position="bottom-start"
+                                    withinPortal
+                                    disabled={cell.lastCheckId == null}
                                   >
-                                    {cell.lastCheckStatus ?? '—'}
-                                  </Badge>
+                                    <Menu.Target>
+                                      <Badge
+                                        size="sm"
+                                        color={sm.color}
+                                        variant={cell.lastCheckStatus ? 'light' : 'outline'}
+                                        leftSection={<Icon path={sm.icon} size={0.55} />}
+                                        style={{ cursor: cell.lastCheckId != null ? 'pointer' : 'default' }}
+                                      >
+                                        {cell.lastCheckStatus ?? '—'}
+                                      </Badge>
+                                    </Menu.Target>
+                                    <Menu.Dropdown>
+                                      <Menu.Label>
+                                        {t('admin.content.ad_ops.override_label', 'Override SLA verdict')}
+                                      </Menu.Label>
+                                      {OVERRIDE_STATUSES.map((s) => (
+                                        <Menu.Item
+                                          key={s.value}
+                                          leftSection={
+                                            <Icon
+                                              path={s.icon}
+                                              size={0.7}
+                                              color={`var(--mantine-color-${s.color}-6)`}
+                                            />
+                                          }
+                                          onClick={() =>
+                                            cell.lastCheckId != null &&
+                                            overrideCheck(cell.lastCheckId, s.value)
+                                          }
+                                        >
+                                          {s.value}
+                                        </Menu.Item>
+                                      ))}
+                                    </Menu.Dropdown>
+                                  </Menu>
                                   <Group gap={2} wrap="nowrap">
                                     <Tooltip
                                       label={t('admin.tooltip.ad_ops.restart',

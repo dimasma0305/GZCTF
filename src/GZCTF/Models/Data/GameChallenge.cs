@@ -76,6 +76,14 @@ public class GameChallenge : Challenge
         DisableBloodBonus = model.DisableBloodBonus ?? DisableBloodBonus;
         SubmissionLimit = model.SubmissionLimit ?? SubmissionLimit;
 
+        // Attack & Defense per-challenge knobs
+        AdCheckerImage = model.AdCheckerImage?.Trim() ?? AdCheckerImage;
+        AdAllowEgress = model.AdAllowEgress ?? AdAllowEgress;
+        AdAllowSelfReset = model.AdAllowSelfReset ?? AdAllowSelfReset;
+        AdPutflagWindowFraction = model.AdPutflagWindowFraction ?? AdPutflagWindowFraction;
+        AdGetflagWindowFraction = model.AdGetflagWindowFraction ?? AdGetflagWindowFraction;
+        AdMinGracePeriodSeconds = model.AdMinGracePeriodSeconds ?? AdMinGracePeriodSeconds;
+
         // isEnabled should be updated alone
         IsEnabled = model.IsEnabled ?? IsEnabled;
 

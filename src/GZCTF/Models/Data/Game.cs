@@ -349,5 +349,13 @@ public partial class Game
     /// after game end.
     /// </summary>
     public int? AdSnapshotRetentionDays { get; set; }
+
+    /// <summary>
+    /// When true, the round scheduler stops advancing rounds and the checker
+    /// stops recording results — freezing flag rotation and SLA accrual without
+    /// tearing anything down. Operator-toggled mid-event (e.g. during an
+    /// infrastructure incident). Default false.
+    /// </summary>
+    public bool AdScoringPaused { get; set; }
     #endregion
 }

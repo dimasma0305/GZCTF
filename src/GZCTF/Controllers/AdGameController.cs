@@ -57,6 +57,31 @@ public class AdGameController(
         if (attackerPart is null)
             return Unauthorized();
 
+        // Submissions are only accepted inside the game window. Round-number
+        // expiry alone doesn't close the door at game end (the scheduler
+        // freezes the round number), so flags from the last lifetime window
+        // would otherwise stay submittable forever and mutate final standings.
+        var window = await db.Games
+            .Where(g => g.Id == id)
+            .Select(g => new { g.StartTimeUtc, g.EndTimeUtc })
+            .FirstOrDefaultAsync(token);
+        if (window is null)
+            return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Game_NotFound)]));
+
+        var now = DateTimeOffset.UtcNow;
+        if (now < window.StartTimeUtc || now > window.EndTimeUtc)
+        {
+            var closed = model.Flags.Select(f => new AdSubmitResultModel
+            {
+                Flag = f,
+                Status = now < window.StartTimeUtc ? "not_started" : "ended",
+                Message = now < window.StartTimeUtc
+                    ? "the game has not started yet"
+                    : "the game has ended — submissions are closed"
+            }).ToList();
+            return Ok(new AdBatchSubmitResultModel { Results = closed });
+        }
+
         var currentRound = await db.AdRounds
             .Where(r => r.GameId == id)
             .OrderByDescending(r => r.Number)
@@ -501,7 +526,8 @@ public class AdGameController(
                 LastCheckStatus = lastChecksByService.GetValueOrDefault(s.Id)?.Status.ToString(),
                 LastResetAt = s.LastResetAt,
                 CanReset = s.Challenge.AdAllowSelfReset && cooldownRemaining == 0,
-                ResetCooldownSecondsRemaining = cooldownRemaining > 0 ? cooldownRemaining : null
+                ResetCooldownSecondsRemaining = cooldownRemaining > 0 ? cooldownRemaining : null,
+                SnapshotAvailable = !string.IsNullOrEmpty(s.SnapshotBlobKey)
             };
         }).ToList();
 
@@ -980,34 +1006,51 @@ public class AdGameController(
         if (peer is null)
         {
             var (pub, priv) = AdVpnKeys.GenerateX25519KeyPair();
-            var usedIps = await db.AdVpnPeers
-                .Where(p => p.Participation.GameId == id)
-                .Select(p => p.AssignedIp)
-                .ToListAsync(token);
 
-            string assignedIp;
-            try { assignedIp = AdVpnKeys.AssignNextIp(clientCidr, usedIps); }
-            catch (InvalidOperationException ex)
+            // Allocate an IP and persist, retrying on the unique (GameId,
+            // AssignedIp) constraint: if a concurrent provision grabbed the
+            // same IP between our scan and save, re-scan and pick the next one
+            // rather than 500-ing.
+            const int maxAttempts = 5;
+            for (var attempt = 1; ; attempt++)
             {
-                return BadRequest(new RequestResponse(ex.Message));
+                var usedIps = await db.AdVpnPeers
+                    .Where(p => p.GameId == participation.GameId)
+                    .Select(p => p.AssignedIp)
+                    .ToListAsync(token);
+
+                string assignedIp;
+                try { assignedIp = AdVpnKeys.AssignNextIp(clientCidr, usedIps); }
+                catch (InvalidOperationException ex)
+                {
+                    return BadRequest(new RequestResponse(ex.Message));
+                }
+
+                peer = new AdVpnPeer
+                {
+                    UserId = user.Id,
+                    ParticipationId = participation.Id,
+                    GameId = participation.GameId,
+                    PublicKey = Convert.ToBase64String(pub),
+                    PrivateKey = AdVpnKeys.WrapPrivateKey(priv, xorKey),
+                    AssignedIp = assignedIp,
+                };
+                db.AdVpnPeers.Add(peer);
+                try
+                {
+                    await db.SaveChangesAsync(token);
+                    logger.SystemLog(
+                        $"A&D VPN peer provisioned: user={user.Id} participation={participation.Id} ip={assignedIp}",
+                        TaskStatus.Success, LogLevel.Information);
+                    break;
+                }
+                catch (DbUpdateException) when (attempt < maxAttempts)
+                {
+                    db.Entry(peer).State = EntityState.Detached;
+                }
             }
 
-            peer = new AdVpnPeer
-            {
-                UserId = user.Id,
-                ParticipationId = participation.Id,
-                PublicKey = Convert.ToBase64String(pub),
-                PrivateKey = AdVpnKeys.WrapPrivateKey(priv, xorKey),
-                AssignedIp = assignedIp,
-            };
-            await db.AdVpnPeers.AddAsync(peer, token);
-            await db.SaveChangesAsync(token);
-
             privKeyBase64 = Convert.ToBase64String(priv);
-
-            logger.SystemLog(
-                $"A&D VPN peer provisioned: user={user.Id} participation={participation.Id} ip={assignedIp}",
-                TaskStatus.Success, LogLevel.Information);
         }
         else
         {

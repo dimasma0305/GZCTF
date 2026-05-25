@@ -4,6 +4,7 @@
       "reset": "重置",
       "submit": "提交攻击",
       "snapshot": "下载快照",
+      "download_snapshot": "下载 .tar.gz",
       "rotate_token": "重置 Token",
       "generate_token": "生成 Token",
       "copy_curl": "复制 curl",
@@ -88,6 +89,7 @@
       "no_checks_yet": "尚未检测",
       "target": "目标",
       "flag_to_defend": "需防守",
+      "snapshot": "赛后快照",
       "defend_target": "你的服务",
       "no_service": {
         "title": "你的队伍尚未分配服务",
@@ -361,7 +363,8 @@
   "tooltip": {
     "ad": {
       "reset": "将此容器重建为初始镜像（重建期间会损失 SLA）",
-      "reset_cooldown": "冷却中 — 剩余 {{seconds}} 秒"
+      "reset_cooldown": "冷却中 — 剩余 {{seconds}} 秒",
+      "snapshot": "将你的容器下载为可加载的 Docker 镜像（docker load -i …）"
     },
     "copy": {
       "copied": "已复制",

@@ -8,7 +8,7 @@ namespace GZCTF.Models.Data;
 /// Outcome of one checker run against one team's service during one round. Used
 /// to compute SLA score per (team, service) per round.
 /// </summary>
-[Index(nameof(AdTeamServiceId), nameof(AdRoundId))]
+[Index(nameof(AdTeamServiceId), nameof(AdRoundId), IsUnique = true)]
 [Index(nameof(AdRoundId))]
 public class AdCheckResult
 {

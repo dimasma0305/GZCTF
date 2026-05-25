@@ -45,6 +45,10 @@ public class AdTeamCellModel
     public string? ContainerIp { get; set; }
     public int? ContainerPort { get; set; }
     public string? LastCheckStatus { get; set; }
+
+    /// <summary>Id of the most recent check result for this service — the target of a judge override. Null if never checked.</summary>
+    public int? LastCheckId { get; set; }
+
     public string? CurrentFlag { get; set; }
 
     /// <summary>True iff a post-game snapshot tarball is stored for this team-service.</summary>
