@@ -1,9 +1,9 @@
-import { Button, Center, ComboboxItem, Group, ScrollArea, Select, SimpleGrid, Stack, Text, Title } from '@mantine/core'
+import { Button, Center, Checkbox, ComboboxItem, Group, ScrollArea, Select, SimpleGrid, Stack, Text, Title } from '@mantine/core'
 import { useModals } from '@mantine/modals'
 import { showNotification } from '@mantine/notifications'
-import { mdiCheck, mdiHammerWrench, mdiHexagonSlice6, mdiPlus, mdiRefresh } from '@mdi/js'
+import { mdiCheck, mdiHammerWrench, mdiHexagonSlice6, mdiPlus, mdiRefresh, mdiTrashCanOutline } from '@mdi/js'
 import { Icon } from '@mdi/react'
-import { Dispatch, FC, SetStateAction, useState } from 'react'
+import { Dispatch, FC, SetStateAction, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router'
 import { BloodBonusModel } from '@Components/admin/BloodBonusModel'
@@ -32,6 +32,75 @@ const GameChallengeEdit: FC = () => {
   const filteredChallenges = category && challenges ? challenges?.filter((c) => c.category === category) : challenges
 
   const modals = useModals()
+
+  // --- batch selection / delete ---
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+
+  const filteredIds = useMemo(
+    () => (filteredChallenges ?? []).map((c) => c.id).filter((x): x is number => x != null),
+    [filteredChallenges],
+  )
+  // Only count selections that are still in the current (filtered) view.
+  const visibleSelected = filteredIds.filter((id) => selectedIds.has(id))
+  const allSelected = filteredIds.length > 0 && visibleSelected.length === filteredIds.length
+  const someSelected = visibleSelected.length > 0 && !allSelected
+
+  const toggleSelect = (cid: number, checked: boolean) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (checked) next.add(cid)
+      else next.delete(cid)
+      return next
+    })
+
+  const toggleSelectAll = () =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (allSelected) filteredIds.forEach((id) => next.delete(id))
+      else filteredIds.forEach((id) => next.add(id))
+      return next
+    })
+
+  const clearSelection = () => setSelectedIds(new Set())
+
+  const onBatchDelete = () => {
+    const ids = filteredIds.filter((id) => selectedIds.has(id))
+    if (ids.length === 0) return
+    modals.openConfirmModal({
+      title: t('admin.button.challenges.delete_selected'),
+      children: (
+        <Text size="sm">
+          {t('admin.content.games.challenges.delete_selected_confirm', { count: ids.length })}
+        </Text>
+      ),
+      labels: { confirm: t('admin.button.challenges.delete_selected'), cancel: t('common.modal.cancel') },
+      confirmProps: { color: 'red' },
+      onConfirm: async () => {
+        setDisabled(true)
+        try {
+          const results = await Promise.allSettled(
+            ids.map((cid) => api.edit.editRemoveGameChallenge(numId, cid)),
+          )
+          const failed = results.filter((r) => r.status === 'rejected').length
+          const ok = ids.length - failed
+          showNotification({
+            color: failed > 0 ? 'orange' : 'teal',
+            message:
+              failed > 0
+                ? t('admin.notification.games.challenges.batch_deleted_partial', { ok, failed })
+                : t('admin.notification.games.challenges.batch_deleted', { count: ok }),
+            icon: <Icon path={mdiCheck} size={1} />,
+          })
+          clearSelection()
+          mutate()
+        } catch (e) {
+          showErrorMsg(e, t)
+        } finally {
+          setDisabled(false)
+        }
+      },
+    })
+  }
 
   const onToggle = (challenge: ChallengeInfoModel, setDisabled: Dispatch<SetStateAction<boolean>>) => {
     modals.openConfirmModal({
@@ -128,21 +197,46 @@ const GameChallengeEdit: FC = () => {
       isLoading={!challenges}
       head={
         <>
-          <Select
-            placeholder={t('admin.content.show_all')}
-            clearable
-            searchable
-            w="16rem"
-            value={category}
-            nothingFoundMessage={t('admin.content.nothing_found')}
-            onChange={(value) => setCategory(value as ChallengeCategory | null)}
-            renderOption={ChallengeCategoryItem}
-            data={ChallengeCategoryList.map((cate) => {
-              const data = challengeCategoryLabelMap.get(cate)
-              return { value: cate, label: data?.name, ...data } as ComboboxItem
-            })}
-          />
+          <Group gap="md">
+            <Select
+              placeholder={t('admin.content.show_all')}
+              clearable
+              searchable
+              w="16rem"
+              value={category}
+              nothingFoundMessage={t('admin.content.nothing_found')}
+              onChange={(value) => setCategory(value as ChallengeCategory | null)}
+              renderOption={ChallengeCategoryItem}
+              data={ChallengeCategoryList.map((cate) => {
+                const data = challengeCategoryLabelMap.get(cate)
+                return { value: cate, label: data?.name, ...data } as ComboboxItem
+              })}
+            />
+            <Checkbox
+              label={t('admin.button.challenges.select_all')}
+              checked={allSelected}
+              indeterminate={someSelected}
+              disabled={filteredIds.length === 0}
+              onChange={toggleSelectAll}
+            />
+          </Group>
           <Group justify="right">
+            {visibleSelected.length > 0 && (
+              <>
+                <Button
+                  leftSection={<Icon path={mdiTrashCanOutline} size={1} />}
+                  color="red"
+                  variant="light"
+                  disabled={disabled}
+                  onClick={onBatchDelete}
+                >
+                  {t('admin.button.challenges.delete_selected')} ({visibleSelected.length})
+                </Button>
+                <Button variant="subtle" color="gray" disabled={disabled} onClick={clearSelection}>
+                  {t('admin.button.challenges.clear_selection')}
+                </Button>
+              </>
+            )}
             {failedBuildCount > 0 && (
               <Button
                 leftSection={<Icon path={mdiHammerWrench} size={1} />}
@@ -184,6 +278,9 @@ const GameChallengeEdit: FC = () => {
                   challenge={challenge}
                   onToggle={onToggle}
                   onMutate={() => mutate()}
+                  selectable
+                  selected={challenge.id != null && selectedIds.has(challenge.id)}
+                  onSelectChange={(checked) => challenge.id != null && toggleSelect(challenge.id, checked)}
                 />
               ))}
           </SimpleGrid>

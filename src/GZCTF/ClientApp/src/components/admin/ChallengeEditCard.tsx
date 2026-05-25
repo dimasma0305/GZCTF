@@ -2,6 +2,7 @@ import {
   ActionIcon,
   Badge,
   Card,
+  Checkbox,
   Group,
   Loader,
   Progress,
@@ -34,9 +35,20 @@ interface ChallengeEditCardProps {
    * refreshes on its own.
    */
   onMutate?: () => void
+  /** When set, the card shows a selection checkbox (for batch actions). */
+  selectable?: boolean
+  selected?: boolean
+  onSelectChange?: (checked: boolean) => void
 }
 
-export const ChallengeEditCard: FC<ChallengeEditCardProps> = ({ challenge, onToggle, onMutate }) => {
+export const ChallengeEditCard: FC<ChallengeEditCardProps> = ({
+  challenge,
+  onToggle,
+  onMutate,
+  selectable,
+  selected,
+  onSelectChange,
+}) => {
   const challengeCategoryLabelMap = useChallengeCategoryLabelMap()
   const data = challengeCategoryLabelMap.get(challenge.category as ChallengeCategory)
   const theme = useMantineTheme()
@@ -99,11 +111,19 @@ export const ChallengeEditCard: FC<ChallengeEditCardProps> = ({ challenge, onTog
   const minRate = (min / tot) * 100
   const curRate = (cur / tot) * 100
 
-  const contentWidth = 'calc(100% - 12rem)'
+  const contentWidth = selectable ? 'calc(100% - 13.75rem)' : 'calc(100% - 12rem)'
 
   return (
     <Card shadow="sm" p="sm">
       <Group wrap="nowrap" justify="space-between" gap="xs">
+        {selectable && (
+          <Checkbox
+            size="sm"
+            checked={!!selected}
+            onChange={(e) => onSelectChange?.(e.currentTarget.checked)}
+            aria-label={t('admin.button.challenges.select')}
+          />
+        )}
         <Switch
           color={color}
           disabled={disabled}

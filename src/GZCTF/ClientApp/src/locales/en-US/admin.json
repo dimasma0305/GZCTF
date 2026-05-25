@@ -37,6 +37,10 @@
       "pending": "Pending Review",
       "watches": "Repo Watches",
       "bulk_rebuild": "Rebuild failed",
+      "select": "Select challenge",
+      "select_all": "Select all",
+      "delete_selected": "Delete selected",
+      "clear_selection": "Clear",
       "build_now": "Build image",
       "build_in_flight": "Build in progress…",
       "next": "Next",
@@ -208,6 +212,7 @@
         },
         "enable": "Are you sure you want to enable challenge {{name}}?",
         "bulk_rebuild_confirm": "Enqueue rebuilds for the {{count}} challenge(s) with a Failed or Missing-Dockerfile status?",
+        "delete_selected_confirm": "Delete {{count}} selected challenge(s)? This permanently removes them and their flags/instances and cannot be undone.",
         "flag": {
           "create": "Create flags. Multiple flags should be separated by lines, one flag per line.<br/> Each challenge can have multiple flags. Any configured flags can be accepted.",
           "delete": "Are you sure you want to delete this flag?",
@@ -1062,7 +1067,9 @@
           "attachment_downloaded": "Pretend the attachment has been downloaded!",
           "flag_submitted": "Flag submitted!"
         },
-        "updated": "Challenge updated"
+        "updated": "Challenge updated",
+        "batch_deleted": "Deleted {{count}} challenge(s)",
+        "batch_deleted_partial": "Deleted {{ok}}, {{failed}} failed"
       },
       "created": "Game created",
       "divisions": {
