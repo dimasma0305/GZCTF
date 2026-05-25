@@ -1921,10 +1921,11 @@ export interface AdTeamScoreRow {
   services: AdServiceScore[];
 }
 
-/** A&D — one service column on the scoreboard. */
+/** A&D — one service column-group on the scoreboard. */
 export interface AdScoreboardChallenge {
   challengeId: number;
   title: string;
+  category: string;
 }
 
 /** A&D — GET /api/Game/{id}/Ad/Scoreboard response. */

@@ -630,11 +630,17 @@ public class AdGameController(
 
         var partIds = teams.Select(p => p.Id).ToList();
 
-        // The per-service columns: enabled A&D challenges in a stable order.
+        // The per-service columns: enabled A&D challenges grouped by category
+        // (contiguous), mirroring the jeopardy board's category tier.
         var challenges = await db.GameChallenges
             .Where(c => c.GameId == id && c.Type == ChallengeType.AttackDefense && c.IsEnabled)
-            .OrderBy(c => c.Id)
-            .Select(c => new AdScoreboardChallenge { ChallengeId = c.Id, Title = c.Title })
+            .OrderBy(c => c.Category).ThenBy(c => c.Id)
+            .Select(c => new AdScoreboardChallenge
+            {
+                ChallengeId = c.Id,
+                Title = c.Title,
+                Category = c.Category.ToString()
+            })
             .ToListAsync(token);
         var challengeIds = challenges.Select(c => c.ChallengeId).ToList();
 

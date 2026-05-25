@@ -19,11 +19,14 @@ public sealed class AdScoreboardModel
     public List<AdTeamScoreRow> Teams { get; set; } = [];
 }
 
-/// <summary>One A&amp;D challenge (= one service column on the scoreboard).</summary>
+/// <summary>One A&amp;D challenge (= one service column-group on the scoreboard).</summary>
 public sealed class AdScoreboardChallenge
 {
     public int ChallengeId { get; set; }
     public string Title { get; set; } = string.Empty;
+
+    /// <summary>Category name (Web / Pwn / …) — drives the colored category tier, mirroring the jeopardy board.</summary>
+    public string Category { get; set; } = string.Empty;
 }
 
 public sealed class AdTeamScoreRow

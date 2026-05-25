@@ -15,6 +15,7 @@ import {
   Text,
   TextInput,
   Tooltip,
+  useMantineColorScheme,
   useMantineTheme,
 } from '@mantine/core'
 import { useDebouncedValue } from '@mantine/hooks'
@@ -25,13 +26,16 @@ import React, { FC, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ScrollingText } from '@Components/ScrollingText'
 import { useAdScoreboard, useGame } from '@Hooks/useGame'
+import { useChallengeCategoryLabelMap } from '@Utils/Shared'
+import { AdScoreboardChallenge, ChallengeCategory } from '@Api'
 import misc from '@Styles/Misc.module.css'
 import classes from '@Styles/ScoreboardTable.module.css'
 
 // Same Widths/Lefts cumulative-sticky math as jeopardy ScoreboardTable so the
 // pinned-left columns visually line up with the jeopardy board.
-// Pinned columns: [Rank overall, Rank division, Team, Captures, Total]
-const Widths = [60, 60, 175, 60, 70]
+// Pinned columns: [Rank overall, Rank division, Team, Captures, Total].
+// Rank/division kept tight so the left block doesn't crowd out the services.
+const Widths = [44, 44, 150, 56, 64]
 const Lefts = Widths.reduce(
   (acc, cur) => {
     acc.push(acc[acc.length - 1] + cur)
@@ -73,8 +77,23 @@ interface AdScoreboardTableProps {
 export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
   const { t } = useTranslation()
   const theme = useMantineTheme()
+  const { colorScheme } = useMantineColorScheme()
+  const categoryLabelMap = useChallengeCategoryLabelMap()
   const { adScoreboard } = useAdScoreboard(numId)
   const { game } = useGame(numId)
+
+  // Group the service columns by category (the backend already orders them
+  // contiguously) so the header can render a colored category tier like the
+  // jeopardy board.
+  const challengeGroups = useMemo(() => {
+    const out: { category: string; items: AdScoreboardChallenge[] }[] = []
+    for (const ch of adScoreboard?.challenges ?? []) {
+      const last = out[out.length - 1]
+      if (last && last.category === ch.category) last.items.push(ch)
+      else out.push({ category: ch.category, items: [ch] })
+    }
+    return out
+  }, [adScoreboard])
   const myTeamName = game?.teamName ?? null
 
   const [activePage, setPage] = useState(1)
@@ -121,6 +140,19 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
 
   const hasDivisionFilter = divisionOptions.length > 0
   const allRank = divisionName === null
+
+  // Empty sticky placeholders for the pinned columns in the category + name
+  // header tiers (same trick as jeopardy ScoreboardTable) so the pinned-left
+  // cells stay aligned across all three header rows.
+  const hiddenCol = [...Array(5).keys()].map((i) => (
+    <Table.Th
+      key={`hidden-${i}`}
+      className={classes.left}
+      style={{ left: Lefts[i], width: Widths[i], minWidth: Widths[i], maxWidth: Widths[i] }}
+    >
+      &nbsp;
+    </Table.Th>
+  ))
 
   if (!adScoreboard || adScoreboard.teams.length === 0 || adScoreboard.latestRound === 0) {
     return (
@@ -210,30 +242,47 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
           >
             <Table className={classes.table} verticalSpacing={4} horizontalSpacing={8}>
               <Table.Thead className={classes.thead}>
-                {/* Tier 1 — pinned columns (span both header rows) + one
-                    challenge-name header per service spanning its 4 metric cols. */}
+                {/* Tier 1 — colored category groups (icon + name), mirroring the
+                    jeopardy board. Pinned columns are empty placeholders here. */}
+                <Table.Tr className={misc.noBorder}>
+                  {hiddenCol}
+                  {challengeGroups.map((grp) => {
+                    const cate = categoryLabelMap.get(grp.category as ChallengeCategory)
+                    return (
+                      <Table.Th
+                        key={grp.category}
+                        colSpan={grp.items.length * 4}
+                        h="2.4rem"
+                        style={
+                          cate
+                            ? {
+                                backgroundColor: alpha(
+                                  theme.colors[cate.color][colorScheme === 'dark' ? 8 : 6],
+                                  colorScheme === 'dark' ? 0.15 : 0.2
+                                ),
+                              }
+                            : undefined
+                        }
+                      >
+                        <Group gap={4} wrap="nowrap" justify="center" w="100%">
+                          {cate && (
+                            <Icon
+                              path={cate.icon}
+                              size={0.8}
+                              color={theme.colors[cate.color][colorScheme === 'dark' ? 8 : 6]}
+                            />
+                          )}
+                          <Text c={cate?.color} className={classes.text} ff="text" fz="xs">
+                            {grp.category}
+                          </Text>
+                        </Group>
+                      </Table.Th>
+                    )
+                  })}
+                </Table.Tr>
+                {/* Tier 2 — challenge name, spanning its 4 metric sub-columns. */}
                 <Table.Tr>
-                  {[
-                    t('game.label.score_table.rank_total', 'Rank'),
-                    t('game.label.score_table.rank_division', 'Division'),
-                    t('common.label.team', 'Team'),
-                    t('game.content.scoreboard.ad.column.captures', 'Captures'),
-                    t('game.content.scoreboard.ad.column.total', 'Total'),
-                  ].map((header, idx) => (
-                    <Table.Th
-                      key={idx}
-                      rowSpan={2}
-                      className={cx(classes.left, classes.header)}
-                      style={{
-                        left: Lefts[idx],
-                        width: Widths[idx],
-                        minWidth: Widths[idx],
-                        maxWidth: Widths[idx],
-                      }}
-                    >
-                      {header}
-                    </Table.Th>
-                  ))}
+                  {hiddenCol}
                   {(adScoreboard.challenges ?? []).map((ch) => (
                     <Table.Th key={ch.challengeId} colSpan={4} className={classes.mono}>
                       <Tooltip label={ch.title} withinPortal>
@@ -244,9 +293,24 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                     </Table.Th>
                   ))}
                 </Table.Tr>
-                {/* Tier 2 — metric icons (attack / SLA / defense / status) as
-                    narrow sub-columns each body number aligns beneath. */}
+                {/* Tier 3 — pinned column labels + metric icons (attack / SLA /
+                    defense / status) as narrow sub-columns. */}
                 <Table.Tr>
+                  {[
+                    t('game.label.score_table.rank_total', 'Rank'),
+                    t('game.label.score_table.rank_division', 'Division'),
+                    t('common.label.team', 'Team'),
+                    t('game.content.scoreboard.ad.column.captures', 'Captures'),
+                    t('game.content.scoreboard.ad.column.total', 'Total'),
+                  ].map((header, idx) => (
+                    <Table.Th
+                      key={idx}
+                      className={cx(classes.left, classes.header)}
+                      style={{ left: Lefts[idx] }}
+                    >
+                      {header}
+                    </Table.Th>
+                  ))}
                   {(adScoreboard.challenges ?? []).flatMap((ch) => [
                     <Table.Th key={`${ch.challengeId}-a`} className={classes.mono} style={{ width: SUBCOL.atk }}>
                       <Tooltip label={t('game.content.scoreboard.ad.legend.attack', 'Attack')} withinPortal>
