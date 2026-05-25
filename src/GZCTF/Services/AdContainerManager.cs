@@ -80,8 +80,10 @@ public sealed class AdContainerManager(
             .Select(g => g.Id)
             .ToListAsync(token);
 
+        var runningIds = await GetRunningContainerIdsAsync(scope.ServiceProvider, token);
+
         foreach (var gameId in activeGames)
-            await EnsureContainersForGameAsync(db, containerManager, gameId, token);
+            await EnsureContainersForGameAsync(db, containerManager, gameId, runningIds, token);
 
         // Ended games: snapshot (if allowed) → destroy.
         var endedGameTeamServices = await db.AdTeamServices
@@ -118,6 +120,34 @@ public sealed class AdContainerManager(
 
         if (endedGameTeamServices.Count > 0)
             await db.SaveChangesAsync(token);
+    }
+
+    /// <summary>
+    /// Set of docker container IDs that are actually <b>running</b> right now,
+    /// used to reconcile against real liveness instead of trusting the stored
+    /// <see cref="ContainerStatus"/>. Returns null on a K8s deploy (no Docker
+    /// provider) or if the listing fails — callers then fall back to the
+    /// status-only behavior so a transient docker hiccup can't trigger a
+    /// relaunch storm.
+    /// </summary>
+    private async Task<HashSet<string>?> GetRunningContainerIdsAsync(
+        IServiceProvider scopeServices, CancellationToken token)
+    {
+        var dockerProvider = scopeServices.GetService<IContainerProvider<DockerClient, DockerMetadata>>();
+        if (dockerProvider is null)
+            return null;
+
+        try
+        {
+            var list = await dockerProvider.GetProvider().Containers.ListContainersAsync(
+                new DockerModels.ContainersListParameters { All = false }, token);
+            return list.Select(c => c.ID).ToHashSet();
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "A&D reconcile: listing running containers failed; using DB status only this tick");
+            return null;
+        }
     }
 
     /// <summary>
@@ -218,13 +248,15 @@ public sealed class AdContainerManager(
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var containerManager = scope.ServiceProvider.GetRequiredService<IContainerManager>();
-        await EnsureContainersForGameAsync(db, containerManager, gameId, token);
+        var runningIds = await GetRunningContainerIdsAsync(scope.ServiceProvider, token);
+        await EnsureContainersForGameAsync(db, containerManager, gameId, runningIds, token);
     }
 
     private async Task EnsureContainersForGameAsync(
         AppDbContext db,
         IContainerManager containerManager,
         int gameId,
+        IReadOnlySet<string>? runningDockerIds,
         CancellationToken token)
     {
         // Pull A&D challenges for this game.
@@ -258,13 +290,37 @@ public sealed class AdContainerManager(
         {
             keyed.TryGetValue((participationId, challenge.Id), out var ts);
 
+            // Reconcile against REAL docker liveness, not just the stored Status.
+            // A container removed/exited out-of-band (crash, OOM, the dying-
+            // container cron, external rm, daemon blip) otherwise stays
+            // "Running" in the DB forever → never relaunched (team down), and
+            // its stale IP can be reused by another team's container → the
+            // checker hits the wrong box and reports Mumble.
+            var deadInDocker = runningDockerIds is not null
+                               && ts?.Container?.ContainerId is { Length: > 0 } cid
+                               && !runningDockerIds.Contains(cid);
+
             var needsLaunch = ts is null
                               || ts.ContainerId is null
                               || ts.Container is null
-                              || ts.Container.Status == ContainerStatus.Destroyed;
+                              || ts.Container.Status == ContainerStatus.Destroyed
+                              || deadInDocker;
 
             if (!needsLaunch)
                 continue;
+
+            // Clean up the dead record before relaunching: mark it Destroyed so
+            // its stale IP stops being treated as live, and best-effort remove
+            // any exited remnant so it can't linger / re-grab the IP.
+            if (deadInDocker && ts!.Container is not null)
+            {
+                ts.Container.Status = ContainerStatus.Destroyed;
+                try { await containerManager.DestroyContainerAsync(ts.Container, token); }
+                catch { /* already gone, or remnant cleanup raced — fine */ }
+                logger.SystemLog(
+                    $"A&D container vanished from docker — relaunching: team={participationId} challenge={challenge.Id}",
+                    TaskStatus.Failed, LogLevel.Warning);
+            }
 
             await LaunchOneAsync(db, containerManager, participationId, challenge, ts, token);
         }
