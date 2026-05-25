@@ -76,7 +76,7 @@
         "no_teams": "No teams ranked yet.",
         "no_service_cell": "no service",
         "cell": {
-          "no_check": "no check"
+          "no_check": "n/a"
         }
       }
     },

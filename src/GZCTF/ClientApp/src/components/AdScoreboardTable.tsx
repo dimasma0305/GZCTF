@@ -48,8 +48,8 @@ const ITEM_COUNT_PER_PAGE = 30
 // under their icons.
 const METRIC_GRID: React.CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '1fr 1fr 1fr 1.7fr',
-  gap: 4,
+  gridTemplateColumns: '1fr 1fr 1fr 1.4fr',
+  gap: 2,
   alignItems: 'center',
   width: '100%',
 }
@@ -210,7 +210,7 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
             minWidth="100%"
             classNames={{ scrollContainer: misc.noScrollBars }}
           >
-            <Table className={classes.table}>
+            <Table className={classes.table} verticalSpacing={4} horizontalSpacing={8}>
               <Table.Thead className={classes.thead}>
                 <Table.Tr>
                   {[
@@ -237,23 +237,25 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                       of metric icons (attack / SLA / defense / status) that each
                       body cell's numbers align beneath. */}
                   {(adScoreboard.challenges ?? []).map((ch) => (
-                    <Table.Th key={ch.challengeId} className={classes.mono} style={{ minWidth: 200 }}>
-                      <Stack gap={4}>
-                        <Box maw={200}>
-                          <ScrollingText size="sm" fw={600} text={ch.title} />
-                        </Box>
+                    <Table.Th key={ch.challengeId} className={classes.mono} style={{ minWidth: 158 }}>
+                      <Stack gap={2}>
+                        <Tooltip label={ch.title} withinPortal>
+                          <Text size="xs" fw={700} truncate ta="center" w="100%">
+                            {ch.title}
+                          </Text>
+                        </Tooltip>
                         <Box style={METRIC_GRID}>
                           <Tooltip label={t('game.content.scoreboard.ad.legend.attack', 'Attack')} withinPortal>
-                            <Center><Icon path={mdiSwordCross} size={0.7} color={theme.colors.teal[6]} /></Center>
+                            <Center><Icon path={mdiSwordCross} size={0.6} color={theme.colors.teal[6]} /></Center>
                           </Tooltip>
                           <Tooltip label={t('game.content.scoreboard.ad.legend.sla', 'SLA')} withinPortal>
-                            <Center><Icon path={mdiTimerSandComplete} size={0.7} color={theme.colors.blue[6]} /></Center>
+                            <Center><Icon path={mdiTimerSandComplete} size={0.6} color={theme.colors.blue[6]} /></Center>
                           </Tooltip>
                           <Tooltip label={t('game.content.scoreboard.ad.legend.defense', 'Defense loss')} withinPortal>
-                            <Center><Icon path={mdiShieldHalfFull} size={0.7} color={theme.colors.red[6]} /></Center>
+                            <Center><Icon path={mdiShieldHalfFull} size={0.6} color={theme.colors.red[6]} /></Center>
                           </Tooltip>
                           <Tooltip label={t('game.content.scoreboard.ad.column.status', 'Status')} withinPortal>
-                            <Center><Icon path={mdiHeartPulse} size={0.7} color="var(--mantine-color-dimmed)" /></Center>
+                            <Center><Icon path={mdiHeartPulse} size={0.6} color="var(--mantine-color-dimmed)" /></Center>
                           </Tooltip>
                         </Box>
                       </Stack>
@@ -387,9 +389,17 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                                 {svc.defenseLoss > 0 ? `−${svc.defenseLoss.toFixed(1)}` : '0.0'}
                               </Text>
                               <Center>
-                                <Badge size="xs" variant="light" color={statusColor(svc.lastCheckStatus)}>
-                                  {svc.lastCheckStatus ??
-                                    t('game.content.scoreboard.ad.cell.no_check', 'no check')}
+                                <Badge
+                                  size="xs"
+                                  variant="light"
+                                  color={statusColor(svc.lastCheckStatus)}
+                                  px={5}
+                                  styles={{ root: { textTransform: 'none' }, label: { fontSize: 9 } }}
+                                >
+                                  {svc.lastCheckStatus === 'InternalError'
+                                    ? 'Error'
+                                    : (svc.lastCheckStatus ??
+                                      t('game.content.scoreboard.ad.cell.no_check', 'n/a'))}
                                 </Badge>
                               </Center>
                             </Box>
