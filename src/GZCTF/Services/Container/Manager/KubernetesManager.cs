@@ -14,6 +14,30 @@ namespace GZCTF.Services.Container.Manager;
 
 public class KubernetesManager : IContainerManager
 {
+    /// <summary>
+    /// Tiny image used for the A&amp;D flag init + writer sidecar. Must be
+    /// pullable by the cluster (Docker Hub busybox is multi-arch incl. arm64).
+    /// </summary>
+    private const string FlagSidecarImage = "busybox:stable";
+
+    /// <summary>Warmup flag written before the challenge container starts, so the
+    /// read-only <c>subPath</c> mount has a file and the service serves something
+    /// until the first real tick plants the round flag.</summary>
+    private const string WarmupFlag = "flag{warmup-no-round-yet}";
+
+    /// <summary>Pod-internal mount path the writer sidecar + init use (the whole
+    /// emptyDir); the flag file lives at <c>{FlagDir}/flag</c> and is surfaced
+    /// read-only into the challenge container at <c>config.FlagFilePath</c>.</summary>
+    internal const string FlagDir = "/flagdir";
+
+    /// <summary>emptyDir volume name shared between the challenge container
+    /// (read-only) and the writer sidecar (read-write).</summary>
+    internal const string FlagVolumeName = "ad-flag";
+
+    /// <summary>Container name of the writer sidecar — the A&amp;D flag planter
+    /// execs into this (not the challenge container) to rotate the flag.</summary>
+    internal const string FlagWriterContainer = "gzctf-flag-writer";
+
     private readonly Kubernetes _client;
     private readonly ILogger<KubernetesManager> _logger;
     private readonly KubernetesMetadata _meta;
@@ -63,6 +87,67 @@ public class KubernetesManager : IContainerManager
         // References: NOTICE, LICENSE_ADDENDUM.txt, licenses/LicenseRef-GZCTF-Restricted.txt
         var envs = BuildContainerEnv(config);
 
+        // A&D flag mount: when FlagFilePath is set we give the challenge
+        // container an undeletable /flag, mirroring the Docker read-only bind
+        // mount. A shared emptyDir is mounted read-write into a tiny writer
+        // sidecar and read-only (single file, via subPath) into the challenge
+        // container — so container-root gets EROFS on delete/write, while the
+        // platform rotates the flag each tick by exec-ing into the sidecar. An
+        // init container seeds a warmup flag so the file exists at startup.
+        var adFlagMount = !string.IsNullOrEmpty(config.FlagFilePath);
+
+        var challenge = new V1Container
+        {
+            Name = name,
+            Image = config.Image,
+            ImagePullPolicy = "Always",
+            Env = envs,
+            Ports = [new V1ContainerPort { ContainerPort = config.ExposedPort }],
+            Resources = new V1ResourceRequirements
+            {
+                Limits = new Dictionary<string, ResourceQuantity>
+                {
+                    ["cpu"] = new($"{config.CPUCount * 100}m"),
+                    ["memory"] = new($"{config.MemoryLimit}Mi"),
+                    ["ephemeral-storage"] = new($"{config.StorageLimit}Mi")
+                },
+                Requests = new Dictionary<string, ResourceQuantity>
+                {
+                    ["cpu"] = new("10m"), ["memory"] = new("32Mi")
+                }
+            },
+            VolumeMounts = adFlagMount
+                ? [new V1VolumeMount
+                {
+                    Name = FlagVolumeName,
+                    MountPath = config.FlagFilePath,
+                    SubPath = "flag",
+                    ReadOnlyProperty = true
+                }]
+                : null
+        };
+
+        var containers = new List<V1Container> { challenge };
+        if (adFlagMount)
+            containers.Add(new V1Container
+            {
+                Name = FlagWriterContainer,
+                Image = FlagSidecarImage,
+                Command = ["sh", "-c", "sleep 2147483647"],
+                VolumeMounts = [new V1VolumeMount { Name = FlagVolumeName, MountPath = FlagDir }],
+                Resources = new V1ResourceRequirements
+                {
+                    Limits = new Dictionary<string, ResourceQuantity>
+                    {
+                        ["cpu"] = new("50m"), ["memory"] = new("16Mi")
+                    },
+                    Requests = new Dictionary<string, ResourceQuantity>
+                    {
+                        ["cpu"] = new("1m"), ["memory"] = new("4Mi")
+                    }
+                }
+            });
+
         var pod = new V1Pod
         {
             Metadata = new V1ObjectMeta
@@ -88,30 +173,19 @@ public class KubernetesManager : IContainerManager
                 DnsPolicy = "None",
                 DnsConfig = new() { Nameservers = options.Dns ?? ["223.5.5.5", "114.114.114.114"] },
                 EnableServiceLinks = false,
-                Containers =
-                [
-                    new V1Container
+                Volumes = adFlagMount
+                    ? [new V1Volume { Name = FlagVolumeName, EmptyDir = new V1EmptyDirVolumeSource() }]
+                    : null,
+                InitContainers = adFlagMount
+                    ? [new V1Container
                     {
-                        Name = name,
-                        Image = config.Image,
-                        ImagePullPolicy = "Always",
-                        Env = envs,
-                        Ports = [new V1ContainerPort { ContainerPort = config.ExposedPort }],
-                        Resources = new V1ResourceRequirements
-                        {
-                            Limits = new Dictionary<string, ResourceQuantity>
-                            {
-                                ["cpu"] = new($"{config.CPUCount * 100}m"),
-                                ["memory"] = new($"{config.MemoryLimit}Mi"),
-                                ["ephemeral-storage"] = new($"{config.StorageLimit}Mi")
-                            },
-                            Requests = new Dictionary<string, ResourceQuantity>
-                            {
-                                ["cpu"] = new("10m"), ["memory"] = new("32Mi")
-                            }
-                        }
-                    }
-                ],
+                        Name = "gzctf-flag-init",
+                        Image = FlagSidecarImage,
+                        Command = ["sh", "-c", $"printf '%s' '{WarmupFlag}' > {FlagDir}/flag && chmod 644 {FlagDir}/flag"],
+                        VolumeMounts = [new V1VolumeMount { Name = FlagVolumeName, MountPath = FlagDir }]
+                    }]
+                    : null,
+                Containers = containers,
                 RestartPolicy = "Never",
                 AutomountServiceAccountToken = false
             }
