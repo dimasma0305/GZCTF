@@ -13,6 +13,12 @@ public sealed class AdScoreboardModel
     public int LatestRound { get; set; }
     public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
 
+    /// <summary>True when this response is an ICPC-freeze snapshot (caller is a non-monitor and now ∈ [freeze, end)).</summary>
+    public bool IsFrozenView { get; set; }
+
+    /// <summary>The game's configured freeze time, surfaced so the UI can render a "frozen as of …" banner.</summary>
+    public DateTimeOffset? Freeze { get; set; }
+
     /// <summary>Enabled A&amp;D challenges, in display order — the scoreboard's per-service columns.</summary>
     public List<AdScoreboardChallenge> Challenges { get; set; } = [];
 

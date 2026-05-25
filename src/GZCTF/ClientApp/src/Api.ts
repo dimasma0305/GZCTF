@@ -1946,6 +1946,10 @@ export interface AdScoreboardChallenge {
 export interface AdScoreboardModel {
   latestRound: number;
   generatedAt: string;
+  /** True when this is an ICPC-freeze snapshot (non-monitor viewer during [freeze, end)). */
+  isFrozenView: boolean;
+  /** The game's configured freeze time, for the "frozen as of …" banner. */
+  freeze?: string | null;
   challenges: AdScoreboardChallenge[];
   teams: AdTeamScoreRow[];
 }

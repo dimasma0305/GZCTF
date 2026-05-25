@@ -628,8 +628,24 @@ public class AdGameController(
     }
 
     /// <summary>
+    /// Returns the freeze cutoff instant for the caller, or null for a live
+    /// view. Non-null only when the game has a <see cref="Game.FreezeTimeUtc"/>,
+    /// now is within [freeze, end), and the caller is NOT a monitor/admin.
+    /// A&amp;D scoreboard + timeline both build against this cutoff so the public
+    /// view freezes exactly like the jeopardy board.
+    /// </summary>
+    private async Task<DateTimeOffset?> ResolveFreezeCutoffAsync(Game game, CancellationToken token)
+    {
+        if (game.FreezeTimeUtc is not { } freeze) return null;
+        var now = DateTimeOffset.UtcNow;
+        if (now < freeze || now >= game.EndTimeUtc) return null;
+        // Monitors/admins always see the live board.
+        return await ContextHelper.HasMonitor(HttpContext) ? null : freeze;
+    }
+
+    /// <summary>
     /// Get the A&amp;D scoreboard for this game — independent of the jeopardy
-    /// scoreboard. Public; respects the game's hidden flag.
+    /// scoreboard. Public; respects the game's hidden flag and ICPC freeze.
     /// </summary>
     [HttpGet("Scoreboard")]
     [ProducesResponseType(typeof(AdScoreboardModel), StatusCodes.Status200OK)]
@@ -642,8 +658,14 @@ public class AdGameController(
             c => c.GameId == id && c.Type == ChallengeType.AttackDefense, token);
         if (!hasAd) return NotFound();
 
+        // ICPC-style freeze: during [FreezeTimeUtc, EndTimeUtc) non-monitor
+        // viewers see the board as of the freeze instant. Attacks/checks after
+        // the cutoff still persist + score; only this public view is frozen.
+        var cutoff = await ResolveFreezeCutoffAsync(game, token);
+        Response.Headers.Append("Vary", "Cookie");
+
         var latestRound = await db.AdRounds
-            .Where(r => r.GameId == id)
+            .Where(r => r.GameId == id && (cutoff == null || r.StartedAt <= cutoff))
             .OrderByDescending(r => r.Number)
             .Select(r => r.Number)
             .FirstOrDefaultAsync(token);
@@ -677,7 +699,8 @@ public class AdGameController(
 
         // Attack points + flags captured, per (attacker, challenge).
         var attackByCell = await db.AdAttacks
-            .Where(a => partIds.Contains(a.AttackerParticipationId) && challengeIds.Contains(a.ChallengeId))
+            .Where(a => partIds.Contains(a.AttackerParticipationId) && challengeIds.Contains(a.ChallengeId)
+                     && (cutoff == null || a.SubmittedAt <= cutoff))
             .GroupBy(a => new { a.AttackerParticipationId, a.ChallengeId })
             .Select(g => new { g.Key.AttackerParticipationId, g.Key.ChallengeId, Points = g.Sum(a => a.Points), Count = g.Count() })
             .ToListAsync(token);
@@ -685,7 +708,8 @@ public class AdGameController(
 
         // Times captured, per (victim, challenge).
         var defenseByCell = await db.AdAttacks
-            .Where(a => partIds.Contains(a.VictimParticipationId) && challengeIds.Contains(a.ChallengeId))
+            .Where(a => partIds.Contains(a.VictimParticipationId) && challengeIds.Contains(a.ChallengeId)
+                     && (cutoff == null || a.SubmittedAt <= cutoff))
             .GroupBy(a => new { a.VictimParticipationId, a.ChallengeId })
             .Select(g => new { g.Key.VictimParticipationId, g.Key.ChallengeId, Count = g.Count() })
             .ToListAsync(token);
@@ -693,6 +717,7 @@ public class AdGameController(
 
         // SLA credit SUM per (team, challenge) — precomputed per tick (see AdScoring).
         var slaByCell = await db.AdCheckResults
+            .Where(c => cutoff == null || c.CheckedAt <= cutoff)
             .Join(db.AdTeamServices,
                 c => c.AdTeamServiceId, ts => ts.Id,
                 (c, ts) => new { ts.ParticipationId, ts.ChallengeId, c.SlaCredit })
@@ -710,7 +735,7 @@ public class AdGameController(
                 ts.ParticipationId,
                 ts.ChallengeId,
                 Last = db.AdCheckResults
-                    .Where(c => c.AdTeamServiceId == ts.Id)
+                    .Where(c => c.AdTeamServiceId == ts.Id && (cutoff == null || c.CheckedAt <= cutoff))
                     .OrderByDescending(c => c.CheckedAt)
                     .Select(c => (AdCheckStatus?)c.Status)
                     .FirstOrDefault()
@@ -775,6 +800,8 @@ public class AdGameController(
         return Ok(new AdScoreboardModel
         {
             LatestRound = latestRound,
+            IsFrozenView = cutoff != null,
+            Freeze = game.FreezeTimeUtc,
             Challenges = challenges,
             Teams = rows
         });
@@ -796,8 +823,12 @@ public class AdGameController(
             c => c.GameId == id && c.Type == ChallengeType.AttackDefense, token);
         if (!hasAd) return NotFound();
 
+        // ICPC freeze: cap the timeline at the freeze instant for non-monitors.
+        var cutoff = await ResolveFreezeCutoffAsync(game, token);
+        Response.Headers.Append("Vary", "Cookie");
+
         var rounds = await db.AdRounds
-            .Where(r => r.GameId == id)
+            .Where(r => r.GameId == id && (cutoff == null || r.StartedAt <= cutoff))
             .OrderBy(r => r.Number)
             .ToListAsync(token);
 
@@ -823,8 +854,9 @@ public class AdGameController(
         // Defense is per-service (Σ caps_s^0.75) → by (victim, challenge, round)
         // so the timeline's defense matches the scoreboard's per-service total.
         var attacks = await db.AdAttacks
-            .Where(a => partIds.Contains(a.AttackerParticipationId)
-                     || partIds.Contains(a.VictimParticipationId))
+            .Where(a => (partIds.Contains(a.AttackerParticipationId)
+                      || partIds.Contains(a.VictimParticipationId))
+                     && (cutoff == null || a.SubmittedAt <= cutoff))
             .Select(a => new
             {
                 a.AttackerParticipationId,
@@ -854,7 +886,7 @@ public class AdGameController(
             .Join(db.AdTeamServices,
                 c => c.AdTeamServiceId, ts => ts.Id,
                 (c, ts) => new { ts.ParticipationId, c.SlaCredit, c.CheckedAt })
-            .Where(x => partIds.Contains(x.ParticipationId))
+            .Where(x => partIds.Contains(x.ParticipationId) && (cutoff == null || x.CheckedAt <= cutoff))
             .ToListAsync(token);
 
         // Index checks per team for fast per-round window queries.

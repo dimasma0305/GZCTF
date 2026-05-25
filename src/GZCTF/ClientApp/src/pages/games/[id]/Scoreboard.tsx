@@ -15,6 +15,7 @@ import { ScoreTimeLine } from '@Components/charts/ScoreTimeLine'
 import { MobileScoreboardTable } from '@Components/mobile/ScoreboardTable'
 import { useIsMobile } from '@Utils/ThemeOverride'
 import { useGameScoreboard, useGameTeamInfo } from '@Hooks/useGame'
+import api from '@Api'
 
 const Scoreboard: FC = () => {
   const { id } = useParams()
@@ -42,10 +43,18 @@ const Scoreboard: FC = () => {
   // When game is A&D-only, force the A&D view.
   const effectiveTab = !hasJeopardyChallenges && hasAdChallenges ? 'ad' : activeTab
 
-  const freezeBanner = scoreboard?.isFrozenView ? (
+  // The A&D board freezes independently (it has its own scoreboard endpoint),
+  // so on the A&D tab read the freeze state from there — otherwise an A&D-only
+  // game would never show the banner. Only fetch when the game has A&D.
+  const { data: adScoreboard } = api.game.useGameAdScoreboard(numId, undefined, hasAdChallenges)
+  const onAdTab = effectiveTab === 'ad' && hasAdChallenges
+  const frozenView = onAdTab ? adScoreboard?.isFrozenView : scoreboard?.isFrozenView
+  const frozenAt = onAdTab ? adScoreboard?.freeze : scoreboard?.freeze
+
+  const freezeBanner = frozenView ? (
     <Alert color="blue" icon={<Icon path={mdiSnowflake} size={1} />}>
       {t('game.content.frozen_banner', {
-        time: scoreboard.freeze ? dayjs(scoreboard.freeze).format('LLL') : '',
+        time: frozenAt ? dayjs(frozenAt).format('LLL') : '',
       })}
     </Alert>
   ) : null
