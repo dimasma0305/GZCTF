@@ -30,7 +30,12 @@ public class DockerMetadata : ContainerProviderMetadata
     /// <returns></returns>
     public static string GetName(GZCTF.Models.Internal.ContainerConfig config) =>
         $"{config.Image.Split("/").LastOrDefault()?.Split(":").FirstOrDefault()}_" +
-        (config.Flag ?? Guid.NewGuid().ToString("N")).ToMD5String()[..16];
+        // Per-instance suffix from the flag; fall back to a random GUID when
+        // there's no flag. MUST treat empty like null — A&D services leave
+        // Flag empty (their flag rotates and lives in /flag), so without this
+        // every flag-less container hashes MD5("")=d41d8… to the SAME name and
+        // docker kills the incumbent on the next create (EXIT 137 churn).
+        (string.IsNullOrEmpty(config.Flag) ? Guid.NewGuid().ToString("N") : config.Flag).ToMD5String()[..16];
 }
 
 public class DockerProvider : IContainerProvider<DockerClient, DockerMetadata>
