@@ -61,7 +61,8 @@
           "defense_loss": "Defense loss",
           "sla": "SLA",
           "captures": "Captures",
-          "times_captured": "Times captured"
+          "times_captured": "Times captured",
+          "status": "Status"
         },
         "legend": {
           "attack": "Attack",

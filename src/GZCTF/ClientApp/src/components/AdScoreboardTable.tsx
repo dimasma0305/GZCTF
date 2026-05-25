@@ -18,7 +18,7 @@ import {
   useMantineTheme,
 } from '@mantine/core'
 import { useDebouncedValue } from '@mantine/hooks'
-import { mdiAccountGroup, mdiCrosshairsGps, mdiMagnify, mdiShieldHalfFull, mdiSwordCross, mdiTimerSandComplete } from '@mdi/js'
+import { mdiAccountGroup, mdiCrosshairsGps, mdiHeartPulse, mdiMagnify, mdiShieldHalfFull, mdiSwordCross, mdiTimerSandComplete } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import cx from 'clsx'
 import React, { FC, useEffect, useMemo, useState } from 'react'
@@ -41,6 +41,18 @@ const Lefts = Widths.reduce(
 )
 
 const ITEM_COUNT_PER_PAGE = 30
+
+// Shared grid for a per-service column: three metric slots (attack / SLA /
+// defense) + a wider status slot. Used identically in the column header
+// (icon row) and every body cell (numbers), so the numbers line up exactly
+// under their icons.
+const METRIC_GRID: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1fr 1fr 1.7fr',
+  gap: 4,
+  alignItems: 'center',
+  width: '100%',
+}
 
 // Per-service status dot color, matching the challenge-panel badge palette.
 const statusColor = (s?: string | null) => {
@@ -221,13 +233,30 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                       {header}
                     </Table.Th>
                   ))}
-                  {/* One column per service — mirrors the jeopardy board's
-                      per-challenge columns. Cell = net points + status dot. */}
+                  {/* One column per service. Header = challenge name, then a row
+                      of metric icons (attack / SLA / defense / status) that each
+                      body cell's numbers align beneath. */}
                   {(adScoreboard.challenges ?? []).map((ch) => (
-                    <Table.Th key={ch.challengeId} className={classes.mono} style={{ minWidth: 210 }}>
-                      <Box maw={210}>
-                        <ScrollingText size="sm" fw={600} text={ch.title} />
-                      </Box>
+                    <Table.Th key={ch.challengeId} className={classes.mono} style={{ minWidth: 200 }}>
+                      <Stack gap={4}>
+                        <Box maw={200}>
+                          <ScrollingText size="sm" fw={600} text={ch.title} />
+                        </Box>
+                        <Box style={METRIC_GRID}>
+                          <Tooltip label={t('game.content.scoreboard.ad.legend.attack', 'Attack')} withinPortal>
+                            <Center><Icon path={mdiSwordCross} size={0.7} color={theme.colors.teal[6]} /></Center>
+                          </Tooltip>
+                          <Tooltip label={t('game.content.scoreboard.ad.legend.sla', 'SLA')} withinPortal>
+                            <Center><Icon path={mdiTimerSandComplete} size={0.7} color={theme.colors.blue[6]} /></Center>
+                          </Tooltip>
+                          <Tooltip label={t('game.content.scoreboard.ad.legend.defense', 'Defense loss')} withinPortal>
+                            <Center><Icon path={mdiShieldHalfFull} size={0.7} color={theme.colors.red[6]} /></Center>
+                          </Tooltip>
+                          <Tooltip label={t('game.content.scoreboard.ad.column.status', 'Status')} withinPortal>
+                            <Center><Icon path={mdiHeartPulse} size={0.7} color="var(--mantine-color-dimmed)" /></Center>
+                          </Tooltip>
+                        </Box>
+                      </Stack>
                     </Table.Th>
                   ))}
                   <Table.Th className={classes.mono}>
@@ -325,15 +354,15 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                         {row.total.toFixed(1)}
                       </Table.Td>
 
-                      {/* Per-service cells — one row: the three score components
-                          (attack / SLA / defense) with icons on the left, then the
-                          container-status badge pushed to the right. */}
+                      {/* Per-service cells — the three numbers align under the
+                          attack / SLA / defense icons in the header, with the
+                          status badge in the rightmost (status) slot. */}
                       {(adScoreboard.challenges ?? []).map((ch) => {
                         const svc = row.services?.find((s) => s.challengeId === ch.challengeId)
                         if (!svc) {
                           return (
                             <Table.Td key={ch.challengeId} className={classes.mono}>
-                              <Text size="xs" c="dimmed">
+                              <Text size="xs" c="dimmed" ta="center">
                                 {t('game.content.scoreboard.ad.no_service_cell', 'no service')}
                               </Text>
                             </Table.Td>
@@ -341,52 +370,29 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                         }
                         return (
                           <Table.Td key={ch.challengeId} className={classes.mono}>
-                            <Group justify="space-between" wrap="nowrap" gap="sm">
-                              <Group gap={10} wrap="nowrap">
-                                <Tooltip label={t('game.content.scoreboard.ad.legend.attack', 'Attack')} withinPortal>
-                                  <Group gap={3} wrap="nowrap">
-                                    <Icon path={mdiSwordCross} size={0.6} color={theme.colors.teal[6]} />
-                                    <Text size="xs" c="teal" className={misc.ffmono} fw={700}>
-                                      {svc.attackPoints.toFixed(1)}
-                                    </Text>
-                                  </Group>
-                                </Tooltip>
-                                <Tooltip label={t('game.content.scoreboard.ad.legend.sla', 'SLA')} withinPortal>
-                                  <Group gap={3} wrap="nowrap">
-                                    <Icon path={mdiTimerSandComplete} size={0.6} color={theme.colors.blue[6]} />
-                                    <Text size="xs" c="blue" className={misc.ffmono} fw={700}>
-                                      {svc.slaPoints.toFixed(1)}
-                                    </Text>
-                                  </Group>
-                                </Tooltip>
-                                <Tooltip label={t('game.content.scoreboard.ad.legend.defense', 'Defense loss')} withinPortal>
-                                  <Group gap={3} wrap="nowrap">
-                                    <Icon
-                                      path={mdiShieldHalfFull}
-                                      size={0.6}
-                                      color={svc.defenseLoss > 0 ? theme.colors.red[6] : 'var(--mantine-color-dimmed)'}
-                                    />
-                                    <Text
-                                      size="xs"
-                                      c={svc.defenseLoss > 0 ? 'red' : 'dimmed'}
-                                      className={misc.ffmono}
-                                      fw={700}
-                                    >
-                                      {svc.defenseLoss > 0 ? `−${svc.defenseLoss.toFixed(1)}` : '0.0'}
-                                    </Text>
-                                  </Group>
-                                </Tooltip>
-                              </Group>
-                              <Badge
+                            <Box style={METRIC_GRID}>
+                              <Text size="xs" ta="center" c="teal" className={misc.ffmono} fw={700}>
+                                {svc.attackPoints.toFixed(1)}
+                              </Text>
+                              <Text size="xs" ta="center" c="blue" className={misc.ffmono} fw={700}>
+                                {svc.slaPoints.toFixed(1)}
+                              </Text>
+                              <Text
                                 size="xs"
-                                variant="light"
-                                color={statusColor(svc.lastCheckStatus)}
-                                style={{ flexShrink: 0 }}
+                                ta="center"
+                                c={svc.defenseLoss > 0 ? 'red' : 'dimmed'}
+                                className={misc.ffmono}
+                                fw={700}
                               >
-                                {svc.lastCheckStatus ??
-                                  t('game.content.scoreboard.ad.cell.no_check', 'no check')}
-                              </Badge>
-                            </Group>
+                                {svc.defenseLoss > 0 ? `−${svc.defenseLoss.toFixed(1)}` : '0.0'}
+                              </Text>
+                              <Center>
+                                <Badge size="xs" variant="light" color={statusColor(svc.lastCheckStatus)}>
+                                  {svc.lastCheckStatus ??
+                                    t('game.content.scoreboard.ad.cell.no_check', 'no check')}
+                                </Badge>
+                              </Center>
+                            </Box>
                           </Table.Td>
                         )
                       })}

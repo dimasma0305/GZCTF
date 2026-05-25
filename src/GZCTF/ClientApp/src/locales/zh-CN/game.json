@@ -61,7 +61,8 @@
           "defense_loss": "防守损失",
           "sla": "SLA",
           "captures": "捕获次数",
-          "times_captured": "被捕获次数"
+          "times_captured": "被捕获次数",
+          "status": "状态"
         },
         "legend": {
           "attack": "进攻得分",
