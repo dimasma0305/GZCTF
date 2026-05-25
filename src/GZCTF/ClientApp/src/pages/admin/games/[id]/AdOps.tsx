@@ -1,7 +1,7 @@
 import {
+  ActionIcon,
   Alert,
   Badge,
-  Box,
   Button,
   Card,
   Center,
@@ -9,26 +9,36 @@ import {
   CopyButton,
   Divider,
   Group,
+  Indicator,
   Loader,
   Modal,
   Paper,
+  RingProgress,
   ScrollArea,
   SimpleGrid,
   Stack,
   Switch,
   Table,
   Text,
+  TextInput,
+  ThemeIcon,
   Title,
   Tooltip,
 } from '@mantine/core'
+import { useDebouncedValue } from '@mantine/hooks'
 import { showNotification } from '@mantine/notifications'
 import {
+  mdiAlertCircle,
   mdiAlertCircleOutline,
   mdiCheck,
+  mdiCheckCircle,
   mdiClose,
-  mdiContentCopy,
+  mdiCloseCircle,
   mdiDownload,
   mdiFileTree,
+  mdiHelpCircle,
+  mdiMagnify,
+  mdiPauseCircleOutline,
   mdiPlayCircle,
   mdiRefresh,
   mdiRestart,
@@ -48,18 +58,20 @@ import api, { AdSnapshotChange, AdTeamCellModel } from '@Api'
 import misc from '@Styles/Misc.module.css'
 import tableClasses from '@Styles/AdOpsTable.module.css'
 
-const statusColor = (s?: string | null) => {
+// Maps an A&D check status to its color, icon and short label — the single
+// source of truth for how a service's health reads across the whole console.
+const statusMeta = (s?: string | null): { color: string; icon: string; label: string } => {
   switch (s) {
     case 'Ok':
-      return 'teal'
+      return { color: 'teal', icon: mdiCheckCircle, label: 'Ok' }
     case 'Mumble':
-      return 'yellow'
+      return { color: 'yellow', icon: mdiAlertCircle, label: 'Mumble' }
     case 'Offline':
-      return 'red'
+      return { color: 'red', icon: mdiCloseCircle, label: 'Offline' }
     case 'InternalError':
-      return 'gray'
+      return { color: 'gray', icon: mdiHelpCircle, label: 'Error' }
     default:
-      return 'gray'
+      return { color: 'gray', icon: mdiHelpCircle, label: '—' }
   }
 }
 
@@ -206,6 +218,25 @@ const SnapshotModal: FC<{ gameId: number; target: SnapTarget | null; onClose: ()
   )
 }
 
+// One health-summary chip: an icon + count for a single status, dimmed when zero.
+const HealthChip: FC<{ icon: string; color: string; count: number; label: string }> = ({
+  icon,
+  color,
+  count,
+  label,
+}) => (
+  <Tooltip label={label} withArrow>
+    <Group gap={4} align="center" wrap="nowrap" style={{ opacity: count ? 1 : 0.45 }}>
+      <ThemeIcon size="sm" radius="xl" variant="light" color={color}>
+        <Icon path={icon} size={0.62} />
+      </ThemeIcon>
+      <Text fw={700} size="sm">
+        {count}
+      </Text>
+    </Group>
+  </Tooltip>
+)
+
 const AdOps: FC = () => {
   const { id } = useParams()
   const numId = parseInt(id ?? '-1', 10)
@@ -213,6 +244,9 @@ const AdOps: FC = () => {
   const { adminAdState: state, error, mutate } = useAdminAdState(numId)
   const [busy, setBusy] = useState(false)
   const [snapTarget, setSnapTarget] = useState<SnapTarget | null>(null)
+  const [search, setSearch] = useState('')
+  const [debouncedSearch] = useDebouncedValue(search, 200)
+  const now = useTicker()
   const isMobile = useIsMobile(1080)
 
   const isLoading = !state && !error
@@ -312,47 +346,127 @@ const AdOps: FC = () => {
     )
   }
 
-  const now = useTicker()
   const roundEndsIn =
     state.roundEndsAt ? Math.max(0, dayjs(state.roundEndsAt).diff(now, 'second')) : null
+  const roundTotal =
+    state.roundStartedAt && state.roundEndsAt
+      ? Math.max(1, dayjs(state.roundEndsAt).diff(state.roundStartedAt, 'second'))
+      : null
+  const roundPct =
+    roundTotal && roundEndsIn !== null
+      ? Math.min(100, Math.max(3, ((roundTotal - roundEndsIn) / roundTotal) * 100))
+      : 0
+  const ringColor =
+    roundEndsIn === 0
+      ? 'red'
+      : roundTotal && roundEndsIn !== null && roundEndsIn / roundTotal < 0.25
+        ? 'orange'
+        : 'teal'
+  const ringLabel =
+    state.currentRound == null
+      ? '—'
+      : roundEndsIn === null
+        ? '∞'
+        : roundEndsIn === 0
+          ? t('admin.content.ad_ops.round_ended_short', 'end')
+          : `${roundEndsIn}s`
+
+  // Aggregate every (team × challenge) cell into a fleet-wide health summary.
+  const counts = { Ok: 0, Mumble: 0, Offline: 0, InternalError: 0, unchecked: 0 }
+  state.teams.forEach((r) =>
+    r.services.forEach((c) => {
+      const k = c.lastCheckStatus
+      if (k === 'Ok' || k === 'Mumble' || k === 'Offline' || k === 'InternalError') counts[k]++
+      else counts.unchecked++
+    })
+  )
+
+  const enabledChallenges = state.challenges.filter((c) => c.isEnabled).length
+  const visibleTeams = state.teams.filter(
+    (r) => debouncedSearch === '' || r.teamName.toLowerCase().includes(debouncedSearch.toLowerCase())
+  )
 
   return (
     <WithGameEditTab>
       <SnapshotModal gameId={numId} target={snapTarget} onClose={() => setSnapTarget(null)} />
       <Stack gap="md">
-        {/* Top status bar */}
-        <Paper p="md" withBorder>
-          <Group justify="space-between" align="center" wrap="wrap" gap="md">
-            <Group gap="xl" wrap="wrap">
-              <Stack gap={0}>
-                <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-                  {t('admin.content.ad_ops.current_round', 'Round')}
-                </Text>
-                <Text fw="bold" size="xl">
-                  {state.currentRound ?? '—'}
-                </Text>
-              </Stack>
-              <Stack gap={0}>
-                <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-                  {t('admin.content.ad_ops.round_ends', 'Round ends')}
-                </Text>
-                <Text fw="bold" size="md">
-                  {roundEndsIn === null
-                    ? '—'
-                    : roundEndsIn === 0
-                      ? t('admin.content.ad_ops.round_ended', 'Round ended')
-                      : `${roundEndsIn}s`}
-                </Text>
-              </Stack>
-              <Stack gap={0}>
+        {/* Mission-control bar: round timing, scoring state, fleet health, actions */}
+        <Paper p="md" withBorder radius="md">
+          <Group justify="space-between" align="center" wrap="wrap" gap="lg">
+            <Group gap="xl" wrap="wrap" align="center">
+              {/* Round progress ring + number */}
+              <Group gap="sm" wrap="nowrap" align="center">
+                <RingProgress
+                  size={76}
+                  thickness={8}
+                  roundCaps
+                  sections={[{ value: roundPct, color: ringColor }]}
+                  label={
+                    <Text ta="center" fw={700} size="sm" c={ringColor === 'teal' ? undefined : ringColor}>
+                      {ringLabel}
+                    </Text>
+                  }
+                />
+                <Stack gap={2}>
+                  <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
+                    {t('admin.content.ad_ops.current_round', 'Round')}
+                  </Text>
+                  <Group gap={6} align="center" wrap="nowrap">
+                    <Text fw="bold" size="xl" lh={1}>
+                      {state.currentRound ?? '—'}
+                    </Text>
+                    {state.scoringPaused ? (
+                      <Badge
+                        color="orange"
+                        variant="light"
+                        leftSection={<Icon path={mdiPauseCircleOutline} size={0.6} />}
+                      >
+                        {t('admin.content.ad_ops.scoring_paused', 'Scoring paused')}
+                      </Badge>
+                    ) : (
+                      roundEndsIn !== 0 &&
+                      state.currentRound != null && (
+                        <Badge color="teal" variant="dot">
+                          {t('admin.content.ad_ops.live', 'Live')}
+                        </Badge>
+                      )
+                    )}
+                  </Group>
+                </Stack>
+              </Group>
+
+              {/* Challenges enabled */}
+              <Stack gap={2}>
                 <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
                   {t('admin.content.ad_ops.challenges_active', 'Challenges')}
                 </Text>
-                <Text fw="bold" size="md">
-                  {state.challenges.filter((c) => c.isEnabled).length}/{state.challenges.length}
+                <Text fw="bold" size="xl" lh={1}>
+                  {enabledChallenges}/{state.challenges.length}
                 </Text>
               </Stack>
+
+              {/* Fleet-wide service health */}
+              <Stack gap={4}>
+                <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
+                  {t('admin.content.ad_ops.service_health', 'Service health')}
+                </Text>
+                <Group gap="md" wrap="nowrap">
+                  <HealthChip icon={mdiCheckCircle} color="teal" count={counts.Ok} label="Ok" />
+                  <HealthChip icon={mdiAlertCircle} color="yellow" count={counts.Mumble} label="Mumble" />
+                  <HealthChip icon={mdiCloseCircle} color="red" count={counts.Offline} label="Offline" />
+                  <HealthChip icon={mdiHelpCircle} color="gray" count={counts.InternalError} label="Error" />
+                  {counts.unchecked > 0 && (
+                    <HealthChip
+                      icon={mdiHelpCircle}
+                      color="dark"
+                      count={counts.unchecked}
+                      label={t('admin.content.ad_ops.health_unchecked', 'Unchecked')}
+                    />
+                  )}
+                </Group>
+              </Stack>
             </Group>
+
             <Group gap="sm" wrap="wrap" justify={isMobile ? 'flex-end' : undefined}>
               <Button
                 leftSection={<Icon path={mdiRefresh} size={0.9} />}
@@ -388,25 +502,35 @@ const AdOps: FC = () => {
         {/* Per-challenge enable/disable cards */}
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
           {state.challenges.map((c) => (
-            <Card key={c.challengeId} withBorder p="sm">
+            <Card
+              key={c.challengeId}
+              withBorder
+              p="sm"
+              style={{
+                borderLeft: `3px solid var(--mantine-color-${c.isEnabled ? 'teal' : 'gray'}-${c.isEnabled ? 6 : 4})`,
+                opacity: c.isEnabled ? 1 : 0.7,
+              }}
+            >
               <Group justify="space-between" wrap="nowrap" align="flex-start">
-                <Stack gap={2} miw={0}>
+                <Stack gap={4} miw={0}>
                   <Text truncate fw="bold">
                     {c.title}
                   </Text>
-                  <Text size="xs" c="dimmed">
-                    {t('admin.content.ad_ops.tick_summary', {
-                      tick: c.tickSeconds,
-                      lifetime: c.flagLifetimeTicks,
-                      defaultValue: 'tick {{tick}}s · lifetime {{lifetime}} ticks',
-                    })}
-                  </Text>
-                  <Text size="xs" c="dimmed">
-                    {t('admin.content.ad_ops.teams_with_container', {
-                      count: c.teamsWithLiveContainer ?? 0,
-                      defaultValue: '{{count}} live container(s)',
-                    })}
-                  </Text>
+                  <Group gap="xs">
+                    <Badge size="xs" variant="light" color={c.teamsWithLiveContainer ? 'blue' : 'gray'}>
+                      {t('admin.content.ad_ops.teams_with_container', {
+                        count: c.teamsWithLiveContainer ?? 0,
+                        defaultValue: '{{count}} live',
+                      })}
+                    </Badge>
+                    <Text size="xs" c="dimmed">
+                      {t('admin.content.ad_ops.tick_summary', {
+                        tick: c.tickSeconds,
+                        lifetime: c.flagLifetimeTicks,
+                        defaultValue: 'tick {{tick}}s · lifetime {{lifetime}} ticks',
+                      })}
+                    </Text>
+                  </Group>
                 </Stack>
                 <Tooltip
                   label={
@@ -427,13 +551,26 @@ const AdOps: FC = () => {
         </SimpleGrid>
 
         {/* Team × challenge grid */}
-        <Paper p="md" withBorder>
-          <Group justify="space-between" mb="sm">
-            <Title order={4}>{t('admin.content.ad_ops.grid_title', 'Team status')}</Title>
-            <Text size="xs" c="dimmed">
-              {t('admin.content.ad_ops.grid_legend',
-                'Click a cell IP to copy. Restart bypasses the player cooldown.')}
-            </Text>
+        <Paper p="md" withBorder radius="md">
+          <Group justify="space-between" mb="sm" wrap="wrap" gap="sm">
+            <Group gap="xs" align="center">
+              <Title order={4}>{t('admin.content.ad_ops.grid_title', 'Team status')}</Title>
+              <Badge variant="light" color="gray">
+                {t('admin.content.ad_ops.teams_count', {
+                  count: visibleTeams.length,
+                  defaultValue: '{{count}} teams',
+                })}
+              </Badge>
+            </Group>
+            <TextInput
+              size="xs"
+              w={260}
+              maw="100%"
+              leftSection={<Icon path={mdiMagnify} size={0.8} />}
+              placeholder={t('admin.placeholder.ad_ops.search_team', 'Filter teams…')}
+              value={search}
+              onChange={(e) => setSearch(e.currentTarget.value)}
+            />
           </Group>
 
           {state.teams.length === 0 ? (
@@ -459,7 +596,7 @@ const AdOps: FC = () => {
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {state.teams.map((row) => (
+                  {visibleTeams.map((row) => (
                     <Table.Tr key={row.participationId}>
                       <Table.Td className={tableClasses.left}>
                         <Text truncate fw="bold" size="sm" maw="12rem">
@@ -468,41 +605,89 @@ const AdOps: FC = () => {
                       </Table.Td>
                       {state.challenges.map((c) => {
                         const cell = row.services.find((s) => s.challengeId === c.challengeId)
+                        const sm = statusMeta(cell?.lastCheckStatus)
                         return (
                           <Table.Td key={c.challengeId}>
                             {cell ? (
-                              <Stack gap={4}>
-                                <Group gap={4} wrap="nowrap">
+                              <Stack gap={6}>
+                                <Group justify="space-between" wrap="nowrap" gap={4}>
                                   <Badge
-                                    size="xs"
-                                    color={statusColor(cell.lastCheckStatus)}
-                                    variant={cell.lastCheckStatus ? 'filled' : 'light'}
+                                    size="sm"
+                                    color={sm.color}
+                                    variant={cell.lastCheckStatus ? 'light' : 'outline'}
+                                    leftSection={<Icon path={sm.icon} size={0.55} />}
                                   >
                                     {cell.lastCheckStatus ?? '—'}
                                   </Badge>
-                                  {cell.containerIp && (
-                                    <CopyButton value={`${cell.containerIp}:${cell.containerPort ?? ''}`}>
-                                      {({ copied, copy }) => (
-                                        <Tooltip
-                                          label={
-                                            copied
-                                              ? t('game.tooltip.copy.copied', 'Copied')
-                                              : t('game.tooltip.copy.ip_port', 'Copy IP:port')
-                                          }
+                                  <Group gap={2} wrap="nowrap">
+                                    <Tooltip
+                                      label={t('admin.tooltip.ad_ops.restart',
+                                        'Restart container (bypasses player cooldown)')}
+                                      withArrow
+                                    >
+                                      <ActionIcon
+                                        size="sm"
+                                        variant="subtle"
+                                        color="gray"
+                                        onClick={() => restartCell(cell)}
+                                      >
+                                        <Icon path={mdiRestart} size={0.7} />
+                                      </ActionIcon>
+                                    </Tooltip>
+                                    {cell.snapshotAvailable && (
+                                      <Tooltip
+                                        label={t('admin.tooltip.ad_ops.snapshot',
+                                          'Inspect post-game snapshot')}
+                                        withArrow
+                                      >
+                                        <Indicator
+                                          disabled={cell.changedFileCount == null}
+                                          label={cell.changedFileCount}
+                                          size={15}
+                                          color="grape"
+                                          offset={3}
                                         >
-                                          <Text
-                                            className={misc.ffmono}
-                                            size="xs"
-                                            style={{ cursor: 'pointer' }}
-                                            onClick={copy}
+                                          <ActionIcon
+                                            size="sm"
+                                            variant="subtle"
+                                            color="grape"
+                                            onClick={() =>
+                                              setSnapTarget({
+                                                cell,
+                                                teamName: row.teamName,
+                                                challengeTitle: c.title,
+                                              })
+                                            }
                                           >
-                                            {cell.containerIp}:{cell.containerPort}
-                                          </Text>
-                                        </Tooltip>
-                                      )}
-                                    </CopyButton>
-                                  )}
+                                            <Icon path={mdiFileTree} size={0.7} />
+                                          </ActionIcon>
+                                        </Indicator>
+                                      </Tooltip>
+                                    )}
+                                  </Group>
                                 </Group>
+                                {cell.containerIp && (
+                                  <CopyButton value={`${cell.containerIp}:${cell.containerPort ?? ''}`}>
+                                    {({ copied, copy }) => (
+                                      <Tooltip
+                                        label={
+                                          copied
+                                            ? t('game.tooltip.copy.copied', 'Copied')
+                                            : t('game.tooltip.copy.ip_port', 'Copy IP:port')
+                                        }
+                                      >
+                                        <Text
+                                          className={misc.ffmono}
+                                          size="xs"
+                                          style={{ cursor: 'pointer' }}
+                                          onClick={copy}
+                                        >
+                                          {cell.containerIp}:{cell.containerPort}
+                                        </Text>
+                                      </Tooltip>
+                                    )}
+                                  </CopyButton>
+                                )}
                                 {cell.currentFlag && (
                                   <CopyButton value={cell.currentFlag}>
                                     {({ copied, copy }) => (
@@ -528,38 +713,6 @@ const AdOps: FC = () => {
                                     )}
                                   </CopyButton>
                                 )}
-                                <Group gap={4} wrap="nowrap">
-                                  <Button
-                                    size="compact-xs"
-                                    variant="subtle"
-                                    leftSection={<Icon path={mdiRestart} size={0.7} />}
-                                    onClick={() => restartCell(cell)}
-                                  >
-                                    {t('admin.button.ad_ops.restart', 'Restart')}
-                                  </Button>
-                                  {cell.snapshotAvailable && (
-                                    <Button
-                                      size="compact-xs"
-                                      variant="subtle"
-                                      color="grape"
-                                      leftSection={<Icon path={mdiFileTree} size={0.7} />}
-                                      onClick={() =>
-                                        setSnapTarget({
-                                          cell,
-                                          teamName: row.teamName,
-                                          challengeTitle: c.title,
-                                        })
-                                      }
-                                    >
-                                      {cell.changedFileCount != null
-                                        ? t('admin.button.ad_ops.snapshot.with_count', {
-                                            count: cell.changedFileCount,
-                                            defaultValue: 'Snapshot ({{count}})',
-                                          })
-                                        : t('admin.button.ad_ops.snapshot.label', 'Snapshot')}
-                                    </Button>
-                                  )}
-                                </Group>
                               </Stack>
                             ) : (
                               <Center>
@@ -571,6 +724,15 @@ const AdOps: FC = () => {
                       })}
                     </Table.Tr>
                   ))}
+                  {visibleTeams.length === 0 && (
+                    <Table.Tr>
+                      <Table.Td colSpan={state.challenges.length + 1}>
+                        <Text ta="center" c="dimmed" py="md" size="sm">
+                          {t('admin.content.ad_ops.no_team_match', 'No teams match the filter.')}
+                        </Text>
+                      </Table.Td>
+                    </Table.Tr>
+                  )}
                 </Table.Tbody>
               </Table>
             </ScrollArea>

@@ -148,9 +148,17 @@
       "current_round": "Round",
       "round_ends": "Round ends",
       "round_ended": "Round ended",
+      "round_ended_short": "end",
+      "scoring_paused": "Scoring paused",
+      "live": "Live",
+      "service_health": "Service health",
+      "health_unchecked": "Unchecked",
       "challenges_active": "Challenges",
-      "teams_with_container_one": "{{count}} live container",
-      "teams_with_container_other": "{{count}} live containers",
+      "teams_with_container_one": "{{count}} live",
+      "teams_with_container_other": "{{count}} live",
+      "teams_count_one": "{{count}} team",
+      "teams_count_other": "{{count}} teams",
+      "no_team_match": "No teams match the filter.",
       "tick_summary": "tick {{tick}}s · lifetime {{lifetime}} ticks",
       "grid_title": "Team status",
       "grid_legend": "Click a cell IP to copy. Restart bypasses the player cooldown.",
@@ -1043,7 +1051,9 @@
     "ad_ops": {
       "enable_challenge": "Re-enable scoring + flag rotation",
       "disable_challenge": "Disable scoring + flag rotation",
-      "copy_flag": "Copy current flag"
+      "copy_flag": "Copy current flag",
+      "restart": "Restart container (bypasses player cooldown)",
+      "snapshot": "Inspect post-game snapshot"
     }
   },
   "notification": {
@@ -1179,6 +1189,9 @@
   },
   "placeholder": {
     "empty": "Empty",
+    "ad_ops": {
+      "search_team": "Filter teams…"
+    },
     "games": {
       "challenges": {
         "attachment": {

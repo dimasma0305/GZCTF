@@ -3,7 +3,9 @@
     "ad_ops": {
       "enable_challenge": "重新启用此题目的计分与 Flag 轮换",
       "disable_challenge": "暂停此题目的计分与 Flag 轮换",
-      "copy_flag": "复制当前 Flag"
+      "copy_flag": "复制当前 Flag",
+      "restart": "重启容器（绕过选手冷却）",
+      "snapshot": "查看赛后快照"
     }
   },
   "button": {
@@ -155,8 +157,15 @@
       "current_round": "回合",
       "round_ends": "回合结束于",
       "round_ended": "回合已结束",
+      "round_ended_short": "结束",
+      "scoring_paused": "计分已暂停",
+      "live": "实时",
+      "service_health": "服务健康度",
+      "health_unchecked": "未检测",
       "challenges_active": "题目",
-      "teams_with_container_other": "{{count}} 个运行中的容器",
+      "teams_with_container_other": "{{count}} 个在线",
+      "teams_count_other": "{{count}} 支队伍",
+      "no_team_match": "没有匹配筛选条件的队伍。",
       "tick_summary": "周期 {{tick}}s · 持续 {{lifetime}} 回合",
       "grid_title": "队伍状态",
       "grid_legend": "点击单元格 IP 复制。重启会绕过玩家冷却。",
@@ -1161,6 +1170,9 @@
   },
   "placeholder": {
     "empty": "未填写",
+    "ad_ops": {
+      "search_team": "筛选队伍……"
+    },
     "games": {
       "challenges": {
         "attachment": {
