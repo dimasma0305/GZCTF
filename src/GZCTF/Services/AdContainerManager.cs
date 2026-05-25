@@ -419,23 +419,38 @@ public sealed class AdContainerManager(
         if (game is not null)
             container.ExpectStopAt = game.EndTimeUtc;
 
-        await db.Containers.AddAsync(container, token);
-
-        if (existing is null)
+        try
         {
-            await db.AdTeamServices.AddAsync(new AdTeamService
+            await db.Containers.AddAsync(container, token);
+
+            if (existing is null)
             {
-                ParticipationId = participationId,
-                ChallengeId = challenge.Id,
-                ContainerId = container.Id
-            }, token);
-        }
-        else
-        {
-            existing.ContainerId = container.Id;
-        }
+                await db.AdTeamServices.AddAsync(new AdTeamService
+                {
+                    ParticipationId = participationId,
+                    ChallengeId = challenge.Id,
+                    ContainerId = container.Id
+                }, token);
+            }
+            else
+            {
+                existing.ContainerId = container.Id;
+            }
 
-        await db.SaveChangesAsync(token);
+            await db.SaveChangesAsync(token);
+        }
+        catch (Exception e)
+        {
+            // The docker container is already created; if recording it fails
+            // (e.g. a concurrent launch won the unique (participation,
+            // challenge) row, or a DB error) we must destroy it — otherwise it
+            // leaks as an untracked orphan that nothing will ever clean up.
+            logger.LogErrorMessage(e,
+                $"A&D launch: recording container failed; destroying orphan team={participationId} challenge={challenge.Id}");
+            try { await containerManager.DestroyContainerAsync(container, token); }
+            catch (Exception de) { logger.LogErrorMessage(de, "A&D launch: orphan cleanup also failed"); }
+            return;
+        }
 
         logger.SystemLog(
             $"A&D container launched: team={participationId} challenge={challenge.Id} ip={container.IP}:{container.Port}",
