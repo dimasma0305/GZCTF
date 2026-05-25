@@ -44,6 +44,13 @@ public sealed class AdCheckerService(
 
     private int MaxParallel => int.TryParse(configuration["Ad:Checker:MaxParallel"], out var n) && n > 0 ? n : 10;
 
+    /// <summary>Attempts per check before recording a verdict. Retries absorb
+    /// transient blips / unlucky jittered timing so one dropped packet doesn't
+    /// cost a team a full tick of SLA. Stops early on the first Ok.</summary>
+    private const int MaxCheckAttempts = 3;
+
+    private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(1500);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.SystemLog(
@@ -96,6 +103,56 @@ public sealed class AdCheckerService(
             await CheckGameAsync(db, executor, gameId, token);
     }
 
+    /// <summary>
+    /// When this service's getflag check becomes due within the current tick:
+    /// <c>StartedAt + grace + jitter</c>, where jitter is a stable
+    /// per-(service, round) offset inside <c>AdGetflagWindowFraction</c> of the
+    /// tick. Grace is capped at half the tick, and the whole schedule is clamped
+    /// to leave one poll interval before the round ends so the check still fires
+    /// before the round advances. Re-rolls each round.
+    /// </summary>
+    private static DateTimeOffset GetflagDueAt(AdTeamService ts, AdRound round, double tickSeconds, double pollSeconds)
+    {
+        var grace = Math.Max(0, ts.Challenge.AdMinGracePeriodSeconds ?? 3);
+        var getFrac = Math.Clamp(ts.Challenge.AdGetflagWindowFraction ?? 0.5, 0.0, 1.0);
+        var graceSec = Math.Min(grace, tickSeconds * 0.5);
+        var maxJitter = Math.Max(0.0, tickSeconds - graceSec - pollSeconds);
+        var jitterSec = Math.Min(getFrac * tickSeconds, maxJitter);
+        return round.StartedAt.AddSeconds(graceSec + StableJitterFraction(ts.Id, round.Id) * jitterSec);
+    }
+
+    /// <summary>Deterministic [0,1) per (service, round): stable across polls and
+    /// process restarts (so the due time never moves mid-tick) but fresh every
+    /// round (so the jitter pattern can't be fingerprinted).</summary>
+    private static double StableJitterFraction(int serviceId, int roundId)
+    {
+        unchecked
+        {
+            var h = (uint)(serviceId * 73856093) ^ (uint)(roundId * 19349663);
+            return h % 100000u / 100000.0;
+        }
+    }
+
+    /// <summary>Run the checker, retrying up to <see cref="MaxCheckAttempts"/>
+    /// times on any non-Ok verdict (returns on the first Ok). Absorbs transient
+    /// network blips and unlucky jittered timing so they don't zero a team's
+    /// SLA for the tick.</summary>
+    private static async Task<AdCheckerExecutor.CheckOutcome> RunWithRetryAsync(
+        AdCheckerExecutor executor, AdTeamService ts, AdRound round, GameChallenge challenge,
+        string? flag, CancellationToken token)
+    {
+        AdCheckerExecutor.CheckOutcome outcome = null!;
+        for (var attempt = 1; attempt <= MaxCheckAttempts; attempt++)
+        {
+            outcome = await executor.RunAsync(ts, round, challenge, flag, token);
+            if (outcome.Status == AdCheckStatus.Ok)
+                return outcome;
+            if (attempt < MaxCheckAttempts)
+                await Task.Delay(RetryDelay, token);
+        }
+        return outcome;
+    }
+
     private async Task CheckGameAsync(
         AppDbContext db, AdCheckerExecutor executor, int gameId, CancellationToken token)
     {
@@ -130,19 +187,31 @@ public sealed class AdCheckerService(
 
         if (pending.Count == 0) return;
 
+        // Getflag jitter + grace: each service's check fires at a per-(service,
+        // round) randomized offset inside the tick — never before
+        // AdMinGracePeriodSeconds (lets the service settle after putflag) and
+        // within AdGetflagWindowFraction of the tick after that. Re-rolled each
+        // round so teams can't predict the SLA check and hide their box only
+        // during it. Services not yet due this poll are picked up on a later one.
+        var nowTs = DateTimeOffset.UtcNow;
+        var tickSeconds = Math.Max(1.0, (latest.EndsAt - latest.StartedAt).TotalSeconds);
+        var pollSeconds = PollInterval.TotalSeconds;
+        var due = pending.Where(ts => nowTs >= GetflagDueAt(ts, latest, tickSeconds, pollSeconds)).ToList();
+        if (due.Count == 0) return;
+
         // Pre-fetch the planted flag for each (team, challenge) so the
         // executor doesn't need DB access. Round N's flag is what the
         // checker should pass via GZCTF_FLAG.
-        var serviceIds = pending.Select(ts => ts.Id).ToList();
+        var serviceIds = due.Select(ts => ts.Id).ToList();
         var flagByService = await db.AdFlags
             .Where(f => f.AdRoundId == latest.Id && serviceIds.Contains(f.AdTeamServiceId))
             .Select(f => new { f.AdTeamServiceId, f.Flag })
             .ToDictionaryAsync(f => f.AdTeamServiceId, f => f.Flag, token);
 
         using var gate = new SemaphoreSlim(MaxParallel, MaxParallel);
-        var tasks = new List<Task>(pending.Count);
+        var tasks = new List<Task>(due.Count);
 
-        foreach (var ts in pending)
+        foreach (var ts in due)
         {
             await gate.WaitAsync(token);
             tasks.Add(Task.Run(async () =>
@@ -150,7 +219,7 @@ public sealed class AdCheckerService(
                 try
                 {
                     flagByService.TryGetValue(ts.Id, out var flag);
-                    var outcome = await executor.RunAsync(ts, latest, ts.Challenge, flag, token);
+                    var outcome = await RunWithRetryAsync(executor, ts, latest, ts.Challenge, flag, token);
                     await PersistOutcomeAsync(scopeFactory, ts.Id, latest.Id, outcome, token);
                 }
                 catch (Exception e) when (e is not OperationCanceledException)
