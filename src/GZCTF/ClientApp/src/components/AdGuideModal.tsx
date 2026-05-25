@@ -542,10 +542,10 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
                         <Text component="span" fw={600} c="blue">
                           {t('game.content.ad.guide.scoring.sla_label', 'SLA')}:
                         </Text>{' '}
-                        <Code className={misc.ffmono}>(ok_checks / total_checks) × 10 × current_round</Code>.{' '}
+                        <Code className={misc.ffmono}>Σ tick_credit × sqrt(teams)</Code>.{' '}
                         {t(
                           'game.content.ad.guide.scoring.sla',
-                          'The platform checks your service every tick. Failed checks (Mumble / Offline) shrink the fraction. Keep your service responding.'
+                          'Each tick your service is checked. A passing check scores 1.0, a service that just came back up scores 0.5 (recovering), a failing or unreachable one scores 0. Credits sum over the whole game and scale with the number of teams. A checker error costs you nothing — it just adds no points.'
                         )}
                       </List.Item>
                     </List>

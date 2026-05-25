@@ -137,7 +137,7 @@
         },
         "rounds": {
           "title": "Rounds & flags",
-          "tick": "A round (tick) is the scoring unit. Length is per-challenge (the operator sets it — typically 60–180s).",
+          "tick": "A round (tick) is the scoring unit. Length is set per game — every A&D service shares one tick (the operator picks it, typically 60–180s).",
           "plant": "At each tick the platform writes a fresh flag into your container (the \"current flag\"). You can see it in the challenge modal — protect it.",
           "lifetime": "Old flags stay valid for N ticks (default 5). After that they expire and cannot be submitted for points.",
           "warmup": "Round 0 is warmup — no scoring yet, just make sure your service is up."
@@ -150,7 +150,7 @@
           "defense_label": "Defense loss",
           "defense": "Each time another team captures one of your flags increments your captured-count. Sub-linear so early losses hurt more than later ones — patch fast.",
           "sla_label": "SLA",
-          "sla": "The platform checks your service every tick. Failed checks (Mumble / Offline) shrink the fraction. Keep your service responding.",
+          "sla": "Each tick your service is checked. A passing check scores 1.0, a service that just came back up scores 0.5 (recovering), a failing or unreachable one scores 0. Credits sum over the whole game and scale with the number of teams. A checker error costs you nothing — it just adds no points.",
           "total_formula": "Total = Attack + SLA − Defense loss"
         },
         "targets": {
