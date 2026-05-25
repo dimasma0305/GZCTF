@@ -12,6 +12,11 @@ namespace GZCTF.Models.Request.Game;
 /// <param name="Category">Challenge category (Web, Pwn, ...).</param>
 /// <param name="Type">Submission type — drives particle color.</param>
 /// <param name="Time">Submission time (UTC).</param>
+/// <param name="VictimTeamName">
+/// For Attack &amp; Defense captures: the team whose flag was stolen. The
+/// animation page fires the projectile at this team's node instead of the
+/// center HQ. Null for jeopardy submissions (which target the HQ).
+/// </param>
 public record AttackEvent(
     string TeamName,
     string? TeamAvatar,
@@ -19,4 +24,5 @@ public record AttackEvent(
     string ChallengeTitle,
     ChallengeCategory Category,
     SubmissionType Type,
-    DateTimeOffset Time);
+    DateTimeOffset Time,
+    string? VictimTeamName = null);

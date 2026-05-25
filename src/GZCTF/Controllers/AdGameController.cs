@@ -1,4 +1,6 @@
 using GZCTF.Extensions;
+using GZCTF.Hubs;
+using GZCTF.Hubs.Clients;
 using GZCTF.Middlewares;
 using GZCTF.Models;
 using GZCTF.Models.Data;
@@ -11,6 +13,7 @@ using GZCTF.Utils;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Localization;
 
@@ -34,6 +37,7 @@ public class AdGameController(
     AdContainerManager adContainerManager,
     IBlobStorage blobStorage,
     IConfigService configService,
+    IHubContext<AttackHub, IAttackClient> attackHub,
     IStringLocalizer<Program> localizer,
     ILogger<AdGameController> logger) : ControllerBase
 {
@@ -214,10 +218,56 @@ public class AdGameController(
             $"A&D attack landed: attacker={attackerPart.Id} victim={victimPart.Id} chal={adFlag.AdTeamService.ChallengeId} round={currentRound.Number} pts={points:F2}",
             TaskStatus.Success, LogLevel.Information);
 
+        // Light up the public attack page: a capture fires a projectile from
+        // the attacker's node at the *victim* team's node (not the center HQ).
+        await BroadcastAdAttackAsync(attackerPart.GameId, attackerPart.Id, victimPart.Id,
+            adFlag.AdTeamService.ChallengeId, token);
+
         result.Status = "accepted";
         result.Points = points;
         result.FlagPlantedAtRound = adFlag.PlantedAtRound;
         return result;
+    }
+
+    /// <summary>
+    /// Broadcast an accepted A&amp;D capture to the public attack page. The
+    /// event carries both the attacker and the <see cref="AttackEvent.VictimTeamName"/>
+    /// so the visualization can fly the projectile team→team instead of into
+    /// the center HQ. Best-effort: a broadcast failure never fails the submit.
+    /// </summary>
+    private async Task BroadcastAdAttackAsync(int gameId, int attackerPartId, int victimPartId,
+        int challengeId, CancellationToken token)
+    {
+        try
+        {
+            var teams = await db.Participations
+                .Where(p => p.Id == attackerPartId || p.Id == victimPartId)
+                .Select(p => new { p.Id, p.Team.Name, p.Team.AvatarHash })
+                .ToListAsync(token);
+            var attacker = teams.FirstOrDefault(t => t.Id == attackerPartId);
+            var victim = teams.FirstOrDefault(t => t.Id == victimPartId);
+
+            var chal = await db.GameChallenges
+                .Where(c => c.Id == challengeId)
+                .Select(c => new { c.Title, c.Category })
+                .FirstOrDefaultAsync(token);
+
+            var evt = new AttackEvent(
+                attacker?.Name ?? string.Empty,
+                attacker?.AvatarHash is null ? null : $"/assets/{attacker.AvatarHash}/avatar",
+                null,
+                chal?.Title ?? string.Empty,
+                chal?.Category ?? ChallengeCategory.Misc,
+                SubmissionType.Normal,
+                DateTimeOffset.UtcNow,
+                victim?.Name);
+
+            await attackHub.Clients.Group($"AttackGame_{gameId}").ReceivedAttack(evt);
+        }
+        catch (Exception e)
+        {
+            logger.LogErrorMessage(e, "Failed to broadcast A&D attack event");
+        }
     }
 
     private async Task<Participation?> ResolveTeamApiTokenAsync(int gameId, CancellationToken token)

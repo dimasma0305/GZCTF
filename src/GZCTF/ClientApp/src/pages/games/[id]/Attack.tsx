@@ -47,6 +47,10 @@ interface AttackEvent {
   category: ChallengeCategory
   type: SubmissionType
   time: string
+  // Attack & Defense only: the team whose flag was captured. When this
+  // resolves to a node on the board the projectile flies there instead of
+  // into the center HQ. Undefined/null for jeopardy submissions.
+  victimTeamName?: string | null
 }
 
 interface FeedLine {
@@ -578,6 +582,16 @@ const Attack: FC = () => {
       const src = resolveSource(evt)
       const color = colorForType(evt.type)
 
+      // Attack target: for an A&D capture (victimTeamName set) aim at the
+      // victim team's node; otherwise (jeopardy) aim at the center HQ.
+      const target = (() => {
+        if (evt.victimTeamName) {
+          const victim = teamIndex.get(evt.victimTeamName)
+          if (victim) return { x: victim.x, y: victim.y }
+        }
+        return hqCenter
+      })()
+
       // Visual effects only fire once Pixi has finished initializing;
       // the feed/stats updates above still run so data stays fresh.
       if (!pixiReadyRef.current) {
@@ -625,7 +639,7 @@ const Attack: FC = () => {
           for (let i = 0; i < BURST_COUNT; i++) {
             const t = setTimeout(() => {
               burstTimersRef.current.delete(t)
-              fireBullet(src.x, src.y, hqCenter.x, hqCenter.y, color, evt.type)
+              fireBullet(src.x, src.y, target.x, target.y, color, evt.type)
               playPew(evt.type)
             }, i * BURST_INTERVAL_MS)
             burstTimersRef.current.add(t)
@@ -633,7 +647,7 @@ const Attack: FC = () => {
         } else {
           burstSpawnTimesRef.current = recent
           // Fire a single reduced arc so the event still registers visually
-          fireBullet(src.x, src.y, hqCenter.x, hqCenter.y, color, evt.type)
+          fireBullet(src.x, src.y, target.x, target.y, color, evt.type)
         }
       }
 
@@ -648,7 +662,7 @@ const Attack: FC = () => {
         }, SCOREBOARD_DEBOUNCE_MS)
       }
     },
-    [audioEnabled, hqCenter.x, hqCenter.y, refreshScoreboard, resolveSource, isPreview]
+    [audioEnabled, hqCenter, teamIndex, refreshScoreboard, resolveSource, isPreview]
   )
 
   /* ---- Cleanup burst timers on unmount ---- */
