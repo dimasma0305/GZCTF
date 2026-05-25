@@ -50,7 +50,6 @@ export function setPausedState(p: boolean): void {
 
 let audioCtx: AudioContext | null = null
 let masterOut: AudioNode | null = null
-let audioUnlocked = false
 let lastPewAt = 0
 let lastBloodSoundAt = 0
 
@@ -185,12 +184,13 @@ export function disposeEffects(): void {
   app = null
   stage = null
 
-  if (audioCtx) {
-    audioCtx.close().catch(() => undefined)
-    audioCtx = null
-    masterOut = null
-  }
-  audioUnlocked = false
+  // Keep the AudioContext alive across navigations. Browsers cap how many
+  // contexts a page may create (~6 in Chrome); closing + recreating one on
+  // every mount/unmount exhausts that cap and then `new AudioContext()`
+  // throws — the cause of audio playing "sometimes" and dying after a few
+  // page changes. Suspend it instead; unlockAudio() resumes it on return.
+  if (audioCtx && audioCtx.state === 'running')
+    void audioCtx.suspend().catch(() => undefined)
 }
 
 function onResize(): void {
@@ -261,8 +261,13 @@ function mkGraphics(blend: PIXI.BLEND_MODES = 'add'): PIXI.Graphics {
 /* ---------------------------------------------------------------- */
 
 export function unlockAudio(): void {
-  if (audioUnlocked) return
-  audioUnlocked = true
+  // Persistent singleton: build the AudioContext once, then on every later
+  // unlock gesture (e.g. navigating back to this page) just resume the
+  // existing one. Recreating it per visit exhausts the browser's context cap.
+  if (audioCtx) {
+    void audioCtx.resume().catch(() => undefined)
+    return
+  }
   try {
     audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)()
     const master = audioCtx.createGain()
