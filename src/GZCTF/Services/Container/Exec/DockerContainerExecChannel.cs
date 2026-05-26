@@ -82,10 +82,3 @@ public sealed class DockerContainerExecChannel(
         }
     }
 }
-
-public sealed class K8sContainerExecChannel : IContainerExecChannel
-{
-    public Task<IExecSession> OpenAsync(Models.Data.Container container, string shell, CancellationToken token) =>
-        throw new NotSupportedException(
-            "In-browser shell is not supported in kubernetes runtime in v1. Use `kubectl exec` against the cluster directly.");
-}

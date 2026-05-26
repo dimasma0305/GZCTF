@@ -3,8 +3,8 @@ namespace GZCTF.Services.Container.Exec;
 /// <summary>
 /// Bidirectional stream over a running container — read from the
 /// container's stdout / stderr, write to its stdin, resize its pty.
-/// Backed by Docker's <c>exec attach</c> in the Docker runtime; not
-/// yet implemented for Kubernetes.
+/// Backed by Docker's <c>exec attach</c> in the Docker runtime and by the
+/// pod <c>exec</c> streaming API in the Kubernetes runtime.
 /// </summary>
 public interface IExecSession : IAsyncDisposable
 {
@@ -21,9 +21,8 @@ public interface IExecSession : IAsyncDisposable
 /// <summary>
 /// Per-runtime exec channel factory. The Docker impl uses
 /// <c>ExecCreateContainerAsync</c> + <c>StartAndAttachContainerExecAsync</c>
-/// against the mounted socket; Kubernetes impl throws
-/// <see cref="NotSupportedException"/> until we wire up the k8s exec
-/// streaming API.
+/// against the mounted socket; the Kubernetes impl uses
+/// <c>MuxedStreamNamespacedPodExecAsync</c> (the pod exec streaming API).
 /// </summary>
 public interface IContainerExecChannel
 {
