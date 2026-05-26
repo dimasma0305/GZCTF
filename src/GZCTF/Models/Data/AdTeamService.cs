@@ -70,4 +70,14 @@ public class AdTeamService
     /// next launch records it.
     /// </summary>
     public bool? LaunchedWithEgress { get; set; }
+
+    /// <summary>
+    /// Running sum of per-tick SLA credit for this service — incremented
+    /// atomically with each <see cref="AdCheckResult"/> insert (same
+    /// SaveChanges transaction in <c>AdCheckerService.PersistOutcomeAsync</c>),
+    /// so the live scoreboard reads one value per service instead of summing the
+    /// (unbounded) <see cref="AdCheckResult"/> table every render. The frozen
+    /// (as-of-cutoff) view still sums the rows, since this column is "now".
+    /// </summary>
+    public double SlaCreditTotal { get; set; }
 }

@@ -73,6 +73,16 @@ public class CacheHelper(
         await channelWriter.WriteAsync(ScoreboardFrozenCacheHandler.MakeCacheRequest(gameId), token);
     }
 
+    /// <summary>Regenerate the live A&amp;D scoreboard + timeline for a game (the
+    /// frozen variants are static within the freeze window, so they aren't flushed —
+    /// they rebuild on first read). Call on round-advance, accepted submit, and after
+    /// a checker tick.</summary>
+    public async Task FlushAdScoreboardCache(int gameId, CancellationToken token)
+    {
+        await channelWriter.WriteAsync(AdScoreboardCacheHandler.MakeCacheRequest(gameId), token);
+        await channelWriter.WriteAsync(AdTimelineCacheHandler.MakeCacheRequest(gameId), token);
+    }
+
     public async Task FlushRecentGamesCache(CancellationToken token) =>
         await channelWriter.WriteAsync(RecentGamesCacheHandler.MakeCacheRequest(), token);
 
@@ -205,6 +215,16 @@ public static class CacheKey
     public const string ScoreBoardFrozenBase = "_ScoreBoardFrozen";
 
     /// <summary>
+    /// A&amp;D scoreboard (live) — base key for the CacheMaker handler.
+    /// </summary>
+    public const string AdScoreBoardBase = "_AdScoreBoard";
+
+    /// <summary>
+    /// A&amp;D score timeline (live) — base key for the CacheMaker handler.
+    /// </summary>
+    public const string AdTimelineBase = "_AdTimeline";
+
+    /// <summary>
     /// Recent games
     /// </summary>
     public const string RecentGames = "_RecentGames";
@@ -268,6 +288,24 @@ public static class CacheKey
     /// Frozen scoreboard cache
     /// </summary>
     public static string ScoreBoardFrozen(string id) => $"_ScoreBoardFrozen_{id}";
+
+    /// <summary>A&amp;D scoreboard cache (live).</summary>
+    public static string AdScoreBoard(int id) => $"_AdScoreBoard_{id}";
+
+    /// <summary>A&amp;D scoreboard cache (live).</summary>
+    public static string AdScoreBoard(string id) => $"_AdScoreBoard_{id}";
+
+    /// <summary>A&amp;D scoreboard cache (frozen view).</summary>
+    public static string AdScoreBoardFrozen(int id) => $"_AdScoreBoardFrozen_{id}";
+
+    /// <summary>A&amp;D score timeline cache (live).</summary>
+    public static string AdTimeline(int id) => $"_AdTimeline_{id}";
+
+    /// <summary>A&amp;D score timeline cache (live).</summary>
+    public static string AdTimeline(string id) => $"_AdTimeline_{id}";
+
+    /// <summary>A&amp;D score timeline cache (frozen view).</summary>
+    public static string AdTimelineFrozen(int id) => $"_AdTimelineFrozen_{id}";
 
     /// <summary>
     /// Game cache

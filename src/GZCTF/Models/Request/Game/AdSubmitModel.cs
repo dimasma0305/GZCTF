@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using MemoryPack;
 
 namespace GZCTF.Models.Request.Game;
 
@@ -111,7 +112,8 @@ public class AdTeamTarget
 /// score, used by the player A&amp;D scoreboard to render an echarts line chart
 /// that mirrors the jeopardy ScoreTimeLine.
 /// </summary>
-public class AdScoreTimelineModel
+[MemoryPackable]
+public partial class AdScoreTimelineModel
 {
     public int LatestRound { get; set; }
     public DateTimeOffset? StartedAt { get; set; }
@@ -119,7 +121,8 @@ public class AdScoreTimelineModel
     public List<AdTeamTimeline> Teams { get; set; } = [];
 }
 
-public class AdTeamTimeline
+[MemoryPackable]
+public partial class AdTeamTimeline
 {
     public int ParticipationId { get; set; }
     public int TeamId { get; set; }
@@ -128,7 +131,8 @@ public class AdTeamTimeline
     public List<AdTimelinePoint> Items { get; set; } = [];
 }
 
-public class AdTimelinePoint
+[MemoryPackable]
+public partial class AdTimelinePoint
 {
     /// <summary>1-indexed round number.</summary>
     public int Round { get; set; }

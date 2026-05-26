@@ -106,12 +106,15 @@ public sealed class AdRoundService(
             .GetService<IContainerProvider<DockerClient, DockerMetadata>>()
             ?.GetProvider();
         int injected = 0;
+
+        // Preferred path: rewrite the read-only host-backed file in place. The
+        // container's :ro bind mount picks up the new flag immediately, and
+        // container-root can't delete or tamper it. Plain local file writes, so
+        // these stay inline (fast); collect the slow legacy docker-exec ones to
+        // run in parallel afterward.
+        var legacy = new List<(string ContainerId, string Flag, int Pid, int Cid)>();
         foreach (var (ts, flag) in toInject)
         {
-            // Preferred: rewrite the read-only host-backed file in place. The
-            // container's :ro bind mount picks up the new flag immediately, and
-            // container-root can't delete or tamper it. Works even on a Docker
-            // provider hiccup (it's a plain host file write).
             if (flagMount.IsBindMounted(ts.ParticipationId, ts.ChallengeId))
             {
                 try { flagMount.Write(ts.ParticipationId, ts.ChallengeId, flag); injected++; }
@@ -127,23 +130,42 @@ public sealed class AdRoundService(
             // containers launched before the bind-mount feature, or when the
             // mount isn't available. Skipped on K8s (no Docker provider).
             if (docker is null) continue;
-            if (ts.Container?.ContainerId is not { Length: > 0 } cid) continue;
-            try
+            if (ts.Container?.ContainerId is { Length: > 0 } cid)
+                legacy.Add((cid, flag, ts.ParticipationId, ts.ChallengeId));
+        }
+
+        // Legacy docker-exec writes in parallel (bounded) so round-advance stays
+        // sub-second even with many pre-bind-mount containers.
+        if (legacy.Count > 0 && docker is not null)
+        {
+            var injectedLegacy = 0;
+            using var gate = new SemaphoreSlim(10, 10);
+            await Task.WhenAll(legacy.Select(async item =>
             {
-                await WriteFlagFileAsync(docker, cid, flag, token);
-                injected++;
-            }
-            catch (Exception e)
-            {
-                logger.LogWarning(e,
-                    "A&D flag inject failed for team={Tid} challenge={Cid}",
-                    ts.ParticipationId, ts.ChallengeId);
-            }
+                await gate.WaitAsync(token);
+                try
+                {
+                    await WriteFlagFileAsync(docker, item.ContainerId, item.Flag, token);
+                    Interlocked.Increment(ref injectedLegacy);
+                }
+                catch (Exception e)
+                {
+                    logger.LogWarning(e, "A&D flag inject failed for team={Tid} challenge={Cid}",
+                        item.Pid, item.Cid);
+                }
+                finally { gate.Release(); }
+            }));
+            injected += injectedLegacy;
         }
 
         logger.SystemLog(
             $"A&D round advanced: game={gameId} round={nextNumber} flags_planted={toInject.Count} flags_injected={injected}",
             TaskStatus.Success, LogLevel.Information);
+
+        // New round → flags rotated, a tick of SLA settled. Refresh the cached
+        // scoreboard/timeline (background regen; CacheMaker de-bounces bursts).
+        await serviceProvider.GetRequiredService<Cache.CacheHelper>()
+            .FlushAdScoreboardCache(gameId, token);
 
         return new Result(round, toInject.Count);
     }

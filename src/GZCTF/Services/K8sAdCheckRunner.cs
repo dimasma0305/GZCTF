@@ -152,6 +152,127 @@ public sealed class K8sAdCheckRunner(
         }
     }
 
+    /// <summary>
+    /// Built-in reachability probe for a whole tick in ONE Pod (gzctf can't reach
+    /// pod ClusterIPs from outside the cluster, so the probe must run in-cluster).
+    /// The pod TCP-connects to every target in parallel and prints
+    /// <c>"&lt;serviceId&gt; ok|down"</c> per line; we read the log and map it.
+    /// One pod per tick instead of one per check.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<int, AdCheckStatus>> RunBuiltinBatchAsync(
+        IReadOnlyList<AdBuiltinTarget> targets, CancellationToken token)
+    {
+        // Default Offline; flipped to Ok only for targets the prober reports up.
+        var results = new Dictionary<int, AdCheckStatus>(targets.Count);
+        foreach (var t in targets)
+            results[t.ServiceId] = AdCheckStatus.Offline;
+        if (targets.Count == 0)
+            return results;
+
+        var client = provider.GetProvider();
+        var ns = provider.GetMetadata().Config.Namespace;
+        var name = $"ad-prober-{Guid.NewGuid().ToString("N")[..12]}".ToValidRFC1123String("ad-prober");
+
+        // "ip|port|serviceId" entries; probed concurrently (& … wait) so the whole
+        // batch finishes in ~one nc timeout regardless of team count.
+        var list = string.Join(' ', targets.Select(t => $"{t.Ip}|{t.Port}|{t.ServiceId}"));
+        const string script =
+            "for e in $TARGETS; do ( ip=${e%%|*}; r=${e#*|}; p=${r%%|*}; s=${r##*|}; " +
+            "if nc -w3 \"$ip\" \"$p\" </dev/null >/dev/null 2>&1; then echo \"$s ok\"; else echo \"$s down\"; fi ) & done; wait";
+
+        var pod = new V1Pod
+        {
+            Metadata = new V1ObjectMeta
+            {
+                Name = name,
+                NamespaceProperty = ns,
+                Labels = new Dictionary<string, string>
+                {
+                    ["gzctf.gzti.me/ResourceId"] = name,
+                    ["gzctf.role"] = "ad-checker",
+                    ["gzctf.gzti.me/NetworkMode"] = "open"
+                }
+            },
+            Spec = new V1PodSpec
+            {
+                Containers =
+                [
+                    new V1Container
+                    {
+                        Name = "prober",
+                        Image = FallbackImage,
+                        ImagePullPolicy = provider.GetMetadata().Config.ImagePullPolicy,
+                        Env = [new V1EnvVar { Name = "TARGETS", Value = list }],
+                        Command = ["sh", "-c", script],
+                        Resources = new V1ResourceRequirements
+                        {
+                            Limits = new Dictionary<string, ResourceQuantity> { ["cpu"] = new("500m"), ["memory"] = new("128Mi") },
+                            Requests = new Dictionary<string, ResourceQuantity> { ["cpu"] = new("10m"), ["memory"] = new("32Mi") }
+                        }
+                    }
+                ],
+                RestartPolicy = "Never",
+                AutomountServiceAccountToken = false,
+                DnsPolicy = "None",
+                DnsConfig = new() { Nameservers = ["223.5.5.5", "114.114.114.114"] }
+            }
+        };
+
+        try
+        {
+            await client.CreateNamespacedPodAsync(pod, ns, cancellationToken: token);
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "K8sAdChecker: prober pod create failed ({N} targets)", targets.Count);
+            return results;
+        }
+
+        try
+        {
+            using var waitCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            waitCts.CancelAfter(Timeout);
+
+            var done = false;
+            while (!waitCts.IsCancellationRequested)
+            {
+                var p = await client.ReadNamespacedPodAsync(name, ns, cancellationToken: waitCts.Token);
+                if (p.Status?.Phase is "Succeeded" or "Failed") { done = true; break; }
+                await Task.Delay(TimeSpan.FromSeconds(1), waitCts.Token);
+            }
+
+            if (!done)
+                return results; // timeout → leave Offline
+
+            var logs = await TryFetchLogsAsync(client, name, ns, token);
+            if (!string.IsNullOrEmpty(logs))
+            {
+                foreach (var line in logs.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length == 2 && parts[1] == "ok" && int.TryParse(parts[0], out var sid))
+                        results[sid] = AdCheckStatus.Ok;
+                }
+            }
+
+            return results;
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
+        {
+            return results;
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "K8sAdChecker: prober run failed ({N} targets)", targets.Count);
+            return results;
+        }
+        finally
+        {
+            try { await client.CoreV1.DeleteNamespacedPodAsync(name, ns, cancellationToken: CancellationToken.None); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
     private static string Trunc(string s) => s.Length > MaxErrorMessageLength ? s[..MaxErrorMessageLength] : s;
 
     private static async Task<string?> TryFetchLogsAsync(Kubernetes client, string name, string ns, CancellationToken token)

@@ -36,6 +36,7 @@ namespace GZCTF.Services;
 public sealed class AdCheckerService(
     IServiceScopeFactory scopeFactory,
     IConfiguration configuration,
+    Cache.CacheHelper cacheHelper,
     ILogger<AdCheckerService> logger) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(10);
@@ -196,42 +197,99 @@ public sealed class AdCheckerService(
         var due = pending.Where(ts => nowTs >= GetflagDueAt(ts, latest, tickSeconds, pollSeconds)).ToList();
         if (due.Count == 0) return;
 
-        // Pre-fetch the planted flag for each (team, challenge) so the
-        // executor doesn't need DB access. Round N's flag is what the
-        // checker should pass via GZCTF_FLAG.
-        var serviceIds = due.Select(ts => ts.Id).ToList();
-        var flagByService = await db.AdFlags
-            .Where(f => f.AdRoundId == latest.Id && serviceIds.Contains(f.AdTeamServiceId))
-            .Select(f => new { f.AdTeamServiceId, f.Flag })
-            .ToDictionaryAsync(f => f.AdTeamServiceId, f => f.Flag, token);
+        // Custom-image checkers run one-per-check (enochecker one-target contract);
+        // the built-in TCP probe runs as a single batch (in-process on Docker, one
+        // prober pod on K8s) instead of a container/pod per service.
+        var customDue = due.Where(ts => !string.IsNullOrWhiteSpace(ts.Challenge.AdCheckerImage)).ToList();
+        var builtinDue = due.Where(ts => string.IsNullOrWhiteSpace(ts.Challenge.AdCheckerImage)).ToList();
 
-        using var gate = new SemaphoreSlim(MaxParallel, MaxParallel);
-        var tasks = new List<Task>(due.Count);
-
-        foreach (var ts in due)
+        if (customDue.Count > 0)
         {
-            await gate.WaitAsync(token);
-            tasks.Add(Task.Run(async () =>
+            // Pre-fetch the planted flag for each (team, challenge) so the
+            // executor doesn't need DB access. Round N's flag is what the
+            // checker should pass via GZCTF_FLAG.
+            var serviceIds = customDue.Select(ts => ts.Id).ToList();
+            var flagByService = await db.AdFlags
+                .Where(f => f.AdRoundId == latest.Id && serviceIds.Contains(f.AdTeamServiceId))
+                .Select(f => new { f.AdTeamServiceId, f.Flag })
+                .ToDictionaryAsync(f => f.AdTeamServiceId, f => f.Flag, token);
+
+            using var gate = new SemaphoreSlim(MaxParallel, MaxParallel);
+            var tasks = new List<Task>(customDue.Count);
+
+            foreach (var ts in customDue)
             {
-                try
+                await gate.WaitAsync(token);
+                tasks.Add(Task.Run(async () =>
                 {
-                    flagByService.TryGetValue(ts.Id, out var flag);
-                    var outcome = await RunWithRetryAsync(runner, ts, latest, ts.Challenge, flag, token);
-                    await PersistOutcomeAsync(scopeFactory, ts.Id, latest.Id, outcome, token);
-                }
-                catch (Exception e) when (e is not OperationCanceledException)
-                {
-                    logger.LogWarning(e,
-                        "AdChecker: dispatch failed for service={Sid} round={Round}", ts.Id, latest.Number);
-                }
-                finally
-                {
-                    gate.Release();
-                }
-            }, token));
+                    try
+                    {
+                        flagByService.TryGetValue(ts.Id, out var flag);
+                        var outcome = await RunWithRetryAsync(runner, ts, latest, ts.Challenge, flag, token);
+                        await PersistOutcomeAsync(scopeFactory, ts.Id, latest.Id, outcome, token);
+                    }
+                    catch (Exception e) when (e is not OperationCanceledException)
+                    {
+                        logger.LogWarning(e,
+                            "AdChecker: dispatch failed for service={Sid} round={Round}", ts.Id, latest.Number);
+                    }
+                    finally
+                    {
+                        gate.Release();
+                    }
+                }, token));
+            }
+
+            await Task.WhenAll(tasks);
         }
 
-        await Task.WhenAll(tasks);
+        if (builtinDue.Count > 0)
+            await RunBuiltinBatchAsync(runner, builtinDue, latest, token);
+
+        // New verdicts persisted → SLA changed; refresh the cached board
+        // (background regen, de-bounced by CacheMaker so frequent ticks collapse).
+        await cacheHelper.FlushAdScoreboardCache(gameId, token);
+    }
+
+    /// <summary>
+    /// Run the built-in TCP probe for a batch of services in one shot
+    /// (<see cref="IAdCheckRunner.RunBuiltinBatchAsync"/>), retrying the non-Ok
+    /// subset to absorb transient blips (same intent as
+    /// <see cref="RunWithRetryAsync"/>), then persist a verdict per service.
+    /// </summary>
+    private async Task RunBuiltinBatchAsync(
+        IAdCheckRunner runner, List<AdTeamService> builtinDue, AdRound round, CancellationToken token)
+    {
+        // Services with no live container IP can't be probed → Offline.
+        var targets = new List<AdBuiltinTarget>(builtinDue.Count);
+        foreach (var ts in builtinDue)
+            if (ts.Container?.IP is { Length: > 0 } ip)
+                targets.Add(new AdBuiltinTarget(ts.Id, ip, ts.Challenge.ExposePort ?? 80));
+
+        var ok = new HashSet<int>();
+        var remaining = targets;
+        for (var attempt = 1; attempt <= MaxCheckAttempts && remaining.Count > 0; attempt++)
+        {
+            var res = await runner.RunBuiltinBatchAsync(remaining, token);
+            var retry = new List<AdBuiltinTarget>();
+            foreach (var t in remaining)
+            {
+                if (res.GetValueOrDefault(t.ServiceId, AdCheckStatus.Offline) == AdCheckStatus.Ok)
+                    ok.Add(t.ServiceId);
+                else
+                    retry.Add(t);
+            }
+            remaining = retry;
+            if (remaining.Count > 0 && attempt < MaxCheckAttempts)
+                await Task.Delay(RetryDelay, token);
+        }
+
+        foreach (var ts in builtinDue)
+        {
+            var status = ok.Contains(ts.Id) ? AdCheckStatus.Ok : AdCheckStatus.Offline;
+            var outcome = new AdCheckOutcome(status, status == AdCheckStatus.Ok ? null : "tcp probe failed", null);
+            await PersistOutcomeAsync(scopeFactory, ts.Id, round.Id, outcome, token);
+        }
     }
 
     /// <summary>
@@ -264,16 +322,24 @@ public sealed class AdCheckerService(
             .Select(cr => (AdCheckStatus?)cr.Status)
             .FirstOrDefaultAsync(token);
 
+        var credit = AdScoring.TickCredit(outcome.Status, prevStatus);
         await db.AdCheckResults.AddAsync(new AdCheckResult
         {
             AdTeamServiceId = adTeamServiceId,
             AdRoundId = adRoundId,
             Status = outcome.Status,
-            SlaCredit = AdScoring.TickCredit(outcome.Status, prevStatus),
+            SlaCredit = credit,
             ErrorMessage = outcome.ErrorMessage,
             SourceIp = outcome.SourceIp,
             CheckedAt = DateTimeOffset.UtcNow
         }, token);
+
+        // Maintain the per-service running SLA total in the SAME transaction as
+        // the insert — so the live scoreboard reads it (O(teams)) instead of
+        // summing all check rows, and it can't drift from the row set.
+        var svc = await db.AdTeamServices.FirstOrDefaultAsync(s => s.Id == adTeamServiceId, token);
+        if (svc is not null)
+            svc.SlaCreditTotal += credit;
 
         try
         {

@@ -1,3 +1,5 @@
+using MemoryPack;
+
 namespace GZCTF.Models.Response.Admin;
 
 /// <summary>
@@ -7,8 +9,12 @@ namespace GZCTF.Models.Response.Admin;
 /// team total is the sum of the service nets. <see cref="Challenges"/> gives
 /// the column order so the UI can render one column per service (mirroring
 /// the jeopardy board). Independent of the jeopardy scoreboard.
+///
+/// <para>Cached via <c>CacheMaker</c> (MemoryPack-serialized) like the jeopardy
+/// board, so it isn't recomputed per request — hence the MemoryPackable types.</para>
 /// </summary>
-public sealed class AdScoreboardModel
+[MemoryPackable]
+public sealed partial class AdScoreboardModel
 {
     public int LatestRound { get; set; }
     public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
@@ -26,7 +32,8 @@ public sealed class AdScoreboardModel
 }
 
 /// <summary>One A&amp;D challenge (= one service column-group on the scoreboard).</summary>
-public sealed class AdScoreboardChallenge
+[MemoryPackable]
+public sealed partial class AdScoreboardChallenge
 {
     public int ChallengeId { get; set; }
     public string Title { get; set; } = string.Empty;
@@ -35,7 +42,8 @@ public sealed class AdScoreboardChallenge
     public string Category { get; set; } = string.Empty;
 }
 
-public sealed class AdTeamScoreRow
+[MemoryPackable]
+public sealed partial class AdTeamScoreRow
 {
     public int Rank { get; set; }
     public int ParticipationId { get; set; }
@@ -66,7 +74,8 @@ public sealed class AdTeamScoreRow
 }
 
 /// <summary>One team's score on one A&amp;D service (scoreboard cell).</summary>
-public sealed class AdServiceScore
+[MemoryPackable]
+public sealed partial class AdServiceScore
 {
     public int ChallengeId { get; set; }
 

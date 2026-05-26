@@ -8,7 +8,9 @@ using GZCTF.Models;
 using GZCTF.Models.Data;
 using GZCTF.Models.Request.Game;
 using GZCTF.Models.Response.Admin;
+using GZCTF.Repositories.Interface;
 using GZCTF.Services;
+using GZCTF.Services.Cache;
 using GZCTF.Services.Config;
 using GZCTF.Storage.Interface;
 using GZCTF.Utils;
@@ -40,6 +42,8 @@ public class AdGameController(
     IBlobStorage blobStorage,
     IConfigService configService,
     IHubContext<AttackHub, IAttackClient> attackHub,
+    CacheHelper cacheHelper,
+    IAdScoreboardRepository adScoreboard,
     IStringLocalizer<Program> localizer,
     ILogger<AdGameController> logger) : ControllerBase
 {
@@ -119,6 +123,10 @@ public class AdGameController(
                 totalPoints += result.Points ?? 0;
             }
         }
+
+        // A capture changes attack + defense totals — refresh the cached board.
+        if (acceptedCount > 0)
+            await cacheHelper.FlushAdScoreboardCache(id, token);
 
         return Ok(new AdBatchSubmitResultModel
         {
@@ -783,147 +791,12 @@ public class AdGameController(
         var cutoff = await ResolveFreezeCutoffAsync(game, token);
         Response.Headers.Append("Vary", "Cookie");
 
-        var latestRound = await db.AdRounds
-            .Where(r => r.GameId == id && (cutoff == null || r.StartedAt <= cutoff))
-            .OrderByDescending(r => r.Number)
-            .Select(r => r.Number)
-            .FirstOrDefaultAsync(token);
-
-        var teams = await db.Participations
-            .Where(p => p.GameId == id && p.Status == ParticipationStatus.Accepted)
-            .Include(p => p.Team)
-            .Include(p => p.Division)
-            .ToListAsync(token);
-
-        var partIds = teams.Select(p => p.Id).ToList();
-
-        // The per-service columns: enabled A&D challenges grouped by category
-        // (contiguous), mirroring the jeopardy board's category tier.
-        var challenges = await db.GameChallenges
-            .Where(c => c.GameId == id && c.Type == ChallengeType.AttackDefense && c.IsEnabled)
-            .OrderBy(c => c.Category).ThenBy(c => c.Id)
-            .Select(c => new AdScoreboardChallenge
-            {
-                ChallengeId = c.Id,
-                Title = c.Title,
-                Category = c.Category.ToString()
-            })
-            .ToListAsync(token);
-        var challengeIds = challenges.Select(c => c.ChallengeId).ToList();
-
-        // Scoring is PER (team, service) — the FAUST/EnoEngine model. The team
-        // total is the sum of service nets. Defense in particular MUST be
-        // per-service: Σ caps_s^0.75 ≠ (Σ caps_s)^0.75, and being broken on
-        // two services should hurt more than the combined sub-linear curve.
-
-        // Attack points + flags captured, per (attacker, challenge).
-        var attackByCell = await db.AdAttacks
-            .Where(a => partIds.Contains(a.AttackerParticipationId) && challengeIds.Contains(a.ChallengeId)
-                     && (cutoff == null || a.SubmittedAt <= cutoff))
-            .GroupBy(a => new { a.AttackerParticipationId, a.ChallengeId })
-            .Select(g => new { g.Key.AttackerParticipationId, g.Key.ChallengeId, Points = g.Sum(a => a.Points), Count = g.Count() })
-            .ToListAsync(token);
-        var attackLookup = attackByCell.ToDictionary(x => (x.AttackerParticipationId, x.ChallengeId), x => (x.Points, x.Count));
-
-        // Times captured, per (victim, challenge).
-        var defenseByCell = await db.AdAttacks
-            .Where(a => partIds.Contains(a.VictimParticipationId) && challengeIds.Contains(a.ChallengeId)
-                     && (cutoff == null || a.SubmittedAt <= cutoff))
-            .GroupBy(a => new { a.VictimParticipationId, a.ChallengeId })
-            .Select(g => new { g.Key.VictimParticipationId, g.Key.ChallengeId, Count = g.Count() })
-            .ToListAsync(token);
-        var defenseLookup = defenseByCell.ToDictionary(x => (x.VictimParticipationId, x.ChallengeId), x => x.Count);
-
-        // SLA credit SUM per (team, challenge) — precomputed per tick (see AdScoring).
-        var slaByCell = await db.AdCheckResults
-            .Where(c => cutoff == null || c.CheckedAt <= cutoff)
-            .Join(db.AdTeamServices,
-                c => c.AdTeamServiceId, ts => ts.Id,
-                (c, ts) => new { ts.ParticipationId, ts.ChallengeId, c.SlaCredit })
-            .Where(x => partIds.Contains(x.ParticipationId) && challengeIds.Contains(x.ChallengeId))
-            .GroupBy(x => new { x.ParticipationId, x.ChallengeId })
-            .Select(g => new { g.Key.ParticipationId, g.Key.ChallengeId, Credit = g.Sum(x => x.SlaCredit) })
-            .ToListAsync(token);
-        var slaLookup = slaByCell.ToDictionary(x => (x.ParticipationId, x.ChallengeId), x => x.Credit);
-
-        // Latest check status per (team, challenge), for the status dot on each cell.
-        var statusRows = await db.AdTeamServices
-            .Where(ts => partIds.Contains(ts.ParticipationId) && challengeIds.Contains(ts.ChallengeId))
-            .Select(ts => new
-            {
-                ts.ParticipationId,
-                ts.ChallengeId,
-                Last = db.AdCheckResults
-                    .Where(c => c.AdTeamServiceId == ts.Id && (cutoff == null || c.CheckedAt <= cutoff))
-                    .OrderByDescending(c => c.CheckedAt)
-                    .Select(c => (AdCheckStatus?)c.Status)
-                    .FirstOrDefault()
-            })
-            .ToListAsync(token);
-        var statusLookup = statusRows.ToDictionary(x => (x.ParticipationId, x.ChallengeId), x => x.Last);
-
-        var activeTeams = teams.Count;
-
-        var rows = teams.Select(p =>
-        {
-            var services = new List<AdServiceScore>(challenges.Count);
-            double tAttack = 0, tDefense = 0, tSla = 0;
-            int tFlags = 0, tCaptured = 0;
-
-            foreach (var ch in challenges)
-            {
-                var key = (p.Id, ch.ChallengeId);
-                var (atkPts, atkCnt) = attackLookup.GetValueOrDefault(key, (0d, 0));
-                var caps = defenseLookup.GetValueOrDefault(key, 0);
-                var defLoss = AdScoring.DefenseLoss(caps);
-                var sla = AdScoring.SlaPoints(slaLookup.GetValueOrDefault(key, 0), activeTeams);
-                var net = atkPts + sla - defLoss;
-
-                tAttack += atkPts; tDefense += defLoss; tSla += sla;
-                tFlags += atkCnt; tCaptured += caps;
-
-                services.Add(new AdServiceScore
-                {
-                    ChallengeId = ch.ChallengeId,
-                    AttackPoints = atkPts,
-                    DefenseLoss = defLoss,
-                    SlaPoints = sla,
-                    Net = net,
-                    FlagsCaptured = atkCnt,
-                    TimesCaptured = caps,
-                    LastCheckStatus = statusLookup.GetValueOrDefault(key)?.ToString()
-                });
-            }
-
-            return new AdTeamScoreRow
-            {
-                ParticipationId = p.Id,
-                TeamId = p.TeamId,
-                TeamName = p.Team.Name,
-                Division = p.Division?.Name,
-                AttackPoints = tAttack,
-                DefenseLoss = tDefense,
-                SlaPoints = tSla,
-                Total = tAttack + tSla - tDefense,
-                TimesCaptured = tCaptured,
-                FlagsCaptured = tFlags,
-                Services = services
-            };
-        })
-        .OrderByDescending(r => r.Total)
-        .ToList();
-
-        for (int i = 0; i < rows.Count; i++)
-            rows[i].Rank = i + 1;
-
-        return Ok(new AdScoreboardModel
-        {
-            LatestRound = latestRound,
-            IsFrozenView = cutoff != null,
-            Freeze = game.FreezeTimeUtc,
-            Challenges = challenges,
-            Teams = rows
-        });
+        // Served from the distributed cache (regenerated in the background on
+        // round-advance / submit / checker tick) so the per-service aggregations
+        // run once per round, not once per viewer. Cache miss → build inline.
+        var board = await adScoreboard.TryGetScoreboardAsync(id, cutoff != null, token)
+                    ?? await adScoreboard.GetScoreboardAsync(id, cutoff, token);
+        return Ok(board);
     }
 
     /// <summary>
@@ -946,130 +819,10 @@ public class AdGameController(
         var cutoff = await ResolveFreezeCutoffAsync(game, token);
         Response.Headers.Append("Vary", "Cookie");
 
-        var rounds = await db.AdRounds
-            .Where(r => r.GameId == id && (cutoff == null || r.StartedAt <= cutoff))
-            .OrderBy(r => r.Number)
-            .ToListAsync(token);
-
-        var teams = await db.Participations
-            .Where(p => p.GameId == id && p.Status == ParticipationStatus.Accepted)
-            .Include(p => p.Team)
-            .Include(p => p.Division)
-            .ToListAsync(token);
-
-        var result = new AdScoreTimelineModel
-        {
-            LatestRound = rounds.LastOrDefault()?.Number ?? 0,
-            StartedAt = rounds.FirstOrDefault()?.StartedAt,
-            EndsAt = rounds.LastOrDefault()?.EndsAt,
-        };
-
-        if (rounds.Count == 0 || teams.Count == 0)
-            return Ok(result);
-
-        var partIds = teams.Select(p => p.Id).ToHashSet();
-
-        // Pre-aggregate attacks once. Attack is linear → by (attacker, round).
-        // Defense is per-service (Σ caps_s^0.75) → by (victim, challenge, round)
-        // so the timeline's defense matches the scoreboard's per-service total.
-        var attacks = await db.AdAttacks
-            .Where(a => (partIds.Contains(a.AttackerParticipationId)
-                      || partIds.Contains(a.VictimParticipationId))
-                     && (cutoff == null || a.SubmittedAt <= cutoff))
-            .Select(a => new
-            {
-                a.AttackerParticipationId,
-                a.VictimParticipationId,
-                a.ChallengeId,
-                a.SubmittedAtRound,
-                a.Points
-            })
-            .ToListAsync(token);
-
-        var attackByTeamRound = attacks
-            .Where(a => partIds.Contains(a.AttackerParticipationId))
-            .GroupBy(a => (a.AttackerParticipationId, a.SubmittedAtRound))
-            .ToDictionary(g => g.Key, g => g.Sum(a => a.Points));
-
-        // (victim, round) → list of (challengeId, captureCount) for that round.
-        var capturesByVictimRound = attacks
-            .Where(a => partIds.Contains(a.VictimParticipationId))
-            .GroupBy(a => (a.VictimParticipationId, a.SubmittedAtRound, a.ChallengeId))
-            .GroupBy(g => (g.Key.VictimParticipationId, g.Key.SubmittedAtRound))
-            .ToDictionary(
-                outer => outer.Key,
-                outer => outer.Select(g => (g.Key.ChallengeId, Count: g.Count())).ToList());
-
-        // Map each AdCheckResult to (participationId, credit, time) once.
-        var checks = await db.AdCheckResults
-            .Join(db.AdTeamServices,
-                c => c.AdTeamServiceId, ts => ts.Id,
-                (c, ts) => new { ts.ParticipationId, c.SlaCredit, c.CheckedAt })
-            .Where(x => partIds.Contains(x.ParticipationId) && (cutoff == null || x.CheckedAt <= cutoff))
-            .ToListAsync(token);
-
-        // Index checks per team for fast per-round window queries.
-        var checksByTeam = checks
-            .GroupBy(c => c.ParticipationId)
-            .ToDictionary(
-                g => g.Key,
-                g => g.OrderBy(c => c.CheckedAt).ToList()
-            );
-
-        var activeTeams = teams.Count;
-
-        foreach (var team in teams)
-        {
-            var timeline = new AdTeamTimeline
-            {
-                ParticipationId = team.Id,
-                TeamId = team.TeamId,
-                TeamName = team.Team.Name,
-                Division = team.Division?.Name,
-            };
-
-            double cumAttack = 0;
-            double cumSlaCredit = 0;
-            // Cumulative captures PER service — defense is Σ caps_s^0.75, so we
-            // can't collapse to a single running total (that would understate
-            // the penalty vs the per-service scoreboard).
-            var cumCapsByChallenge = new Dictionary<int, int>();
-
-            // Walk team's checks in order; advance pointer per round.
-            var teamChecks = checksByTeam.GetValueOrDefault(team.Id) ?? [];
-            var checkIdx = 0;
-
-            foreach (var round in rounds)
-            {
-                cumAttack += attackByTeamRound.GetValueOrDefault((team.Id, round.Number), 0);
-
-                foreach (var (challengeId, count) in
-                         capturesByVictimRound.GetValueOrDefault((team.Id, round.Number), []))
-                {
-                    cumCapsByChallenge[challengeId] = cumCapsByChallenge.GetValueOrDefault(challengeId) + count;
-                }
-
-                while (checkIdx < teamChecks.Count && teamChecks[checkIdx].CheckedAt < round.EndsAt)
-                {
-                    cumSlaCredit += teamChecks[checkIdx].SlaCredit;
-                    checkIdx++;
-                }
-
-                var defenseLoss = cumCapsByChallenge.Values.Sum(AdScoring.DefenseLoss);
-                var slaPoints = AdScoring.SlaPoints(cumSlaCredit, activeTeams);
-                var total = cumAttack - defenseLoss + slaPoints;
-
-                timeline.Items.Add(new AdTimelinePoint
-                {
-                    Round = round.Number,
-                    Time = round.EndsAt,
-                    Score = total
-                });
-            }
-
-            result.Teams.Add(timeline);
-        }
-
+        // Cached + downsampled (≤150 points/team) — built once per round in the
+        // background, not per request. Cache miss → build inline.
+        var result = await adScoreboard.TryGetTimelineAsync(id, cutoff != null, token)
+                     ?? await adScoreboard.GetTimelineAsync(id, cutoff, token);
         return Ok(result);
     }
 

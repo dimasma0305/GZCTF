@@ -6,6 +6,9 @@ namespace GZCTF.Services;
 /// <summary>Outcome of a single A&amp;D check (provider-agnostic).</summary>
 public sealed record AdCheckOutcome(AdCheckStatus Status, string? ErrorMessage, string? SourceIp);
 
+/// <summary>One target for the built-in TCP-reachability probe.</summary>
+public sealed record AdBuiltinTarget(int ServiceId, string Ip, int Port);
+
 /// <summary>
 /// Runs one A&amp;D check against a team's running service and returns the
 /// verdict the scheduler persists as an <see cref="AdCheckResult"/>.
@@ -20,6 +23,18 @@ public interface IAdCheckRunner
         AdRound round,
         GameChallenge challenge,
         string? plantedFlag,
+        CancellationToken token);
+
+    /// <summary>
+    /// Batch the built-in TCP-reachability probe (challenges with no custom
+    /// <see cref="GameChallenge.AdCheckerImage"/>) — returns serviceId →
+    /// <see cref="AdCheckStatus.Ok"/>/<see cref="AdCheckStatus.Offline"/>. Docker
+    /// probes in-process (no container); Kubernetes uses a single prober Pod for
+    /// the whole batch instead of one Pod per check, so checker cost is O(1) pods
+    /// per tick rather than O(teams × challenges).
+    /// </summary>
+    Task<IReadOnlyDictionary<int, AdCheckStatus>> RunBuiltinBatchAsync(
+        IReadOnlyList<AdBuiltinTarget> targets,
         CancellationToken token);
 }
 

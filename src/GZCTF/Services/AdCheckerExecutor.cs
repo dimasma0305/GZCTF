@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Net.Sockets;
 using System.Text;
 using Docker.DotNet;
 using Docker.DotNet.Models;
@@ -200,6 +202,42 @@ public sealed class AdCheckerExecutor(
                     logger.LogDebug(e, "AdChecker: cleanup failed for {Cid}", containerId);
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Built-in reachability probe, in-process: gzctf is attached to the
+    /// challenge bridges, so it can TCP-connect to each target directly — no
+    /// per-check <c>alpine nc</c> container. Connect OK → Ok, else Offline.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<int, AdCheckStatus>> RunBuiltinBatchAsync(
+        IReadOnlyList<AdBuiltinTarget> targets, CancellationToken token)
+    {
+        var results = new ConcurrentDictionary<int, AdCheckStatus>();
+        var probeTimeout = TimeSpan.FromSeconds(5);
+        var opts = new ParallelOptions { MaxDegreeOfParallelism = 64, CancellationToken = token };
+        await Parallel.ForEachAsync(targets, opts, async (t, ct) =>
+        {
+            results[t.ServiceId] = await TcpReachableAsync(t.Ip, t.Port, probeTimeout, ct)
+                ? AdCheckStatus.Ok
+                : AdCheckStatus.Offline;
+        });
+        return results;
+    }
+
+    private static async Task<bool> TcpReachableAsync(string ip, int port, TimeSpan timeout, CancellationToken token)
+    {
+        try
+        {
+            using var client = new TcpClient();
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            cts.CancelAfter(timeout);
+            await client.ConnectAsync(ip, port, cts.Token);
+            return client.Connected;
+        }
+        catch
+        {
+            return false;
         }
     }
 

@@ -100,6 +100,7 @@ internal static class ServicesExtension
             builder.Services.AddScoped<IBlobRepository, BlobRepository>();
             builder.Services.AddScoped<IPostRepository, PostRepository>();
             builder.Services.AddScoped<IGameRepository, GameRepository>();
+            builder.Services.AddScoped<IAdScoreboardRepository, AdScoreboardRepository>();
             builder.Services.AddScoped<ITeamRepository, TeamRepository>();
             builder.Services.AddScoped<IApiTokenRepository, ApiTokenRepository>();
             builder.Services.AddScoped<IContainerRepository, ContainerRepository>();
