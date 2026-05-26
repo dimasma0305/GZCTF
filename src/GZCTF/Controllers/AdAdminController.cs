@@ -3,10 +3,14 @@ using GZCTF.Extensions;
 using GZCTF.Middlewares;
 using GZCTF.Models;
 using GZCTF.Models.Data;
+using GZCTF.Models.Internal;
 using GZCTF.Models.Request.Admin;
+using GZCTF.Repositories.Interface;
 using GZCTF.Services;
+using GZCTF.Services.Container.Manager;
 using GZCTF.Storage.Interface;
 using GZCTF.Utils;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Localization;
@@ -28,6 +32,9 @@ public class AdAdminController(
     AdContainerManager adContainerManager,
     AdRoundService adRoundService,
     IBlobStorage blobStorage,
+    UserManager<UserInfo> userManager,
+    IContainerManager containerService,
+    IContainerRepository containerRepository,
     IStringLocalizer<Program> localizer,
     ILogger<AdAdminController> logger) : ControllerBase
 {
@@ -432,6 +439,68 @@ public class AdAdminController(
             model.UnifiedDiff is null ? "null" : $"{model.UnifiedDiff.Length}c");
 
         return Ok(model);
+    }
+
+    /// <summary>
+    /// Spawn a short-lived inspector container from the challenge's image so an
+    /// admin can shell in and explore files when there's no running team
+    /// container (e.g. post-game). It's a FRESH container off the image — baseline
+    /// files, not the team's edits (those live in the running container). Reaped
+    /// by <c>ExpectStopAt</c>; the DELETE counterpart tears it down on shell close.
+    /// </summary>
+    [RequireGameAdmin]
+    [HttpPost("Services/{adTeamServiceId:int}/Inspector")]
+    [ProducesResponseType(typeof(AdInspectorModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> SpawnInspector(int id, int adTeamServiceId, CancellationToken token)
+    {
+        var ts = await db.AdTeamServices
+            .Include(t => t.Participation)
+            .Include(t => t.Challenge)
+            .FirstOrDefaultAsync(t => t.Id == adTeamServiceId, token);
+        if (ts is null || ts.Participation.GameId != id) return NotFound();
+        if (string.IsNullOrWhiteSpace(ts.Challenge.ContainerImage))
+            return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Container_ConfigError)]));
+
+        var user = await userManager.GetUserAsync(User);
+        var container = await containerService.CreateContainerAsync(new ContainerConfig
+        {
+            TeamId = "inspector",
+            UserId = user!.Id,
+            ChallengeId = ts.ChallengeId,
+            GameId = ts.Participation.GameId,
+            Image = ts.Challenge.ContainerImage!,
+            CPUCount = ts.Challenge.CPUCount ?? 1,
+            MemoryLimit = ts.Challenge.MemoryLimit ?? 64,
+            StorageLimit = ts.Challenge.StorageLimit ?? 256,
+            NetworkMode = NetworkMode.Isolated, // no egress — inspection only
+            ExposedPort = ts.Challenge.ExposePort ?? 80,
+        }, token);
+
+        if (container is null)
+            return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Container_CreationFailed)]));
+
+        // Short TTL so a forgotten inspector is reaped even if the DELETE never fires.
+        container.ExpectStopAt = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(15);
+        await db.Containers.AddAsync(container, token);
+        await db.SaveChangesAsync(token);
+
+        logger.Log(
+            $"A&D inspector spawned: service={adTeamServiceId} image={ts.Challenge.ContainerImage} container={container.LogId}",
+            user, TaskStatus.Success);
+
+        return Ok(new AdInspectorModel { ContainerGuid = container.Id });
+    }
+
+    /// <summary>Destroy an inspector container (called when the admin closes the shell).</summary>
+    [RequireGameAdmin]
+    [HttpDelete("Services/{adTeamServiceId:int}/Inspector/{containerGuid:guid}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> DestroyInspector(int id, int adTeamServiceId, Guid containerGuid, CancellationToken token)
+    {
+        var container = await containerRepository.GetContainerById(containerGuid, token);
+        if (container is not null)
+            await containerRepository.DestroyContainer(container, token);
+        return Ok();
     }
 
     private const int MaxDiffLines = 1500;

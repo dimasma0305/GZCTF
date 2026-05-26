@@ -89,6 +89,13 @@ public class AdSnapshotChangesModel
     public List<AdSnapshotChange> Changes { get; set; } = [];
 }
 
+/// <summary>Result of spawning a throwaway inspector container.</summary>
+public class AdInspectorModel
+{
+    /// <summary>GUID of the spawned container — feed to the in-browser shell (ContainerExecHub).</summary>
+    public Guid ContainerGuid { get; set; }
+}
+
 /// <summary>One file's content, capped + binary-aware (see AdFileViewModel).</summary>
 public class AdFileBlob
 {

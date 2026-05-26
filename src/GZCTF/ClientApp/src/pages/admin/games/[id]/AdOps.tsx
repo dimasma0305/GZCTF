@@ -4,7 +4,6 @@ import {
   Badge,
   Button,
   Center,
-  Code,
   CopyButton,
   Divider,
   Group,
@@ -33,11 +32,15 @@ import {
   mdiArrowLeft,
   mdiCheck,
   mdiCheckCircle,
+  mdiChevronDown,
+  mdiChevronRight,
   mdiClose,
   mdiCloseCircle,
   mdiConsole,
   mdiDownload,
+  mdiFileOutline,
   mdiFileTree,
+  mdiFolderOutline,
   mdiHelpCircle,
   mdiMagnify,
   mdiPauseCircleOutline,
@@ -131,6 +134,113 @@ const ShikiBlock: FC<{ code: string; lang: string }> = ({ code, lang }) => (
     />
   </ScrollArea>
 )
+
+// ---- changed-files folder tree ----
+interface TreeNode {
+  name: string
+  path: string
+  kind?: number // set on leaf files (A/M/D)
+  children: Map<string, TreeNode>
+}
+
+const buildTree = (changes: AdSnapshotChange[]): TreeNode => {
+  const root: TreeNode = { name: '', path: '', children: new Map() }
+  for (const ch of changes) {
+    const parts = ch.path.split('/').filter(Boolean)
+    let node = root
+    let acc = ''
+    parts.forEach((part, i) => {
+      acc += `/${part}`
+      let child = node.children.get(part)
+      if (!child) {
+        child = { name: part, path: acc, children: new Map() }
+        node.children.set(part, child)
+      }
+      if (i === parts.length - 1) child.kind = ch.kind
+      node = child
+    })
+  }
+  return root
+}
+
+const countFiles = (node: TreeNode): number =>
+  node.children.size === 0
+    ? 1
+    : [...node.children.values()].reduce((n, c) => n + countFiles(c), 0)
+
+const FileTreeNode: FC<{
+  node: TreeNode
+  depth: number
+  forceOpen: boolean
+  collapsed: Set<string>
+  onToggle: (path: string) => void
+  onSelect: (path: string) => void
+}> = ({ node, depth, forceOpen, collapsed, onToggle, onSelect }) => {
+  const entries = [...node.children.values()].sort((a, b) => {
+    const af = a.children.size === 0
+    const bf = b.children.size === 0
+    if (af !== bf) return af ? 1 : -1 // folders first
+    return a.name.localeCompare(b.name)
+  })
+
+  return (
+    <>
+      {entries.map((child) => {
+        const isFile = child.children.size === 0
+        if (isFile) {
+          const m = kindMeta(child.kind ?? 0)
+          return (
+            <UnstyledButton
+              key={child.path}
+              onClick={() => onSelect(child.path)}
+              style={{ width: '100%', borderRadius: 4, padding: '1px 4px' }}
+            >
+              <Group gap={6} wrap="nowrap" style={{ paddingLeft: depth * 14 + 16 }}>
+                <Badge size="xs" color={m.color} variant="filled" w={20} p={0}>
+                  {m.label}
+                </Badge>
+                <Icon path={mdiFileOutline} size={0.6} />
+                <Text className={misc.ffmono} size="xs" style={{ wordBreak: 'break-all' }}>
+                  {child.name}
+                </Text>
+              </Group>
+            </UnstyledButton>
+          )
+        }
+        const open = forceOpen || !collapsed.has(child.path)
+        return (
+          <div key={child.path}>
+            <UnstyledButton
+              onClick={() => onToggle(child.path)}
+              style={{ width: '100%', borderRadius: 4, padding: '1px 4px' }}
+            >
+              <Group gap={4} wrap="nowrap" style={{ paddingLeft: depth * 14 }}>
+                <Icon path={open ? mdiChevronDown : mdiChevronRight} size={0.7} />
+                <Icon path={mdiFolderOutline} size={0.7} />
+                <Text size="xs" fw={500}>
+                  {child.name}
+                </Text>
+                <Text size="xs" c="dimmed">
+                  ({countFiles(child)})
+                </Text>
+              </Group>
+            </UnstyledButton>
+            {open && (
+              <FileTreeNode
+                node={child}
+                depth={depth + 1}
+                forceOpen={forceOpen}
+                collapsed={collapsed}
+                onToggle={onToggle}
+                onSelect={onSelect}
+              />
+            )}
+          </div>
+        )
+      })}
+    </>
+  )
+}
 
 // Drill-down into one changed file: current content (running container),
 // baseline content (challenge image), and the unified diff between them.
@@ -253,14 +363,52 @@ const SnapshotModal: FC<{
   target: SnapTarget | null
   selectedPath: string | null
   onSelectPath: (path: string | null) => void
+  onOpenShell: (guid: string, title: string, inspectorSid?: number) => void
   onClose: () => void
-}> = ({ gameId, target, selectedPath, onSelectPath, onClose }) => {
+}> = ({ gameId, target, selectedPath, onSelectPath, onOpenShell, onClose }) => {
   const { t } = useTranslation()
   const [loading, setLoading] = useState(false)
   const [changes, setChanges] = useState<AdSnapshotChange[]>([])
   const [live, setLive] = useState(false)
+  const [fileSearch, setFileSearch] = useState('')
+  const [debouncedFileSearch] = useDebouncedValue(fileSearch, 200)
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [spawning, setSpawning] = useState(false)
   const sid = target?.cell.adTeamServiceId
   const hasSnapshot = !!target?.cell.snapshotAvailable
+  const containerGuid = target?.cell.containerGuid
+
+  const toggleFolder = (path: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+
+  const openShell = async () => {
+    if (!target) return
+    const title = `${target.teamName} · ${target.challengeTitle}`
+    if (containerGuid) {
+      onOpenShell(containerGuid, title) // shell into the live team container
+      return
+    }
+    // No live container → spawn a throwaway inspector from the image.
+    setSpawning(true)
+    try {
+      const { data } = await api.edit.editAdSpawnInspector(gameId, sid!)
+      onOpenShell(data.containerGuid, `${title} (inspector)`, sid!)
+    } catch (e) {
+      showErrorMsg(e, t)
+    } finally {
+      setSpawning(false)
+    }
+  }
+
+  const filtered = debouncedFileSearch
+    ? changes.filter((c) => c.path.toLowerCase().includes(debouncedFileSearch.toLowerCase()))
+    : changes
+  const tree = buildTree(filtered)
 
   useEffect(() => {
     if (sid === undefined) return
@@ -292,19 +440,6 @@ const SnapshotModal: FC<{
     ? `ad-snapshot-team${target.cell.adTeamServiceId}-challenge${target.cell.challengeId}.tar.gz`
     : 'snapshot.tar.gz'
 
-  const recipe = [
-    `# 1. Load the team's committed container image`,
-    `docker load -i ${filename}`,
-    `#    → note the printed "Loaded image: <repo:tag>"`,
-    ``,
-    `# 2. Shell in to inspect what they shipped`,
-    `docker run --rm -it <loaded-image> sh`,
-    ``,
-    `# 3. Diff their files against the original challenge image`,
-    `#    (the list above is docker diff; for content diffs:)`,
-    `docker run --rm <loaded-image> cat /path/from/list/above`,
-  ].join('\n')
-
   return (
     <Modal
       opened={target !== null}
@@ -322,20 +457,41 @@ const SnapshotModal: FC<{
     >
       <Stack gap="md">
         <Group justify="space-between" wrap="wrap" gap="sm">
-          {hasSnapshot ? (
-            <Button
-              component="a"
-              href={downloadUrl}
-              download={filename}
-              leftSection={<Icon path={mdiDownload} size={0.9} />}
+          <Group gap="sm" wrap="nowrap">
+            {hasSnapshot && (
+              <Button
+                component="a"
+                href={downloadUrl}
+                download={filename}
+                variant="default"
+                leftSection={<Icon path={mdiDownload} size={0.9} />}
+              >
+                {t('admin.button.ad_ops.snapshot.download', 'Download .tar.gz')}
+              </Button>
+            )}
+            <Tooltip
+              label={
+                containerGuid
+                  ? t('admin.tooltip.ad_ops.shell_live', 'Shell into the running container (their files)')
+                  : t('admin.tooltip.ad_ops.shell_spawn',
+                      'No running container — spawn a throwaway inspector from the image')
+              }
+              withArrow
+              multiline
+              w={240}
             >
-              {t('admin.button.ad_ops.snapshot.download', 'Download .tar.gz')}
-            </Button>
-          ) : (
-            <Badge color="grape" variant="light" size="lg">
-              {t('admin.content.ad_ops.snapshot.live_badge', 'Live (running container)')}
-            </Badge>
-          )}
+              <Button
+                color="grape"
+                loading={spawning}
+                leftSection={<Icon path={mdiConsole} size={0.9} />}
+                onClick={openShell}
+              >
+                {containerGuid
+                  ? t('admin.button.ad_ops.shell', 'Open shell')
+                  : t('admin.button.ad_ops.shell_spawn', 'Spawn inspector')}
+              </Button>
+            </Tooltip>
+          </Group>
           <Text size="sm" c="dimmed">
             {t('admin.content.ad_ops.snapshot.changed_count', {
               count: changes.length,
@@ -372,42 +528,33 @@ const SnapshotModal: FC<{
           </Text>
         ) : (
           <>
-            <ScrollArea h={300} type="auto">
-              <Stack gap={2}>
-                {changes.map((ch, i) => {
-                  const m = kindMeta(ch.kind)
-                  return (
-                    <UnstyledButton
-                      key={`${ch.path}-${i}`}
-                      onClick={() => onSelectPath(ch.path)}
-                      style={{ width: '100%', borderRadius: 4, padding: '2px 4px' }}
-                    >
-                      <Group gap="xs" wrap="nowrap">
-                        <Badge size="xs" color={m.color} variant="filled" w={22} p={0}>
-                          {m.label}
-                        </Badge>
-                        <Text className={misc.ffmono} size="xs" style={{ wordBreak: 'break-all' }}>
-                          {ch.path}
-                        </Text>
-                      </Group>
-                    </UnstyledButton>
-                  )
-                })}
-              </Stack>
+            <TextInput
+              size="xs"
+              leftSection={<Icon path={mdiMagnify} size={0.8} />}
+              placeholder={t('admin.placeholder.ad_ops.search_file', 'Filter files…')}
+              value={fileSearch}
+              onChange={(e) => setFileSearch(e.currentTarget.value)}
+            />
+            <ScrollArea h={320} type="auto">
+              {filtered.length === 0 ? (
+                <Text size="sm" c="dimmed">
+                  {t('admin.content.ad_ops.snapshot.no_match', 'No files match the filter.')}
+                </Text>
+              ) : (
+                <FileTreeNode
+                  node={tree}
+                  depth={0}
+                  forceOpen={debouncedFileSearch !== ''}
+                  collapsed={collapsed}
+                  onToggle={toggleFolder}
+                  onSelect={onSelectPath}
+                />
+              )}
             </ScrollArea>
             <Text size="xs" c="dimmed">
               {t('admin.content.ad_ops.snapshot.click_hint',
                 'Click a file to view its content and diff vs the original image.')}
             </Text>
-            {hasSnapshot && (
-              <>
-                <Divider
-                  label={t('admin.content.ad_ops.snapshot.inspect_label', 'Inspect locally')}
-                  labelPosition="left"
-                />
-                <Code block>{recipe}</Code>
-              </>
-            )}
           </>
         )}
       </Stack>
@@ -440,7 +587,21 @@ const AdOps: FC = () => {
   const { t } = useTranslation()
   const { adminAdState: state, error, mutate } = useAdminAdState(numId)
   const [busy, setBusy] = useState(false)
-  const [execTarget, setExecTarget] = useState<{ guid: string; title: string } | null>(null)
+  // inspectorSid set ⇒ a throwaway inspector container we must destroy on close.
+  const [execTarget, setExecTarget] = useState<{
+    guid: string
+    title: string
+    inspectorSid?: number
+  } | null>(null)
+
+  const openShell = (guid: string, title: string, inspectorSid?: number) =>
+    setExecTarget({ guid, title, inspectorSid })
+
+  const closeShell = () => {
+    if (execTarget?.inspectorSid != null)
+      api.edit.editAdDestroyInspector(numId, execTarget.inspectorSid, execTarget.guid).catch(() => undefined)
+    setExecTarget(null)
+  }
 
   // The inspect-snapshot modal + selected file live in the URL hash, so they're
   // deep-linkable and the browser Back button steps file → snapshot → closed:
@@ -655,13 +816,14 @@ const AdOps: FC = () => {
         target={snapTarget}
         selectedPath={selectedPath}
         onSelectPath={selectFile}
+        onOpenShell={openShell}
         onClose={closeSnapshot}
       />
       <ContainerExecModal
         containerGuid={execTarget?.guid ?? null}
         containerTitle={execTarget?.title}
         opened={execTarget != null}
-        onClose={() => setExecTarget(null)}
+        onClose={closeShell}
       />
       <Stack gap="md">
         {/* Mission-control bar: round timing, scoring state, fleet health, actions */}

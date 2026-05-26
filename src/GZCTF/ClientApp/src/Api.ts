@@ -2090,6 +2090,12 @@ export interface AdFileBlob {
   base64?: string | null;
 }
 
+/** Result of spawning a throwaway inspector container. */
+export interface AdInspectorModel {
+  /** GUID of the spawned container — feed to the in-browser shell. */
+  containerGuid: string;
+}
+
 /** Per-file inspection: current (running container) + baseline (image) + unified diff. */
 export interface AdFileViewModel {
   path: string;
@@ -6480,6 +6486,41 @@ export class Api<
         method: "GET",
         query: query,
         format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Spawn a short-lived inspector container from the challenge image
+     * so an admin can shell in. Requires game admin.
+     *
+     * @tags Edit
+     * @name EditAdSpawnInspector
+     * @request POST:/api/edit/games/{id}/ad/Services/{adTeamServiceId}/Inspector
+     */
+    editAdSpawnInspector: (id: number, adTeamServiceId: number, params: RequestParams = {}) =>
+      this.request<AdInspectorModel, RequestResponse>({
+        path: `/api/edit/games/${id}/ad/Services/${adTeamServiceId}/Inspector`,
+        method: "POST",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Destroy an inspector container. Requires game admin.
+     *
+     * @tags Edit
+     * @name EditAdDestroyInspector
+     * @request DELETE:/api/edit/games/{id}/ad/Services/{adTeamServiceId}/Inspector/{containerGuid}
+     */
+    editAdDestroyInspector: (
+      id: number,
+      adTeamServiceId: number,
+      containerGuid: string,
+      params: RequestParams = {},
+    ) =>
+      this.request<void, RequestResponse>({
+        path: `/api/edit/games/${id}/ad/Services/${adTeamServiceId}/Inspector/${containerGuid}`,
+        method: "DELETE",
         ...params,
       }),
 
