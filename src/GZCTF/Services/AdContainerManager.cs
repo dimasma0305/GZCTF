@@ -10,6 +10,8 @@ using GZCTF.Services.Container.Manager;
 using GZCTF.Services.Container.Provider;
 using GZCTF.Storage.Interface;
 using GZCTF.Utils;
+using k8s;
+using k8s.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 
@@ -55,24 +57,76 @@ public sealed class AdContainerManager(
         _serviceLocks.GetOrAdd((participationId, challengeId), _ => new SemaphoreSlim(1, 1));
 
     /// <summary>
-    /// Authoritative single-container liveness check (fresh docker inspect).
-    /// Used under the per-service lock so we don't act on a stale tick-level
-    /// snapshot (a concurrent launch may have replaced the container since).
-    /// Returns true ("assume alive, don't relaunch") when liveness can't be
-    /// determined — no Docker provider (K8s) or an inspect error — so only a
-    /// definitive not-found / not-running triggers a relaunch.
+    /// Authoritative single-container liveness check (fresh docker inspect / pod
+    /// read). Used under the per-service lock so we don't act on a stale
+    /// tick-level snapshot (a concurrent launch may have replaced the container
+    /// since). Returns true ("assume alive, don't relaunch") when liveness can't
+    /// be determined (no provider / a query error) so only a definitive
+    /// not-found / not-running / failed state triggers a relaunch.
     /// </summary>
     private static async Task<bool> IsContainerRunningAsync(
-        IContainerProvider<DockerClient, DockerMetadata>? provider, string containerId, CancellationToken token)
+        IContainerProvider<DockerClient, DockerMetadata>? dockerProvider,
+        IContainerProvider<Kubernetes, KubernetesMetadata>? k8sProvider,
+        string containerId, CancellationToken token)
     {
-        if (provider is null) return true;
-        try
+        if (dockerProvider is not null)
         {
-            var info = await provider.GetProvider().Containers.InspectContainerAsync(containerId, token);
-            return info.State?.Running == true;
+            try
+            {
+                var info = await dockerProvider.GetProvider().Containers.InspectContainerAsync(containerId, token);
+                return info.State?.Running == true;
+            }
+            catch (DockerContainerNotFoundException) { return false; }
+            catch { return true; }
         }
-        catch (DockerContainerNotFoundException) { return false; }
-        catch { return true; }
+
+        if (k8sProvider is not null)
+        {
+            try
+            {
+                var pod = await k8sProvider.GetProvider().CoreV1
+                    .ReadNamespacedPodAsync(containerId, k8sProvider.GetMetadata().Config.Namespace, cancellationToken: token);
+                return !IsPodDead(pod);
+            }
+            catch (k8s.Autorest.HttpOperationException e) when (e.Response?.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                return false;
+            }
+            catch { return true; }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Whether a launched A&amp;D pod has definitively failed and should be
+    /// relaunched. Treats a pod as dead on: terminal phase (Failed/Succeeded —
+    /// a long-running service that exited), a container stuck in an image-pull
+    /// or crash back-off, or any container already terminated. A pod still
+    /// pulling / starting (Pending without an error reason) is considered alive,
+    /// so a freshly-launched pod isn't churned before it comes up.
+    /// </summary>
+    private static bool IsPodDead(V1Pod pod)
+    {
+        var phase = pod.Status?.Phase;
+        if (phase is "Failed" or "Succeeded")
+            return true;
+
+        var statuses = pod.Status?.ContainerStatuses;
+        if (statuses is null)
+            return false;
+
+        foreach (var cs in statuses)
+        {
+            if (cs.State?.Terminated is not null)
+                return true;
+            var reason = cs.State?.Waiting?.Reason;
+            if (reason is "ImagePullBackOff" or "ErrImagePull" or "CrashLoopBackOff"
+                or "CreateContainerError" or "RunContainerError" or "InvalidImageName")
+                return true;
+        }
+
+        return false;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -113,10 +167,11 @@ public sealed class AdContainerManager(
             .ToListAsync(token);
 
         var dockerProvider = scope.ServiceProvider.GetService<IContainerProvider<DockerClient, DockerMetadata>>();
-        var runningIds = await GetRunningContainerIdsAsync(dockerProvider, token);
+        var k8sProvider = scope.ServiceProvider.GetService<IContainerProvider<Kubernetes, KubernetesMetadata>>();
+        var runningIds = await GetRunningContainerIdsAsync(dockerProvider, k8sProvider, token);
 
         foreach (var gameId in activeGames)
-            await EnsureContainersForGameAsync(db, containerManager, dockerProvider, gameId, runningIds, token);
+            await EnsureContainersForGameAsync(db, containerManager, dockerProvider, k8sProvider, gameId, runningIds, token);
 
         // Ended games: snapshot (if allowed) → destroy. Each under the
         // per-service lock so it can't race a concurrent self-reset /
@@ -169,30 +224,52 @@ public sealed class AdContainerManager(
     }
 
     /// <summary>
-    /// Set of docker container IDs that are actually <b>running</b> right now,
-    /// used to reconcile against real liveness instead of trusting the stored
-    /// <see cref="ContainerStatus"/>. Returns null on a K8s deploy (no Docker
-    /// provider) or if the listing fails — callers then fall back to the
-    /// status-only behavior so a transient docker hiccup can't trigger a
-    /// relaunch storm.
+    /// Set of container IDs (Docker container IDs / K8s pod names) that look
+    /// <b>alive</b> right now, used to reconcile against real liveness instead
+    /// of trusting the stored <see cref="ContainerStatus"/>. Returns null if no
+    /// container provider is registered or the listing fails — callers then fall
+    /// back to the status-only behavior so a transient provider hiccup can't
+    /// trigger a relaunch storm. The K8s set excludes pods that have
+    /// definitively failed (<see cref="IsPodDead"/>) but keeps still-starting
+    /// pods, so the cheap pre-check only flags genuinely-dead services for the
+    /// authoritative re-check.
     /// </summary>
     private async Task<HashSet<string>?> GetRunningContainerIdsAsync(
-        IContainerProvider<DockerClient, DockerMetadata>? dockerProvider, CancellationToken token)
+        IContainerProvider<DockerClient, DockerMetadata>? dockerProvider,
+        IContainerProvider<Kubernetes, KubernetesMetadata>? k8sProvider,
+        CancellationToken token)
     {
-        if (dockerProvider is null)
-            return null;
+        if (dockerProvider is not null)
+        {
+            try
+            {
+                var list = await dockerProvider.GetProvider().Containers.ListContainersAsync(
+                    new DockerModels.ContainersListParameters { All = false }, token);
+                return list.Select(c => c.ID).ToHashSet();
+            }
+            catch (Exception e)
+            {
+                logger.LogWarning(e, "A&D reconcile: listing running containers failed; using DB status only this tick");
+                return null;
+            }
+        }
 
-        try
+        if (k8sProvider is not null)
         {
-            var list = await dockerProvider.GetProvider().Containers.ListContainersAsync(
-                new DockerModels.ContainersListParameters { All = false }, token);
-            return list.Select(c => c.ID).ToHashSet();
+            try
+            {
+                var pods = await k8sProvider.GetProvider().CoreV1.ListNamespacedPodAsync(
+                    k8sProvider.GetMetadata().Config.Namespace, cancellationToken: token);
+                return pods.Items.Where(p => !IsPodDead(p)).Select(p => p.Metadata.Name).ToHashSet();
+            }
+            catch (Exception e)
+            {
+                logger.LogWarning(e, "A&D reconcile: listing pods failed; using DB status only this tick");
+                return null;
+            }
         }
-        catch (Exception e)
-        {
-            logger.LogWarning(e, "A&D reconcile: listing running containers failed; using DB status only this tick");
-            return null;
-        }
+
+        return null;
     }
 
     /// <summary>
@@ -294,14 +371,16 @@ public sealed class AdContainerManager(
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var containerManager = scope.ServiceProvider.GetRequiredService<IContainerManager>();
         var dockerProvider = scope.ServiceProvider.GetService<IContainerProvider<DockerClient, DockerMetadata>>();
-        var runningIds = await GetRunningContainerIdsAsync(dockerProvider, token);
-        await EnsureContainersForGameAsync(db, containerManager, dockerProvider, gameId, runningIds, token);
+        var k8sProvider = scope.ServiceProvider.GetService<IContainerProvider<Kubernetes, KubernetesMetadata>>();
+        var runningIds = await GetRunningContainerIdsAsync(dockerProvider, k8sProvider, token);
+        await EnsureContainersForGameAsync(db, containerManager, dockerProvider, k8sProvider, gameId, runningIds, token);
     }
 
     private async Task EnsureContainersForGameAsync(
         AppDbContext db,
         IContainerManager containerManager,
         IContainerProvider<DockerClient, DockerMetadata>? dockerProvider,
+        IContainerProvider<Kubernetes, KubernetesMetadata>? k8sProvider,
         int gameId,
         IReadOnlySet<string>? runningDockerIds,
         CancellationToken token)
@@ -355,7 +434,7 @@ public sealed class AdContainerManager(
             if (!needsAction)
                 continue;
 
-            await EnsureOneServiceAsync(db, containerManager, dockerProvider, participationId, challenge, token);
+            await EnsureOneServiceAsync(db, containerManager, dockerProvider, k8sProvider, participationId, challenge, token);
         }
     }
 
@@ -374,6 +453,7 @@ public sealed class AdContainerManager(
         AppDbContext db,
         IContainerManager containerManager,
         IContainerProvider<DockerClient, DockerMetadata>? dockerProvider,
+        IContainerProvider<Kubernetes, KubernetesMetadata>? k8sProvider,
         int participationId,
         GameChallenge challenge,
         CancellationToken token)
@@ -386,11 +466,11 @@ public sealed class AdContainerManager(
                 .Include(t => t.Container)
                 .FirstOrDefaultAsync(t => t.ParticipationId == participationId && t.ChallengeId == challenge.Id, token);
 
-            // Authoritative liveness via a fresh inspect (not the stale tick
-            // snapshot) — avoids relaunching a container another holder just
-            // created since the snapshot was taken.
+            // Authoritative liveness via a fresh inspect / pod read (not the
+            // stale tick snapshot) — avoids relaunching a container another
+            // holder just created since the snapshot was taken.
             var deadInDocker = ts?.Container?.ContainerId is { Length: > 0 } cid
-                               && !await IsContainerRunningAsync(dockerProvider, cid, token);
+                               && !await IsContainerRunningAsync(dockerProvider, k8sProvider, cid, token);
 
             var networkDrift = ts?.LaunchedWithEgress is { } le && le != challenge.AdAllowEgress;
 

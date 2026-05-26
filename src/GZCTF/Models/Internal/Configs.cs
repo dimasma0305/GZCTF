@@ -562,6 +562,14 @@ public class KubernetesConfig
     public string KubeConfig { get; set; } = "kube-config.yaml";
     public string[]? AllowCidr { get; set; }
     public string[]? Dns { get; set; }
+
+    /// <summary>
+    /// imagePullPolicy for launched challenge/checker pods. Defaults to
+    /// <c>Always</c> (assumes a registry, picks up rebuilt mutable tags).
+    /// Set to <c>IfNotPresent</c> for single-node / air-gapped clusters that
+    /// side-load images (e.g. <c>k3d image import</c>) instead of pulling.
+    /// </summary>
+    public string ImagePullPolicy { get; set; } = "Always";
 }
 
 public class RegistrySet<T> : Dictionary<string, T>

@@ -60,6 +60,7 @@ public sealed class K8sAdCheckRunner(
         {
             Name = "checker",
             Image = image,
+            ImagePullPolicy = provider.GetMetadata().Config.ImagePullPolicy,
             Env = env,
             // Built-in TCP probe when no custom checker image is set.
             Command = useCustomChecker ? null : ["sh", "-c", $"nc -z -w3 {targetIp} {targetPort}"],
