@@ -20,6 +20,18 @@ services:
       - ContainerProvider__DockerConfig__ChallengeNetwork=z-test-challenges
       - ContainerProvider__PortMappingType=PlatformProxy
       - ContainerProvider__EnableTrafficCapture=true
+      # --- Kubernetes container backend (local k3d cluster `k3d-gzctf`) ---
+      # gzctf joins the k3d-gzctf docker network (see networks: below) to reach
+      # the API at https://k3d-gzctf-serverlb:6443 via the mounted kubeconfig.
+      - ContainerProvider__Type=Kubernetes
+      - ContainerProvider__KubernetesConfig__KubeConfig=/app/kube-config.yaml
+      - ContainerProvider__KubernetesConfig__Namespace=gzctf-challenges
+      # k3d side-loads images (`k3d image import`); don't force a registry pull.
+      - ContainerProvider__KubernetesConfig__ImagePullPolicy=IfNotPresent
+      # A&D flag pull: team pods fetch the planted flag from gzctf. Must be an
+      # IP (pods run external DNS, can't resolve cluster/host names). 172.0.12.1
+      # is the k3d-gzctf network gateway (= host) → published port 8080.
+      - Ad__FlagPullBaseUrl=http://172.0.12.1:8080
       - CheatDetectionConfig__LogContainerAccess=true
       - CheatDetectionConfig__DelayedSubmissionThresholdMinutes=1
       - RequestLogging=true
@@ -82,7 +94,10 @@ services:
       # Host-backed A&D flag files, bind-mounted read-only into each team's
       # container so /flag can't be deleted/tampered by container-root. gzctf
       # auto-derives this volume's host path to use as the bind source.
+      # (Docker-provider only; on K8s the pull-sidecar delivers the flag.)
       - "ad-flags:/app/ad-flags"
+      # Kubeconfig for the Kubernetes container backend (read-only).
+      - "./kube-config.k3d.yaml:/app/kube-config.yaml:ro"
     depends_on:
       - postgres
       - redis
@@ -93,6 +108,8 @@ services:
     # it the default network for control-plane connectivity (postgres + redis).
     networks:
       - default
+      # Reach the k3d Kubernetes API (k3d-gzctf-serverlb:6443) in-network.
+      - k3d
 
   ssh-jump:
     build:
@@ -171,3 +188,8 @@ networks:
   # the challenge networks at runtime.
   wg-bootstrap:
     driver: bridge
+  # The local k3d cluster's docker network — joined so gzctf can reach the
+  # Kubernetes API server. Created by `k3d cluster create`, external here.
+  k3d:
+    external: true
+    name: k3d-gzctf
