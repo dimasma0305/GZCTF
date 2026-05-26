@@ -624,6 +624,13 @@
           "description": "Time window before the container expires to renew",
           "label": "Renewal Window (min)"
         },
+        "provider": {
+          "label": "Container backend",
+          "description": "Where challenge containers run. Set at startup (ContainerProvider:Type) — not editable here.",
+          "traffic_capture": "Traffic capture",
+          "namespace": "Namespace",
+          "pull_policy": "Image pull policy"
+        },
         "title": "Container Policy"
       },
       "build_registry": {

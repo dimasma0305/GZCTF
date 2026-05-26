@@ -3,6 +3,7 @@ import {
   Affix,
   Alert,
   ActionIcon,
+  Badge,
   Box,
   Button,
   ColorInput,
@@ -32,11 +33,13 @@ import {
   mdiCheck,
   mdiContentSaveOutline,
   mdiCubeOutline,
+  mdiDocker,
   mdiDotsHorizontal,
   mdiEmailOutline,
   mdiHammerWrench,
   mdiHeartPulse,
   mdiInformationOutline,
+  mdiKubernetes,
   mdiPackageVariantClosed,
   mdiRestore,
   mdiShieldCheckOutline,
@@ -629,6 +632,61 @@ const Configs: FC = () => {
             <SectionHelp description={t('admin.content.settings.container.default_lifetime.description')} />
           </Group>
           <Divider />
+          {/* Read-only: which backend challenges run on. Comes from startup
+              config (ContainerProvider:Type), not editable here. */}
+          {configs?.containerProvider &&
+            (() => {
+              const cp = configs.containerProvider!
+              const isK8s = cp.type === 'Kubernetes'
+              return (
+                <Paper withBorder radius="md" p="sm">
+                  <Group justify="space-between" wrap="nowrap" align="flex-start">
+                    <Group gap="sm" wrap="nowrap">
+                      <ThemeIcon variant="light" color={isK8s ? 'blue' : 'cyan'} size="lg" radius="md">
+                        <Icon path={isK8s ? mdiKubernetes : mdiDocker} size={1} />
+                      </ThemeIcon>
+                      <Stack gap={0}>
+                        <Text fw={600}>{t('admin.content.settings.container.provider.label')}</Text>
+                        <Text size="xs" c="dimmed">
+                          {t('admin.content.settings.container.provider.description')}
+                        </Text>
+                      </Stack>
+                    </Group>
+                    <Group gap="xs" wrap="nowrap">
+                      <Badge size="lg" variant="filled" color={isK8s ? 'blue' : 'cyan'}>
+                        {cp.type}
+                      </Badge>
+                      {cp.portMappingType && (
+                        <Badge size="sm" variant="light" color="gray">
+                          {cp.portMappingType}
+                        </Badge>
+                      )}
+                      {cp.trafficCapture && (
+                        <Badge size="sm" variant="light" color="teal">
+                          {t('admin.content.settings.container.provider.traffic_capture')}
+                        </Badge>
+                      )}
+                    </Group>
+                  </Group>
+                  {isK8s && (
+                    <Group gap="lg" mt="xs" pl={2}>
+                      {cp.kubernetesNamespace && (
+                        <Text size="xs" c="dimmed">
+                          {t('admin.content.settings.container.provider.namespace')}:{' '}
+                          <code>{cp.kubernetesNamespace}</code>
+                        </Text>
+                      )}
+                      {cp.imagePullPolicy && (
+                        <Text size="xs" c="dimmed">
+                          {t('admin.content.settings.container.provider.pull_policy')}:{' '}
+                          <code>{cp.imagePullPolicy}</code>
+                        </Text>
+                      )}
+                    </Group>
+                  )}
+                </Paper>
+              )
+            })()}
           <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }} className={misc.alignCenter}>
             <NumberInput
               label={t('admin.content.settings.container.default_lifetime.label')}

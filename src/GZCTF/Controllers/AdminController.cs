@@ -128,6 +128,9 @@ public class AdminController(
             HasPassword = registry.HasPassword,
         };
 
+        var containerProvider = serviceProvider.GetRequiredService<IOptionsSnapshot<ContainerProvider>>().Value;
+        var isK8s = containerProvider.Type == ContainerProviderType.Kubernetes;
+
         ConfigEditModel config = new()
         {
             AccountPolicy = serviceProvider.GetRequiredService<IOptionsSnapshot<AccountPolicy>>().Value,
@@ -138,6 +141,14 @@ public class AdminController(
             Captcha = safeCaptcha,
             Registry = safeRegistry,
             ProxyTrust = serviceProvider.GetRequiredService<IOptionsSnapshot<ProxyTrustConfig>>().Value,
+            ContainerProvider = new ContainerProviderInfoModel
+            {
+                Type = containerProvider.Type,
+                PortMappingType = containerProvider.PortMappingType,
+                TrafficCapture = containerProvider.EnableTrafficCapture,
+                KubernetesNamespace = isK8s ? containerProvider.KubernetesConfig?.Namespace : null,
+                ImagePullPolicy = isK8s ? containerProvider.KubernetesConfig?.ImagePullPolicy : null,
+            },
         };
 
         return Ok(config);

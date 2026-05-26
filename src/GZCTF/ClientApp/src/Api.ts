@@ -422,6 +422,30 @@ export interface ConfigEditModel {
   /** Reverse-proxy trust list — admin-editable override for the
    *  appsettings ForwardedOptions section. Restart required to apply. */
   proxyTrust?: ProxyTrustConfig | null;
+  /** Read-only view of the active container backend (Docker / Kubernetes).
+   *  Set at startup; populated on GET, ignored on PUT. */
+  containerProvider?: ContainerProviderInfoModel | null;
+}
+
+/** The active container backend. */
+export enum ContainerProviderType {
+  Docker = "Docker",
+  Kubernetes = "Kubernetes",
+}
+
+/** Read-only summary of the configured container provider, so an admin can
+ *  tell at a glance whether challenges run on Docker or Kubernetes. */
+export interface ContainerProviderInfoModel {
+  /** The active backend: Docker or Kubernetes. */
+  type?: ContainerProviderType;
+  /** How challenge ports are exposed (Default / PlatformProxy). */
+  portMappingType?: ContainerPortMappingType;
+  /** Whether per-challenge traffic capture is enabled. */
+  trafficCapture?: boolean;
+  /** K8s only: namespace challenge pods are created in. */
+  kubernetesNamespace?: string | null;
+  /** K8s only: imagePullPolicy applied to challenge / checker pods. */
+  imagePullPolicy?: string | null;
 }
 
 /** Admin-editable proxy trust configuration. Mirror of

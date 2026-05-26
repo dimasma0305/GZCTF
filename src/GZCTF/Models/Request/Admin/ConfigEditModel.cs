@@ -55,4 +55,35 @@ public class ConfigEditModel
     /// restart-required alert next to this section.
     /// </summary>
     public ProxyTrustConfig? ProxyTrust { get; set; }
+
+    /// <summary>
+    /// Read-only view of the active container backend (Docker / Kubernetes).
+    /// Sourced from startup config, not editable here — populated on GET and
+    /// ignored on PUT.
+    /// </summary>
+    public ContainerProviderInfoModel? ContainerProvider { get; set; }
+}
+
+/// <summary>
+/// Read-only summary of the configured container provider, so an admin can
+/// tell at a glance whether challenges run on Docker or Kubernetes (and, for
+/// K8s, in which namespace / with which pull policy). Set at startup via the
+/// <c>ContainerProvider</c> config section; not editable from the settings UI.
+/// </summary>
+public sealed class ContainerProviderInfoModel
+{
+    /// <summary>The active backend: Docker or Kubernetes.</summary>
+    public ContainerProviderType Type { get; set; }
+
+    /// <summary>How challenge ports are exposed (Default / PlatformProxy).</summary>
+    public ContainerPortMappingType PortMappingType { get; set; }
+
+    /// <summary>Whether per-challenge traffic capture is enabled.</summary>
+    public bool TrafficCapture { get; set; }
+
+    /// <summary>K8s only: namespace challenge pods are created in.</summary>
+    public string? KubernetesNamespace { get; set; }
+
+    /// <summary>K8s only: imagePullPolicy applied to challenge / checker pods.</summary>
+    public string? ImagePullPolicy { get; set; }
 }

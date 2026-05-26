@@ -616,6 +616,13 @@
           "description": "容器到期前多少分钟内可以续期",
           "label": "续期窗口（分钟）"
         },
+        "provider": {
+          "label": "容器后端",
+          "description": "题目容器的运行环境。由启动配置（ContainerProvider:Type）决定，此处不可编辑。",
+          "traffic_capture": "流量捕获",
+          "namespace": "命名空间",
+          "pull_policy": "镜像拉取策略"
+        },
         "title": "容器策略"
       },
       "build_registry": {
