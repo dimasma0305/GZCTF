@@ -5,11 +5,13 @@ using DockerModels = Docker.DotNet.Models;
 using GZCTF.Models;
 using GZCTF.Models.Data;
 using GZCTF.Models.Internal;
+using GZCTF.Services.Config;
 using GZCTF.Services.Container.Manager;
 using GZCTF.Services.Container.Provider;
 using GZCTF.Storage.Interface;
 using GZCTF.Utils;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 namespace GZCTF.Services;
 
@@ -424,7 +426,7 @@ public sealed class AdContainerManager(
                     TaskStatus.Failed, LogLevel.Warning);
             }
 
-            await LaunchOneAsync(db, containerManager, participationId, challenge, ts, token);
+            await LaunchOneAsync(db, containerManager, participationId, challenge, ts, dockerProvider is null, token);
         }
         finally
         {
@@ -494,6 +496,7 @@ public sealed class AdContainerManager(
         int participationId,
         GameChallenge challenge,
         AdTeamService? existing,
+        bool isK8s,
         CancellationToken token)
     {
         if (string.IsNullOrWhiteSpace(challenge.ContainerImage))
@@ -529,11 +532,42 @@ public sealed class AdContainerManager(
         // the container's life, so it would go stale after the first rotation
         // and mislead challenge code. Only GZCTF_FLAG_FILE is surfaced (below);
         // read the live flag from that path.
-        // When the read-only flag-mount is available, ensure the host-backed
-        // file exists (warmup) BEFORE creating the container — docker bind-mounts
-        // a missing source as an empty *directory*, which would break /flag.
-        if (flagMount.Available)
-            flagMount.EnsureWarmup(participationId, challenge.Id);
+        // Flag delivery differs by provider:
+        //   Docker → read-only host-backed /flag bind mount (undeletable);
+        //            warmup the host file first (docker bind-mounts a missing
+        //            source as an empty *directory*, which would break /flag).
+        //   K8s    → PULL model: the flag-writer sidecar polls FlagPullUrl and
+        //            writes /gzctf-flag/flag (no exec; RO-enforced on real nodes).
+        var flagFilePath = "/flag";
+        string? flagBindSource = null;
+        string? flagPullUrl = null;
+
+        if (isK8s)
+        {
+            flagFilePath = "/gzctf-flag/flag";
+            using var cfgScope = scopeFactory.CreateScope();
+            var baseUrl = cfgScope.ServiceProvider.GetRequiredService<IConfiguration>()["Ad:FlagPullBaseUrl"]
+                ?.TrimEnd('/');
+            var xorKey = cfgScope.ServiceProvider.GetService<IConfigService>()?.GetXorKey();
+            if (!string.IsNullOrEmpty(baseUrl) && xorKey is not null)
+            {
+                var podToken = AdTokenUtils.PodFlagToken(participationId, challenge.Id, xorKey);
+                flagPullUrl =
+                    $"{baseUrl}/api/Game/{participation.GameId}/Ad/PodFlag/{participationId}/{challenge.Id}/{podToken}";
+            }
+            else
+                logger.SystemLog(
+                    "A&D on K8s: Ad:FlagPullBaseUrl not configured — flags can't be delivered to team pods",
+                    TaskStatus.Failed, LogLevel.Warning);
+        }
+        else
+        {
+            if (flagMount.Available)
+            {
+                flagMount.EnsureWarmup(participationId, challenge.Id);
+                flagBindSource = flagMount.BindSource(participationId, challenge.Id);
+            }
+        }
 
         var config = new ContainerConfig
         {
@@ -543,11 +577,10 @@ public sealed class AdContainerManager(
             GameId = participation.GameId,
             UserId = participation.FirstUserId,
             ExposedPort = challenge.ExposePort ?? 80,
-            // Flag intentionally unset for A&D — see note above; /flag is the source of truth.
-            FlagFilePath = "/flag",
-            // Read-only host-backed /flag (undeletable by container-root) when
-            // available; null falls back to the docker-exec plant.
-            FlagBindSource = flagMount.Available ? flagMount.BindSource(participationId, challenge.Id) : null,
+            // Flag intentionally unset for A&D — see note above; the flag file is the source of truth.
+            FlagFilePath = flagFilePath,
+            FlagBindSource = flagBindSource,
+            FlagPullUrl = flagPullUrl,
             CPUCount = challenge.CPUCount ?? 1,
             MemoryLimit = challenge.MemoryLimit ?? 128,
             StorageLimit = challenge.StorageLimit ?? 256,
@@ -631,6 +664,7 @@ public sealed class AdContainerManager(
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var containerManager = scope.ServiceProvider.GetRequiredService<IContainerManager>();
+        var isK8s = scope.ServiceProvider.GetService<IContainerProvider<DockerClient, DockerMetadata>>() is null;
 
         // Need the (participation, challenge) key to take the per-service lock
         // before mutating — otherwise a concurrent reset/reconcile could race.
@@ -661,7 +695,7 @@ public sealed class AdContainerManager(
                 await db.SaveChangesAsync(token);
             }
 
-            await LaunchOneAsync(db, containerManager, ts.ParticipationId, ts.Challenge, ts, token);
+            await LaunchOneAsync(db, containerManager, ts.ParticipationId, ts.Challenge, ts, isK8s, token);
             ts.LastResetAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(token);
             return true;

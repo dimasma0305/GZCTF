@@ -171,12 +171,6 @@ public class AdGameController(
         return Content(flag ?? "flag{warmup-no-round-yet}", "text/plain");
     }
 
-    /// <summary>Stable per-(participation, challenge) pull token for the flag
-    /// sidecar — <c>HMAC(XorKey, "adpodflag:{pid}:{cid}")</c> as hex. Used by the
-    /// K8s launch path to build the sidecar's pull URL.</summary>
-    internal static string PodFlagToken(int participationId, int challengeId, byte[] xorKey) =>
-        Convert.ToHexString(AdTokenUtils.Hash($"adpodflag:{participationId}:{challengeId}", xorKey));
-
     private async Task<AdSubmitResultModel> ProcessSingleFlagAsync(
         Participation attackerPart, AdRound currentRound, string raw, CancellationToken token)
     {

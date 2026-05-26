@@ -48,4 +48,14 @@ public static class AdTokenUtils
         using var hmac = new HMACSHA256(key);
         return hmac.ComputeHash(Encoding.UTF8.GetBytes(plaintext));
     }
+
+    /// <summary>
+    /// Stable per-(participation, challenge) token for the Kubernetes flag-pull
+    /// endpoint (<c>GET …/Ad/PodFlag/{pid}/{cid}/{token}</c>). HMAC of the pair
+    /// keyed by the XorKey, hex-encoded — unguessable and scoped to that team's
+    /// own flag. Computed at pod launch (injected into the flag-writer sidecar's
+    /// URL) and re-derived + compared by the endpoint.
+    /// </summary>
+    public static string PodFlagToken(int participationId, int challengeId, byte[] key) =>
+        Convert.ToHexString(Hash($"adpodflag:{participationId}:{challengeId}", key));
 }
