@@ -2079,6 +2079,27 @@ export interface AdSnapshotChangesModel {
   changes: AdSnapshotChange[];
 }
 
+/** One file's content, capped + binary-aware. */
+export interface AdFileBlob {
+  size: number;
+  truncated: boolean;
+  binary: boolean;
+  /** UTF-8 text (when not binary). */
+  text?: string | null;
+  /** Base64 (when binary). */
+  base64?: string | null;
+}
+
+/** Per-file inspection: current (running container) + baseline (image) + unified diff. */
+export interface AdFileViewModel {
+  path: string;
+  containerRunning: boolean;
+  current?: AdFileBlob | null;
+  baseline?: AdFileBlob | null;
+  /** Unified diff (baseline → current); present only when both sides are text within the line cap. */
+  unifiedDiff?: string | null;
+}
+
 /** A&D admin — per-team row in the admin grid. */
 export interface AdTeamRowModel {
   participationId: number;
@@ -6436,6 +6457,28 @@ export class Api<
       this.request<AdSnapshotChangesModel, RequestResponse>({
         path: `/api/edit/games/${id}/ad/Services/${adTeamServiceId}/Snapshot/Changes`,
         method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Inspect one changed file: current content (running container),
+     * baseline content (challenge image), and a unified diff. Requires game admin.
+     *
+     * @tags Edit
+     * @name EditAdFile
+     * @request GET:/api/edit/games/{id}/ad/Services/{adTeamServiceId}/File
+     */
+    editAdFile: (
+      id: number,
+      adTeamServiceId: number,
+      query: { path: string },
+      params: RequestParams = {},
+    ) =>
+      this.request<AdFileViewModel, RequestResponse>({
+        path: `/api/edit/games/${id}/ad/Services/${adTeamServiceId}/File`,
+        method: "GET",
+        query: query,
         format: "json",
         ...params,
       }),

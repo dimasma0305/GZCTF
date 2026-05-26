@@ -82,7 +82,7 @@ const transformers = [
   transformerColorizedBrackets(),
 ]
 
-const highlight = (code: string, lang: string) => {
+export const highlight = (code: string, lang: string) => {
   const highlighter = initHighlighter()
 
   if (supportedLanguages && !supportedLanguages.includes(lang)) {

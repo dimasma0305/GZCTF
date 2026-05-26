@@ -1,12 +1,14 @@
 using System.Collections.Concurrent;
 using System.IO.Compression;
 using System.Net.WebSockets;
+using System.Security.Cryptography;
 using System.Text;
 using Docker.DotNet;
 using DockerModels = Docker.DotNet.Models;
 using GZCTF.Models;
 using GZCTF.Models.Data;
 using GZCTF.Models.Internal;
+using GZCTF.Services.Cache;
 using GZCTF.Services.Config;
 using GZCTF.Services.Container.Manager;
 using GZCTF.Services.Container.Provider;
@@ -15,6 +17,7 @@ using GZCTF.Utils;
 using k8s;
 using k8s.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 
 namespace GZCTF.Services;
@@ -475,6 +478,248 @@ public sealed class AdContainerManager(
 
         return sb.ToString();
     }
+
+    #region A&D file inspection (read a single file from the live container + the baseline image)
+
+    /// <summary>Max bytes read per file (256 KiB). The reader pulls one extra byte
+    /// to flag truncation.</summary>
+    private const int MaxFileBytes = 256 * 1024;
+
+    /// <summary>argv for reading a file: base64 of the first <see cref="MaxFileBytes"/>+1
+    /// bytes (or the literal <c>__NOFILE__</c> when absent). The path is a positional
+    /// param (<c>$1</c>), never interpolated into the script → no shell injection.</summary>
+    private static string[] FileReadCmd(string path) =>
+    [
+        "sh", "-c",
+        $"if [ -f \"$1\" ]; then head -c {MaxFileBytes + 1} \"$1\" | base64 | tr -d '\\n'; else printf __NOFILE__; fi",
+        "x", path
+    ];
+
+    /// <summary>Read a file from the team's <em>running</em> container (Docker exec
+    /// / K8s exec). Null when there's no live container, no provider, or the file
+    /// is absent. Returns the (capped) bytes + a truncation flag.</summary>
+    public async Task<(byte[] Data, bool Truncated)?> ReadCurrentFileBytesAsync(
+        IServiceProvider scopeServices, AdTeamService ts, string path, CancellationToken token)
+    {
+        if (ts.Container?.ContainerId is not { Length: > 0 } cid)
+            return null;
+
+        try
+        {
+            var dockerProvider = scopeServices.GetService<IContainerProvider<DockerClient, DockerMetadata>>();
+            if (dockerProvider is not null)
+                return DecodeFileOutput(await ExecCaptureDockerAsync(dockerProvider.GetProvider(), cid, FileReadCmd(path), token));
+
+            var k8sProvider = scopeServices.GetService<IContainerProvider<Kubernetes, KubernetesMetadata>>();
+            if (k8sProvider is not null)
+                return DecodeFileOutput(await ExecCaptureStdoutAsync(
+                    k8sProvider.GetProvider(), k8sProvider.GetMetadata().Config.Namespace, cid, cid, FileReadCmd(path), token));
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "A&D read current file failed: service={Sid} path={Path}", ts.Id, path);
+        }
+        return null;
+    }
+
+    /// <summary>Read the same file from the challenge <em>image</em> (the baseline)
+    /// via a throwaway one-shot container/pod. Cached per (image, path) — the image
+    /// is immutable. Null when the image lacks the file (e.g. a team-added file).</summary>
+    public async Task<(byte[] Data, bool Truncated)?> ReadBaselineFileBytesAsync(
+        IServiceProvider scopeServices, string image, string path, CancellationToken token)
+    {
+        if (string.IsNullOrWhiteSpace(image))
+            return null;
+
+        var cache = scopeServices.GetService<CacheHelper>();
+        var key = "_AdBaseFile_" +
+                  Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{image}\n{path}")));
+
+        var b64 = cache is null ? null : await cache.GetStringAsync(key, token);
+        if (b64 is null)
+        {
+            try
+            {
+                var dockerProvider = scopeServices.GetService<IContainerProvider<DockerClient, DockerMetadata>>();
+                var k8sProvider = scopeServices.GetService<IContainerProvider<Kubernetes, KubernetesMetadata>>();
+                b64 = dockerProvider is not null
+                    ? await ReadFileFromDockerImageAsync(dockerProvider.GetProvider(), image, path, token)
+                    : k8sProvider is not null
+                        ? await ReadFileFromK8sImageAsync(k8sProvider, image, path, token)
+                        : null;
+            }
+            catch (Exception e)
+            {
+                logger.LogWarning(e, "A&D read baseline file failed: image={Img} path={Path}", image, path);
+            }
+
+            b64 ??= "__NOFILE__";
+            if (cache is not null)
+                await cache.SetStringAsync(key, b64,
+                    new DistributedCacheEntryOptions { SlidingExpiration = TimeSpan.FromDays(7) }, token);
+        }
+
+        return DecodeFileOutput(b64);
+    }
+
+    private static (byte[] Data, bool Truncated)? DecodeFileOutput(string? output)
+    {
+        var s = output?.Trim();
+        if (string.IsNullOrEmpty(s) || s == "__NOFILE__")
+            return null;
+        byte[] raw;
+        try { raw = Convert.FromBase64String(s); }
+        catch { return null; }
+        var truncated = raw.Length > MaxFileBytes;
+        if (truncated) raw = raw[..MaxFileBytes];
+        return (raw, truncated);
+    }
+
+    private static async Task<string> ExecCaptureDockerAsync(
+        DockerClient docker, string containerId, string[] cmd, CancellationToken token)
+    {
+        var exec = await docker.Exec.CreateContainerExecAsync(containerId,
+            new DockerModels.ContainerExecCreateParameters { AttachStdout = true, AttachStderr = false, Cmd = cmd }, token);
+        using var stream = await docker.Exec.StartContainerExecAsync(exec.ID,
+            new DockerModels.ContainerExecStartParameters(), token);
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
+        cts.CancelAfter(TimeSpan.FromSeconds(15));
+        var sb = new StringBuilder();
+        var buf = new byte[16 * 1024];
+        while (true)
+        {
+            var res = await stream.ReadOutputAsync(buf, 0, buf.Length, cts.Token);
+            if (res.EOF || res.Count <= 0) break;
+            sb.Append(Encoding.ASCII.GetString(buf, 0, res.Count)); // base64 is ASCII
+        }
+        return sb.ToString();
+    }
+
+    private async Task<string?> ReadFileFromDockerImageAsync(
+        DockerClient docker, string image, string path, CancellationToken token)
+    {
+        var pars = new DockerModels.CreateContainerParameters
+        {
+            Image = image,
+            Cmd = FileReadCmd(path),
+            HostConfig = new DockerModels.HostConfig
+            {
+                NetworkMode = "none",
+                Memory = 128L * 1024 * 1024,
+                NanoCPUs = 500_000_000L,
+                AutoRemove = false
+            }
+        };
+
+        string? id = null;
+        try
+        {
+            DockerModels.CreateContainerResponse created;
+            try { created = await docker.Containers.CreateContainerAsync(pars, token); }
+            catch (DockerImageNotFoundException)
+            {
+                await docker.Images.CreateImageAsync(new DockerModels.ImagesCreateParameters { FromImage = image }, null,
+                    new Progress<DockerModels.JSONMessage>(_ => { }), token);
+                created = await docker.Containers.CreateContainerAsync(pars, token);
+            }
+
+            id = created.ID;
+            await docker.Containers.StartContainerAsync(id, new DockerModels.ContainerStartParameters(), token);
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            cts.CancelAfter(TimeSpan.FromSeconds(60));
+            await docker.Containers.WaitContainerAsync(id, cts.Token);
+
+            var sb = new StringBuilder();
+            var progress = new Progress<string>(line => { if (sb.Length < 2 * (MaxFileBytes + 1)) sb.Append(line); });
+            using var logCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            logCts.CancelAfter(TimeSpan.FromSeconds(5));
+            await docker.Containers.GetContainerLogsAsync(id,
+                new DockerModels.ContainerLogsParameters { ShowStdout = true, ShowStderr = false }, progress, logCts.Token);
+            return sb.ToString();
+        }
+        finally
+        {
+            if (id is not null)
+                try { await docker.Containers.RemoveContainerAsync(id, new DockerModels.ContainerRemoveParameters { Force = true }, CancellationToken.None); }
+                catch { /* best-effort */ }
+        }
+    }
+
+    private async Task<string?> ReadFileFromK8sImageAsync(
+        IContainerProvider<Kubernetes, KubernetesMetadata> provider, string image, string path, CancellationToken token)
+    {
+        var client = provider.GetProvider();
+        var ns = provider.GetMetadata().Config.Namespace;
+        var name = $"ad-fileread-{Guid.NewGuid().ToString("N")[..12]}".ToValidRFC1123String("ad-fileread");
+
+        var pod = new V1Pod
+        {
+            Metadata = new V1ObjectMeta
+            {
+                Name = name,
+                NamespaceProperty = ns,
+                Labels = new Dictionary<string, string>
+                {
+                    ["gzctf.gzti.me/ResourceId"] = name,
+                    ["gzctf.role"] = "ad-fileread"
+                }
+            },
+            Spec = new V1PodSpec
+            {
+                Containers =
+                [
+                    new V1Container
+                    {
+                        Name = "reader",
+                        Image = image,
+                        ImagePullPolicy = provider.GetMetadata().Config.ImagePullPolicy,
+                        Command = FileReadCmd(path),
+                        Resources = new V1ResourceRequirements
+                        {
+                            Limits = new Dictionary<string, ResourceQuantity> { ["cpu"] = new("500m"), ["memory"] = new("128Mi") },
+                            Requests = new Dictionary<string, ResourceQuantity> { ["cpu"] = new("10m"), ["memory"] = new("32Mi") }
+                        }
+                    }
+                ],
+                RestartPolicy = "Never",
+                AutomountServiceAccountToken = false
+            }
+        };
+
+        try { await client.CreateNamespacedPodAsync(pod, ns, cancellationToken: token); }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "A&D fileread pod create failed image={Img}", image);
+            return null;
+        }
+
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            cts.CancelAfter(TimeSpan.FromSeconds(60)); // allow for image pull
+            var done = false;
+            while (!cts.IsCancellationRequested)
+            {
+                var p = await client.ReadNamespacedPodAsync(name, ns, cancellationToken: cts.Token);
+                if (p.Status?.Phase is "Succeeded" or "Failed") { done = true; break; }
+                await Task.Delay(TimeSpan.FromSeconds(1), cts.Token);
+            }
+            if (!done) return null;
+
+            await using var stream = await client.CoreV1.ReadNamespacedPodLogAsync(name, ns, cancellationToken: token);
+            using var reader = new StreamReader(stream);
+            return await reader.ReadToEndAsync(token);
+        }
+        finally
+        {
+            try { await client.CoreV1.DeleteNamespacedPodAsync(name, ns, cancellationToken: CancellationToken.None); }
+            catch { /* best-effort */ }
+        }
+    }
+
+    #endregion
 
     /// <summary>
     /// Public entrypoint for one-shot ensure: called from controllers when a

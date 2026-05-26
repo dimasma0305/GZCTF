@@ -15,6 +15,7 @@ import {
   Paper,
   RingProgress,
   ScrollArea,
+  SegmentedControl,
   Stack,
   Table,
   Text,
@@ -22,12 +23,14 @@ import {
   ThemeIcon,
   Title,
   Tooltip,
+  UnstyledButton,
 } from '@mantine/core'
 import { useDebouncedValue } from '@mantine/hooks'
 import { showNotification } from '@mantine/notifications'
 import {
   mdiAlertCircle,
   mdiAlertCircleOutline,
+  mdiArrowLeft,
   mdiCheck,
   mdiCheckCircle,
   mdiClose,
@@ -54,7 +57,8 @@ import { showErrorMsg } from '@Utils/Shared'
 import { useIsMobile } from '@Utils/ThemeOverride'
 import { useAdminAdState } from '@Hooks/useGame'
 import { useTicker } from '@Hooks/useTicker'
-import api, { AdCheckStatus, AdSnapshotChange, AdTeamCellModel } from '@Api'
+import { highlight } from '@Utils/marked/ShikiExtension'
+import api, { AdCheckStatus, AdFileBlob, AdFileViewModel, AdSnapshotChange, AdTeamCellModel } from '@Api'
 import misc from '@Styles/Misc.module.css'
 import tableClasses from '@Styles/AdOpsTable.module.css'
 
@@ -101,6 +105,149 @@ interface SnapTarget {
   challengeTitle: string
 }
 
+// Guess a Shiki language from the file path so content highlights sensibly.
+const langFromPath = (p: string): string => {
+  const f = p.toLowerCase()
+  if (f.endsWith('dockerfile') || f.includes('/dockerfile')) return 'docker'
+  const ext = f.includes('.') ? f.slice(f.lastIndexOf('.') + 1) : ''
+  const map: Record<string, string> = {
+    sh: 'bash', bash: 'bash', py: 'python', js: 'typescript', ts: 'typescript',
+    json: 'json', yml: 'yaml', yaml: 'yaml', c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp',
+    go: 'go', rs: 'rust', html: 'html', htm: 'html', css: 'css', md: 'markdown',
+    sql: 'sql', ini: 'ini', conf: 'ini', cfg: 'ini', env: 'dotenv', toml: 'toml',
+    xml: 'xml', java: 'java',
+  }
+  return map[ext] ?? 'text'
+}
+
+// Shiki-highlighted code block. Shiki escapes the code, so the rendered HTML
+// is safe even though the content comes from a team's container.
+const ShikiBlock: FC<{ code: string; lang: string }> = ({ code, lang }) => (
+  <ScrollArea h={400} type="auto">
+    <div
+      style={{ fontSize: 12 }}
+      // eslint-disable-next-line react/no-danger
+      dangerouslySetInnerHTML={{ __html: highlight(code, lang) }}
+    />
+  </ScrollArea>
+)
+
+// Drill-down into one changed file: current content (running container),
+// baseline content (challenge image), and the unified diff between them.
+const FileDetail: FC<{ gameId: number; sid: number; path: string; onBack: () => void }> = ({
+  gameId,
+  sid,
+  path,
+  onBack,
+}) => {
+  const { t } = useTranslation()
+  const [loading, setLoading] = useState(true)
+  const [data, setData] = useState<AdFileViewModel | null>(null)
+  const [view, setView] = useState<'diff' | 'current' | 'original'>('diff')
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setData(null)
+    api.edit
+      .editAdFile(gameId, sid, { path })
+      .then(({ data }) => {
+        if (cancelled) return
+        setData(data)
+        setView(data.unifiedDiff ? 'diff' : data.current ? 'current' : 'original')
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [gameId, sid, path])
+
+  const lang = langFromPath(path)
+
+  const renderBlob = (blob: AdFileBlob | null | undefined, emptyMsg: string) => {
+    if (!blob) return <Text size="sm" c="dimmed">{emptyMsg}</Text>
+    if (blob.binary)
+      return (
+        <Text size="sm" c="dimmed">
+          {t('admin.content.ad_ops.file.binary', {
+            n: blob.size,
+            defaultValue: 'Binary file — {{n}} bytes (not shown).',
+          })}
+        </Text>
+      )
+    return (
+      <Stack gap={4}>
+        {blob.truncated && (
+          <Text size="xs" c="orange">
+            {t('admin.content.ad_ops.file.truncated', 'Showing the first 256 KiB (truncated).')}
+          </Text>
+        )}
+        <ShikiBlock code={blob.text ?? ''} lang={lang} />
+      </Stack>
+    )
+  }
+
+  const tabs: { value: string; label: string }[] = []
+  if (data?.unifiedDiff) tabs.push({ value: 'diff', label: t('admin.content.ad_ops.file.tab_diff', 'Diff') })
+  if (data?.current) tabs.push({ value: 'current', label: t('admin.content.ad_ops.file.tab_current', 'Current') })
+  if (data?.baseline) tabs.push({ value: 'original', label: t('admin.content.ad_ops.file.tab_original', 'Original') })
+
+  return (
+    <Stack gap="sm">
+      <Group justify="space-between" wrap="nowrap" gap="sm">
+        <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+          <ActionIcon variant="subtle" color="gray" onClick={onBack}>
+            <Icon path={mdiArrowLeft} size={0.9} />
+          </ActionIcon>
+          <Text className={misc.ffmono} size="sm" fw="bold" style={{ wordBreak: 'break-all' }}>
+            {path}
+          </Text>
+        </Group>
+        {tabs.length > 1 && (
+          <SegmentedControl
+            size="xs"
+            data={tabs}
+            value={view}
+            onChange={(v) => setView(v as 'diff' | 'current' | 'original')}
+          />
+        )}
+      </Group>
+
+      {loading ? (
+        <Center h={200}>
+          <Loader size="sm" />
+        </Center>
+      ) : !data ? (
+        <Text size="sm" c="dimmed">
+          {t('admin.content.ad_ops.file.load_failed', 'Could not read this file from the container.')}
+        </Text>
+      ) : view === 'diff' ? (
+        data.unifiedDiff ? (
+          <ShikiBlock code={data.unifiedDiff} lang="diff" />
+        ) : (
+          <Text size="sm" c="dimmed">
+            {t('admin.content.ad_ops.file.no_diff',
+              'No line diff (file too large, binary, or one side missing) — use Current / Original.')}
+          </Text>
+        )
+      ) : view === 'current' ? (
+        renderBlob(
+          data.current,
+          t('admin.content.ad_ops.file.no_current', 'Container not running — current content unavailable.')
+        )
+      ) : (
+        renderBlob(
+          data.baseline,
+          t('admin.content.ad_ops.file.no_baseline', 'Not in the baseline image (team-added file).')
+        )
+      )}
+    </Stack>
+  )
+}
+
 const SnapshotModal: FC<{ gameId: number; target: SnapTarget | null; onClose: () => void }> = ({
   gameId,
   target,
@@ -110,6 +257,7 @@ const SnapshotModal: FC<{ gameId: number; target: SnapTarget | null; onClose: ()
   const [loading, setLoading] = useState(false)
   const [changes, setChanges] = useState<AdSnapshotChange[]>([])
   const [live, setLive] = useState(false)
+  const [selected, setSelected] = useState<string | null>(null)
   const sid = target?.cell.adTeamServiceId
   const hasSnapshot = !!target?.cell.snapshotAvailable
 
@@ -119,6 +267,7 @@ const SnapshotModal: FC<{ gameId: number; target: SnapTarget | null; onClose: ()
     setLoading(true)
     setChanges([])
     setLive(false)
+    setSelected(null)
     api.edit
       .editAdSnapshotChanges(gameId, sid)
       .then(({ data }) => {
@@ -210,7 +359,9 @@ const SnapshotModal: FC<{ gameId: number; target: SnapTarget | null; onClose: ()
           }
           labelPosition="left"
         />
-        {loading ? (
+        {selected ? (
+          <FileDetail gameId={gameId} sid={sid!} path={selected} onBack={() => setSelected(null)} />
+        ) : loading ? (
           <Center h={120}>
             <Loader size="sm" />
           </Center>
@@ -220,32 +371,43 @@ const SnapshotModal: FC<{ gameId: number; target: SnapTarget | null; onClose: ()
               'No filesystem changes were recorded (snapshot may predate diff capture, or nothing changed).')}
           </Text>
         ) : (
-          <ScrollArea h={300} type="auto">
-            <Stack gap={2}>
-              {changes.map((ch, i) => {
-                const m = kindMeta(ch.kind)
-                return (
-                  <Group key={`${ch.path}-${i}`} gap="xs" wrap="nowrap">
-                    <Badge size="xs" color={m.color} variant="filled" w={22} p={0}>
-                      {m.label}
-                    </Badge>
-                    <Text className={misc.ffmono} size="xs" style={{ wordBreak: 'break-all' }}>
-                      {ch.path}
-                    </Text>
-                  </Group>
-                )
-              })}
-            </Stack>
-          </ScrollArea>
-        )}
-
-        {hasSnapshot && (
           <>
-            <Divider
-              label={t('admin.content.ad_ops.snapshot.inspect_label', 'Inspect locally')}
-              labelPosition="left"
-            />
-            <Code block>{recipe}</Code>
+            <ScrollArea h={300} type="auto">
+              <Stack gap={2}>
+                {changes.map((ch, i) => {
+                  const m = kindMeta(ch.kind)
+                  return (
+                    <UnstyledButton
+                      key={`${ch.path}-${i}`}
+                      onClick={() => setSelected(ch.path)}
+                      style={{ width: '100%', borderRadius: 4, padding: '2px 4px' }}
+                    >
+                      <Group gap="xs" wrap="nowrap">
+                        <Badge size="xs" color={m.color} variant="filled" w={22} p={0}>
+                          {m.label}
+                        </Badge>
+                        <Text className={misc.ffmono} size="xs" style={{ wordBreak: 'break-all' }}>
+                          {ch.path}
+                        </Text>
+                      </Group>
+                    </UnstyledButton>
+                  )
+                })}
+              </Stack>
+            </ScrollArea>
+            <Text size="xs" c="dimmed">
+              {t('admin.content.ad_ops.snapshot.click_hint',
+                'Click a file to view its content and diff vs the original image.')}
+            </Text>
+            {hasSnapshot && (
+              <>
+                <Divider
+                  label={t('admin.content.ad_ops.snapshot.inspect_label', 'Inspect locally')}
+                  labelPosition="left"
+                />
+                <Code block>{recipe}</Code>
+              </>
+            )}
           </>
         )}
       </Stack>

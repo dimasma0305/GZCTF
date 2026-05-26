@@ -1,3 +1,4 @@
+using System.Text;
 using GZCTF.Extensions;
 using GZCTF.Middlewares;
 using GZCTF.Models;
@@ -384,5 +385,94 @@ public class AdAdminController(
         }
 
         return Ok(model);
+    }
+
+    /// <summary>
+    /// Inspect ONE changed file: its current content (from the team's running
+    /// container), the baseline content (from the challenge image), and a unified
+    /// diff between them. Powers the AdOps "view file / view diff" drill-down.
+    /// Content needs a live container; the baseline comes from the (immutable,
+    /// cached) image regardless.
+    /// </summary>
+    [RequireGameAdmin]
+    [HttpGet("Services/{adTeamServiceId:int}/File")]
+    [ProducesResponseType(typeof(AdFileViewModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> File(int id, int adTeamServiceId, [FromQuery] string path, CancellationToken token)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Model_ValidationFailed)]));
+
+        var ts = await db.AdTeamServices
+            .Include(t => t.Participation)
+            .Include(t => t.Challenge)
+            .Include(t => t.Container)
+            .FirstOrDefaultAsync(t => t.Id == adTeamServiceId, token);
+        if (ts is null || ts.Participation.GameId != id) return NotFound();
+
+        var sp = HttpContext.RequestServices;
+        var current = await adContainerManager.ReadCurrentFileBytesAsync(sp, ts, path, token);
+        var baseline = await adContainerManager.ReadBaselineFileBytesAsync(sp, ts.Challenge.ContainerImage ?? string.Empty, path, token);
+
+        var model = new AdFileViewModel
+        {
+            Path = path,
+            ContainerRunning = ts.ContainerId is not null,
+            Current = ToBlob(current),
+            Baseline = ToBlob(baseline)
+        };
+
+        if (model.Current is { Binary: false, Text: { } cur } && model.Baseline is { Binary: false, Text: { } bas })
+            model.UnifiedDiff = BuildUnifiedDiff(bas, cur);
+
+        return Ok(model);
+    }
+
+    private const int MaxDiffLines = 1500;
+
+    private static AdFileBlob? ToBlob((byte[] Data, bool Truncated)? read)
+    {
+        if (read is not { } r) return null;
+        var binary = LooksBinary(r.Data);
+        var blob = new AdFileBlob { Size = r.Data.Length, Truncated = r.Truncated, Binary = binary };
+        if (binary) blob.Base64 = Convert.ToBase64String(r.Data);
+        else blob.Text = Encoding.UTF8.GetString(r.Data);
+        return blob;
+    }
+
+    private static bool LooksBinary(byte[] data)
+    {
+        var n = Math.Min(data.Length, 8000);
+        for (var i = 0; i < n; i++)
+            if (data[i] == 0) return true;
+        return false;
+    }
+
+    /// <summary>Line-based unified diff (baseline → current) via LCS. Returns null
+    /// when either side exceeds <see cref="MaxDiffLines"/> (the UI then shows the
+    /// two sides separately).</summary>
+    private static string? BuildUnifiedDiff(string baseline, string current)
+    {
+        var a = baseline.Replace("\r\n", "\n").Split('\n');
+        var b = current.Replace("\r\n", "\n").Split('\n');
+        if (a.Length > MaxDiffLines || b.Length > MaxDiffLines)
+            return null;
+
+        int m = a.Length, n = b.Length;
+        var lcs = new int[m + 1, n + 1];
+        for (var i = m - 1; i >= 0; i--)
+            for (var j = n - 1; j >= 0; j--)
+                lcs[i, j] = a[i] == b[j] ? lcs[i + 1, j + 1] + 1 : Math.Max(lcs[i + 1, j], lcs[i, j + 1]);
+
+        var sb = new StringBuilder();
+        int x = 0, y = 0;
+        while (x < m && y < n)
+        {
+            if (a[x] == b[y]) { sb.Append(' ').Append(a[x]).Append('\n'); x++; y++; }
+            else if (lcs[x + 1, y] >= lcs[x, y + 1]) { sb.Append('-').Append(a[x]).Append('\n'); x++; }
+            else { sb.Append('+').Append(b[y]).Append('\n'); y++; }
+        }
+        while (x < m) { sb.Append('-').Append(a[x]).Append('\n'); x++; }
+        while (y < n) { sb.Append('+').Append(b[y]).Append('\n'); y++; }
+        return sb.ToString();
     }
 }
