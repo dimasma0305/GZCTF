@@ -123,6 +123,12 @@ public sealed class DockerChallengeImageBuilder(
                             Remove = true,
                             ForceRemove = true,
                             NoCache = false,
+                            // Mark platform-built images so a host-side
+                            // `docker image prune -af --filter label!=org.gzctf.keep=true`
+                            // won't delete them. Critical for A&D checker images, which
+                            // have no long-running container holding them (spawned per
+                            // tick) and would otherwise be pruned → checks InternalError.
+                            Labels = new Dictionary<string, string> { ["org.gzctf.keep"] = "true" },
                         },
                         contextStream,
                         authConfigs: null,

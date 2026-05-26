@@ -1,5 +1,10 @@
 FROM alpine:3.21
 
+# Keep out of the host's daily `docker image prune -af` (running team
+# containers usually hold this, but label it too for safety). The prune cron
+# excludes label org.gzctf.keep=true.
+LABEL org.gzctf.keep="true"
+
 RUN apk add --no-cache socat
 
 # Default "warmup" flag — the platform rotates /flag each tick via docker
