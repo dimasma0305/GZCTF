@@ -1,7 +1,5 @@
-using Docker.DotNet;
 using GZCTF.Models;
 using GZCTF.Models.Data;
-using GZCTF.Services.Container.Provider;
 using GZCTF.Utils;
 using Microsoft.EntityFrameworkCore;
 
@@ -78,17 +76,16 @@ public sealed class AdCheckerService(
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        // Bail silently on K8s (no Docker provider registered). The
-        // checker doesn't support k8s exec-to-completion in v1.
-        var dockerProvider = scope.ServiceProvider
-            .GetService<IContainerProvider<DockerClient, DockerMetadata>>();
-        if (dockerProvider is null)
+        // Provider-agnostic: the check runner is registered per container
+        // provider (Docker → AdCheckerExecutor, K8s → K8sAdCheckRunner). If no
+        // container provider is registered at all, there's nothing to check.
+        var runner = scope.ServiceProvider.GetService<IAdCheckRunner>();
+        if (runner is null)
         {
-            logger.LogDebug("AdChecker tick: no Docker provider, skipping");
+            logger.LogDebug("AdChecker tick: no check runner registered, skipping");
             return;
         }
 
-        var executor = scope.ServiceProvider.GetRequiredService<AdCheckerExecutor>();
         var now = DateTimeOffset.UtcNow;
 
         var activeGameIds = await db.Games
@@ -100,7 +97,7 @@ public sealed class AdCheckerService(
         logger.LogDebug("AdChecker tick: {N} active A&D games", activeGameIds.Count);
 
         foreach (var gameId in activeGameIds)
-            await CheckGameAsync(db, executor, gameId, token);
+            await CheckGameAsync(db, runner, gameId, token);
     }
 
     /// <summary>
@@ -137,14 +134,14 @@ public sealed class AdCheckerService(
     /// times on any non-Ok verdict (returns on the first Ok). Absorbs transient
     /// network blips and unlucky jittered timing so they don't zero a team's
     /// SLA for the tick.</summary>
-    private static async Task<AdCheckerExecutor.CheckOutcome> RunWithRetryAsync(
-        AdCheckerExecutor executor, AdTeamService ts, AdRound round, GameChallenge challenge,
+    private static async Task<AdCheckOutcome> RunWithRetryAsync(
+        IAdCheckRunner runner, AdTeamService ts, AdRound round, GameChallenge challenge,
         string? flag, CancellationToken token)
     {
-        AdCheckerExecutor.CheckOutcome outcome = null!;
+        AdCheckOutcome outcome = null!;
         for (var attempt = 1; attempt <= MaxCheckAttempts; attempt++)
         {
-            outcome = await executor.RunAsync(ts, round, challenge, flag, token);
+            outcome = await runner.RunAsync(ts, round, challenge, flag, token);
             if (outcome.Status == AdCheckStatus.Ok)
                 return outcome;
             if (attempt < MaxCheckAttempts)
@@ -154,7 +151,7 @@ public sealed class AdCheckerService(
     }
 
     private async Task CheckGameAsync(
-        AppDbContext db, AdCheckerExecutor executor, int gameId, CancellationToken token)
+        AppDbContext db, IAdCheckRunner runner, int gameId, CancellationToken token)
     {
         // Latest round for this game. If null, we're still in warmup —
         // no flags, no checks.
@@ -219,7 +216,7 @@ public sealed class AdCheckerService(
                 try
                 {
                     flagByService.TryGetValue(ts.Id, out var flag);
-                    var outcome = await RunWithRetryAsync(executor, ts, latest, ts.Challenge, flag, token);
+                    var outcome = await RunWithRetryAsync(runner, ts, latest, ts.Challenge, flag, token);
                     await PersistOutcomeAsync(scopeFactory, ts.Id, latest.Id, outcome, token);
                 }
                 catch (Exception e) when (e is not OperationCanceledException)
@@ -246,7 +243,7 @@ public sealed class AdCheckerService(
         IServiceScopeFactory scopeFactory,
         int adTeamServiceId,
         int adRoundId,
-        AdCheckerExecutor.CheckOutcome outcome,
+        AdCheckOutcome outcome,
         CancellationToken token)
     {
         await using var scope = scopeFactory.CreateAsyncScope();

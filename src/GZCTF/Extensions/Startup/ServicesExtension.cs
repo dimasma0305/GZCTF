@@ -163,7 +163,8 @@ internal static class ServicesExtension
             builder.Services.AddHostedService<Services.AdWireGuardSyncService>();
             builder.Services.AddScoped<Services.AdRoundService>();
             builder.Services.AddHostedService<Services.AdRoundScheduler>();
-            builder.Services.AddScoped<Services.AdCheckerExecutor>();
+            // IAdCheckRunner (AdCheckerExecutor for Docker, K8sAdCheckRunner for
+            // Kubernetes) is registered per provider in ContainerServiceExtension.
             builder.Services.AddHostedService<Services.AdCheckerService>();
         }
 

@@ -8,9 +8,10 @@ using GZCTF.Utils;
 namespace GZCTF.Services;
 
 /// <summary>
-/// Runs a single A&amp;D check against one team's service container and
-/// returns a <see cref="CheckOutcome"/> the scheduler can persist as an
-/// <see cref="AdCheckResult"/> row.
+/// Docker <see cref="IAdCheckRunner"/>: runs a single A&amp;D check by spawning a
+/// checker container on the target's network and returns an
+/// <see cref="AdCheckOutcome"/> the scheduler persists as an
+/// <see cref="AdCheckResult"/> row. (K8s uses <see cref="K8sAdCheckRunner"/>.)
 ///
 /// <para>Two modes selected by <see cref="GameChallenge.AdCheckerImage"/>:</para>
 /// <list type="number">
@@ -31,14 +32,13 @@ namespace GZCTF.Services;
 /// platform. <see cref="HostConfig.AutoRemove"/> is intentionally false so
 /// we can read logs + inspect IP before removing.</para>
 ///
-/// <para>K8s parity: the executor is no-op when the Docker provider
-/// isn't registered (the caller checks). K8s exec-to-completion is a v2
-/// concern, same as <c>AdRoundService</c>'s flag-inject path.</para>
+/// <para>Registered as <see cref="IAdCheckRunner"/> only under the Docker
+/// provider; on Kubernetes <see cref="K8sAdCheckRunner"/> is registered instead.</para>
 /// </summary>
 public sealed class AdCheckerExecutor(
     IContainerProvider<DockerClient, DockerMetadata> provider,
     IConfiguration configuration,
-    ILogger<AdCheckerExecutor> logger)
+    ILogger<AdCheckerExecutor> logger) : IAdCheckRunner
 {
     private const string FallbackImage = "alpine:3.21";
     private const int MaxErrorMessageLength = 4096;
@@ -46,9 +46,7 @@ public sealed class AdCheckerExecutor(
     private TimeSpan Timeout => TimeSpan.FromSeconds(
         int.TryParse(configuration["Ad:Checker:TimeoutSeconds"], out var s) && s is > 0 and <= 600 ? s : 30);
 
-    public sealed record CheckOutcome(AdCheckStatus Status, string? ErrorMessage, string? SourceIp);
-
-    public async Task<CheckOutcome> RunAsync(
+    public async Task<AdCheckOutcome> RunAsync(
         AdTeamService ts,
         AdRound round,
         GameChallenge challenge,
@@ -56,14 +54,14 @@ public sealed class AdCheckerExecutor(
         CancellationToken token)
     {
         if (ts.Container is null || string.IsNullOrEmpty(ts.Container.IP))
-            return new CheckOutcome(AdCheckStatus.Offline, "target container has no IP", null);
+            return new AdCheckOutcome(AdCheckStatus.Offline, "target container has no IP", null);
 
         var targetIp = ts.Container.IP;
         var targetPort = challenge.ExposePort ?? 80;
         var meta = provider.GetMetadata();
         var networkMode = challenge.AdAllowEgress ? NetworkMode.Open : NetworkMode.Isolated;
         if (!meta.NetworkNames.TryGetValue(networkMode, out var networkName))
-            return new CheckOutcome(AdCheckStatus.InternalError, $"no network for mode {networkMode}", null);
+            return new AdCheckOutcome(AdCheckStatus.InternalError, $"no network for mode {networkMode}", null);
 
         var useCustomChecker = !string.IsNullOrWhiteSpace(challenge.AdCheckerImage);
         var image = useCustomChecker ? challenge.AdCheckerImage!.Trim() : FallbackImage;
@@ -130,7 +128,7 @@ public sealed class AdCheckerExecutor(
 
             var started = await client.Containers.StartContainerAsync(containerId, new ContainerStartParameters(), token);
             if (!started)
-                return new CheckOutcome(AdCheckStatus.InternalError, "container failed to start", null);
+                return new AdCheckOutcome(AdCheckStatus.InternalError, "container failed to start", null);
 
             // SourceIp: read it BEFORE waiting — the container may be removed
             // after exit by some setups, and we want a recorded value even
@@ -172,21 +170,21 @@ public sealed class AdCheckerExecutor(
                 // doesn't have to wait for the orphan.
                 try { await client.Containers.KillContainerAsync(containerId, new ContainerKillParameters(), CancellationToken.None); }
                 catch { /* container may already be gone */ }
-                return new CheckOutcome(AdCheckStatus.Offline,
+                return new AdCheckOutcome(AdCheckStatus.Offline,
                     $"checker timeout after {Timeout.TotalSeconds:0}s", sourceIp);
             }
 
             var exitCode = (int)(waitResp?.StatusCode ?? -1);
             var stderr = await TryFetchLogsAsync(client, containerId, token);
 
-            var status = MapExitCode(exitCode, useCustomChecker);
+            var status = AdCheckMapping.FromExitCode(exitCode, useCustomChecker);
             var message = BuildMessage(status, exitCode, stderr, useCustomChecker);
-            return new CheckOutcome(status, message, sourceIp);
+            return new AdCheckOutcome(status, message, sourceIp);
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
             logger.LogWarning(e, "AdChecker: run failed for service={Sid} round={Round}", ts.Id, round.Number);
-            return new CheckOutcome(AdCheckStatus.InternalError, Trunc($"checker run error: {e.Message}"), null);
+            return new AdCheckOutcome(AdCheckStatus.InternalError, Trunc($"checker run error: {e.Message}"), null);
         }
         finally
         {
@@ -203,20 +201,6 @@ public sealed class AdCheckerExecutor(
                 }
             }
         }
-    }
-
-    private static AdCheckStatus MapExitCode(int exitCode, bool useCustomChecker)
-    {
-        if (!useCustomChecker)
-            return exitCode == 0 ? AdCheckStatus.Ok : AdCheckStatus.Offline;
-
-        return exitCode switch
-        {
-            0 => AdCheckStatus.Ok,
-            1 => AdCheckStatus.Mumble,
-            2 => AdCheckStatus.Offline,
-            _ => AdCheckStatus.InternalError
-        };
     }
 
     private static string? BuildMessage(AdCheckStatus status, int exitCode, string? stderr, bool useCustomChecker)
