@@ -77,51 +77,74 @@ export const ContainerExecModal: FC<ContainerExecModalProps> = (props) => {
 
     // Copy / paste, the way a normal terminal behaves. xterm sends Ctrl+C to
     // the shell (SIGINT) by default and never copies, so a selection + Ctrl+C
-    // just kills your command. Wire up the conventional shortcuts:
-    //   - Ctrl/⌘+C        → copy IF there's a selection, else fall through to SIGINT
-    //   - Ctrl+Shift+C / Ctrl+Insert → always copy the selection
-    //   - Ctrl+Shift+V / Shift+Insert → paste (async clipboard; secure-context only)
-    //   - plain Ctrl+V and right-click use xterm's built-in paste (works on HTTP too)
-    // writeText is polyfilled (installClipboardPolyfill) to fall back to
-    // execCommand so copy works over plain HTTP, not just HTTPS/localhost.
+    // just kills your command. Wire up collision-free shortcuts:
+    //   - Ctrl/⌘+C  → copy IF there's a selection, else fall through to SIGINT
+    //   - right-click → copy the selection, or paste when nothing is selected
+    //   - Ctrl+Insert copy / Shift+Insert / Ctrl+Shift+V paste (extras)
+    //   - plain Ctrl+V uses xterm's built-in paste (works on HTTP too)
+    // NOT Ctrl+Shift+C: Chrome reserves it for DevTools "inspect element" at the
+    // browser level — preventDefault can't cancel it — so binding copy there
+    // just pops DevTools. writeText is polyfilled (installClipboardPolyfill) to
+    // fall back to execCommand so copy works over plain HTTP, not just HTTPS.
     const copySelection = (): boolean => {
       const sel = term.getSelection()
       if (!sel) return false
       void navigator.clipboard.writeText(sel).catch(() => undefined)
       return true
     }
+    const pasteFromClipboard = () => {
+      navigator.clipboard
+        ?.readText?.()
+        .then((txt) => txt && term.paste(txt))
+        .catch(() => undefined) // HTTP: use plain Ctrl+V / right-click instead
+    }
+    // Swallow a shortcut completely: stop xterm AND the browser default
+    // (returning false alone leaves the browser to act — e.g. Ctrl+Shift+C
+    // would still open DevTools).
+    const swallow = (e: KeyboardEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      return false
+    }
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true
       const mod = e.ctrlKey || e.metaKey
       const key = e.key.toLowerCase()
 
-      if ((mod && e.shiftKey && key === 'c') || (e.ctrlKey && e.key === 'Insert')) {
+      // Explicit copy: Ctrl+Insert (Ctrl+Shift+C is browser-reserved, skip it).
+      if (e.ctrlKey && e.key === 'Insert') {
         copySelection()
-        return false
+        return swallow(e)
       }
+      // Smart Ctrl/⌘+C: copy if there's a selection, else let it through (SIGINT).
       if (mod && !e.shiftKey && key === 'c' && term.hasSelection()) {
         copySelection()
-        return false // copied — don't also send SIGINT
+        return swallow(e)
       }
+      // Explicit paste: Ctrl+Shift+V / Shift+Insert (async clipboard; secure ctx).
       if ((mod && e.shiftKey && key === 'v') || (e.shiftKey && e.key === 'Insert')) {
-        navigator.clipboard
-          ?.readText?.()
-          .then((txt) => txt && term.paste(txt))
-          .catch(() => undefined) // HTTP: use plain Ctrl+V / right-click instead
-        return false
+        pasteFromClipboard()
+        return swallow(e)
       }
       return true
     })
 
-    // Right-click pastes when the clipboard is readable; otherwise let the
-    // browser's native context menu through so the user can paste manually.
+    // Right-click = copy the selection (works on HTTP via the writeText
+    // polyfill), or paste when nothing is selected. With no selection on plain
+    // HTTP we can't read the clipboard from JS, so we let the browser's native
+    // context menu through — its "Paste" still works there.
     const onContextMenu = (ev: MouseEvent) => {
-      if (!navigator.clipboard?.readText) return
-      ev.preventDefault()
-      navigator.clipboard
-        .readText()
-        .then((txt) => txt && term.paste(txt))
-        .catch(() => undefined)
+      if (term.hasSelection()) {
+        ev.preventDefault()
+        copySelection()
+        term.clearSelection()
+      } else if (navigator.clipboard?.readText) {
+        ev.preventDefault()
+        navigator.clipboard
+          .readText()
+          .then((txt) => txt && term.paste(txt))
+          .catch(() => undefined)
+      }
     }
     terminalEl.addEventListener('contextmenu', onContextMenu)
 
@@ -248,7 +271,7 @@ export const ContainerExecModal: FC<ContainerExecModalProps> = (props) => {
           <Text size="xs" c="dimmed" ff="monospace">
             {t(
               'admin.content.exec.shortcuts',
-              'Ctrl/⌘+C copies selection · Ctrl+V / right-click pastes'
+              'Ctrl/⌘+C or right-click copies selection · Ctrl+V / right-click pastes'
             )}
           </Text>
         </Group>
