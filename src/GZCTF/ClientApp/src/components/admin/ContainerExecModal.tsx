@@ -66,6 +66,7 @@ export const ContainerExecModal: FC<ContainerExecModalProps> = (props) => {
       fontFamily: 'JetBrains Mono, Consolas, monospace',
       fontSize: 13,
       cursorBlink: true,
+      scrollback: 5000,
       theme: { background: '#0c0c14' },
     })
     const fit = new FitAddon()
@@ -73,6 +74,56 @@ export const ContainerExecModal: FC<ContainerExecModalProps> = (props) => {
     term.open(terminalEl)
     fit.fit()
     fitRef.current = fit
+
+    // Copy / paste, the way a normal terminal behaves. xterm sends Ctrl+C to
+    // the shell (SIGINT) by default and never copies, so a selection + Ctrl+C
+    // just kills your command. Wire up the conventional shortcuts:
+    //   - Ctrl/⌘+C        → copy IF there's a selection, else fall through to SIGINT
+    //   - Ctrl+Shift+C / Ctrl+Insert → always copy the selection
+    //   - Ctrl+Shift+V / Shift+Insert → paste (async clipboard; secure-context only)
+    //   - plain Ctrl+V and right-click use xterm's built-in paste (works on HTTP too)
+    // writeText is polyfilled (installClipboardPolyfill) to fall back to
+    // execCommand so copy works over plain HTTP, not just HTTPS/localhost.
+    const copySelection = (): boolean => {
+      const sel = term.getSelection()
+      if (!sel) return false
+      void navigator.clipboard.writeText(sel).catch(() => undefined)
+      return true
+    }
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== 'keydown') return true
+      const mod = e.ctrlKey || e.metaKey
+      const key = e.key.toLowerCase()
+
+      if ((mod && e.shiftKey && key === 'c') || (e.ctrlKey && e.key === 'Insert')) {
+        copySelection()
+        return false
+      }
+      if (mod && !e.shiftKey && key === 'c' && term.hasSelection()) {
+        copySelection()
+        return false // copied — don't also send SIGINT
+      }
+      if ((mod && e.shiftKey && key === 'v') || (e.shiftKey && e.key === 'Insert')) {
+        navigator.clipboard
+          ?.readText?.()
+          .then((txt) => txt && term.paste(txt))
+          .catch(() => undefined) // HTTP: use plain Ctrl+V / right-click instead
+        return false
+      }
+      return true
+    })
+
+    // Right-click pastes when the clipboard is readable; otherwise let the
+    // browser's native context menu through so the user can paste manually.
+    const onContextMenu = (ev: MouseEvent) => {
+      if (!navigator.clipboard?.readText) return
+      ev.preventDefault()
+      navigator.clipboard
+        .readText()
+        .then((txt) => txt && term.paste(txt))
+        .catch(() => undefined)
+    }
+    terminalEl.addEventListener('contextmenu', onContextMenu)
 
     const hub = new HubConnectionBuilder()
       .withUrl('/hub/containerExec')
@@ -109,6 +160,7 @@ export const ContainerExecModal: FC<ContainerExecModalProps> = (props) => {
         }
         sessionIdRef.current = sid
         setStatus('connected')
+        term.focus()
 
         const { cols, rows } = term
         hub.invoke('Resize', sid, cols, rows).catch(() => undefined)
@@ -134,14 +186,21 @@ export const ContainerExecModal: FC<ContainerExecModalProps> = (props) => {
 
     void start()
 
-    const onWindowResize = () => {
+    // Refit on any size change of the terminal box (modal resize, viewport
+    // change), not just window resize — keeps cols/rows correct so the shell
+    // wraps properly.
+    const refit = () => {
       try { fit.fit() } catch { /* ignore */ }
     }
-    window.addEventListener('resize', onWindowResize)
+    window.addEventListener('resize', refit)
+    const ro = new ResizeObserver(refit)
+    ro.observe(terminalEl)
 
     return () => {
       disposed = true
-      window.removeEventListener('resize', onWindowResize)
+      window.removeEventListener('resize', refit)
+      ro.disconnect()
+      terminalEl.removeEventListener('contextmenu', onContextMenu)
       const sid = sessionIdRef.current
       const ref = hubRef.current
       sessionIdRef.current = null
@@ -178,13 +237,21 @@ export const ContainerExecModal: FC<ContainerExecModalProps> = (props) => {
       {...rest}
     >
       <Stack gap="sm">
-        <SegmentedControl
-          size="xs"
-          data={['sh', 'bash']}
-          value={shell}
-          onChange={(v) => setShell(v as 'sh' | 'bash')}
-          disabled={status === 'connecting' || status === 'connected'}
-        />
+        <Group justify="space-between" align="center" wrap="nowrap">
+          <SegmentedControl
+            size="xs"
+            data={['sh', 'bash']}
+            value={shell}
+            onChange={(v) => setShell(v as 'sh' | 'bash')}
+            disabled={status === 'connecting' || status === 'connected'}
+          />
+          <Text size="xs" c="dimmed" ff="monospace">
+            {t(
+              'admin.content.exec.shortcuts',
+              'Ctrl/⌘+C copies selection · Ctrl+V / right-click pastes'
+            )}
+          </Text>
+        </Group>
         {status === 'error' && errorMsg && (
           <Alert color="red" variant="light" title={t('admin.content.exec.error_title', 'Connection error')}>
             <Text size="xs" ff="monospace">{errorMsg}</Text>
