@@ -317,6 +317,20 @@ public sealed class RepoBindingDiscoveryService(
         // +08:00, so normalize everything before persisting.
         static DateTimeOffset Utc(DateTimeOffset v) => v.ToUniversalTime();
 
+        // Event-wide A&D knobs → Game. Sparse: only fields the manifest names
+        // override; omitted ones keep the entity defaults (create) or the
+        // current value (update), so a re-scan never resets hand-set settings.
+        static void ApplyAd(Game g, GzEventModel.AdEventSection? ad)
+        {
+            if (ad is null) return;
+            if (ad.TickSeconds is { } ts) g.AdTickSeconds = ts;
+            if (ad.FlagLifetimeTicks is { } fl) g.AdFlagLifetimeTicks = fl;
+            if (ad.WarmupSeconds is { } ws) g.AdWarmupSeconds = ws;
+            if (ad.ResetCooldownMinutes is { } rc) g.AdResetCooldownMinutes = rc;
+            if (ad.AllowSnapshotDownload is { } asd) g.AdAllowSnapshotDownload = asd;
+            if (ad.SnapshotRetentionDays is { } srd) g.AdSnapshotRetentionDays = srd;
+        }
+
         if (existing is null)
         {
             var fresh = new Game
@@ -339,6 +353,7 @@ public sealed class RepoBindingDiscoveryService(
                 RepoBindingId = binding.Id,
                 EventManifestPath = manifestRel
             };
+            ApplyAd(fresh, manifest.Ad);
             var created = await gameRepository.CreateGame(fresh, token) ?? fresh;
             return (created, true);
         }
@@ -359,6 +374,7 @@ public sealed class RepoBindingDiscoveryService(
         if (manifest.TeamMemberCountLimit is { } tml) existing.TeamMemberCountLimit = tml;
         if (manifest.ContainerCountLimit is { } ccl) existing.ContainerCountLimit = ccl;
         if (manifest.BloodBonus is { } bb) existing.BloodBonus = BloodBonus.FromValue(bb);
+        ApplyAd(existing, manifest.Ad);
         await context.SaveChangesAsync(token);
         return (existing, false);
     }

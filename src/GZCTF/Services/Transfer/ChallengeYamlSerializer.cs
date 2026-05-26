@@ -95,6 +95,28 @@ public static class ChallengeYamlSerializer
             };
         }
 
+        // A&D block — emit only NON-default per-challenge knobs (defaults match
+        // the GameChallenge entity init: egress/self-reset true, jitter 0.4/0.5,
+        // grace 3) so a fresh import doesn't churn the file, and skip the block
+        // entirely when nothing differs. Event-wide settings live on the game
+        // (.gzevent), not here.
+        if (ch.Type.IsAttackDefense())
+        {
+            var ad = new ChallengeYamlModel.AdSection
+            {
+                CheckerImage = string.IsNullOrEmpty(ch.AdCheckerImage) ? null : ch.AdCheckerImage,
+                AllowEgress = ch.AdAllowEgress ? null : false,
+                AllowSelfReset = ch.AdAllowSelfReset ? null : false,
+                PutflagWindowFraction = ch.AdPutflagWindowFraction is { } pw && pw != 0.4 ? pw : null,
+                GetflagWindowFraction = ch.AdGetflagWindowFraction is { } gw && gw != 0.5 ? gw : null,
+                MinGracePeriodSeconds = ch.AdMinGracePeriodSeconds is { } mg && mg != 3 ? mg : null,
+            };
+            if (ad.CheckerImage is not null || ad.AllowEgress is not null || ad.AllowSelfReset is not null
+                || ad.PutflagWindowFraction is not null || ad.GetflagWindowFraction is not null
+                || ad.MinGracePeriodSeconds is not null)
+                model.Ad = ad;
+        }
+
         return YamlSerializer.Serialize(model);
     }
 

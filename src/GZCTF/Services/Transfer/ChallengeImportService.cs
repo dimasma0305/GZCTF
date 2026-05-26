@@ -625,6 +625,9 @@ public sealed class ChallengeImportService(
                 c.AdCheckerImage = ad.CheckerImage.Trim();
             c.AdAllowEgress = ad.AllowEgress ?? c.AdAllowEgress;
             c.AdAllowSelfReset = ad.AllowSelfReset ?? c.AdAllowSelfReset;
+            c.AdPutflagWindowFraction = ad.PutflagWindowFraction ?? c.AdPutflagWindowFraction;
+            c.AdGetflagWindowFraction = ad.GetflagWindowFraction ?? c.AdGetflagWindowFraction;
+            c.AdMinGracePeriodSeconds = ad.MinGracePeriodSeconds ?? c.AdMinGracePeriodSeconds;
         }
 
         // 'visible:' is intentionally ignored — admin is the only one who
