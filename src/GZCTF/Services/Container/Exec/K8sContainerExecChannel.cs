@@ -6,14 +6,21 @@ using k8s;
 namespace GZCTF.Services.Container.Exec;
 
 /// <summary>
-/// Kubernetes in-browser shell, backed by the pod <c>exec</c> streaming API
-/// (the same channel <c>kubectl exec</c> uses). Opens a TTY against the
-/// challenge container and bridges its multiplexed stdin/stdout/resize channels
-/// to <see cref="IExecSession"/> for <c>ContainerExecHub</c>.
+/// Kubernetes in-browser shell, backed by the pod <c>exec</c> WebSocket (the
+/// same channel <c>kubectl exec</c> uses). Opens a TTY against the challenge
+/// container and bridges its multiplexed channels to <see cref="IExecSession"/>
+/// for <c>ContainerExecHub</c>.
+///
+/// <para>We frame the SPDY/WebSocket channels ourselves rather than going
+/// through <c>StreamDemuxer</c>: its <c>MuxedStream</c> only implements a
+/// blocking synchronous <c>Write</c> (no real <c>WriteAsync</c>) and sends
+/// partial frames, which wedged stdin so keystrokes never reached the pod.
+/// Each message is <c>[channel byte][payload]</c> — channel 0 stdin, 1 stdout,
+/// 2 stderr, 3 error, 4 resize.</para>
 ///
 /// <para>The pod name, the challenge container name, and
-/// <see cref="Models.Data.Container.ContainerId"/> are all the same value
-/// (see <c>KubernetesManager</c>), so we exec into <c>ContainerId</c> directly —
+/// <see cref="Models.Data.Container.ContainerId"/> are all the same value (see
+/// <c>KubernetesManager</c>), so we exec into <c>ContainerId</c> directly —
 /// never the flag-writer sidecar.</para>
 /// </summary>
 public sealed class K8sContainerExecChannel(
@@ -27,53 +34,105 @@ public sealed class K8sContainerExecChannel(
     {
         var safeShell = string.Equals(shell, "bash", StringComparison.OrdinalIgnoreCase) ? "bash" : "sh";
 
-        var demux = await _client.MuxedStreamNamespacedPodExecAsync(
+        var ws = await _client.WebSocketNamespacedPodExecAsync(
             name: container.ContainerId,
             @namespace: _namespace,
-            command: [safeShell],
+            command: new[] { safeShell },
             container: container.ContainerId,
-            tty: true,
+            stderr: true, stdin: true, stdout: true, tty: true,
             cancellationToken: token);
-        demux.Start();
 
         logger.LogInformation("K8s exec opened: pod {Id}, shell {Shell}", container.LogId, safeShell);
-        return new K8sExecSession(demux, logger);
+        return new K8sExecSession(ws);
     }
 
     sealed class K8sExecSession : IExecSession
     {
-        private readonly IStreamDemuxer _demux;
-        private readonly Stream _io;     // read stdout (stderr is merged under TTY), write stdin
-        private readonly Stream _resize; // write {"Width":..,"Height":..} resize frames
-        private readonly ILogger _logger;
+        // k8s remotecommand channels.
+        private const byte ChStdin = 0, ChStdout = 1, ChStderr = 2, ChResize = 4;
 
-        public K8sExecSession(IStreamDemuxer demux, ILogger logger)
+        private readonly WebSocket _ws;
+        // Serializes sends — a WebSocket forbids concurrent SendAsync, and we
+        // send from both WriteAsync (keystrokes) and ResizeAsync.
+        private readonly SemaphoreSlim _sendLock = new(1, 1);
+
+        // Receive buffer + leftover bookkeeping: a single output frame can be
+        // larger than the hub's read buffer, so we only pull the next frame
+        // once the current one is fully drained (no overwrite-before-read).
+        private readonly byte[] _recv = new byte[16 * 1024];
+        private int _off;
+        private int _len;
+        private int _cont = -1; // channel of an in-progress (fragmented) message, else -1
+
+        public K8sExecSession(WebSocket ws) => _ws = ws;
+
+        public async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token)
         {
-            _demux = demux;
-            _logger = logger;
-            _io = demux.GetStream(ChannelIndex.StdOut, ChannelIndex.StdIn);
-            _resize = demux.GetStream(null, ChannelIndex.Resize);
+            while (_len == 0)
+            {
+                WebSocketReceiveResult r;
+                try { r = await _ws.ReceiveAsync(new ArraySegment<byte>(_recv), token); }
+                catch (WebSocketException) { return 0; }
+                catch (OperationCanceledException) { return 0; }
+
+                if (r.MessageType == WebSocketMessageType.Close || r.Count == 0)
+                    return 0;
+
+                int ch, off, len;
+                if (_cont < 0) { ch = _recv[0]; off = 1; len = r.Count - 1; } // new message: first byte = channel
+                else { ch = _cont; off = 0; len = r.Count; }                  // continuation frame
+                _cont = r.EndOfMessage ? -1 : ch;
+
+                // Surface stdout/stderr; skip error/status (3) and empty frames.
+                if (len > 0 && ch is ChStdout or ChStderr) { _off = off; _len = len; }
+            }
+
+            var n = Math.Min(_len, buffer.Length);
+            new ReadOnlyMemory<byte>(_recv, _off, n).CopyTo(buffer);
+            _off += n;
+            _len -= n;
+            return n;
         }
 
-        public async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token) =>
-            await _io.ReadAsync(buffer, token); // 0 = EOF (shell exited / channel closed)
-
         public ValueTask WriteAsync(ReadOnlyMemory<byte> chunk, CancellationToken token) =>
-            _io.WriteAsync(chunk, token);
+            SendFramedAsync(ChStdin, chunk, token);
 
         public async Task ResizeAsync(uint cols, uint rows, CancellationToken token)
         {
-            // remotecommand resize frame on channel 4: JSON {"Width":cols,"Height":rows}.
-            var frame = JsonSerializer.SerializeToUtf8Bytes(new TerminalSize { Width = cols, Height = rows });
-            await _resize.WriteAsync(frame, token);
-            await _resize.FlushAsync(token);
+            // remotecommand resize frame: JSON {"Width":cols,"Height":rows}.
+            var json = JsonSerializer.SerializeToUtf8Bytes(new TerminalSize { Width = cols, Height = rows });
+            await SendFramedAsync(ChResize, json, token);
+        }
+
+        private async ValueTask SendFramedAsync(byte channel, ReadOnlyMemory<byte> payload, CancellationToken token)
+        {
+            var frame = new byte[payload.Length + 1];
+            frame[0] = channel;
+            payload.CopyTo(frame.AsMemory(1));
+
+            await _sendLock.WaitAsync(token);
+            try
+            {
+                if (_ws.State == WebSocketState.Open)
+                    await _ws.SendAsync(new ArraySegment<byte>(frame), WebSocketMessageType.Binary,
+                        endOfMessage: true, token);
+            }
+            finally
+            {
+                _sendLock.Release();
+            }
         }
 
         public async ValueTask DisposeAsync()
         {
-            try { await _io.FlushAsync(CancellationToken.None); } catch { /* closing */ }
-            // StreamDemuxer.Dispose tears down the underlying WebSocket.
-            try { _demux.Dispose(); } catch { /* already gone */ }
+            try
+            {
+                if (_ws.State == WebSocketState.Open)
+                    await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "closed", CancellationToken.None);
+            }
+            catch { /* already closing / gone */ }
+            _ws.Dispose();
+            _sendLock.Dispose();
         }
 
         private sealed class TerminalSize
