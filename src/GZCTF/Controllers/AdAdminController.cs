@@ -353,6 +353,7 @@ public class AdAdminController(
 
         if (!string.IsNullOrEmpty(ts.SnapshotChanges))
         {
+            // Post-game: the diff captured at snapshot time.
             try
             {
                 using var doc = System.Text.Json.JsonDocument.Parse(ts.SnapshotChanges);
@@ -368,6 +369,17 @@ public class AdAdminController(
             catch (Exception e)
             {
                 logger.LogWarning(e, "A&D snapshot changes parse failed for service={Sid}", adTeamServiceId);
+            }
+        }
+        else if (ts.ContainerId is not null)
+        {
+            // Mid-game: compute the diff live against the running container.
+            var live = await adContainerManager.ComputeLiveChangesAsync(HttpContext.RequestServices, ts, token);
+            if (live is not null)
+            {
+                model.Live = true;
+                foreach (var (path, kind) in live)
+                    model.Changes.Add(new AdSnapshotChange { Path = path, Kind = kind });
             }
         }
 

@@ -2074,6 +2074,8 @@ export interface AdSnapshotChange {
 /** A&D admin — GET /api/edit/games/{id}/ad/Services/{adTeamServiceId}/Snapshot/Changes response. */
 export interface AdSnapshotChangesModel {
   snapshotAvailable: boolean;
+  /** True when computed live from the running container (mid-game), not a stored snapshot. */
+  live?: boolean;
   changes: AdSnapshotChange[];
 }
 

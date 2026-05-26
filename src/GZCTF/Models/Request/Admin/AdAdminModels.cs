@@ -78,6 +78,14 @@ public class AdSnapshotChange
 public class AdSnapshotChangesModel
 {
     public bool SnapshotAvailable { get; set; }
+
+    /// <summary>True when <see cref="Changes"/> was computed from the live
+    /// container on demand (mid-game) rather than from a stored post-game
+    /// snapshot. On Kubernetes the live diff is mtime-based (files modified
+    /// since container start), so it can't distinguish add/modify or detect
+    /// deletions — all entries are reported as modified.</summary>
+    public bool Live { get; set; }
+
     public List<AdSnapshotChange> Changes { get; set; } = [];
 }
 

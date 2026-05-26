@@ -109,17 +109,23 @@ const SnapshotModal: FC<{ gameId: number; target: SnapTarget | null; onClose: ()
   const { t } = useTranslation()
   const [loading, setLoading] = useState(false)
   const [changes, setChanges] = useState<AdSnapshotChange[]>([])
+  const [live, setLive] = useState(false)
   const sid = target?.cell.adTeamServiceId
+  const hasSnapshot = !!target?.cell.snapshotAvailable
 
   useEffect(() => {
     if (sid === undefined) return
     let cancelled = false
     setLoading(true)
     setChanges([])
+    setLive(false)
     api.edit
       .editAdSnapshotChanges(gameId, sid)
       .then(({ data }) => {
-        if (!cancelled) setChanges(data.changes ?? [])
+        if (!cancelled) {
+          setChanges(data.changes ?? [])
+          setLive(!!data.live)
+        }
       })
       .catch(() => {
         // changes are best-effort; the tarball download is the source of truth
@@ -167,14 +173,20 @@ const SnapshotModal: FC<{ gameId: number; target: SnapTarget | null; onClose: ()
     >
       <Stack gap="md">
         <Group justify="space-between" wrap="wrap" gap="sm">
-          <Button
-            component="a"
-            href={downloadUrl}
-            download={filename}
-            leftSection={<Icon path={mdiDownload} size={0.9} />}
-          >
-            {t('admin.button.ad_ops.snapshot.download', 'Download .tar.gz')}
-          </Button>
+          {hasSnapshot ? (
+            <Button
+              component="a"
+              href={downloadUrl}
+              download={filename}
+              leftSection={<Icon path={mdiDownload} size={0.9} />}
+            >
+              {t('admin.button.ad_ops.snapshot.download', 'Download .tar.gz')}
+            </Button>
+          ) : (
+            <Badge color="grape" variant="light" size="lg">
+              {t('admin.content.ad_ops.snapshot.live_badge', 'Live (running container)')}
+            </Badge>
+          )}
           <Text size="sm" c="dimmed">
             {t('admin.content.ad_ops.snapshot.changed_count', {
               count: changes.length,
@@ -183,8 +195,19 @@ const SnapshotModal: FC<{ gameId: number; target: SnapTarget | null; onClose: ()
           </Text>
         </Group>
 
+        {live && (
+          <Text size="xs" c="dimmed">
+            {t('admin.content.ad_ops.snapshot.live_note',
+              'Live diff: files modified since the container started (mtime-based; additions/deletions not distinguished).')}
+          </Text>
+        )}
+
         <Divider
-          label={t('admin.content.ad_ops.snapshot.diff_label', 'Filesystem changes (docker diff)')}
+          label={
+            live
+              ? t('admin.content.ad_ops.snapshot.diff_label_live', 'Filesystem changes (live)')
+              : t('admin.content.ad_ops.snapshot.diff_label', 'Filesystem changes (docker diff)')
+          }
           labelPosition="left"
         />
         {loading ? (
@@ -216,11 +239,15 @@ const SnapshotModal: FC<{ gameId: number; target: SnapTarget | null; onClose: ()
           </ScrollArea>
         )}
 
-        <Divider
-          label={t('admin.content.ad_ops.snapshot.inspect_label', 'Inspect locally')}
-          labelPosition="left"
-        />
-        <Code block>{recipe}</Code>
+        {hasSnapshot && (
+          <>
+            <Divider
+              label={t('admin.content.ad_ops.snapshot.inspect_label', 'Inspect locally')}
+              labelPosition="left"
+            />
+            <Code block>{recipe}</Code>
+          </>
+        )}
       </Stack>
     </Modal>
   )
@@ -748,10 +775,14 @@ const AdOps: FC = () => {
                                         <Icon path={mdiRestart} size={0.7} />
                                       </ActionIcon>
                                     </Tooltip>
-                                    {cell.snapshotAvailable && (
+                                    {(cell.snapshotAvailable || cell.containerGuid) && (
                                       <Tooltip
-                                        label={t('admin.tooltip.ad_ops.snapshot',
-                                          'Inspect post-game snapshot')}
+                                        label={
+                                          cell.snapshotAvailable
+                                            ? t('admin.tooltip.ad_ops.snapshot', 'Inspect post-game snapshot')
+                                            : t('admin.tooltip.ad_ops.snapshot_live',
+                                                'Inspect filesystem changes (live)')
+                                        }
                                         withArrow
                                       >
                                         <Indicator

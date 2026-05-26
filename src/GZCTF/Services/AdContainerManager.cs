@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.IO.Compression;
+using System.Net.WebSockets;
+using System.Text;
 using Docker.DotNet;
 using DockerModels = Docker.DotNet.Models;
 using GZCTF.Models;
@@ -204,6 +206,19 @@ public sealed class AdContainerManager(
                     if (key is not null)
                         ts.SnapshotBlobKey = key;
                 }
+
+                // Capture the filesystem diff before the container is gone, so the
+                // post-game "what did they change" view works. Docker's
+                // TrySnapshotAsync already set this; K8s (image-tarball snapshot is
+                // Docker-only) wouldn't have, so compute it here via exec.
+                if (ts.SnapshotChanges is null)
+                {
+                    var changes = await ComputeLiveChangesAsync(scope.ServiceProvider, ts, token);
+                    if (changes is { Count: > 0 })
+                        ts.SnapshotChanges = System.Text.Json.JsonSerializer.Serialize(
+                            changes.Take(3000).Select(c => new { p = c.Path, k = c.Kind }));
+                }
+
                 await containerManager.DestroyContainerAsync(ts.Container, token);
                 flagMount.Delete(ts.ParticipationId, ts.ChallengeId);
                 ts.ContainerId = null;
@@ -358,6 +373,107 @@ public sealed class AdContainerManager(
                 $"A&D snapshot failed: team={ts.ParticipationId} challenge={ts.ChallengeId}");
             return null;
         }
+    }
+
+    /// <summary>
+    /// On-demand filesystem diff of a team's <em>live</em> container — the admin
+    /// "what did they change" view during a running game (the post-game snapshot
+    /// captures the same thing at game end). Returns (path, kind) entries, capped,
+    /// or null if there's no live container / the provider can't compute it.
+    ///
+    /// <para>Docker: <c>docker diff</c> (InspectChanges) vs the baseline image —
+    /// precise add/modify/delete. Kubernetes: <c>exec</c> a <c>find … -newer
+    /// /proc/1</c> in the pod (files modified since the container started) — an
+    /// mtime heuristic (no add/modify/delete distinction, misses deletions) since
+    /// there's no layer-diff API. Both work on the running container.</para>
+    /// </summary>
+    public async Task<List<(string Path, int Kind)>?> ComputeLiveChangesAsync(
+        IServiceProvider scopeServices, AdTeamService ts, CancellationToken token)
+    {
+        if (ts.Container?.ContainerId is not { Length: > 0 } cid)
+            return null;
+
+        const int maxEntries = 3000;
+
+        var dockerProvider = scopeServices.GetService<IContainerProvider<DockerClient, DockerMetadata>>();
+        if (dockerProvider is not null)
+        {
+            try
+            {
+                var changes = await dockerProvider.GetProvider().Containers.InspectChangesAsync(cid, token);
+                return changes is null
+                    ? []
+                    : changes.Take(maxEntries).Select(c => (c.Path, (int)c.Kind)).ToList();
+            }
+            catch (Exception e)
+            {
+                logger.LogWarning(e, "A&D live diff (docker) failed for service={Sid}", ts.Id);
+                return null;
+            }
+        }
+
+        var k8sProvider = scopeServices.GetService<IContainerProvider<Kubernetes, KubernetesMetadata>>();
+        if (k8sProvider is not null)
+        {
+            try
+            {
+                var ns = k8sProvider.GetMetadata().Config.Namespace;
+                // -xdev keeps us on the container's rootfs (skips /proc /sys /dev /tmp
+                // mounts); -newer /proc/1 ≈ "modified since the main process started".
+                const string find = "find / -xdev -newer /proc/1 -type f 2>/dev/null | head -n 3000";
+                var stdout = await ExecCaptureStdoutAsync(k8sProvider.GetProvider(), ns, cid, cid,
+                    ["sh", "-c", find], token);
+                return stdout
+                    .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Take(maxEntries)
+                    .Select(p => (p, 0))
+                    .ToList();
+            }
+            catch (Exception e)
+            {
+                logger.LogWarning(e, "A&D live diff (k8s exec) failed for service={Sid}", ts.Id);
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>One-shot <c>exec</c> capturing stdout (channel 1) from a pod over
+    /// the K8s exec WebSocket. tty:false so stdout/stderr stay on separate
+    /// channels; we accumulate channel-1 bytes (handling message fragmentation)
+    /// until the socket closes.</summary>
+    private static async Task<string> ExecCaptureStdoutAsync(
+        Kubernetes client, string ns, string pod, string container, string[] command, CancellationToken token)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
+        cts.CancelAfter(TimeSpan.FromSeconds(15));
+
+        using var ws = await client.WebSocketNamespacedPodExecAsync(
+            pod, ns, command, container, stderr: false, stdin: false, stdout: true, tty: false,
+            cancellationToken: cts.Token);
+
+        var sb = new StringBuilder();
+        var buf = new byte[16 * 1024];
+        var cont = -1; // channel of an in-progress (fragmented) message, else -1
+        while (ws.State == WebSocketState.Open)
+        {
+            WebSocketReceiveResult r;
+            try { r = await ws.ReceiveAsync(new ArraySegment<byte>(buf), cts.Token); }
+            catch { break; }
+            if (r.MessageType == WebSocketMessageType.Close || r.Count == 0)
+                break;
+
+            int ch, off, len;
+            if (cont < 0) { ch = buf[0]; off = 1; len = r.Count - 1; } // first byte = channel
+            else { ch = cont; off = 0; len = r.Count; }
+            cont = r.EndOfMessage ? -1 : ch;
+
+            if (ch == 1 && len > 0) // stdout
+                sb.Append(Encoding.UTF8.GetString(buf, off, len));
+        }
+
+        return sb.ToString();
     }
 
     /// <summary>
