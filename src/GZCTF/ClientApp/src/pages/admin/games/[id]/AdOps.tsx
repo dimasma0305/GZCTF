@@ -48,9 +48,9 @@ import {
 } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import dayjs from 'dayjs'
-import { FC, useEffect, useState } from 'react'
+import { FC, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useParams } from 'react-router'
+import { useLocation, useNavigate, useParams } from 'react-router'
 import { ContainerExecModal } from '@Components/admin/ContainerExecModal'
 import { WithGameEditTab } from '@Components/admin/WithGameEditTab'
 import { showErrorMsg } from '@Utils/Shared'
@@ -248,16 +248,17 @@ const FileDetail: FC<{ gameId: number; sid: number; path: string; onBack: () => 
   )
 }
 
-const SnapshotModal: FC<{ gameId: number; target: SnapTarget | null; onClose: () => void }> = ({
-  gameId,
-  target,
-  onClose,
-}) => {
+const SnapshotModal: FC<{
+  gameId: number
+  target: SnapTarget | null
+  selectedPath: string | null
+  onSelectPath: (path: string | null) => void
+  onClose: () => void
+}> = ({ gameId, target, selectedPath, onSelectPath, onClose }) => {
   const { t } = useTranslation()
   const [loading, setLoading] = useState(false)
   const [changes, setChanges] = useState<AdSnapshotChange[]>([])
   const [live, setLive] = useState(false)
-  const [selected, setSelected] = useState<string | null>(null)
   const sid = target?.cell.adTeamServiceId
   const hasSnapshot = !!target?.cell.snapshotAvailable
 
@@ -267,7 +268,6 @@ const SnapshotModal: FC<{ gameId: number; target: SnapTarget | null; onClose: ()
     setLoading(true)
     setChanges([])
     setLive(false)
-    setSelected(null)
     api.edit
       .editAdSnapshotChanges(gameId, sid)
       .then(({ data }) => {
@@ -359,8 +359,8 @@ const SnapshotModal: FC<{ gameId: number; target: SnapTarget | null; onClose: ()
           }
           labelPosition="left"
         />
-        {selected ? (
-          <FileDetail gameId={gameId} sid={sid!} path={selected} onBack={() => setSelected(null)} />
+        {selectedPath ? (
+          <FileDetail gameId={gameId} sid={sid!} path={selectedPath} onBack={() => onSelectPath(null)} />
         ) : loading ? (
           <Center h={120}>
             <Loader size="sm" />
@@ -379,7 +379,7 @@ const SnapshotModal: FC<{ gameId: number; target: SnapTarget | null; onClose: ()
                   return (
                     <UnstyledButton
                       key={`${ch.path}-${i}`}
-                      onClick={() => setSelected(ch.path)}
+                      onClick={() => onSelectPath(ch.path)}
                       style={{ width: '100%', borderRadius: 4, padding: '2px 4px' }}
                     >
                       <Group gap="xs" wrap="nowrap">
@@ -440,8 +440,41 @@ const AdOps: FC = () => {
   const { t } = useTranslation()
   const { adminAdState: state, error, mutate } = useAdminAdState(numId)
   const [busy, setBusy] = useState(false)
-  const [snapTarget, setSnapTarget] = useState<SnapTarget | null>(null)
   const [execTarget, setExecTarget] = useState<{ guid: string; title: string } | null>(null)
+
+  // The inspect-snapshot modal + selected file live in the URL hash, so they're
+  // deep-linkable and the browser Back button steps file → snapshot → closed:
+  //   #snapshot=<adTeamServiceId>            → modal open for that service
+  //   #snapshot=<id>&file=<urlencoded path>  → + that file's content/diff
+  const location = useLocation()
+  const navigate = useNavigate()
+  const hashParams = new URLSearchParams(location.hash.replace(/^#/, ''))
+  const rawSnap = hashParams.get('snapshot')
+  const snapSid = rawSnap !== null && rawSnap !== '' ? parseInt(rawSnap, 10) : null
+  const selectedPath = hashParams.get('file') // URLSearchParams already decodes it
+
+  const setHash = (frag: string) =>
+    navigate(`${location.pathname}${location.search}${frag ? `#${frag}` : ''}`)
+  const openSnapshot = (cell: AdTeamCellModel) => setHash(`snapshot=${cell.adTeamServiceId}`)
+  const closeSnapshot = () => setHash('')
+  const selectFile = (path: string | null) =>
+    setHash(
+      snapSid == null ? '' : `snapshot=${snapSid}${path ? `&file=${encodeURIComponent(path)}` : ''}`
+    )
+
+  // Rebuild the modal's target from the service id in the hash.
+  const snapTarget = useMemo<SnapTarget | null>(() => {
+    if (snapSid == null || Number.isNaN(snapSid) || !state) return null
+    for (const team of state.teams ?? []) {
+      const cell = (team.services ?? []).find((s) => s.adTeamServiceId === snapSid)
+      if (cell) {
+        const title =
+          (state.challenges ?? []).find((c) => c.challengeId === cell.challengeId)?.title ?? ''
+        return { cell, teamName: team.teamName, challengeTitle: title }
+      }
+    }
+    return null
+  }, [snapSid, state])
   const [search, setSearch] = useState('')
   const [debouncedSearch] = useDebouncedValue(search, 200)
   const now = useTicker()
@@ -617,7 +650,13 @@ const AdOps: FC = () => {
 
   return (
     <WithGameEditTab>
-      <SnapshotModal gameId={numId} target={snapTarget} onClose={() => setSnapTarget(null)} />
+      <SnapshotModal
+        gameId={numId}
+        target={snapTarget}
+        selectedPath={selectedPath}
+        onSelectPath={selectFile}
+        onClose={closeSnapshot}
+      />
       <ContainerExecModal
         containerGuid={execTarget?.guid ?? null}
         containerTitle={execTarget?.title}
@@ -958,13 +997,7 @@ const AdOps: FC = () => {
                                             size="sm"
                                             variant="subtle"
                                             color="grape"
-                                            onClick={() =>
-                                              setSnapTarget({
-                                                cell,
-                                                teamName: row.teamName,
-                                                challengeTitle: c.title,
-                                              })
-                                            }
+                                            onClick={() => openSnapshot(cell)}
                                           >
                                             <Icon path={mdiFileTree} size={0.7} />
                                           </ActionIcon>

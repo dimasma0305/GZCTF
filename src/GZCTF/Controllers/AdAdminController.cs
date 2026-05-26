@@ -424,6 +424,13 @@ public class AdAdminController(
         if (model.Current is { Binary: false, Text: { } cur } && model.Baseline is { Binary: false, Text: { } bas })
             model.UnifiedDiff = BuildUnifiedDiff(bas, cur);
 
+        logger.LogInformation(
+            "AD File inspect: service={Sid} cid={Cid} path={Path} running={Run} current={Cur} baseline={Base} diff={Diff}",
+            adTeamServiceId, ts.ContainerId, path, model.ContainerRunning,
+            model.Current is null ? "null" : $"{model.Current.Size}b{(model.Current.Binary ? " bin" : "")}",
+            model.Baseline is null ? "null" : $"{model.Baseline.Size}b",
+            model.UnifiedDiff is null ? "null" : $"{model.UnifiedDiff.Length}c");
+
         return Ok(model);
     }
 
