@@ -15,27 +15,24 @@ namespace GZCTF.Services.Container.Manager;
 public class KubernetesManager : IContainerManager
 {
     /// <summary>
-    /// Tiny image used for the A&amp;D flag init + writer sidecar. Must be
-    /// pullable by the cluster (Docker Hub busybox is multi-arch incl. arm64).
+    /// Tiny image for the A&amp;D flag-writer sidecar (the pull poller). Stock
+    /// busybox — has <c>wget</c>, multi-arch, no custom image to build/push.
     /// </summary>
     private const string FlagSidecarImage = "busybox:stable";
 
-    /// <summary>Warmup flag written before the challenge container starts, so the
-    /// read-only <c>subPath</c> mount has a file and the service serves something
-    /// until the first real tick plants the round flag.</summary>
-    private const string WarmupFlag = "flag{warmup-no-round-yet}";
+    /// <summary>How often the writer sidecar re-pulls the flag (seconds). Also the
+    /// self-heal window if container-root deletes the file (VNs don't enforce RO).</summary>
+    private const int FlagPollSeconds = 5;
 
-    /// <summary>Pod-internal mount path the writer sidecar + init use (the whole
-    /// emptyDir); the flag file lives at <c>{FlagDir}/flag</c> and is surfaced
-    /// read-only into the challenge container at <c>config.FlagFilePath</c>.</summary>
+    /// <summary>Sidecar-side mount path of the shared emptyDir (writer's RW view).
+    /// The challenge mounts the same volume read-only at its flag directory.</summary>
     internal const string FlagDir = "/flagdir";
 
     /// <summary>emptyDir volume name shared between the challenge container
     /// (read-only) and the writer sidecar (read-write).</summary>
     internal const string FlagVolumeName = "ad-flag";
 
-    /// <summary>Container name of the writer sidecar — the A&amp;D flag planter
-    /// execs into this (not the challenge container) to rotate the flag.</summary>
+    /// <summary>Container name of the flag-writer sidecar (polls the pull URL).</summary>
     internal const string FlagWriterContainer = "gzctf-flag-writer";
 
     private readonly Kubernetes _client;
@@ -87,14 +84,16 @@ public class KubernetesManager : IContainerManager
         // References: NOTICE, LICENSE_ADDENDUM.txt, licenses/LicenseRef-GZCTF-Restricted.txt
         var envs = BuildContainerEnv(config);
 
-        // A&D flag mount: when FlagFilePath is set we give the challenge
-        // container an undeletable /flag, mirroring the Docker read-only bind
-        // mount. A shared emptyDir is mounted read-write into a tiny writer
-        // sidecar and read-only (single file, via subPath) into the challenge
-        // container — so container-root gets EROFS on delete/write, while the
-        // platform rotates the flag each tick by exec-ing into the sidecar. An
-        // init container seeds a warmup flag so the file exists at startup.
-        var adFlagMount = !string.IsNullOrEmpty(config.FlagFilePath);
+        // A&D flag delivery (PULL model). Virtual nodes can't exec / initContainer
+        // / subPath and don't enforce readOnly, so the flag-writer sidecar polls
+        // config.FlagPullUrl and writes the flag into a shared emptyDir that the
+        // challenge mounts read-only at the flag's *directory* (not subPath). Root
+        // can still delete it, but the next poll (<= FlagPollSeconds) re-plants it.
+        var pullFlag = !string.IsNullOrEmpty(config.FlagPullUrl) && !string.IsNullOrEmpty(config.FlagFilePath);
+        var flagDir = pullFlag ? Path.GetDirectoryName(config.FlagFilePath!.Replace('\\', '/')) : null;
+        var flagFile = pullFlag ? Path.GetFileName(config.FlagFilePath!) : null;
+        if (pullFlag && string.IsNullOrEmpty(flagDir))
+            flagDir = "/gzctf-flag"; // FlagFilePath must be under a subdir; guard root
 
         var challenge = new V1Container
         {
@@ -116,24 +115,24 @@ public class KubernetesManager : IContainerManager
                     ["cpu"] = new("10m"), ["memory"] = new("32Mi")
                 }
             },
-            VolumeMounts = adFlagMount
-                ? [new V1VolumeMount
-                {
-                    Name = FlagVolumeName,
-                    MountPath = config.FlagFilePath,
-                    SubPath = "flag",
-                    ReadOnlyProperty = true
-                }]
+            VolumeMounts = pullFlag
+                ? [new V1VolumeMount { Name = FlagVolumeName, MountPath = flagDir, ReadOnlyProperty = true }]
                 : null
         };
 
         var containers = new List<V1Container> { challenge };
-        if (adFlagMount)
+        if (pullFlag)
             containers.Add(new V1Container
             {
                 Name = FlagWriterContainer,
                 Image = FlagSidecarImage,
-                Command = ["sh", "-c", "sleep 2147483647"],
+                // Poll the pull URL and rewrite the flag file in the shared volume.
+                Command =
+                [
+                    "sh", "-c",
+                    $"while true; do wget -qO {FlagDir}/{flagFile} \"$GZCTF_FLAG_URL\" 2>/dev/null; sleep {FlagPollSeconds}; done"
+                ],
+                Env = [new V1EnvVar { Name = "GZCTF_FLAG_URL", Value = config.FlagPullUrl }],
                 VolumeMounts = [new V1VolumeMount { Name = FlagVolumeName, MountPath = FlagDir }],
                 Resources = new V1ResourceRequirements
                 {
@@ -173,18 +172,11 @@ public class KubernetesManager : IContainerManager
                 DnsPolicy = "None",
                 DnsConfig = new() { Nameservers = options.Dns ?? ["223.5.5.5", "114.114.114.114"] },
                 EnableServiceLinks = false,
-                Volumes = adFlagMount
+                Volumes = pullFlag
                     ? [new V1Volume { Name = FlagVolumeName, EmptyDir = new V1EmptyDirVolumeSource() }]
                     : null,
-                InitContainers = adFlagMount
-                    ? [new V1Container
-                    {
-                        Name = "gzctf-flag-init",
-                        Image = FlagSidecarImage,
-                        Command = ["sh", "-c", $"printf '%s' '{WarmupFlag}' > {FlagDir}/flag && chmod 644 {FlagDir}/flag"],
-                        VolumeMounts = [new V1VolumeMount { Name = FlagVolumeName, MountPath = FlagDir }]
-                    }]
-                    : null,
+                // No initContainers — virtual nodes don't support them; the writer
+                // sidecar seeds the flag on its first poll.
                 Containers = containers,
                 RestartPolicy = "Never",
                 AutomountServiceAccountToken = false
@@ -336,6 +328,11 @@ public class KubernetesManager : IContainerManager
 
         if (!string.IsNullOrWhiteSpace(config.Flag))
             envs.Add(new V1EnvVar { Name = "GZCTF_FLAG", Value = config.Flag });
+
+        // A&D: tell the challenge where to read the per-tick flag (the read-only
+        // pull volume). Challenges should read $GZCTF_FLAG_FILE (fallback /flag).
+        if (!string.IsNullOrEmpty(config.FlagFilePath))
+            envs.Add(new V1EnvVar { Name = "GZCTF_FLAG_FILE", Value = config.FlagFilePath });
 
         return envs;
     }

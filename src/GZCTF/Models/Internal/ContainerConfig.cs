@@ -59,6 +59,16 @@ public class ContainerConfig
     public string? FlagBindSource { get; set; }
 
     /// <summary>
+    /// Full URL the Kubernetes flag-writer sidecar polls to pull the current
+    /// A&amp;D flag (virtual nodes can't <c>exec</c>, so flags are pulled, not
+    /// pushed). Includes the per-(team, challenge) HMAC token. Set only for A&amp;D
+    /// containers on the K8s provider; null for Docker (which uses the read-only
+    /// bind mount) and for jeopardy/exercise. When set, <see cref="FlagFilePath"/>
+    /// is the path inside the read-only volume the challenge reads.
+    /// </summary>
+    public string? FlagPullUrl { get; set; }
+
+    /// <summary>
     /// Whether to record traffic
     /// </summary>
     public bool EnableTrafficCapture { get; set; }
