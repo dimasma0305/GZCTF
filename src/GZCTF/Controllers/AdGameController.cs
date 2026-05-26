@@ -1,4 +1,6 @@
+using System.Security.Cryptography;
 using GZCTF.Extensions;
+using Microsoft.AspNetCore.Authorization;
 using GZCTF.Hubs;
 using GZCTF.Hubs.Clients;
 using GZCTF.Middlewares;
@@ -125,6 +127,55 @@ public class AdGameController(
             Results = results
         });
     }
+
+    /// <summary>
+    /// Pull endpoint for the Kubernetes flag-writer sidecar. Virtual nodes can't
+    /// <c>exec</c>, so the per-tick flag is <b>pulled</b>, not pushed: the sidecar
+    /// polls this and writes the result to the read-only volume the challenge
+    /// reads. Returns the current round's flag for one <c>(participation,
+    /// challenge)</c> as <c>text/plain</c>.
+    /// <para>Auth is the <paramref name="token"/> itself — an HMAC of the
+    /// <c>(participation, challenge)</c> keyed by the platform XorKey, so it's
+    /// unguessable and only ever yields the <em>owner's</em> own flag. Injected
+    /// into the sidecar only (never the challenge container). No session needed.</para>
+    /// </summary>
+    [HttpGet("PodFlag/{participationId:int}/{challengeId:int}/{token}")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> PodFlag(int id, int participationId, int challengeId, string token,
+        CancellationToken cancelToken)
+    {
+        var expected = AdTokenUtils.Hash($"adpodflag:{participationId}:{challengeId}", configService.GetXorKey());
+        byte[] presented;
+        try { presented = Convert.FromHexString(token); }
+        catch { return Unauthorized(); }
+        if (!CryptographicOperations.FixedTimeEquals(expected, presented))
+            return Unauthorized();
+
+        var serviceId = await db.AdTeamServices
+            .Where(s => s.ParticipationId == participationId && s.ChallengeId == challengeId
+                && s.Participation.GameId == id)
+            .Select(s => (int?)s.Id)
+            .FirstOrDefaultAsync(cancelToken);
+        if (serviceId is null)
+            return NotFound();
+
+        var flag = await db.AdFlags
+            .Where(f => f.AdTeamServiceId == serviceId)
+            .OrderByDescending(f => f.Id)
+            .Select(f => f.Flag)
+            .FirstOrDefaultAsync(cancelToken);
+
+        // No round yet → the warmup literal, so the sidecar always writes something.
+        return Content(flag ?? "flag{warmup-no-round-yet}", "text/plain");
+    }
+
+    /// <summary>Stable per-(participation, challenge) pull token for the flag
+    /// sidecar — <c>HMAC(XorKey, "adpodflag:{pid}:{cid}")</c> as hex. Used by the
+    /// K8s launch path to build the sidecar's pull URL.</summary>
+    internal static string PodFlagToken(int participationId, int challengeId, byte[] xorKey) =>
+        Convert.ToHexString(AdTokenUtils.Hash($"adpodflag:{participationId}:{challengeId}", xorKey));
 
     private async Task<AdSubmitResultModel> ProcessSingleFlagAsync(
         Participation attackerPart, AdRound currentRound, string raw, CancellationToken token)
