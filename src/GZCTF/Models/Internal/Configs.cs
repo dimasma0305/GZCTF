@@ -560,6 +560,12 @@ public class KubernetesConfig
 {
     public string Namespace { get; set; } = "gzctf-challenges";
     public string KubeConfig { get; set; } = "kube-config.yaml";
+    /// <summary>
+    /// Extra egress-deny CIDRs for "open" challenges (e.g. the cluster's node /
+    /// control-plane network). These <b>augment</b> the built-in private +
+    /// link-local baseline (10/8, 172.16/12, 192.168/16, 169.254/16) — they do
+    /// not replace it, so the baseline can't be accidentally re-opened.
+    /// </summary>
     public string[]? AllowCidr { get; set; }
     public string[]? Dns { get; set; }
 

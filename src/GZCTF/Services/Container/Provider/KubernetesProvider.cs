@@ -117,6 +117,18 @@ public class KubernetesProvider : IContainerProvider<Kubernetes, KubernetesMetad
     private const string OpenNetworkPolicyName = "gzctf-network-open";
 
     /// <summary>
+    /// Baseline egress-deny CIDRs for "open" challenges: the cluster pod/service
+    /// network (10/8) plus the rest of RFC1918 and link-local. Blocking
+    /// 169.254.0.0/16 is the important one — it keeps an RCE/SSRF challenge from
+    /// reaching the cloud metadata service (node IAM credential theft). Operators
+    /// <b>add</b> deployment-specific ranges (e.g. their node network) via
+    /// <see cref="KubernetesConfig.AllowCidr"/>; that list augments this baseline,
+    /// it never replaces it, so the private ranges can't be accidentally re-opened.
+    /// </summary>
+    private static readonly string[] EgressDenyBaseline =
+        ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"];
+
+    /// <summary>
     /// Isolated Network Policy
     /// </summary>
     /// <remarks>
@@ -143,7 +155,10 @@ public class KubernetesProvider : IContainerProvider<Kubernetes, KubernetesMetad
     ///  Open Network Policy
     /// </summary>
     /// <remarks>
-    ///  Allows all outbound traffic except to the specified CIDR blocks in the Kubernetes configuration.
+    ///  Allows outbound traffic to the public internet but denies the private +
+    ///  link-local baseline (<see cref="EgressDenyBaseline"/>) plus any operator
+    ///  <see cref="KubernetesConfig.AllowCidr"/> ranges — so a compromised "open"
+    ///  challenge can't reach the cluster, cloud metadata, or other internal nets.
     /// </remarks>
     private V1NetworkPolicy OpenNetworkPolicy =>
         new()
@@ -170,7 +185,11 @@ public class KubernetesProvider : IContainerProvider<Kubernetes, KubernetesMetad
                                 IpBlock = new()
                                 {
                                     Cidr = "0.0.0.0/0",
-                                    Except = _kubernetesMetadata.Config.AllowCidr ?? ["10.0.0.0/8"]
+                                    // Always deny the private/link-local baseline; AllowCidr (the
+                                    // operator's node/control-plane ranges) augments, never replaces it.
+                                    Except = EgressDenyBaseline
+                                        .Concat(_kubernetesMetadata.Config.AllowCidr ?? [])
+                                        .Distinct().ToList()
                                 }
                             }
                         ]
