@@ -258,6 +258,7 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                       <Table.Th
                         key={grp.category}
                         colSpan={grp.items.length * 4}
+                        className={classes.groupStart}
                         h="2.4rem"
                         style={
                           cate
@@ -295,7 +296,7 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                 <Table.Tr>
                   {hiddenCol}
                   {(adScoreboard.challenges ?? []).map((ch) => (
-                    <Table.Th key={ch.challengeId} colSpan={4} className={classes.mono}>
+                    <Table.Th key={ch.challengeId} colSpan={4} className={cx(classes.mono, classes.groupStart)}>
                       <Tooltip label={ch.title} withinPortal>
                         <Text size="xs" fw={700} truncate maw={GROUP_W} mx="auto">
                           {ch.title}
@@ -323,7 +324,7 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                     </Table.Th>
                   ))}
                   {(adScoreboard.challenges ?? []).flatMap((ch) => [
-                    <Table.Th key={`${ch.challengeId}-a`} className={classes.mono} style={{ width: SUBCOL.atk }}>
+                    <Table.Th key={`${ch.challengeId}-a`} className={cx(classes.mono, classes.groupStart)} style={{ width: SUBCOL.atk }}>
                       <Tooltip label={t('game.content.scoreboard.ad.legend.attack', 'Attack')} withinPortal>
                         <Center><Icon path={mdiSwordCross} size={0.6} color={theme.colors.teal[6]} /></Center>
                       </Tooltip>
@@ -435,7 +436,7 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                         const svc = row.services?.find((s) => s.challengeId === ch.challengeId)
                         if (!svc) {
                           return [
-                            <Table.Td key={ch.challengeId} colSpan={4} className={classes.mono}>
+                            <Table.Td key={ch.challengeId} colSpan={4} className={cx(classes.mono, classes.groupStart)}>
                               <Text size="xs" c="dimmed">
                                 {t('game.content.scoreboard.ad.no_service_cell', 'no service')}
                               </Text>
@@ -443,7 +444,7 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                           ]
                         }
                         return [
-                          <Table.Td key={`${ch.challengeId}-a`} className={classes.mono}>
+                          <Table.Td key={`${ch.challengeId}-a`} className={cx(classes.mono, classes.groupStart)}>
                             <Text size="xs" c="teal" className={misc.ffmono} fw={700}>
                               {fmtPts(svc.attackPoints)}
                             </Text>

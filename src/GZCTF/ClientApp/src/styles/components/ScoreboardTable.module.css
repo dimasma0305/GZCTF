@@ -30,6 +30,14 @@
   font-family: var(--mantine-font-family-monospace);
 }
 
+/* Vertical divider at the left edge of a challenge's service-column group on
+   the A&D board, so each challenge's 4 sub-columns (attack/SLA/defense/status)
+   read as one unit, separated from the next challenge (and from the pinned
+   team block at the first group). */
+.groupStart {
+  border-left: 2px solid var(--mantine-color-default-border);
+}
+
 .teamCell {
   max-width: 0;
   width: auto;
