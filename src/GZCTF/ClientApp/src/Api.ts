@@ -2077,6 +2077,8 @@ export interface AdSnapshotChangesModel {
   /** True when computed live from the running container (mid-game), not a stored snapshot. */
   live?: boolean;
   changes: AdSnapshotChange[];
+  /** Path categories filtered out of `changes` (runtime/churn blacklist), shown via the info button. */
+  filteredCategories?: string[];
 }
 
 /** One file's content, capped + binary-aware. */

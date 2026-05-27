@@ -7,7 +7,9 @@ import {
   CopyButton,
   Divider,
   Group,
+  HoverCard,
   Indicator,
+  List as MList,
   Loader,
   Menu,
   Modal,
@@ -44,6 +46,7 @@ import {
   mdiFileTree,
   mdiFolderOutline,
   mdiHelpCircle,
+  mdiInformationOutline,
   mdiMagnify,
   mdiPauseCircleOutline,
   mdiPlayCircle,
@@ -497,6 +500,7 @@ const SnapshotModal: FC<{
   const [loading, setLoading] = useState(false)
   const [changes, setChanges] = useState<AdSnapshotChange[]>([])
   const [live, setLive] = useState(false)
+  const [filteredCats, setFilteredCats] = useState<string[]>([])
   const [fileSearch, setFileSearch] = useState('')
   const [debouncedFileSearch] = useDebouncedValue(fileSearch, 200)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
@@ -550,6 +554,7 @@ const SnapshotModal: FC<{
         if (!cancelled) {
           setChanges(data.changes ?? [])
           setLive(!!data.live)
+          setFilteredCats(data.filteredCategories ?? [])
         }
       })
       .catch(() => {
@@ -620,12 +625,48 @@ const SnapshotModal: FC<{
               </Button>
             </Tooltip>
           </Group>
-          <Text size="sm" c="dimmed">
-            {t('admin.content.ad_ops.snapshot.changed_count', {
-              count: changes.length,
-              defaultValue: '{{count}} file(s) changed vs original image',
-            })}
-          </Text>
+          <Group gap={6} wrap="nowrap">
+            <Text size="sm" c="dimmed">
+              {t('admin.content.ad_ops.snapshot.changed_count', {
+                count: changes.length,
+                defaultValue: '{{count}} file(s) changed vs original image',
+              })}
+            </Text>
+            <HoverCard width={360} shadow="md" withArrow position="bottom-end" openDelay={100}>
+              <HoverCard.Target>
+                <ActionIcon size="sm" variant="subtle" color="gray" aria-label="filter-info">
+                  <Icon path={mdiInformationOutline} size={0.75} />
+                </ActionIcon>
+              </HoverCard.Target>
+              <HoverCard.Dropdown>
+                <Stack gap={6}>
+                  <Text size="xs" fw={700}>
+                    {t('admin.content.ad_ops.snapshot.filter_title', 'What this view shows')}
+                  </Text>
+                  <Text size="xs" c="teal">
+                    {t('admin.content.ad_ops.snapshot.filter_shown',
+                      'Shown (whitelist): files the team added / modified / deleted vs the base image.')}
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {t('admin.content.ad_ops.snapshot.filter_hidden',
+                      'Hidden (blacklist) — runtime/churn paths, so only deliberate changes show:')}
+                  </Text>
+                  <MList size="xs" spacing={2}>
+                    {(filteredCats.length
+                      ? filteredCats
+                      : ['flag mount', '/tmp, /run', 'logs & caches', '/proc, /sys, /dev', '__pycache__', 'ancestor dirs']
+                    ).map((c) => (
+                      <MList.Item key={c}>{c}</MList.Item>
+                    ))}
+                  </MList>
+                  <Text size="xs" c="orange">
+                    {t('admin.content.ad_ops.snapshot.filter_warn',
+                      'A foothold dropped into a hidden path won’t appear here — use the shell to inspect.')}
+                  </Text>
+                </Stack>
+              </HoverCard.Dropdown>
+            </HoverCard>
+          </Group>
         </Group>
 
         {live && (

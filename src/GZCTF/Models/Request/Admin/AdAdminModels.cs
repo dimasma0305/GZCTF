@@ -87,6 +87,11 @@ public class AdSnapshotChangesModel
     public bool Live { get; set; }
 
     public List<AdSnapshotChange> Changes { get; set; } = [];
+
+    /// <summary>Path categories filtered OUT of <see cref="Changes"/> (runtime/churn
+    /// blacklist) — surfaced via the AdOps info button so the operator knows the
+    /// view is filtered and what it omits (a foothold in these paths won't show).</summary>
+    public string[] FilteredCategories { get; set; } = [];
 }
 
 /// <summary>One captured point in a service's file-change history (for time-diffing).</summary>

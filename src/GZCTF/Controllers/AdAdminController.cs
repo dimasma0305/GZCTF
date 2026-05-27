@@ -404,7 +404,8 @@ public class AdAdminController(
 
         var model = new AdSnapshotChangesModel
         {
-            SnapshotAvailable = !string.IsNullOrEmpty(ts.SnapshotBlobKey)
+            SnapshotAvailable = !string.IsNullOrEmpty(ts.SnapshotBlobKey),
+            FilteredCategories = AdContainerManager.NoiseFilterCategories
         };
 
         if (!string.IsNullOrEmpty(ts.SnapshotChanges))

@@ -411,6 +411,21 @@ public sealed class AdContainerManager(
         // Python bytecode cache — regenerated on first import, not a team change.
         p.Contains("__pycache__", StringComparison.Ordinal);
 
+    /// <summary>Human-readable summary of what the change-diff hides (see
+    /// <see cref="IsNoiseChangePath"/> + the Docker ancestor-collapse). Surfaced in
+    /// AdOps so an operator knows the "Changes" view is a filtered blacklist — and
+    /// that an attacker foothold dropped into one of these paths won't show here
+    /// (use the shell / raw inspection for that).</summary>
+    public static readonly string[] NoiseFilterCategories =
+    [
+        "flag mount (/flag, /gzctf-flag)",
+        "/tmp and /run",
+        "/var/log, /var/cache, /var/tmp, /var/run, package caches",
+        "/proc, /sys, /dev",
+        "Python __pycache__ and *.pyc",
+        "directories that only contain a changed file (ancestor dirs)"
+    ];
+
     /// <summary>
     /// On-demand filesystem diff of a team's <em>live</em> container — the admin
     /// "what did they change" view during a running game (the post-game snapshot
