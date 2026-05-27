@@ -7,10 +7,9 @@ LABEL org.gzctf.keep="true"
 
 RUN apk add --no-cache socat
 
-# Default "warmup" flag — the platform rotates /flag each tick via docker
-# exec. serve.sh reads /flag fresh per request (no GZCTF_FLAG env var).
-RUN echo 'flag{warmup-no-round-yet}' > /flag && chmod 644 /flag
-
+# No baked flag: the platform supplies the live flag at $GZCTF_FLAG_FILE
+# (Docker: /flag bind-mount; K8s: /gzctf-flag/flag via the flag-pull sidecar).
+# serve.sh reads $GZCTF_FLAG_FILE fresh per request; a missing file = warmup.
 COPY serve.sh /serve.sh
 RUN chmod +x /serve.sh
 

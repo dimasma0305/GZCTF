@@ -6,10 +6,8 @@ LABEL org.gzctf.keep="true"
 
 COPY app.php /app/app.php
 
-# Default warmup flag — the platform rotates the live flag each tick into
-# GZCTF_FLAG_FILE (/flag on Docker, /gzctf-flag/flag on K8s). app.php reads
-# it fresh per request.
-RUN echo 'flag{warmup-no-round-yet}' > /flag && chmod 644 /flag
-
+# No baked flag: the platform supplies the live flag at $GZCTF_FLAG_FILE
+# (Docker: /flag bind-mount; K8s: /gzctf-flag/flag via the flag-pull sidecar).
+# app.php reads $GZCTF_FLAG_FILE fresh per request; a missing file = warmup.
 EXPOSE 8080
 CMD ["php", "-S", "0.0.0.0:8080", "/app/app.php"]
