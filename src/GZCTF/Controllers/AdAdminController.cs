@@ -108,6 +108,17 @@ public class AdAdminController(
 
         var serviceIds = services.Select(s => s.Id).ToList();
 
+        // Latest per-round change manifest per service — the LIVE "what files has
+        // this team changed" count during a running game (SnapshotChanges is only
+        // populated at game-end). Noise-filtered upstream, so it reflects real
+        // team changes (e.g. a patch), not runtime churn.
+        var latestManifests = serviceIds.Count == 0 ? new Dictionary<int, string>() :
+            await db.AdServiceSnapshots
+                .Where(s => serviceIds.Contains(s.AdTeamServiceId))
+                .GroupBy(s => s.AdTeamServiceId)
+                .Select(g => new { Sid = g.Key, Manifest = g.OrderByDescending(x => x.Id).Select(x => x.ManifestJson).First() })
+                .ToDictionaryAsync(x => x.Sid, x => x.Manifest, token);
+
         var lastChecks = serviceIds.Count == 0 ? [] :
             await db.AdCheckResults
                 .Where(c => serviceIds.Contains(c.AdTeamServiceId))
@@ -120,6 +131,15 @@ public class AdAdminController(
             await db.AdFlags
                 .Where(f => f.AdRoundId == currentRound.Id && serviceIds.Contains(f.AdTeamServiceId))
                 .ToDictionaryAsync(f => f.AdTeamServiceId, f => f.Flag, token);
+
+        // Prefer the post-game diff (SnapshotChanges) when present, else the live
+        // per-round snapshot manifest; surface a count only when the team actually
+        // changed something (>0) so unpatched services stay badge-free.
+        int? ChangedCount(AdTeamService svc)
+        {
+            var n = CountChanges(svc.SnapshotChanges) ?? CountChanges(latestManifests.GetValueOrDefault(svc.Id));
+            return n > 0 ? n : null;
+        }
 
         var rows = participations.Select(p => new AdTeamRowModel
         {
@@ -136,7 +156,7 @@ public class AdAdminController(
                 LastCheckId = lastChecksByService.GetValueOrDefault(s.Id)?.Id,
                 CurrentFlag = currentFlags.GetValueOrDefault(s.Id),
                 SnapshotAvailable = !string.IsNullOrEmpty(s.SnapshotBlobKey),
-                ChangedFileCount = CountChanges(s.SnapshotChanges)
+                ChangedFileCount = ChangedCount(s)
             }).ToList()
         }).ToList();
 
