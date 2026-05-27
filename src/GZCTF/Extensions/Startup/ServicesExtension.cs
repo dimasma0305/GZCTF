@@ -149,6 +149,7 @@ internal static class ServicesExtension
             builder.Services.AddSingleton<TrafficRecorderRegistry>();
             builder.Services.AddScoped<IPcapFlowExtractor, PcapFlowExtractor>();
 
+            builder.Services.AddHostedService<Services.StartupSecurityAudit>();
             builder.Services.AddHostedService<CacheMaker>();
             builder.Services.AddHostedService<FlagChecker>();
             builder.Services.AddHostedService<CronJobService>();

@@ -33,6 +33,12 @@ public class KubernetesProvider : IContainerProvider<Kubernetes, KubernetesMetad
     private readonly string? _flagPullHost;
     private readonly int _flagPullPort;
 
+    /// <summary>Auto-detected node / control-plane addresses (as /32) that the open
+    /// egress policy denies — so an "open" challenge can't reach kube-apiserver,
+    /// kubelet, or other host-level services even if the operator never set
+    /// AllowCidr. Best-effort; empty if nodes can't be listed (RBAC).</summary>
+    private readonly List<string> _autoNodeDeny = [];
+
     public KubernetesProvider(IOptions<RegistrySet<RegistryConfig>> registries, IOptions<ContainerProvider> options,
         IConfiguration configuration, ILogger<KubernetesProvider> logger)
     {
@@ -76,6 +82,30 @@ public class KubernetesProvider : IContainerProvider<Kubernetes, KubernetesMetad
 
         _kubernetesMetadata.HostIp = new Uri(config.Host).Host;
         _kubernetesClient = new Kubernetes(config);
+
+        // Auto-detect the cluster's node / control-plane addresses and deny
+        // challenge egress to them (kube-apiserver, kubelet, host services), so an
+        // "open" challenge can't reach the control plane without the operator
+        // hand-configuring AllowCidr. Best-effort: needs nodes:list (cluster-
+        // scoped) — if RBAC forbids it we keep just the API-server host and log a
+        // hint. The flag-pull allow-rule still overrides this for flag delivery.
+        try
+        {
+            foreach (var node in _kubernetesClient.CoreV1.ListNode().Items)
+                foreach (var addr in node.Status?.Addresses ?? [])
+                    if (addr.Type is "InternalIP" or "ExternalIP"
+                        && System.Net.IPAddress.TryParse(addr.Address, out _))
+                        _autoNodeDeny.Add($"{addr.Address}/32");
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e,
+                "K8s: couldn't auto-detect node addresses for challenge egress deny (needs nodes:list). " +
+                "Set ContainerProvider:KubernetesConfig:AllowCidr to your node/control-plane CIDR to block kube-api/kubelet from open challenges.");
+        }
+
+        if (System.Net.IPAddress.TryParse(_kubernetesMetadata.HostIp, out _))
+            _autoNodeDeny.Add($"{_kubernetesMetadata.HostIp}/32");
 
         try
         {
@@ -251,9 +281,11 @@ public class KubernetesProvider : IContainerProvider<Kubernetes, KubernetesMetad
                                 IpBlock = new()
                                 {
                                     Cidr = "0.0.0.0/0",
-                                    // Always deny the private/link-local baseline; AllowCidr (the
-                                    // operator's node/control-plane ranges) augments, never replaces it.
+                                    // Always deny the private/link-local baseline + the auto-detected
+                                    // node/control-plane addresses; AllowCidr (operator-supplied
+                                    // ranges) augments, never replaces, all of it.
                                     Except = EgressDenyBaseline
+                                        .Concat(_autoNodeDeny)
                                         .Concat(_kubernetesMetadata.Config.AllowCidr ?? [])
                                         .Distinct().ToList()
                                 }
