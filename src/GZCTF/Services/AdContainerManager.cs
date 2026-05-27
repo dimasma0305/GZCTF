@@ -379,10 +379,32 @@ public sealed class AdContainerManager(
         }
     }
 
+    // Runtime/churn paths kept OUT of the "what did the team change" diff: the
+    // SLA checker drops a fresh probe file every tick (e.g. /tmp/notes/chk*),
+    // k8s injects /etc/hosts etc., the flag sidecar rewrites its mount, package
+    // caches/logs churn. None are deliberate team patches — and including them
+    // buries the real change AND makes the manifest differ every tick, defeating
+    // the snapshot dedup (unbounded AdServiceSnapshots growth).
+    private static readonly string[] NoiseChangePrefixes =
+    [
+        "/tmp/", "/run/", "/var/run/", "/var/log/", "/var/cache/", "/var/tmp/",
+        "/var/lib/apt/", "/proc/", "/sys/", "/dev/", "/gzctf-flag/", "/root/.cache/"
+    ];
+
+    private static readonly HashSet<string> NoiseChangeExact = new(StringComparer.Ordinal)
+    {
+        "/tmp", "/run", "/etc/hosts", "/etc/resolv.conf", "/etc/hostname", "/etc/mtab"
+    };
+
+    private static bool IsNoiseChangePath(string p) =>
+        NoiseChangeExact.Contains(p) ||
+        NoiseChangePrefixes.Any(pre => p.StartsWith(pre, StringComparison.Ordinal));
+
     /// <summary>
     /// On-demand filesystem diff of a team's <em>live</em> container — the admin
     /// "what did they change" view during a running game (the post-game snapshot
     /// captures the same thing at game end). Returns (path, kind) entries, capped,
+    /// runtime/churn paths filtered out (see <see cref="IsNoiseChangePath"/>),
     /// or null if there's no live container / the provider can't compute it.
     ///
     /// <para>Docker: <c>docker diff</c> (InspectChanges) vs the baseline image —
@@ -407,7 +429,8 @@ public sealed class AdContainerManager(
                 var changes = await dockerProvider.GetProvider().Containers.InspectChangesAsync(cid, token);
                 return changes is null
                     ? []
-                    : changes.Take(maxEntries).Select(c => (c.Path, (int)c.Kind)).ToList();
+                    : changes.Where(c => !IsNoiseChangePath(c.Path))
+                        .Take(maxEntries).Select(c => (c.Path, (int)c.Kind)).ToList();
             }
             catch (Exception e)
             {
@@ -422,13 +445,20 @@ public sealed class AdContainerManager(
             try
             {
                 var ns = k8sProvider.GetMetadata().Config.Namespace;
-                // -xdev keeps us on the container's rootfs (skips /proc /sys /dev /tmp
-                // mounts); -newer /proc/1 ≈ "modified since the main process started".
-                const string find = "find / -xdev -newer /proc/1 -type f 2>/dev/null | head -n 3000";
+                // -xdev stays on the container rootfs; -newer /proc/1 ≈ "modified
+                // since PID 1 started". Prune the churn dirs (the checker writes a
+                // probe file every tick under /tmp etc.) so the scan is cheap and
+                // returns deliberate changes; the IsNoiseChangePath filter below is
+                // the authoritative exclusion (also covers the Docker path).
+                const string find =
+                    "find / -xdev \\( -path /tmp -o -path /run -o -path /var/log -o -path /var/cache " +
+                    "-o -path /var/tmp -o -path /var/lib/apt -o -path /proc -o -path /sys -o -path /dev " +
+                    "-o -path /gzctf-flag \\) -prune -o -newer /proc/1 -type f -print 2>/dev/null | head -n 3000";
                 var stdout = await ExecCaptureStdoutAsync(k8sProvider.GetProvider(), ns, cid, cid,
                     ["sh", "-c", find], token);
                 return stdout
                     .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Where(p => !IsNoiseChangePath(p))
                     .Take(maxEntries)
                     .Select(p => (p, 0))
                     .ToList();
