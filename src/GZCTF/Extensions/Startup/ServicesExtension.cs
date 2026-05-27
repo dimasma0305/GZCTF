@@ -167,6 +167,7 @@ internal static class ServicesExtension
             // IAdCheckRunner (AdCheckerExecutor for Docker, K8sAdCheckRunner for
             // Kubernetes) is registered per provider in ContainerServiceExtension.
             builder.Services.AddHostedService<Services.AdCheckerService>();
+            builder.Services.AddHostedService<Services.AdSnapshotService>();
         }
 
         internal void AddWebServices()

@@ -60,6 +60,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) :
     public DbSet<AdRound> AdRounds { get; set; } = null!;
     public DbSet<AdFlag> AdFlags { get; set; } = null!;
     public DbSet<AdCheckResult> AdCheckResults { get; set; } = null!;
+    public DbSet<AdServiceSnapshot> AdServiceSnapshots { get; set; } = null!;
     public DbSet<AdAttack> AdAttacks { get; set; } = null!;
     public DbSet<AdVpnPeer> AdVpnPeers { get; set; } = null!;
     public DbSet<AdTeamApiToken> AdTeamApiTokens { get; set; } = null!;

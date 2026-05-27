@@ -2096,6 +2096,20 @@ export interface AdInspectorModel {
   containerGuid: string;
 }
 
+/** One capture point in a service's file-change history. */
+export interface AdSnapshotPointModel {
+  id: number;
+  round: number;
+  capturedAt: string;
+  fileCount: number;
+}
+
+/** Diff between two capture points: files touched between them. */
+export interface AdSnapshotTimeDiffModel {
+  added: AdSnapshotChange[];
+  removed: AdSnapshotChange[];
+}
+
 /** Per-file inspection: current (running container) + baseline (image) + unified diff. */
 export interface AdFileViewModel {
   path: string;
@@ -6483,6 +6497,42 @@ export class Api<
     ) =>
       this.request<AdFileViewModel, RequestResponse>({
         path: `/api/edit/games/${id}/ad/Services/${adTeamServiceId}/File`,
+        method: "GET",
+        query: query,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Capture points in a service's file-change history. Requires game admin.
+     *
+     * @tags Edit
+     * @name EditAdServiceSnapshots
+     * @request GET:/api/edit/games/{id}/ad/Services/{adTeamServiceId}/Snapshots
+     */
+    editAdServiceSnapshots: (id: number, adTeamServiceId: number, params: RequestParams = {}) =>
+      this.request<AdSnapshotPointModel[], RequestResponse>({
+        path: `/api/edit/games/${id}/ad/Services/${adTeamServiceId}/Snapshots`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Diff a service between two capture points. Requires game admin.
+     *
+     * @tags Edit
+     * @name EditAdSnapshotTimeDiff
+     * @request GET:/api/edit/games/{id}/ad/Services/{adTeamServiceId}/SnapshotDiff
+     */
+    editAdSnapshotTimeDiff: (
+      id: number,
+      adTeamServiceId: number,
+      query: { fromId: number; toId: number },
+      params: RequestParams = {},
+    ) =>
+      this.request<AdSnapshotTimeDiffModel, RequestResponse>({
+        path: `/api/edit/games/${id}/ad/Services/${adTeamServiceId}/SnapshotDiff`,
         method: "GET",
         query: query,
         format: "json",

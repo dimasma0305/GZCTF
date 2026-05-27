@@ -89,6 +89,26 @@ public class AdSnapshotChangesModel
     public List<AdSnapshotChange> Changes { get; set; } = [];
 }
 
+/// <summary>One captured point in a service's file-change history (for time-diffing).</summary>
+public class AdSnapshotPointModel
+{
+    public int Id { get; set; }
+    public int Round { get; set; }
+    public DateTimeOffset CapturedAt { get; set; }
+    /// <summary>Number of changed files at this point.</summary>
+    public int FileCount { get; set; }
+}
+
+/// <summary>Diff between two capture points: which files the team touched between them.</summary>
+public class AdSnapshotTimeDiffModel
+{
+    /// <summary>Files changed in the later point but not the earlier (new activity).</summary>
+    public List<AdSnapshotChange> Added { get; set; } = [];
+
+    /// <summary>Files changed in the earlier point but not the later (e.g. reverted).</summary>
+    public List<AdSnapshotChange> Removed { get; set; } = [];
+}
+
 /// <summary>Result of spawning a throwaway inspector container.</summary>
 public class AdInspectorModel
 {

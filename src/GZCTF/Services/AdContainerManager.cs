@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Formats.Tar;
 using System.IO.Compression;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
@@ -508,7 +509,17 @@ public sealed class AdContainerManager(
         {
             var dockerProvider = scopeServices.GetService<IContainerProvider<DockerClient, DockerMetadata>>();
             if (dockerProvider is not null)
-                return DecodeFileOutput(await ExecCaptureDockerAsync(dockerProvider.GetProvider(), cid, FileReadCmd(path), token));
+            {
+                // Read straight from the container filesystem via the daemon's tar
+                // archive API — no shell/coreutils needed in the image, exact bytes.
+                try
+                {
+                    var resp = await dockerProvider.GetProvider().Containers.GetArchiveFromContainerAsync(
+                        cid, new DockerModels.ContainerPathStatParameters { Path = path }, statOnly: false, token);
+                    return DecodeFileOutput(await ReadTarSingleFileAsync(resp.Stream, token));
+                }
+                catch (DockerApiException) { return null; } // path absent / not found
+            }
 
             var k8sProvider = scopeServices.GetService<IContainerProvider<Kubernetes, KubernetesMetadata>>();
             if (k8sProvider is not null)
@@ -575,43 +586,39 @@ public sealed class AdContainerManager(
         return (raw, truncated);
     }
 
-    private static async Task<string> ExecCaptureDockerAsync(
-        DockerClient docker, string containerId, string[] cmd, CancellationToken token)
+    /// <summary>Extract the first regular file from a Docker tar archive stream as
+    /// base64 (capped at <see cref="MaxFileBytes"/>+1 bytes so <see cref="DecodeFileOutput"/>
+    /// flags truncation). Null when the archive has no regular-file entry.</summary>
+    private static async Task<string?> ReadTarSingleFileAsync(Stream tar, CancellationToken token)
     {
-        var exec = await docker.Exec.CreateContainerExecAsync(containerId,
-            new DockerModels.ContainerExecCreateParameters { AttachStdout = true, AttachStderr = false, Cmd = cmd }, token);
-        using var stream = await docker.Exec.StartContainerExecAsync(exec.ID,
-            new DockerModels.ContainerExecStartParameters(), token);
-
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
-        cts.CancelAfter(TimeSpan.FromSeconds(15));
-        var sb = new StringBuilder();
-        var buf = new byte[16 * 1024];
-        while (true)
+        await using (tar)
         {
-            var res = await stream.ReadOutputAsync(buf, 0, buf.Length, cts.Token);
-            if (res.EOF || res.Count <= 0) break;
-            sb.Append(Encoding.ASCII.GetString(buf, 0, res.Count)); // base64 is ASCII
+            using var reader = new TarReader(tar);
+            while (await reader.GetNextEntryAsync(cancellationToken: token) is { } entry)
+            {
+                if (entry.EntryType is not (TarEntryType.RegularFile or TarEntryType.V7RegularFile)
+                    || entry.DataStream is null)
+                    continue;
+
+                var cap = MaxFileBytes + 1;
+                using var ms = new MemoryStream();
+                var buf = new byte[16 * 1024];
+                int read;
+                while (ms.Length < cap &&
+                       (read = await entry.DataStream.ReadAsync(buf.AsMemory(0, (int)Math.Min(buf.Length, cap - ms.Length)), token)) > 0)
+                    ms.Write(buf, 0, read);
+                return Convert.ToBase64String(ms.GetBuffer(), 0, (int)ms.Length);
+            }
         }
-        return sb.ToString();
+        return null;
     }
 
     private async Task<string?> ReadFileFromDockerImageAsync(
         DockerClient docker, string image, string path, CancellationToken token)
     {
-        var pars = new DockerModels.CreateContainerParameters
-        {
-            Image = image,
-            Cmd = FileReadCmd(path),
-            HostConfig = new DockerModels.HostConfig
-            {
-                NetworkMode = "none",
-                Memory = 128L * 1024 * 1024,
-                NanoCPUs = 500_000_000L,
-                AutoRemove = false
-            }
-        };
-
+        // Create (never start) a container from the image and read the file straight
+        // from its filesystem via the archive API — no entrypoint run, no in-image tools.
+        var pars = new DockerModels.CreateContainerParameters { Image = image };
         string? id = null;
         try
         {
@@ -625,19 +632,13 @@ public sealed class AdContainerManager(
             }
 
             id = created.ID;
-            await docker.Containers.StartContainerAsync(id, new DockerModels.ContainerStartParameters(), token);
-
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
-            cts.CancelAfter(TimeSpan.FromSeconds(60));
-            await docker.Containers.WaitContainerAsync(id, cts.Token);
-
-            var sb = new StringBuilder();
-            var progress = new Progress<string>(line => { if (sb.Length < 2 * (MaxFileBytes + 1)) sb.Append(line); });
-            using var logCts = CancellationTokenSource.CreateLinkedTokenSource(token);
-            logCts.CancelAfter(TimeSpan.FromSeconds(5));
-            await docker.Containers.GetContainerLogsAsync(id,
-                new DockerModels.ContainerLogsParameters { ShowStdout = true, ShowStderr = false }, progress, logCts.Token);
-            return sb.ToString();
+            try
+            {
+                var resp = await docker.Containers.GetArchiveFromContainerAsync(
+                    id, new DockerModels.ContainerPathStatParameters { Path = path }, statOnly: false, token);
+                return await ReadTarSingleFileAsync(resp.Stream, token);
+            }
+            catch (DockerApiException) { return null; } // path not in the image
         }
         finally
         {

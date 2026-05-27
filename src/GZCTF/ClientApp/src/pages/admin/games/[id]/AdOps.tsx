@@ -15,6 +15,7 @@ import {
   RingProgress,
   ScrollArea,
   SegmentedControl,
+  Select,
   Stack,
   Table,
   Text,
@@ -61,7 +62,15 @@ import { useIsMobile } from '@Utils/ThemeOverride'
 import { useAdminAdState } from '@Hooks/useGame'
 import { useTicker } from '@Hooks/useTicker'
 import { highlight } from '@Utils/marked/ShikiExtension'
-import api, { AdCheckStatus, AdFileBlob, AdFileViewModel, AdSnapshotChange, AdTeamCellModel } from '@Api'
+import api, {
+  AdCheckStatus,
+  AdFileBlob,
+  AdFileViewModel,
+  AdSnapshotChange,
+  AdSnapshotPointModel,
+  AdSnapshotTimeDiffModel,
+  AdTeamCellModel,
+} from '@Api'
 import misc from '@Styles/Misc.module.css'
 import tableClasses from '@Styles/AdOpsTable.module.css'
 
@@ -358,6 +367,123 @@ const FileDetail: FC<{ gameId: number; sid: number; path: string; onBack: () => 
   )
 }
 
+// "History" tab: pick two capture points and see which files the team touched
+// between them. Capture points accrue (deduped) as AdSnapshotService runs.
+const SnapshotHistory: FC<{ gameId: number; sid: number; onSelect: (path: string) => void }> = ({
+  gameId,
+  sid,
+  onSelect,
+}) => {
+  const { t } = useTranslation()
+  const [points, setPoints] = useState<AdSnapshotPointModel[]>([])
+  const [loading, setLoading] = useState(true)
+  const [fromId, setFromId] = useState<string | null>(null)
+  const [toId, setToId] = useState<string | null>(null)
+  const [diff, setDiff] = useState<AdSnapshotTimeDiffModel | null>(null)
+  const [diffLoading, setDiffLoading] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    api.edit
+      .editAdServiceSnapshots(gameId, sid)
+      .then(({ data }) => {
+        if (cancelled) return
+        setPoints(data)
+        if (data.length >= 2) {
+          setFromId(String(data[0].id))
+          setToId(String(data[data.length - 1].id))
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [gameId, sid])
+
+  useEffect(() => {
+    if (!fromId || !toId) return
+    let cancelled = false
+    setDiffLoading(true)
+    api.edit
+      .editAdSnapshotTimeDiff(gameId, sid, { fromId: Number(fromId), toId: Number(toId) })
+      .then(({ data }) => {
+        if (!cancelled) setDiff(data)
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setDiffLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [gameId, sid, fromId, toId])
+
+  if (loading)
+    return (
+      <Center h={120}>
+        <Loader size="sm" />
+      </Center>
+    )
+  if (points.length < 2)
+    return (
+      <Text size="sm" c="dimmed">
+        {t('admin.content.ad_ops.history.too_few',
+          'Not enough capture points yet — snapshots accrue as the team changes files over the game.')}
+      </Text>
+    )
+
+  const opts = points.map((p) => ({
+    value: String(p.id),
+    label: `#${p.round} · ${dayjs(p.capturedAt).format('HH:mm:ss')} (${p.fileCount})`,
+  }))
+
+  const row = (ch: AdSnapshotChange, color: string, label: string) => (
+    <UnstyledButton
+      key={`${label}-${ch.path}`}
+      onClick={() => onSelect(ch.path)}
+      style={{ width: '100%', borderRadius: 4, padding: '1px 4px' }}
+    >
+      <Group gap={6} wrap="nowrap">
+        <Badge size="xs" color={color} variant="filled" w={20} p={0}>
+          {label}
+        </Badge>
+        <Text className={misc.ffmono} size="xs" style={{ wordBreak: 'break-all' }}>
+          {ch.path}
+        </Text>
+      </Group>
+    </UnstyledButton>
+  )
+
+  return (
+    <Stack gap="sm">
+      <Group grow wrap="nowrap">
+        <Select size="xs" label={t('admin.content.ad_ops.history.from', 'From')} data={opts} value={fromId} onChange={setFromId} />
+        <Select size="xs" label={t('admin.content.ad_ops.history.to', 'To')} data={opts} value={toId} onChange={setToId} />
+      </Group>
+      {diffLoading ? (
+        <Center h={120}>
+          <Loader size="sm" />
+        </Center>
+      ) : diff && (diff.added.length > 0 || diff.removed.length > 0) ? (
+        <ScrollArea h={280} type="auto">
+          <Stack gap={2}>
+            {diff.added.map((ch) => row(ch, 'teal', '+'))}
+            {diff.removed.map((ch) => row(ch, 'red', '−'))}
+          </Stack>
+        </ScrollArea>
+      ) : (
+        <Text size="sm" c="dimmed">
+          {t('admin.content.ad_ops.history.no_change', 'No file changes between these two points.')}
+        </Text>
+      )}
+    </Stack>
+  )
+}
+
 const SnapshotModal: FC<{
   gameId: number
   target: SnapTarget | null
@@ -374,6 +500,7 @@ const SnapshotModal: FC<{
   const [debouncedFileSearch] = useDebouncedValue(fileSearch, 200)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [spawning, setSpawning] = useState(false)
+  const [tab, setTab] = useState<'changes' | 'history'>('changes')
   const sid = target?.cell.adTeamServiceId
   const hasSnapshot = !!target?.cell.snapshotAvailable
   const containerGuid = target?.cell.containerGuid
@@ -517,44 +644,61 @@ const SnapshotModal: FC<{
         />
         {selectedPath ? (
           <FileDetail gameId={gameId} sid={sid!} path={selectedPath} onBack={() => onSelectPath(null)} />
-        ) : loading ? (
-          <Center h={120}>
-            <Loader size="sm" />
-          </Center>
-        ) : changes.length === 0 ? (
-          <Text size="sm" c="dimmed">
-            {t('admin.content.ad_ops.snapshot.no_changes',
-              'No filesystem changes were recorded (snapshot may predate diff capture, or nothing changed).')}
-          </Text>
         ) : (
           <>
-            <TextInput
+            <SegmentedControl
               size="xs"
-              leftSection={<Icon path={mdiMagnify} size={0.8} />}
-              placeholder={t('admin.placeholder.ad_ops.search_file', 'Filter files…')}
-              value={fileSearch}
-              onChange={(e) => setFileSearch(e.currentTarget.value)}
+              value={tab}
+              onChange={(v) => setTab(v as 'changes' | 'history')}
+              data={[
+                { value: 'changes', label: t('admin.content.ad_ops.snapshot.tab_changes', 'Current changes') },
+                { value: 'history', label: t('admin.content.ad_ops.snapshot.tab_history', 'History (compare over time)') },
+              ]}
             />
-            <ScrollArea h={320} type="auto">
-              {filtered.length === 0 ? (
-                <Text size="sm" c="dimmed">
-                  {t('admin.content.ad_ops.snapshot.no_match', 'No files match the filter.')}
-                </Text>
-              ) : (
-                <FileTreeNode
-                  node={tree}
-                  depth={0}
-                  forceOpen={debouncedFileSearch !== ''}
-                  collapsed={collapsed}
-                  onToggle={toggleFolder}
-                  onSelect={onSelectPath}
+            {tab === 'history' ? (
+              sid != null ? (
+                <SnapshotHistory gameId={gameId} sid={sid} onSelect={onSelectPath} />
+              ) : null
+            ) : loading ? (
+              <Center h={120}>
+                <Loader size="sm" />
+              </Center>
+            ) : changes.length === 0 ? (
+              <Text size="sm" c="dimmed">
+                {t('admin.content.ad_ops.snapshot.no_changes',
+                  'No filesystem changes were recorded (snapshot may predate diff capture, or nothing changed).')}
+              </Text>
+            ) : (
+              <>
+                <TextInput
+                  size="xs"
+                  leftSection={<Icon path={mdiMagnify} size={0.8} />}
+                  placeholder={t('admin.placeholder.ad_ops.search_file', 'Filter files…')}
+                  value={fileSearch}
+                  onChange={(e) => setFileSearch(e.currentTarget.value)}
                 />
-              )}
-            </ScrollArea>
-            <Text size="xs" c="dimmed">
-              {t('admin.content.ad_ops.snapshot.click_hint',
-                'Click a file to view its content and diff vs the original image.')}
-            </Text>
+                <ScrollArea h={320} type="auto">
+                  {filtered.length === 0 ? (
+                    <Text size="sm" c="dimmed">
+                      {t('admin.content.ad_ops.snapshot.no_match', 'No files match the filter.')}
+                    </Text>
+                  ) : (
+                    <FileTreeNode
+                      node={tree}
+                      depth={0}
+                      forceOpen={debouncedFileSearch !== ''}
+                      collapsed={collapsed}
+                      onToggle={toggleFolder}
+                      onSelect={onSelectPath}
+                    />
+                  )}
+                </ScrollArea>
+                <Text size="xs" c="dimmed">
+                  {t('admin.content.ad_ops.snapshot.click_hint',
+                    'Click a file to view its content and diff vs the original image.')}
+                </Text>
+              </>
+            )}
           </>
         )}
       </Stack>

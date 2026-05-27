@@ -431,14 +431,78 @@ public class AdAdminController(
         if (model.Current is { Binary: false, Text: { } cur } && model.Baseline is { Binary: false, Text: { } bas })
             model.UnifiedDiff = BuildUnifiedDiff(bas, cur);
 
-        logger.LogInformation(
-            "AD File inspect: service={Sid} cid={Cid} path={Path} running={Run} current={Cur} baseline={Base} diff={Diff}",
-            adTeamServiceId, ts.ContainerId, path, model.ContainerRunning,
-            model.Current is null ? "null" : $"{model.Current.Size}b{(model.Current.Binary ? " bin" : "")}",
-            model.Baseline is null ? "null" : $"{model.Baseline.Size}b",
-            model.UnifiedDiff is null ? "null" : $"{model.UnifiedDiff.Length}c");
-
         return Ok(model);
+    }
+
+    /// <summary>The capture points in a service's file-change history — for choosing
+    /// two to diff (see <see cref="SnapshotTimeDiff"/>).</summary>
+    [RequireGameAdmin]
+    [HttpGet("Services/{adTeamServiceId:int}/Snapshots")]
+    [ProducesResponseType(typeof(AdSnapshotPointModel[]), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Snapshots(int id, int adTeamServiceId, CancellationToken token)
+    {
+        var ts = await db.AdTeamServices.Include(t => t.Participation)
+            .FirstOrDefaultAsync(t => t.Id == adTeamServiceId, token);
+        if (ts is null || ts.Participation.GameId != id) return NotFound();
+
+        var rows = await db.AdServiceSnapshots
+            .Where(s => s.AdTeamServiceId == adTeamServiceId)
+            .OrderBy(s => s.Id)
+            .Select(s => new { s.Id, Round = s.AdRound.Number, s.CapturedAt, s.ManifestJson })
+            .ToListAsync(token);
+
+        return Ok(rows.Select(r => new AdSnapshotPointModel
+        {
+            Id = r.Id,
+            Round = r.Round,
+            CapturedAt = r.CapturedAt,
+            FileCount = CountChanges(r.ManifestJson) ?? 0
+        }).ToList());
+    }
+
+    /// <summary>Diff a service between two capture points — which files the team
+    /// touched between them (file-level; content is the live current-vs-baseline view).</summary>
+    [RequireGameAdmin]
+    [HttpGet("Services/{adTeamServiceId:int}/SnapshotDiff")]
+    [ProducesResponseType(typeof(AdSnapshotTimeDiffModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> SnapshotTimeDiff(
+        int id, int adTeamServiceId, [FromQuery] int fromId, [FromQuery] int toId, CancellationToken token)
+    {
+        var ts = await db.AdTeamServices.Include(t => t.Participation)
+            .FirstOrDefaultAsync(t => t.Id == adTeamServiceId, token);
+        if (ts is null || ts.Participation.GameId != id) return NotFound();
+
+        var snaps = await db.AdServiceSnapshots
+            .Where(s => s.AdTeamServiceId == adTeamServiceId && (s.Id == fromId || s.Id == toId))
+            .Select(s => new { s.Id, s.ManifestJson })
+            .ToListAsync(token);
+
+        var fromSet = ParseManifest(snaps.FirstOrDefault(s => s.Id == fromId)?.ManifestJson);
+        var toSet = ParseManifest(snaps.FirstOrDefault(s => s.Id == toId)?.ManifestJson);
+
+        var model = new AdSnapshotTimeDiffModel();
+        foreach (var (path, kind) in toSet)
+            if (!fromSet.ContainsKey(path))
+                model.Added.Add(new AdSnapshotChange { Path = path, Kind = kind });
+        foreach (var (path, kind) in fromSet)
+            if (!toSet.ContainsKey(path))
+                model.Removed.Add(new AdSnapshotChange { Path = path, Kind = kind });
+        return Ok(model);
+    }
+
+    private static Dictionary<string, int> ParseManifest(string? json)
+    {
+        var map = new Dictionary<string, int>();
+        if (string.IsNullOrEmpty(json)) return map;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            foreach (var el in doc.RootElement.EnumerateArray())
+                map[el.GetProperty("p").GetString() ?? string.Empty] =
+                    el.TryGetProperty("k", out var k) ? k.GetInt32() : 0;
+        }
+        catch { /* malformed — empty */ }
+        return map;
     }
 
     /// <summary>
