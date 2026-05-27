@@ -20,10 +20,13 @@ services:
       - ContainerProvider__DockerConfig__ChallengeNetwork=z-test-challenges
       - ContainerProvider__PortMappingType=PlatformProxy
       - ContainerProvider__EnableTrafficCapture=true
-      # --- Kubernetes container backend (local k3d cluster `k3d-gzctf`) ---
-      # gzctf joins the k3d-gzctf docker network (see networks: below) to reach
-      # the API at https://k3d-gzctf-serverlb:6443 via the mounted kubeconfig.
-      - ContainerProvider__Type=Kubernetes
+      # --- Container backend ---
+      # Docker provider: challenges spawn as host docker containers on the
+      # z-test-challenges-{open,isolated} networks; /flag is the read-only
+      # ad-flags bind-mount (no pull sidecar); precise `docker diff` + post-game
+      # snapshot tarballs are available. Set Type=Kubernetes to use the k3d
+      # backend instead (KubernetesConfig + Ad__FlagPullBaseUrl below apply then).
+      - ContainerProvider__Type=Docker
       - ContainerProvider__KubernetesConfig__KubeConfig=/app/kube-config.yaml
       - ContainerProvider__KubernetesConfig__Namespace=gzctf-challenges
       # k3d side-loads images (`k3d image import`); don't force a registry pull.
