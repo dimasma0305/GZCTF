@@ -561,9 +561,27 @@ public class AdAdminController(
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> DestroyInspector(int id, int adTeamServiceId, Guid containerGuid, CancellationToken token)
     {
+        // Scope like every sibling endpoint: the caller (possibly a per-game
+        // EventManager, not a global admin) must administer the game this
+        // service belongs to.
+        var ts = await db.AdTeamServices
+            .Include(t => t.Participation)
+            .FirstOrDefaultAsync(t => t.Id == adTeamServiceId, token);
+        if (ts is null || ts.Participation.GameId != id) return NotFound();
+
         var container = await containerRepository.GetContainerById(containerGuid, token);
-        if (container is not null)
-            await containerRepository.DestroyContainer(container, token);
+        if (container is null) return Ok(); // already gone — idempotent
+
+        // Only ever reap a throwaway inspector here: never a jeopardy/exercise
+        // instance, nor any team's live A&D service container. Without this an
+        // authorized GUID would let this endpoint tear down real player/team
+        // containers (in this or any other game) — SpawnInspector containers
+        // carry no instance link and aren't referenced by any AdTeamService.
+        var isInstance = container.GameInstanceId is not null || container.ExerciseInstanceId is not null;
+        var isTeamService = await db.AdTeamServices.AnyAsync(t => t.ContainerId == container.Id, token);
+        if (isInstance || isTeamService) return NotFound();
+
+        await containerRepository.DestroyContainer(container, token);
         return Ok();
     }
 
