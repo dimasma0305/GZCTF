@@ -52,9 +52,10 @@ public sealed class GzEventModel
     /// <summary>
     /// Event-wide Attack &amp; Defense settings, applied to the Game. These are
     /// shared by every A&amp;D challenge in the event (rounds span the whole game,
-    /// so the tick is per-game, not per-challenge). All optional — omitted ones
-    /// keep the platform defaults. The per-challenge knobs (checker image,
-    /// egress, self-reset, jitter/grace) live in each challenge's <c>ad:</c> block.
+    /// so the tick — and the checker timing knobs that are fractions of it — are
+    /// per-game, not per-challenge). All optional — omitted ones keep the platform
+    /// defaults. The per-challenge knobs (checker image, egress, self-reset) live
+    /// in each challenge's <c>ad:</c> block.
     /// </summary>
     public AdEventSection? Ad { get; set; }
 
@@ -77,5 +78,11 @@ public sealed class GzEventModel
 
         /// <summary>Days to retain post-game snapshots; null = keep indefinitely.</summary>
         public int? SnapshotRetentionDays { get; set; }
+
+        /// <summary>Getflag jitter window as a fraction of the tick. Default 0.5.</summary>
+        public double? GetflagWindowFraction { get; set; }
+
+        /// <summary>Seconds after a round starts before getflag may fire. Default 3.</summary>
+        public int? MinGracePeriodSeconds { get; set; }
     }
 }

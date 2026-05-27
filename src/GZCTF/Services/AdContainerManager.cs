@@ -405,11 +405,32 @@ public sealed class AdContainerManager(
         "/tmp", "/run", "/etc/hosts", "/etc/resolv.conf", "/etc/hostname", "/etc/mtab"
     };
 
-    private static bool IsNoiseChangePath(string p) =>
+    internal static bool IsNoiseChangePath(string p) =>
         NoiseChangeExact.Contains(p) ||
         NoiseChangePrefixes.Any(pre => p.StartsWith(pre, StringComparison.Ordinal)) ||
         // Python bytecode cache — regenerated on first import, not a team change.
         p.Contains("__pycache__", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Collapse a raw <c>docker diff</c> change list to the changed leaf files and
+    /// drop runtime/churn noise. <c>docker diff</c> reports every ancestor directory
+    /// of a change (e.g. <c>/usr</c>, <c>/usr/local</c>, … leading to a touched
+    /// file); keep only entries that aren't a strict parent of a deeper entry, then
+    /// filter out the flag mount, <c>__pycache__</c>, <c>/run</c>, … (see
+    /// <see cref="IsNoiseChangePath"/>). Pure — extracted from the Docker branch of
+    /// <see cref="ComputeLiveChangesAsync"/> so it can be unit-tested.
+    /// </summary>
+    internal static List<(string Path, int Kind)> FilterAndCollapseChanges(
+        IReadOnlyList<(string Path, int Kind)> entries)
+    {
+        var paths = entries.Select(e => e.Path).ToList();
+        return entries
+            .Where(e => !paths.Any(o =>
+                o.Length > e.Path.Length && o.StartsWith(e.Path + "/", StringComparison.Ordinal)))
+            .Where(e => !IsNoiseChangePath(e.Path))
+            .Select(e => (e.Path, e.Kind))
+            .ToList();
+    }
 
     /// <summary>Human-readable summary of what the change-diff hides (see
     /// <see cref="IsNoiseChangePath"/> + the Docker ancestor-collapse). Surfaced in
@@ -455,17 +476,10 @@ public sealed class AdContainerManager(
                 var changes = await dockerProvider.GetProvider().Containers.InspectChangesAsync(cid, token);
                 if (changes is null) return [];
                 var entries = changes.Take(maxEntries).Select(c => (Path: c.Path, Kind: (int)c.Kind)).ToList();
-                var paths = entries.Select(e => e.Path).ToList();
                 // docker diff lists EVERY ancestor dir of a change (the K8s `find
-                // -type f` doesn't); keep only leaf paths so the diff shows the
-                // changed files, not the /usr/... chain leading to them. Then drop
-                // runtime/churn noise (the flag mount, __pycache__, /run, …).
-                return entries
-                    .Where(e => !paths.Any(o =>
-                        o.Length > e.Path.Length && o.StartsWith(e.Path + "/", StringComparison.Ordinal)))
-                    .Where(e => !IsNoiseChangePath(e.Path))
-                    .Select(e => (e.Path, e.Kind))
-                    .ToList();
+                // -type f` doesn't); collapse to leaf paths and drop runtime/churn
+                // noise (the flag mount, __pycache__, /run, …).
+                return FilterAndCollapseChanges(entries);
             }
             catch (Exception e)
             {
@@ -549,7 +563,7 @@ public sealed class AdContainerManager(
 
     /// <summary>Max bytes read per file (256 KiB). The reader pulls one extra byte
     /// to flag truncation.</summary>
-    private const int MaxFileBytes = 256 * 1024;
+    internal const int MaxFileBytes = 256 * 1024;
 
     /// <summary>argv for reading a file: base64 of the first <see cref="MaxFileBytes"/>+1
     /// bytes (or the literal <c>__NOFILE__</c> when absent). The path is a positional
@@ -638,7 +652,7 @@ public sealed class AdContainerManager(
         return DecodeFileOutput(b64);
     }
 
-    private static (byte[] Data, bool Truncated)? DecodeFileOutput(string? output)
+    internal static (byte[] Data, bool Truncated)? DecodeFileOutput(string? output)
     {
         var s = output?.Trim();
         if (string.IsNullOrEmpty(s) || s == "__NOFILE__")
@@ -667,7 +681,7 @@ public sealed class AdContainerManager(
     /// exhaust memory; the +16 KiB margin covers the tar header, 512-byte padding,
     /// the end-of-archive trailer, and any extended-header blocks.
     /// </remarks>
-    private static async Task<string?> ReadTarSingleFileAsync(Stream tar, CancellationToken token)
+    internal static async Task<string?> ReadTarSingleFileAsync(Stream tar, CancellationToken token)
     {
         using var buffer = new MemoryStream();
         await using (tar)

@@ -149,4 +149,61 @@ public class TransferGameTests
         Assert.Null(transfer.BloodBonus); // Should be null when BloodBonusValue is 0
         Assert.Null(transfer.PosterHash);
     }
+
+    [Fact]
+    public void ToTransfer_DefaultAdConfig_AdSectionStaysNull()
+    {
+        // A game with platform-default A&D config (or no A&D at all) shouldn't
+        // bloat its export with an Ad section.
+        var game = new Game
+        {
+            Title = "No AD",
+            Summary = "Summary",
+            Content = "Content",
+            StartTimeUtc = DateTimeOffset.UtcNow,
+            EndTimeUtc = DateTimeOffset.UtcNow.AddDays(1),
+            BloodBonusValue = 0
+        };
+
+        Assert.Null(game.ToTransfer().Ad);
+    }
+
+    [Fact]
+    public void AdConfig_RoundTrips()
+    {
+        // Event-wide A&D config survives a Game → TransferGame → Game round-trip
+        // (regression: export/import used to silently drop all A&D settings).
+        var game = new Game
+        {
+            Title = "AD Event",
+            Summary = "Summary",
+            Content = "Content",
+            StartTimeUtc = DateTimeOffset.UtcNow,
+            EndTimeUtc = DateTimeOffset.UtcNow.AddDays(1),
+            BloodBonusValue = 0,
+            AdWarmupSeconds = 600,
+            AdTickSeconds = 90,
+            AdFlagLifetimeTicks = 7,
+            AdResetCooldownMinutes = 10,
+            AdGetflagWindowFraction = 0.55,
+            AdMinGracePeriodSeconds = 5,
+            AdAllowSnapshotDownload = false,
+            AdSnapshotRetentionDays = 14
+        };
+
+        var transfer = game.ToTransfer();
+        Assert.NotNull(transfer.Ad);
+        Assert.Equal(90, transfer.Ad!.TickSeconds);
+
+        var roundTripped = transfer.ToGame();
+
+        Assert.Equal(600, roundTripped.AdWarmupSeconds);
+        Assert.Equal(90, roundTripped.AdTickSeconds);
+        Assert.Equal(7, roundTripped.AdFlagLifetimeTicks);
+        Assert.Equal(10, roundTripped.AdResetCooldownMinutes);
+        Assert.Equal(0.55, roundTripped.AdGetflagWindowFraction!.Value);
+        Assert.Equal(5, roundTripped.AdMinGracePeriodSeconds);
+        Assert.False(roundTripped.AdAllowSnapshotDownload);
+        Assert.Equal(14, roundTripped.AdSnapshotRetentionDays);
+    }
 }

@@ -92,6 +92,28 @@ public class TransferGame : IValidatableObject
     /// </summary>
     public List<TransferDivision> Divisions { get; set; } = [];
 
+    /// <summary>
+    /// Event-wide Attack &amp; Defense configuration. Null when the game has no
+    /// non-default A&amp;D settings (so non-A&amp;D game exports stay clean). Shared
+    /// by every A&amp;D challenge in the game — per-challenge knobs live on each
+    /// <see cref="TransferChallenge.Ad"/>.
+    /// </summary>
+    public AdGameSection? Ad { get; set; }
+
+    /// <summary>Event-wide A&amp;D settings carried by the game transfer. All
+    /// optional; omitted fields keep the platform defaults on import.</summary>
+    public sealed class AdGameSection
+    {
+        public int? WarmupSeconds { get; set; }
+        public int? TickSeconds { get; set; }
+        public int? FlagLifetimeTicks { get; set; }
+        public int? ResetCooldownMinutes { get; set; }
+        public double? GetflagWindowFraction { get; set; }
+        public int? MinGracePeriodSeconds { get; set; }
+        public bool? AllowSnapshotDownload { get; set; }
+        public int? SnapshotRetentionDays { get; set; }
+    }
+
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         if (EndTime <= StartTime)

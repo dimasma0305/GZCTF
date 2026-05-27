@@ -9,7 +9,11 @@ namespace GZCTF.Test.UnitTests.Transfer;
 
 /// <summary>
 /// Tests for the Attack &amp; Defense extensions to the challenge.yml transfer
-/// format added in Phase 1 slice 1H.
+/// format. Per-challenge A&amp;D config is limited to the checker image + the two
+/// network-policy toggles; tick length, flag lifetime, reset cooldown, snapshot
+/// download, and the checker timing knobs (getflag jitter window + min grace
+/// period) are EVENT-WIDE and live on <see cref="Game"/>, not the challenge — so
+/// they are not part of the per-challenge transfer.
 /// </summary>
 public class TransferChallengeAdTests
 {
@@ -32,15 +36,8 @@ public class TransferChallengeAdTests
         ExposePort = 8080,
         NetworkMode = NetworkMode.Open,
         AdCheckerImage = "ghcr.io/myorg/vuln-flask-checker:1.0",
-        AdTickSeconds = 90,
-        AdFlagLifetimeTicks = 7,
         AdAllowEgress = true,
-        AdAllowSelfReset = false,
-        AdResetCooldownMinutes = 10,
-        AdAllowSnapshotDownload = false,
-        AdPutflagWindowFraction = 0.35,
-        AdGetflagWindowFraction = 0.55,
-        AdMinGracePeriodSeconds = 5
+        AdAllowSelfReset = false
     };
 
     [Fact]
@@ -57,15 +54,8 @@ public class TransferChallengeAdTests
         Assert.NotNull(transfer.Ad);
         var ad = transfer.Ad!;
         Assert.Equal("ghcr.io/myorg/vuln-flask-checker:1.0", ad.CheckerImage);
-        Assert.Equal(90, ad.TickSeconds);
-        Assert.Equal(7, ad.FlagLifetimeTicks);
         Assert.True(ad.AllowEgress);
         Assert.False(ad.AllowSelfReset);
-        Assert.Equal(10, ad.ResetCooldownMinutes);
-        Assert.False(ad.AllowSnapshotDownload);
-        Assert.Equal(0.35, ad.PutflagWindowFraction);
-        Assert.Equal(0.55, ad.GetflagWindowFraction);
-        Assert.Equal(5, ad.MinGracePeriodSeconds);
     }
 
     [Fact]
@@ -86,23 +76,16 @@ public class TransferChallengeAdTests
     [Fact]
     public void ToChallenge_AdSection_RoundTrips()
     {
-        // Round-trip: GameChallenge → TransferChallenge → GameChallenge with
-        // Ad fields preserved.
+        // Round-trip: GameChallenge → TransferChallenge → GameChallenge with the
+        // per-challenge Ad fields preserved.
         var original = MakeAdChallenge();
 
         var roundTripped = original.ToTransfer().ToChallenge();
 
         Assert.Equal(ChallengeType.AttackDefense, roundTripped.Type);
         Assert.Equal(original.AdCheckerImage, roundTripped.AdCheckerImage);
-        Assert.Equal(original.AdTickSeconds, roundTripped.AdTickSeconds);
-        Assert.Equal(original.AdFlagLifetimeTicks, roundTripped.AdFlagLifetimeTicks);
         Assert.Equal(original.AdAllowEgress, roundTripped.AdAllowEgress);
         Assert.Equal(original.AdAllowSelfReset, roundTripped.AdAllowSelfReset);
-        Assert.Equal(original.AdResetCooldownMinutes, roundTripped.AdResetCooldownMinutes);
-        Assert.Equal(original.AdAllowSnapshotDownload, roundTripped.AdAllowSnapshotDownload);
-        Assert.Equal(original.AdPutflagWindowFraction, roundTripped.AdPutflagWindowFraction);
-        Assert.Equal(original.AdGetflagWindowFraction, roundTripped.AdGetflagWindowFraction);
-        Assert.Equal(original.AdMinGracePeriodSeconds, roundTripped.AdMinGracePeriodSeconds);
 
         // Container fields round-trip too (A&D inherits the same container shape).
         Assert.Equal(original.ContainerImage, roundTripped.ContainerImage);
@@ -114,8 +97,8 @@ public class TransferChallengeAdTests
     [Fact]
     public void ToChallenge_OmittedAdFields_KeepGameChallengeDefaults()
     {
-        // When operator omits optional ad.* fields, the resulting GameChallenge
-        // should retain its column defaults (120s tick, etc.) rather than getting
+        // When the operator omits the optional ad.* toggles, the resulting
+        // GameChallenge should retain its column defaults rather than getting
         // null'd out.
         var transfer = new TransferChallenge
         {
@@ -129,17 +112,10 @@ public class TransferChallengeAdTests
         var c = transfer.ToChallenge();
 
         Assert.Equal("checker:1", c.AdCheckerImage);
-        // Tick + lifetime + windows retained from the GameChallenge default
-        // initializer (120 / 5 / 0.4 / 0.5 / 3).
-        Assert.Equal(120, c.AdTickSeconds);
-        Assert.Equal(5, c.AdFlagLifetimeTicks);
-        Assert.Equal(0.4, c.AdPutflagWindowFraction);
-        Assert.Equal(0.5, c.AdGetflagWindowFraction);
-        Assert.Equal(3, c.AdMinGracePeriodSeconds);
-        // Booleans default per GameChallenge initializer:
-        Assert.False(c.AdAllowEgress);
+        // Booleans default per the GameChallenge initializer: egress is OPEN by
+        // default (challenges reach the internet unless sandboxed), self-reset on.
+        Assert.True(c.AdAllowEgress);
         Assert.True(c.AdAllowSelfReset);
-        Assert.True(c.AdAllowSnapshotDownload);
     }
 
     [Fact]

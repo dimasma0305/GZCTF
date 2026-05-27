@@ -109,7 +109,7 @@ public sealed class AdCheckerService(
     /// to leave one poll interval before the round ends so the check still fires
     /// before the round advances. Re-rolls each round.
     /// </summary>
-    private static DateTimeOffset GetflagDueAt(
+    internal static DateTimeOffset GetflagDueAt(
         AdTeamService ts, AdRound round, double tickSeconds, double pollSeconds, int graceSeconds, double getflagFraction)
     {
         var grace = Math.Max(0, graceSeconds);
@@ -123,7 +123,7 @@ public sealed class AdCheckerService(
     /// <summary>Deterministic [0,1) per (service, round): stable across polls and
     /// process restarts (so the due time never moves mid-tick) but fresh every
     /// round (so the jitter pattern can't be fingerprinted).</summary>
-    private static double StableJitterFraction(int serviceId, int roundId)
+    internal static double StableJitterFraction(int serviceId, int roundId)
     {
         unchecked
         {

@@ -329,6 +329,8 @@ public sealed class RepoBindingDiscoveryService(
             if (ad.ResetCooldownMinutes is { } rc) g.AdResetCooldownMinutes = rc;
             if (ad.AllowSnapshotDownload is { } asd) g.AdAllowSnapshotDownload = asd;
             if (ad.SnapshotRetentionDays is { } srd) g.AdSnapshotRetentionDays = srd;
+            if (ad.GetflagWindowFraction is { } gw) g.AdGetflagWindowFraction = gw;
+            if (ad.MinGracePeriodSeconds is { } mg) g.AdMinGracePeriodSeconds = mg;
         }
 
         if (existing is null)

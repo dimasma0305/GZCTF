@@ -395,7 +395,16 @@ public class GameExportImportTests(GZCTFApplicationFactory factory, ITestOutputH
             EndTimeUtc = DateTimeOffset.UtcNow.AddDays(7),
             WriteupRequired = true,
             WriteupDeadline = DateTimeOffset.UtcNow.AddDays(14),
-            BloodBonus = new BloodBonus((50L << 20) + (30L << 10) + 10L) // First=50, Second=30, Third=10
+            BloodBonus = new BloodBonus((50L << 20) + (30L << 10) + 10L), // First=50, Second=30, Third=10
+            // Event-wide A&D config (non-default) — must survive export/import.
+            AdWarmupSeconds = 600,
+            AdTickSeconds = 90,
+            AdFlagLifetimeTicks = 7,
+            AdResetCooldownMinutes = 10,
+            AdGetflagWindowFraction = 0.55,
+            AdMinGracePeriodSeconds = 5,
+            AdAllowSnapshotDownload = false,
+            AdSnapshotRetentionDays = 14
         };
 
         await context.Games.AddAsync(game);
@@ -690,6 +699,17 @@ public class GameExportImportTests(GZCTFApplicationFactory factory, ITestOutputH
 
         // Writeup
         Assert.Equal(originalGame.WriteupRequired, importedGame.WriteupRequired);
+
+        // Event-wide A&D config must round-trip through export/import.
+        Assert.Equal(originalGame.AdWarmupSeconds, importedGame.AdWarmupSeconds);
+        Assert.Equal(originalGame.AdTickSeconds, importedGame.AdTickSeconds);
+        Assert.Equal(originalGame.AdFlagLifetimeTicks, importedGame.AdFlagLifetimeTicks);
+        Assert.Equal(originalGame.AdResetCooldownMinutes, importedGame.AdResetCooldownMinutes);
+        Assert.Equal(originalGame.AdGetflagWindowFraction, importedGame.AdGetflagWindowFraction);
+        Assert.Equal(originalGame.AdMinGracePeriodSeconds, importedGame.AdMinGracePeriodSeconds);
+        Assert.Equal(originalGame.AdAllowSnapshotDownload, importedGame.AdAllowSnapshotDownload);
+        Assert.Equal(originalGame.AdSnapshotRetentionDays, importedGame.AdSnapshotRetentionDays);
+        output.WriteLine("A&D config preserved through export/import ✓");
 
         // Validate divisions
         Assert.NotNull(importedGame.Divisions);

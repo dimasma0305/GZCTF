@@ -55,6 +55,31 @@ public static class TransferExtensions
             if (!string.IsNullOrWhiteSpace(game.PosterHash))
                 transfer.PosterHash = game.PosterHash;
 
+            // Event-wide A&D config — emit only when it deviates from the platform
+            // defaults, so non-A&D game exports stay clean while configured A&D
+            // games round-trip. (Runtime pause state is intentionally excluded.)
+            if ((game.AdWarmupSeconds ?? 1800) != 1800
+                || (game.AdTickSeconds ?? 60) != 60
+                || (game.AdFlagLifetimeTicks ?? 5) != 5
+                || (game.AdResetCooldownMinutes ?? 5) != 5
+                || Math.Abs((game.AdGetflagWindowFraction ?? 0.5) - 0.5) > 1e-9
+                || (game.AdMinGracePeriodSeconds ?? 3) != 3
+                || !game.AdAllowSnapshotDownload
+                || game.AdSnapshotRetentionDays is not null)
+            {
+                transfer.Ad = new TransferGame.AdGameSection
+                {
+                    WarmupSeconds = game.AdWarmupSeconds,
+                    TickSeconds = game.AdTickSeconds,
+                    FlagLifetimeTicks = game.AdFlagLifetimeTicks,
+                    ResetCooldownMinutes = game.AdResetCooldownMinutes,
+                    GetflagWindowFraction = game.AdGetflagWindowFraction,
+                    MinGracePeriodSeconds = game.AdMinGracePeriodSeconds,
+                    AllowSnapshotDownload = game.AdAllowSnapshotDownload,
+                    SnapshotRetentionDays = game.AdSnapshotRetentionDays
+                };
+            }
+
             return transfer;
         }
     }
@@ -242,6 +267,20 @@ public static class TransferExtensions
             else
             {
                 game.BloodBonusValue = 0; // No bonus
+            }
+
+            // Event-wide A&D config — apply each provided field; omitted ones keep
+            // the Game's platform defaults.
+            if (transfer.Ad is { } ad)
+            {
+                if (ad.WarmupSeconds is { } ws) game.AdWarmupSeconds = ws;
+                if (ad.TickSeconds is { } ts) game.AdTickSeconds = ts;
+                if (ad.FlagLifetimeTicks is { } fl) game.AdFlagLifetimeTicks = fl;
+                if (ad.ResetCooldownMinutes is { } rc) game.AdResetCooldownMinutes = rc;
+                if (ad.GetflagWindowFraction is { } gw) game.AdGetflagWindowFraction = gw;
+                if (ad.MinGracePeriodSeconds is { } mg) game.AdMinGracePeriodSeconds = mg;
+                if (ad.AllowSnapshotDownload is { } asd) game.AdAllowSnapshotDownload = asd;
+                if (ad.SnapshotRetentionDays is { } srd) game.AdSnapshotRetentionDays = srd;
             }
 
             return game;
