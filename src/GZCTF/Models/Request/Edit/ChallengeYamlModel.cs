@@ -110,31 +110,12 @@ public sealed class ChallengeYamlModel
         [YamlMember(Alias = "allowSelfReset")]
         public bool? AllowSelfReset { get; set; }
 
-        /// <summary>
-        /// Fraction of the tick within which the checker may plant this
-        /// service's flag (anti-fingerprinting jitter). Default 0.4.
-        /// </summary>
-        [YamlMember(Alias = "putflagWindowFraction")]
-        public double? PutflagWindowFraction { get; set; }
-
-        /// <summary>
-        /// Fraction of the tick within which the checker may retrieve the
-        /// flag (after the min grace period). Default 0.5.
-        /// </summary>
-        [YamlMember(Alias = "getflagWindowFraction")]
-        public double? GetflagWindowFraction { get; set; }
-
-        /// <summary>
-        /// Seconds after putflag before getflag may fire — lets a slow service
-        /// settle so a too-early check doesn't false-fail. Default 3.
-        /// </summary>
-        [YamlMember(Alias = "minGracePeriodSeconds")]
-        public int? MinGracePeriodSeconds { get; set; }
-
         // tickSeconds / flagLifetimeTicks / warmupSeconds / resetCooldownMinutes
-        // / allowSnapshotDownload are EVENT-WIDE — set them in the `ad:` block of
-        // the .gzevent manifest (or admin game settings), not per challenge:
-        // rounds span the whole game, so a per-challenge tick is never honored.
+        // / allowSnapshotDownload / getflagWindowFraction / minGracePeriodSeconds
+        // are EVENT-WIDE — set them in the `ad:` block of the .gzevent manifest
+        // (or admin game settings), not per challenge: rounds span the whole
+        // game, so a per-challenge tick is never honored and the checker timing
+        // knobs are fractions of that one shared tick.
     }
 
     public sealed class ContainerSection

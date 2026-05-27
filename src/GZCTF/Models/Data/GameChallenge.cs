@@ -80,9 +80,6 @@ public class GameChallenge : Challenge
         AdCheckerImage = model.AdCheckerImage?.Trim() ?? AdCheckerImage;
         AdAllowEgress = model.AdAllowEgress ?? AdAllowEgress;
         AdAllowSelfReset = model.AdAllowSelfReset ?? AdAllowSelfReset;
-        AdPutflagWindowFraction = model.AdPutflagWindowFraction ?? AdPutflagWindowFraction;
-        AdGetflagWindowFraction = model.AdGetflagWindowFraction ?? AdGetflagWindowFraction;
-        AdMinGracePeriodSeconds = model.AdMinGracePeriodSeconds ?? AdMinGracePeriodSeconds;
 
         // isEnabled should be updated alone
         IsEnabled = model.IsEnabled ?? IsEnabled;
@@ -165,31 +162,14 @@ public class GameChallenge : Challenge
     /// </summary>
     public bool AdAllowSelfReset { get; set; } = true;
 
-    // Tick length, flag lifetime, reset cooldown, and snapshot-download are
+    // Tick length, flag lifetime, reset cooldown, snapshot-download, and the
+    // checker timing knobs (getflag jitter window + min grace period) are all
     // EVENT-WIDE policy and live on Game (AdTickSeconds, AdFlagLifetimeTicks,
-    // AdResetCooldownMinutes, AdAllowSnapshotDownload). Rounds span the whole
-    // game, so a per-challenge tick was never actually honored — the round
-    // advancer collapsed them to a single value.
-
-    /// <summary>
-    /// Putflag jitter window as a fraction of the tick duration. Default 0.4
-    /// = the checker plants flags somewhere in the first 40% of each tick.
-    /// Per-(team, service) random offset within this window — defeats timing-
-    /// based Superman patches.
-    /// </summary>
-    public double? AdPutflagWindowFraction { get; set; } = 0.4;
-
-    /// <summary>
-    /// Getflag jitter window as a fraction of the tick duration, applied
-    /// after putflag + min grace period. Default 0.5.
-    /// </summary>
-    public double? AdGetflagWindowFraction { get; set; } = 0.5;
-
-    /// <summary>
-    /// Seconds after putflag before getflag may fire — gives the service time
-    /// to commit the flag. Default 3.
-    /// </summary>
-    public int? AdMinGracePeriodSeconds { get; set; } = 3;
+    // AdResetCooldownMinutes, AdAllowSnapshotDownload, AdGetflagWindowFraction,
+    // AdMinGracePeriodSeconds). Rounds span the whole game, so a per-challenge
+    // tick was never actually honored, and the jitter/grace are fractions of
+    // that shared tick — the random offset is still rolled per (team, service,
+    // round), so anti-fingerprinting is unaffected by sharing one window size.
 
     #endregion
 }

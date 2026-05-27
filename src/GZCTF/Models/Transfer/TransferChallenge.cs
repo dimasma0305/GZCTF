@@ -128,21 +128,10 @@ public class AdSection
     /// <summary>Whether teams can self-reset their own container. Default true.</summary>
     public bool? AllowSelfReset { get; set; }
 
-    // tick_seconds, flag_lifetime_ticks, reset_cooldown_minutes, and
-    // allow_snapshot_download are EVENT-WIDE policy and live on the game,
-    // not the challenge — see Game.Ad* fields.
-
-    /// <summary>Putflag jitter window as a fraction of the tick. Default 0.4.</summary>
-    [Range(0.01, 0.9, ErrorMessage = "putflag_window_fraction must be 0.01..0.9")]
-    public double? PutflagWindowFraction { get; set; }
-
-    /// <summary>Getflag jitter window as a fraction of the tick. Default 0.5.</summary>
-    [Range(0.01, 0.9, ErrorMessage = "getflag_window_fraction must be 0.01..0.9")]
-    public double? GetflagWindowFraction { get; set; }
-
-    /// <summary>Min seconds between putflag and getflag. Default 3.</summary>
-    [Range(1, 60, ErrorMessage = "min_grace_period_seconds must be 1..60")]
-    public int? MinGracePeriodSeconds { get; set; }
+    // tick_seconds, flag_lifetime_ticks, reset_cooldown_minutes,
+    // allow_snapshot_download, and the checker timing knobs (getflag jitter
+    // window + min grace period) are all EVENT-WIDE policy and live on the
+    // game, not the challenge — see Game.Ad* fields.
 }
 
 public class ScoringSection

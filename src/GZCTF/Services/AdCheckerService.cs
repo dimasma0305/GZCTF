@@ -109,10 +109,11 @@ public sealed class AdCheckerService(
     /// to leave one poll interval before the round ends so the check still fires
     /// before the round advances. Re-rolls each round.
     /// </summary>
-    private static DateTimeOffset GetflagDueAt(AdTeamService ts, AdRound round, double tickSeconds, double pollSeconds)
+    private static DateTimeOffset GetflagDueAt(
+        AdTeamService ts, AdRound round, double tickSeconds, double pollSeconds, int graceSeconds, double getflagFraction)
     {
-        var grace = Math.Max(0, ts.Challenge.AdMinGracePeriodSeconds ?? 3);
-        var getFrac = Math.Clamp(ts.Challenge.AdGetflagWindowFraction ?? 0.5, 0.0, 1.0);
+        var grace = Math.Max(0, graceSeconds);
+        var getFrac = Math.Clamp(getflagFraction, 0.0, 1.0);
         var graceSec = Math.Min(grace, tickSeconds * 0.5);
         var maxJitter = Math.Max(0.0, tickSeconds - graceSec - pollSeconds);
         var jitterSec = Math.Min(getFrac * tickSeconds, maxJitter);
@@ -194,7 +195,16 @@ public sealed class AdCheckerService(
         var nowTs = DateTimeOffset.UtcNow;
         var tickSeconds = Math.Max(1.0, (latest.EndsAt - latest.StartedAt).TotalSeconds);
         var pollSeconds = PollInterval.TotalSeconds;
-        var due = pending.Where(ts => nowTs >= GetflagDueAt(ts, latest, tickSeconds, pollSeconds)).ToList();
+        // Getflag jitter window + min grace are event-wide (on Game): the tick
+        // they're fractions of is shared across all A&D services in the game.
+        var timing = await db.Games
+            .Where(g => g.Id == gameId)
+            .Select(g => new { g.AdGetflagWindowFraction, g.AdMinGracePeriodSeconds })
+            .FirstOrDefaultAsync(token);
+        var graceSeconds = timing?.AdMinGracePeriodSeconds ?? 3;
+        var getflagFraction = timing?.AdGetflagWindowFraction ?? 0.5;
+        var due = pending.Where(ts =>
+            nowTs >= GetflagDueAt(ts, latest, tickSeconds, pollSeconds, graceSeconds, getflagFraction)).ToList();
         if (due.Count == 0) return;
 
         // Custom-image checkers run one-per-check (enochecker one-target contract);

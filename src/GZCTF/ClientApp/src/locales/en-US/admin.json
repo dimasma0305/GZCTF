@@ -332,18 +332,6 @@
             "label": "Reset cooldown (min)",
             "description": "Minimum minutes between consecutive self-resets per team."
           },
-          "putflag_window_fraction": {
-            "label": "Putflag jitter window",
-            "description": "Fraction of the tick within which the checker may plant flags. Defeats timing-based fingerprinting."
-          },
-          "getflag_window_fraction": {
-            "label": "Getflag jitter window",
-            "description": "Fraction of the tick within which the checker may retrieve flags."
-          },
-          "min_grace_period_seconds": {
-            "label": "Min grace period (s)",
-            "description": "Seconds after putflag before getflag may fire."
-          },
           "allow_egress": {
             "label": "Allow external internet",
             "description": "Default off — A&D containers are sandboxed from the public internet. Enable only if your service genuinely needs an external API call."
@@ -503,6 +491,14 @@
         "ad_reset_cooldown_minutes": {
           "label": "A&D reset cooldown (minutes)",
           "description": "Minimum minutes between a team's container self-resets (default 5). Whether a service can be reset at all is per-challenge."
+        },
+        "ad_getflag_window_fraction": {
+          "label": "A&D getflag jitter window",
+          "description": "Fraction of the tick within which the SLA check (getflag) may fire, after the grace period (default 0.5). Event-wide; each team's check still gets an independent random offset, so the check time can't be predicted."
+        },
+        "ad_min_grace_period_seconds": {
+          "label": "A&D min grace period (s)",
+          "description": "Seconds after a round starts (flags planted) before getflag may fire — lets services commit the flag first (default 3)."
         },
         "ad_allow_snapshot_download": {
           "label": "A&D snapshot download",

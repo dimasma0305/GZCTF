@@ -1339,6 +1339,13 @@ export interface GameInfoModel {
   adResetCooldownMinutes?: number | null;
   /** A&D — snapshot team containers at game end for download (default true). */
   adAllowSnapshotDownload?: boolean | null;
+  /** A&D — getflag jitter window as a fraction of the tick (default 0.5). */
+  adGetflagWindowFraction?: number | null;
+  /**
+   * A&D — seconds after a round starts before getflag may fire (default 3).
+   * @format int32
+   */
+  adMinGracePeriodSeconds?: number | null;
 }
 
 /** List response */
@@ -1564,12 +1571,6 @@ export interface ChallengeEditDetailModel {
   adAllowEgress?: boolean | null;
   /** A&D — When true, teams can self-reset to baseline. */
   adAllowSelfReset?: boolean | null;
-  /** A&D — putflag jitter window as a fraction of the tick. */
-  adPutflagWindowFraction?: number | null;
-  /** A&D — getflag jitter window as a fraction of the tick. */
-  adGetflagWindowFraction?: number | null;
-  /** A&D — seconds after putflag before getflag may fire. */
-  adMinGracePeriodSeconds?: number | null;
   /** Current build pipeline state */
   buildStatus?: ChallengeBuildStatus;
   /** Live-updated build log tail */
@@ -1827,12 +1828,6 @@ export interface ChallengeUpdateModel {
   adAllowEgress?: boolean | null;
   /** A&D — When true, teams can self-reset to baseline (default true). */
   adAllowSelfReset?: boolean | null;
-  /** A&D — putflag jitter window as a fraction of tick (default 0.4). */
-  adPutflagWindowFraction?: number | null;
-  /** A&D — getflag jitter window as a fraction of tick (default 0.5). */
-  adGetflagWindowFraction?: number | null;
-  /** A&D — Seconds between putflag and getflag (default 3). */
-  adMinGracePeriodSeconds?: number | null;
 }
 
 /**

@@ -233,6 +233,8 @@ public partial class Game
         if (model.AdFlagLifetimeTicks is { } lifetime) AdFlagLifetimeTicks = lifetime;
         if (model.AdResetCooldownMinutes is { } cooldown) AdResetCooldownMinutes = cooldown;
         if (model.AdAllowSnapshotDownload is { } snap) AdAllowSnapshotDownload = snap;
+        if (model.AdGetflagWindowFraction is { } getFrac) AdGetflagWindowFraction = getFrac;
+        if (model.AdMinGracePeriodSeconds is { } grace) AdMinGracePeriodSeconds = grace;
 
         return this;
     }
@@ -333,6 +335,23 @@ public partial class Game
     /// <c>GameChallenge.AdAllowSelfReset</c> flag.)
     /// </summary>
     public int? AdResetCooldownMinutes { get; set; } = 5;
+
+    /// <summary>
+    /// Getflag jitter window as a fraction of the tick, applied after the min
+    /// grace period. Each (team, service) gets an independent random offset
+    /// within this window every round, so the SLA-check instant can't be
+    /// predicted (a team can't hide a popped box only during the check).
+    /// Event-wide — every A&amp;D service shares the tick this is a fraction of.
+    /// Default 0.5.
+    /// </summary>
+    public double? AdGetflagWindowFraction { get; set; } = 0.5;
+
+    /// <summary>
+    /// Seconds after a round starts (flags planted) before getflag may fire —
+    /// gives services time to commit the planted flag. Capped at half the tick
+    /// by the scheduler. Event-wide. Default 3.
+    /// </summary>
+    public int? AdMinGracePeriodSeconds { get; set; } = 3;
 
     /// <summary>
     /// If true, each team's final container state is committed + saved as a

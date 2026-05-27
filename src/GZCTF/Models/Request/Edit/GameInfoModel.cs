@@ -163,6 +163,17 @@ public class GameInfoModel : IValidatableObject
     /// </summary>
     public bool? AdAllowSnapshotDownload { get; set; }
 
+    /// <summary>
+    /// A&amp;D — getflag jitter window as a fraction of the tick (default 0.5).
+    /// Event-wide; the random offset is still rolled per (team, service, round).
+    /// </summary>
+    public double? AdGetflagWindowFraction { get; set; }
+
+    /// <summary>
+    /// A&amp;D — seconds after a round starts before getflag may fire (default 3).
+    /// </summary>
+    public int? AdMinGracePeriodSeconds { get; set; }
+
     internal static GameInfoModel FromGame(Data.Game game) =>
         new()
         {
@@ -192,7 +203,9 @@ public class GameInfoModel : IValidatableObject
             AdTickSeconds = game.AdTickSeconds,
             AdFlagLifetimeTicks = game.AdFlagLifetimeTicks,
             AdResetCooldownMinutes = game.AdResetCooldownMinutes,
-            AdAllowSnapshotDownload = game.AdAllowSnapshotDownload
+            AdAllowSnapshotDownload = game.AdAllowSnapshotDownload,
+            AdGetflagWindowFraction = game.AdGetflagWindowFraction,
+            AdMinGracePeriodSeconds = game.AdMinGracePeriodSeconds
         };
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)

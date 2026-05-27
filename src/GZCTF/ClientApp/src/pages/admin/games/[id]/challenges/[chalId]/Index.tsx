@@ -746,55 +746,11 @@ const GameChallengeEdit: FC = () => {
                   onChange={(e) => setChallengeInfo({ ...challengeInfo, adCheckerImage: e.target.value })}
                 />
               </Grid.Col>
-              {/* tick / flag-lifetime / reset-cooldown / snapshot-download are
-                  event-wide now — edit them in the game's settings (Info tab),
-                  not per challenge. */}
-              <Grid.Col span={2}>
-                <NumberInput
-                  label={t('admin.content.games.challenges.ad.putflag_window_fraction.label')}
-                  description={t('admin.content.games.challenges.ad.putflag_window_fraction.description')}
-                  min={0.05}
-                  max={0.9}
-                  step={0.05}
-                  decimalScale={2}
-                  disabled={disabled}
-                  value={challengeInfo.adPutflagWindowFraction ?? 0.4}
-                  onChange={(e) => {
-                    const n = getInputNumber(e)
-                    if (!isNaN(n)) setChallengeInfo({ ...challengeInfo, adPutflagWindowFraction: n })
-                  }}
-                />
-              </Grid.Col>
-              <Grid.Col span={2}>
-                <NumberInput
-                  label={t('admin.content.games.challenges.ad.getflag_window_fraction.label')}
-                  description={t('admin.content.games.challenges.ad.getflag_window_fraction.description')}
-                  min={0.05}
-                  max={0.9}
-                  step={0.05}
-                  decimalScale={2}
-                  disabled={disabled}
-                  value={challengeInfo.adGetflagWindowFraction ?? 0.5}
-                  onChange={(e) => {
-                    const n = getInputNumber(e)
-                    if (!isNaN(n)) setChallengeInfo({ ...challengeInfo, adGetflagWindowFraction: n })
-                  }}
-                />
-              </Grid.Col>
-              <Grid.Col span={2}>
-                <NumberInput
-                  label={t('admin.content.games.challenges.ad.min_grace_period_seconds.label')}
-                  description={t('admin.content.games.challenges.ad.min_grace_period_seconds.description')}
-                  min={1}
-                  max={60}
-                  disabled={disabled}
-                  value={challengeInfo.adMinGracePeriodSeconds ?? 3}
-                  onChange={(e) => {
-                    const n = getInputNumber(e)
-                    if (!isNaN(n)) setChallengeInfo({ ...challengeInfo, adMinGracePeriodSeconds: n })
-                  }}
-                />
-              </Grid.Col>
+              {/* tick / flag-lifetime / reset-cooldown / snapshot-download AND the
+                  checker timing knobs (getflag jitter window + min grace period)
+                  are event-wide now — edit them in the game's settings (Info tab),
+                  not per challenge. The putflag jitter window was removed (flags
+                  plant at round start; it was never honored). */}
               <Grid.Col span={6} display="flex" className={misc.alignCenter}>
                 <Switch
                   disabled={disabled}

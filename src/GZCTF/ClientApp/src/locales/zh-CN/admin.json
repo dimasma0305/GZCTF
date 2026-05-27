@@ -340,18 +340,6 @@
             "label": "自重置冷却（分钟）",
             "description": "团队连续重置容器的最小间隔。"
           },
-          "putflag_window_fraction": {
-            "label": "Putflag 抖动窗口",
-            "description": "Checker 可在 tick 内的哪段比例投放 Flag。用于打乱基于时间的指纹。"
-          },
-          "getflag_window_fraction": {
-            "label": "Getflag 抖动窗口",
-            "description": "Checker 可在 tick 内的哪段比例读取 Flag。"
-          },
-          "min_grace_period_seconds": {
-            "label": "最小宽限期（秒）",
-            "description": "putflag 与 getflag 之间的最小间隔。"
-          },
           "allow_egress": {
             "label": "允许访问外网",
             "description": "默认关闭——A&D 容器与公网隔离。仅在服务必须调用外部 API 时启用。"

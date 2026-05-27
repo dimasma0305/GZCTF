@@ -475,6 +475,32 @@ const GameInfoEdit: FC = () => {
             if (!isNaN(n)) game && setGame({ ...game, adResetCooldownMinutes: n })
           }}
         />
+        <NumberInput
+          label={t('admin.content.games.info.ad_getflag_window_fraction.label')}
+          description={t('admin.content.games.info.ad_getflag_window_fraction.description')}
+          disabled={disabled}
+          min={0.05}
+          max={0.9}
+          step={0.05}
+          decimalScale={2}
+          value={game?.adGetflagWindowFraction ?? 0.5}
+          onChange={(e) => {
+            const n = getInputNumber(e)
+            if (!isNaN(n)) game && setGame({ ...game, adGetflagWindowFraction: n })
+          }}
+        />
+        <NumberInput
+          label={t('admin.content.games.info.ad_min_grace_period_seconds.label')}
+          description={t('admin.content.games.info.ad_min_grace_period_seconds.description')}
+          disabled={disabled}
+          min={1}
+          max={60}
+          value={game?.adMinGracePeriodSeconds ?? 3}
+          onChange={(e) => {
+            const n = getInputNumber(e)
+            if (!isNaN(n)) game && setGame({ ...game, adMinGracePeriodSeconds: n })
+          }}
+        />
         <Switch
           mt="md"
           label={t('admin.content.games.info.ad_allow_snapshot_download.label')}

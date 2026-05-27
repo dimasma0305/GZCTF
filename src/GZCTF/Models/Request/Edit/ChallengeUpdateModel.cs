@@ -132,18 +132,6 @@ public class ChallengeUpdateModel
     /// <summary>A&amp;D — When true, teams can self-reset to baseline.</summary>
     public bool? AdAllowSelfReset { get; set; }
 
-    /// <summary>A&amp;D — putflag jitter window as a fraction of the tick.</summary>
-    [Range(0, 1)]
-    public double? AdPutflagWindowFraction { get; set; }
-
-    /// <summary>A&amp;D — getflag jitter window as a fraction of the tick.</summary>
-    [Range(0, 1)]
-    public double? AdGetflagWindowFraction { get; set; }
-
-    /// <summary>A&amp;D — seconds after putflag before getflag may fire.</summary>
-    [Range(0, 3600)]
-    public int? AdMinGracePeriodSeconds { get; set; }
-
     #endregion
 
     /// <summary>

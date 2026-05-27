@@ -130,10 +130,7 @@ public static class TransferExtensions
                 {
                     CheckerImage = challenge.AdCheckerImage ?? string.Empty,
                     AllowEgress = challenge.AdAllowEgress,
-                    AllowSelfReset = challenge.AdAllowSelfReset,
-                    PutflagWindowFraction = challenge.AdPutflagWindowFraction,
-                    GetflagWindowFraction = challenge.AdGetflagWindowFraction,
-                    MinGracePeriodSeconds = challenge.AdMinGracePeriodSeconds
+                    AllowSelfReset = challenge.AdAllowSelfReset
                 };
             }
 
@@ -300,9 +297,6 @@ public static class TransferExtensions
                 challenge.AdCheckerImage = ad.CheckerImage;
                 if (ad.AllowEgress is { } ae) challenge.AdAllowEgress = ae;
                 if (ad.AllowSelfReset is { } asr) challenge.AdAllowSelfReset = asr;
-                if (ad.PutflagWindowFraction is { } pw) challenge.AdPutflagWindowFraction = pw;
-                if (ad.GetflagWindowFraction is { } gw) challenge.AdGetflagWindowFraction = gw;
-                if (ad.MinGracePeriodSeconds is { } mg) challenge.AdMinGracePeriodSeconds = mg;
             }
 
             return challenge;
