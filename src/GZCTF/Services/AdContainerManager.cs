@@ -398,12 +398,18 @@ public sealed class AdContainerManager(
 
     private static readonly HashSet<string> NoiseChangeExact = new(StringComparer.Ordinal)
     {
+        // /flag is the Docker flag bind-mount (K8s uses /gzctf-flag/, covered by the
+        // prefix above) — `docker diff` reports its mount point as a layer change,
+        // but it's the platform's flag delivery, not a team change.
+        "/flag", "/gzctf-flag",
         "/tmp", "/run", "/etc/hosts", "/etc/resolv.conf", "/etc/hostname", "/etc/mtab"
     };
 
     private static bool IsNoiseChangePath(string p) =>
         NoiseChangeExact.Contains(p) ||
-        NoiseChangePrefixes.Any(pre => p.StartsWith(pre, StringComparison.Ordinal));
+        NoiseChangePrefixes.Any(pre => p.StartsWith(pre, StringComparison.Ordinal)) ||
+        // Python bytecode cache — regenerated on first import, not a team change.
+        p.Contains("__pycache__", StringComparison.Ordinal);
 
     /// <summary>
     /// On-demand filesystem diff of a team's <em>live</em> container — the admin
@@ -432,10 +438,19 @@ public sealed class AdContainerManager(
             try
             {
                 var changes = await dockerProvider.GetProvider().Containers.InspectChangesAsync(cid, token);
-                return changes is null
-                    ? []
-                    : changes.Where(c => !IsNoiseChangePath(c.Path))
-                        .Take(maxEntries).Select(c => (c.Path, (int)c.Kind)).ToList();
+                if (changes is null) return [];
+                var entries = changes.Take(maxEntries).Select(c => (Path: c.Path, Kind: (int)c.Kind)).ToList();
+                var paths = entries.Select(e => e.Path).ToList();
+                // docker diff lists EVERY ancestor dir of a change (the K8s `find
+                // -type f` doesn't); keep only leaf paths so the diff shows the
+                // changed files, not the /usr/... chain leading to them. Then drop
+                // runtime/churn noise (the flag mount, __pycache__, /run, …).
+                return entries
+                    .Where(e => !paths.Any(o =>
+                        o.Length > e.Path.Length && o.StartsWith(e.Path + "/", StringComparison.Ordinal)))
+                    .Where(e => !IsNoiseChangePath(e.Path))
+                    .Select(e => (e.Path, e.Kind))
+                    .ToList();
             }
             catch (Exception e)
             {
