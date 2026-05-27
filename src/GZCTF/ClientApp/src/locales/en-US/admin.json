@@ -7,7 +7,7 @@
       "advance_round": "Advance round",
       "pause_scoring": "Pause scoring",
       "resume_scoring": "Resume scoring",
-      "restart": "Restart",
+      "restart": "Reset",
       "snapshot": {
         "label": "Snapshot",
         "with_count": "Snapshot ({{count}})",
@@ -168,7 +168,13 @@
       "no_team_match": "No teams match the filter.",
       "tick_summary": "tick {{tick}}s · lifetime {{lifetime}} ticks",
       "grid_title": "Team status",
-      "grid_legend": "Click a cell IP to copy. Restart bypasses the player cooldown.",
+      "grid_legend": "Click a cell IP to copy. Reset bypasses the player cooldown.",
+      "reset_confirm": {
+        "title": "Reset container to base image?",
+        "message": "Destroys the running container and recreates it from the challenge image. The team's current filesystem changes — including any patches — are wiped, and a fresh flag is delivered. This can't be undone.",
+        "ok": "Reset to base image",
+        "cancel": "Cancel"
+      },
       "column_team": "Team",
       "no_teams": "No accepted teams yet. Once you accept teams from the participations page, their containers will spin up automatically.",
       "empty": {
@@ -1069,7 +1075,7 @@
       "disable_challenge": "Disable scoring + flag rotation",
       "copy_flag": "Copy current flag",
       "shell": "Open a shell in this container",
-      "restart": "Restart container (bypasses player cooldown)",
+      "restart": "Reset to base image — wipes the team's changes (bypasses player cooldown)",
       "snapshot": "Inspect post-game snapshot",
       "challenge_off": "Disabled on the Challenges page — no scoring or flag rotation"
     }
@@ -1085,8 +1091,8 @@
         "message": "Missing A&D containers will spin up shortly."
       },
       "restart_queued": {
-        "title": "Restart queued",
-        "message": "Container will restart in seconds."
+        "title": "Reset queued",
+        "message": "Container will be recreated from the base image in seconds."
       },
       "scoring_paused": "Scoring paused — rounds + checks frozen.",
       "scoring_resumed": "Scoring resumed.",

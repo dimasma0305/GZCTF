@@ -5,7 +5,7 @@
       "disable_challenge": "暂停此题目的计分与 Flag 轮换",
       "copy_flag": "复制当前 Flag",
       "shell": "在该容器中打开 Shell",
-      "restart": "重启容器（绕过选手冷却）",
+      "restart": "重置到基础镜像——清除队伍的改动（绕过选手冷却）",
       "snapshot": "查看赛后快照",
       "challenge_off": "已在「题目」页停用 — 不计分、不轮换 Flag"
     }
@@ -18,7 +18,7 @@
       "advance_round": "推进回合",
       "pause_scoring": "暂停计分",
       "resume_scoring": "恢复计分",
-      "restart": "重启",
+      "restart": "重置",
       "snapshot": {
         "label": "快照",
         "with_count": "快照（{{count}}）",
@@ -177,7 +177,13 @@
       "no_team_match": "没有匹配筛选条件的队伍。",
       "tick_summary": "周期 {{tick}}s · 持续 {{lifetime}} 回合",
       "grid_title": "队伍状态",
-      "grid_legend": "点击单元格 IP 复制。重启会绕过玩家冷却。",
+      "grid_legend": "点击单元格 IP 复制。重置会绕过玩家冷却。",
+      "reset_confirm": {
+        "title": "将容器重置到基础镜像？",
+        "message": "销毁正在运行的容器并从题目镜像重新创建。队伍当前的文件系统改动（包括任何修补）都会被清除，并下发新的 Flag。此操作不可撤销。",
+        "ok": "重置到基础镜像",
+        "cancel": "取消"
+      },
       "column_team": "队伍",
       "no_teams": "暂无已通过的队伍。一旦在参赛页通过队伍，其容器会自动启动。",
       "empty": {
@@ -1066,8 +1072,8 @@
         "message": "缺失的 A&D 容器将很快启动。"
       },
       "restart_queued": {
-        "title": "重启已排队",
-        "message": "容器将在数秒后重启。"
+        "title": "重置已排队",
+        "message": "容器将在数秒后从基础镜像重建。"
       },
       "scoring_paused": "计分已暂停 — 回合与检查已冻结。",
       "scoring_resumed": "计分已恢复。",

@@ -26,6 +26,7 @@ import {
   UnstyledButton,
 } from '@mantine/core'
 import { useDebouncedValue } from '@mantine/hooks'
+import { useModals } from '@mantine/modals'
 import { showNotification } from '@mantine/notifications'
 import {
   mdiAlertCircle,
@@ -729,6 +730,7 @@ const AdOps: FC = () => {
   const { id } = useParams()
   const numId = parseInt(id ?? '-1', 10)
   const { t } = useTranslation()
+  const modals = useModals()
   const { adminAdState: state, error, mutate } = useAdminAdState(numId)
   const [busy, setBusy] = useState(false)
   // inspectorSid set ⇒ a throwaway inspector container we must destroy on close.
@@ -828,20 +830,40 @@ const AdOps: FC = () => {
     }
   }
 
-  const restartCell = async (cell: AdTeamCellModel) => {
-    try {
-      await api.edit.editAdForceRestart(numId, cell.adTeamServiceId)
-      showNotification({
-        color: 'teal',
-        icon: <Icon path={mdiRestart} size={1} />,
-        title: t('admin.notification.ad_ops.restart_queued.title', 'Restart queued'),
-        message: t('admin.notification.ad_ops.restart_queued.message',
-          'Container will restart in seconds.'),
-      })
-      setTimeout(() => mutate(), 3_000)
-    } catch (e) {
-      showErrorMsg(e, t)
-    }
+  // Reset = destroy the running container and recreate it from the challenge
+  // base image. This WIPES the team's filesystem changes (including any patches)
+  // — there is no in-place restart on Kubernetes — so confirm before firing.
+  const resetCell = (cell: AdTeamCellModel) => {
+    modals.openConfirmModal({
+      title: t('admin.content.ad_ops.reset_confirm.title', 'Reset container to base image?'),
+      children: (
+        <Text size="sm">
+          {t('admin.content.ad_ops.reset_confirm.message',
+            "Destroys the running container and recreates it from the challenge image. The team's current "
+            + "filesystem changes — including any patches — are wiped, and a fresh flag is delivered. This can't be undone.")}
+        </Text>
+      ),
+      labels: {
+        confirm: t('admin.content.ad_ops.reset_confirm.ok', 'Reset to base image'),
+        cancel: t('admin.content.ad_ops.reset_confirm.cancel', 'Cancel'),
+      },
+      confirmProps: { color: 'red' },
+      onConfirm: async () => {
+        try {
+          await api.edit.editAdForceRestart(numId, cell.adTeamServiceId)
+          showNotification({
+            color: 'teal',
+            icon: <Icon path={mdiRestart} size={1} />,
+            title: t('admin.notification.ad_ops.restart_queued.title', 'Reset queued'),
+            message: t('admin.notification.ad_ops.restart_queued.message',
+              'Container will be recreated from the base image in seconds.'),
+          })
+          setTimeout(() => mutate(), 3_000)
+        } catch (e) {
+          showErrorMsg(e, t)
+        }
+      },
+    })
   }
 
   const toggleScoringPause = async () => {
@@ -1270,14 +1292,14 @@ const AdOps: FC = () => {
                                     )}
                                     <Tooltip
                                       label={t('admin.tooltip.ad_ops.restart',
-                                        'Restart container (bypasses player cooldown)')}
+                                        'Reset to base image — wipes the team’s changes (bypasses player cooldown)')}
                                       withArrow
                                     >
                                       <ActionIcon
                                         size="sm"
                                         variant="subtle"
                                         color="gray"
-                                        onClick={() => restartCell(cell)}
+                                        onClick={() => resetCell(cell)}
                                       >
                                         <Icon path={mdiRestart} size={0.7} />
                                       </ActionIcon>
