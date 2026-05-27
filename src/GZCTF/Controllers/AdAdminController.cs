@@ -371,6 +371,7 @@ public class AdAdminController(
     {
         var ts = await db.AdTeamServices
             .Include(t => t.Participation)
+            .Include(t => t.Container) // ComputeLiveChangesAsync reads ts.Container.ContainerId
             .FirstOrDefaultAsync(t => t.Id == adTeamServiceId, token);
         if (ts is null || ts.Participation.GameId != id) return NotFound();
 
@@ -403,11 +404,28 @@ public class AdAdminController(
         {
             // Mid-game: compute the diff live against the running container.
             var live = await adContainerManager.ComputeLiveChangesAsync(HttpContext.RequestServices, ts, token);
-            if (live is not null)
+            if (live is { Count: > 0 })
             {
                 model.Live = true;
                 foreach (var (path, kind) in live)
                     model.Changes.Add(new AdSnapshotChange { Path = path, Kind = kind });
+            }
+            else
+            {
+                // Live scan unavailable or empty (shell-less image, transient exec
+                // failure) — fall back to the latest captured per-round manifest so
+                // the modal matches the grid's changed-file badge.
+                var manifest = await db.AdServiceSnapshots
+                    .Where(s => s.AdTeamServiceId == ts.Id)
+                    .OrderByDescending(s => s.Id)
+                    .Select(s => s.ManifestJson)
+                    .FirstOrDefaultAsync(token);
+                if (!string.IsNullOrEmpty(manifest))
+                {
+                    model.Live = true;
+                    foreach (var (path, kind) in ParseManifest(manifest))
+                        model.Changes.Add(new AdSnapshotChange { Path = path, Kind = kind });
+                }
             }
         }
 
