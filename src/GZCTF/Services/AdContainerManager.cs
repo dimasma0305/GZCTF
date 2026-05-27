@@ -654,26 +654,56 @@ public sealed class AdContainerManager(
     /// <summary>Extract the first regular file from a Docker tar archive stream as
     /// base64 (capped at <see cref="MaxFileBytes"/>+1 bytes so <see cref="DecodeFileOutput"/>
     /// flags truncation). Null when the archive has no regular-file entry.</summary>
+    /// <remarks>
+    /// Docker's <c>GetArchiveFromContainerAsync</c> returns the tar over a chunked
+    /// HTTP response. <c>System.Formats.Tar.TarReader</c> reads it with small,
+    /// exactly-sized reads (512-byte headers, per-entry substreams), which trips a
+    /// bug in Docker.DotNet's <c>ChunkedReadStream</c> — it throws
+    /// <see cref="EndOfStreamException"/> ("read past the end of the stream") at the
+    /// final chunk instead of returning 0, aborting the read mid-entry. So first
+    /// drain the response into a seekable <see cref="MemoryStream"/> with large
+    /// CopyTo-style reads (the pattern the snapshot export already uses reliably),
+    /// then parse the complete buffer. The buffer is capped so a huge file can't
+    /// exhaust memory; the +16 KiB margin covers the tar header, 512-byte padding,
+    /// the end-of-archive trailer, and any extended-header blocks.
+    /// </remarks>
     private static async Task<string?> ReadTarSingleFileAsync(Stream tar, CancellationToken token)
     {
+        using var buffer = new MemoryStream();
         await using (tar)
         {
-            using var reader = new TarReader(tar);
-            while (await reader.GetNextEntryAsync(cancellationToken: token) is { } entry)
+            var bufferCap = MaxFileBytes + 16 * 1024;
+            var chunk = new byte[81920];
+            try
             {
-                if (entry.EntryType is not (TarEntryType.RegularFile or TarEntryType.V7RegularFile)
-                    || entry.DataStream is null)
-                    continue;
-
-                var cap = MaxFileBytes + 1;
-                using var ms = new MemoryStream();
-                var buf = new byte[16 * 1024];
-                int read;
-                while (ms.Length < cap &&
-                       (read = await entry.DataStream.ReadAsync(buf.AsMemory(0, (int)Math.Min(buf.Length, cap - ms.Length)), token)) > 0)
-                    ms.Write(buf, 0, read);
-                return Convert.ToBase64String(ms.GetBuffer(), 0, (int)ms.Length);
+                int n;
+                while (buffer.Length < bufferCap &&
+                       (n = await tar.ReadAsync(chunk.AsMemory(0, (int)Math.Min(chunk.Length, bufferCap - buffer.Length)), token)) > 0)
+                    buffer.Write(chunk, 0, n);
             }
+            catch (EndOfStreamException)
+            {
+                // Docker.DotNet chunked-stream quirk: the real archive bytes are
+                // already buffered by the time it throws on the read past the end.
+            }
+        }
+        buffer.Position = 0;
+
+        using var reader = new TarReader(buffer);
+        while (await reader.GetNextEntryAsync(cancellationToken: token) is { } entry)
+        {
+            if (entry.EntryType is not (TarEntryType.RegularFile or TarEntryType.V7RegularFile)
+                || entry.DataStream is null)
+                continue;
+
+            var cap = MaxFileBytes + 1;
+            using var ms = new MemoryStream();
+            var buf = new byte[16 * 1024];
+            int read;
+            while (ms.Length < cap &&
+                   (read = await entry.DataStream.ReadAsync(buf.AsMemory(0, (int)Math.Min(buf.Length, cap - ms.Length)), token)) > 0)
+                ms.Write(buf, 0, read);
+            return Convert.ToBase64String(ms.GetBuffer(), 0, (int)ms.Length);
         }
         return null;
     }
