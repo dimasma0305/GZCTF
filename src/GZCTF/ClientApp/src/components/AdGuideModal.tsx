@@ -709,25 +709,31 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
                     <List.Item>
                       {t(
                         'game.content.ad.guide.container.flag_file',
-                        "The current round's flag lives in /flag inside your container. Your challenge code should read it from there (the path is also in the GZCTF_FLAG_FILE env var). The platform overwrites /flag at the start of every round via docker exec."
+                        "The live flag is rewritten every round at the path in the GZCTF_FLAG_FILE env var — /gzctf-flag/flag on Kubernetes, /flag on Docker. Read it fresh from $GZCTF_FLAG_FILE on every request (don't cache it)."
                       )}
                     </List.Item>
                     <List.Item>
                       {t(
                         'game.content.ad.guide.container.flag_env',
-                        "There is NO GZCTF_FLAG env var for A&D services — an env is frozen at container start and would go stale after the first round. Always read the live flag from /flag (path in GZCTF_FLAG_FILE)."
+                        "Never hard-code /flag: on Kubernetes /flag is a stale build-time placeholder, so a service that reads it serves the wrong flag and fails the check. There is also no GZCTF_FLAG env var (it would freeze at container start) — always read $GZCTF_FLAG_FILE."
                       )}
                     </List.Item>
                     <List.Item>
                       {t(
                         'game.content.ad.guide.container.patch',
-                        'You can patch the binary / web service inside the container live — the platform does NOT redeploy unless you reset.'
+                        'Patch your service live inside the container — the platform does not redeploy on its own. Your changes live ONLY in the running container; there is no persistent disk.'
+                      )}
+                    </List.Item>
+                    <List.Item>
+                      {t(
+                        'game.content.ad.guide.container.supervisor',
+                        "Your service runs under a supervisor (PID 1). If the service process crashes — or you restart it — it comes back automatically and your patches stay. Restarting the service is safe; but don't kill PID 1 (the supervisor): that drops the box back to the base image."
                       )}
                     </List.Item>
                     <List.Item>
                       {t(
                         'game.content.ad.guide.container.reset',
-                        'Click "Reset" to rebuild back to the baseline image. Useful if your patch broke the service, but you lose SLA during the rebuild and there is a cooldown between resets.'
+                        'Reset rebuilds the box from the original image — it WIPES all your changes (patches included), costs SLA during the rebuild, and has a cooldown. Use it only if your box is wedged or compromised, then re-apply your patches.'
                       )}
                     </List.Item>
                   </List>
@@ -765,6 +771,12 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
                           'Watch your check status badge — if it goes Mumble/Offline you are losing SLA every tick.'
                         )}
                       </List.Item>
+                      <List.Item>
+                        {t(
+                          'game.content.ad.guide.do_dont.do_reapply',
+                          'Re-apply your patches after any reset — a reset reverts to the pristine, vulnerable image.'
+                        )}
+                      </List.Item>
                     </List>
                     <Text size="sm" fw={600} c="red" mt="xs">
                       {t('game.content.ad.guide.do_dont.dont', "Don't")}
@@ -786,6 +798,18 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
                         {t(
                           'game.content.ad.guide.do_dont.dont_break',
                           'Patch in a way that breaks the legit check (returns 500 to the checker) — you lose SLA equivalent to being offline.'
+                        )}
+                      </List.Item>
+                      <List.Item>
+                        {t(
+                          'game.content.ad.guide.do_dont.dont_hardcode',
+                          "Hard-code /flag or cache the flag — read $GZCTF_FLAG_FILE fresh each request, or you'll serve a stale flag and fail the check on Kubernetes."
+                        )}
+                      </List.Item>
+                      <List.Item>
+                        {t(
+                          'game.content.ad.guide.do_dont.dont_kill_pid1',
+                          'Kill PID 1 (the supervisor) in your box — it resets you to the base image and wipes your patches.'
                         )}
                       </List.Item>
                     </List>

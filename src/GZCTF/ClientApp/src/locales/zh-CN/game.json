@@ -181,10 +181,11 @@
         "container": {
           "title": "你的容器",
           "ip": "题目弹窗显示你的容器 IP:端口 — 这是检测器访问的地址，也是对手攻击的目标。",
-          "flag_file": "本回合的 flag 位于容器内的 /flag 文件。请在题目代码中读取该文件（路径同样可通过 GZCTF_FLAG_FILE 环境变量获取）。平台会在每个回合开始时通过 docker exec 覆写 /flag。",
-          "flag_env": "A&D 服务不会设置 GZCTF_FLAG 环境变量 —— 环境变量在容器启动时即固定，首回合之后就会过期。请始终从 /flag 读取实时 flag（路径见 GZCTF_FLAG_FILE）。",
-          "patch": "你可以在容器内直接修补二进制 / Web 服务 — 平台不会重新部署，除非你点击重置。",
-          "reset": "点击「重置」可将容器重建为初始镜像。修补失败时可用，但重建期间会损失 SLA，并存在重置冷却。"
+          "flag_file": "实时 flag 每回合都会被改写，路径见 GZCTF_FLAG_FILE 环境变量 —— Kubernetes 上为 /gzctf-flag/flag，Docker 上为 /flag。请每次请求都从 $GZCTF_FLAG_FILE 重新读取（不要缓存）。",
+          "flag_env": "切勿硬编码 /flag：在 Kubernetes 上 /flag 只是构建时的过期占位文件，读它会返回错误的 flag 并导致检测失败。也没有 GZCTF_FLAG 环境变量（启动时即固定）—— 始终读取 $GZCTF_FLAG_FILE。",
+          "patch": "你可以在容器内直接修补服务 — 平台不会自行重新部署。你的改动只存在于运行中的容器里，没有持久化磁盘。",
+          "supervisor": "你的服务由 supervisor（PID 1）托管。服务进程崩溃或被你重启后会自动拉起，补丁保留。重启服务是安全的；但不要杀掉 PID 1（supervisor）：那会让容器回退到基础镜像。",
+          "reset": "重置会用初始镜像重建容器 —— 会清除你的所有改动（包括补丁），重建期间损失 SLA，且有冷却。仅在容器卡死或被攻陷时使用，之后请重新打补丁。"
         },
         "do_dont": {
           "title": "建议 / 禁忌",
@@ -192,10 +193,13 @@
           "do_patch": "在首次攻击到达之前修补你的服务。",
           "do_automate": "自动化提交 flag — 循环从每个目标抓取当前 flag 并批量 POST。",
           "do_monitor": "关注检测状态徽章 — 一旦出现 Mumble / Offline，每个 tick 都会损失 SLA。",
+          "do_reapply": "任何一次重置后都要重新打补丁 —— 重置会回退到原始的有漏洞镜像。",
           "dont": "禁忌",
           "dont_share": "与其他队伍共享你的 flag 或 Token — 管理员会检测并处罚。",
           "dont_dos": "对其他队伍服务或检测器基础设施进行 DoS — 立即取消资格。",
-          "dont_break": "以破坏合法检测的方式修补（向检测器返回 500）— 损失等同于服务下线。"
+          "dont_break": "以破坏合法检测的方式修补（向检测器返回 500）— 损失等同于服务下线。",
+          "dont_hardcode": "硬编码 /flag 或缓存 flag — 请每次请求都重新读取 $GZCTF_FLAG_FILE，否则在 Kubernetes 上会返回过期 flag 而检测失败。",
+          "dont_kill_pid1": "杀掉容器内的 PID 1（supervisor）— 这会把你重置回基础镜像并清除补丁。"
         }
       }
     },
