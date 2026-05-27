@@ -54,6 +54,17 @@ case "$curl_exit" in
         ;;
 esac
 
+# STRICT: the service must return the well-formed "flag is: <flag>" body, not
+# just the flag somewhere in the response — catches a mangled response format
+# (e.g. a patch that drops the prefix).
+case "$body" in
+    "flag is: "*) ;;
+    *)
+        echo "strict: response missing 'flag is:' prefix. got: $(printf '%s' "$body" | head -c 120)" >&2
+        exit 1
+        ;;
+esac
+
 case "$body" in
     *"$GZCTF_FLAG"*)
         # Quiet on success — Ok rows don't store ErrorMessage.

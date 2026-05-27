@@ -26,6 +26,14 @@ if [ "$code" != "403" ]; then
     exit 1
 fi
 
+# STRICT: a WRONG token must also be rejected (403), not just a missing one —
+# catches an auth weakened to accept any non-empty token.
+wcode="$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' "$B/secret?token=wrong" 2>&1)"
+if [ "$wcode" != "403" ]; then
+    echo "strict: a bad token was not rejected -> $wcode" >&2
+    exit 1
+fi
+
 if [ -z "${GZCTF_FLAG:-}" ]; then
     echo "no GZCTF_FLAG (warmup)" >&2
     exit 1
