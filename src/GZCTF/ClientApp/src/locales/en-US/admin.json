@@ -334,7 +334,7 @@
           },
           "allow_egress": {
             "label": "Allow external internet",
-            "description": "Default off — A&D containers are sandboxed from the public internet. Enable only if your service genuinely needs an external API call."
+            "description": "Default on — the service can reach the public internet (private and link-local ranges, incl. cloud metadata, stay blocked). Turn off to fully sandbox a service that needs no outbound access."
           },
           "allow_self_reset": {
             "label": "Allow self-reset",
