@@ -72,8 +72,18 @@ export const ContainerExecModal: FC<ContainerExecModalProps> = (props) => {
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(terminalEl)
-    fit.fit()
     fitRef.current = fit
+    // Defer the first fit until the modal has actually laid out. Fitting
+    // synchronously here (during the open animation) sizes the PTY wrong, so
+    // the shell wraps/garbles until the next resize. Double-rAF ≈ post-layout.
+    const fitNow = () => {
+      try {
+        fit.fit()
+      } catch {
+        /* element not sized yet */
+      }
+    }
+    requestAnimationFrame(() => requestAnimationFrame(fitNow))
 
     // Copy / paste, the way a normal terminal behaves. xterm sends Ctrl+C to
     // the shell (SIGINT) by default and never copies, so a selection + Ctrl+C
@@ -170,35 +180,64 @@ export const ContainerExecModal: FC<ContainerExecModalProps> = (props) => {
       if (reason && reason !== 'eof') setErrorMsg(reason)
     })
 
+    // term -> server, registered ONCE; each handler reads the live session id,
+    // so it keeps working across a reconnect that swaps the session underneath
+    // (and no-ops before connect / while reconnecting, when the id is null).
+    term.onData((data) => {
+      const sid = sessionIdRef.current
+      if (!sid) return
+      hub.invoke('Input', sid, encodeBase64(new TextEncoder().encode(data))).catch(() => undefined)
+    })
+    term.onResize(({ cols, rows }) => {
+      const sid = sessionIdRef.current
+      if (!sid) return
+      hub.invoke('Resize', sid, cols, rows).catch(() => undefined)
+    })
+
+    // Open (or re-open) the exec session. The server's PTY can't survive a
+    // transport drop — OnDisconnected disposes it — so on reconnect we spawn a
+    // FRESH shell rather than leaving a "connected"-looking but dead terminal
+    // that silently swallows keystrokes.
+    const openSession = async () => {
+      const sid = await hub.invoke<string>('Open', containerGuid, shellRef.current)
+      if (disposed) {
+        await hub.invoke('Close', sid).catch(() => undefined)
+        return
+      }
+      sessionIdRef.current = sid
+      setStatus('connected')
+      term.focus()
+      fitNow()
+      hub.invoke('Resize', sid, term.cols, term.rows).catch(() => undefined)
+    }
+
+    // While reconnecting, drop the stale id so input isn't posted into the void.
+    hub.onreconnecting(() => {
+      sessionIdRef.current = null
+      if (!disposed) setStatus('connecting')
+    })
+    hub.onreconnected(() => {
+      if (disposed) return
+      term.write('\r\n\x1b[33m[gzctf] reconnected — new shell\x1b[0m\r\n')
+      openSession().catch((e) => {
+        if (!disposed) {
+          setStatus('error')
+          setErrorMsg((e as Error).message)
+        }
+      })
+    })
+    hub.onclose(() => {
+      sessionIdRef.current = null
+      if (!disposed) setStatus((s) => (s === 'error' ? s : 'closed'))
+    })
+
     const start = async () => {
       setStatus('connecting')
       setErrorMsg(null)
       try {
         await hub.start()
         if (disposed) return
-        const sid = await hub.invoke<string>('Open', containerGuid, shellRef.current)
-        if (disposed) {
-          await hub.invoke('Close', sid).catch(() => undefined)
-          return
-        }
-        sessionIdRef.current = sid
-        setStatus('connected')
-        term.focus()
-
-        const { cols, rows } = term
-        hub.invoke('Resize', sid, cols, rows).catch(() => undefined)
-
-        // Terminal -> server pump.
-        term.onData((data) => {
-          if (!sessionIdRef.current) return
-          const b64 = encodeBase64(new TextEncoder().encode(data))
-          hub.invoke('Input', sessionIdRef.current, b64).catch(() => undefined)
-        })
-
-        term.onResize(({ cols: c, rows: r }) => {
-          if (!sessionIdRef.current) return
-          hub.invoke('Resize', sessionIdRef.current, c, r).catch(() => undefined)
-        })
+        await openSession()
       } catch (e) {
         if (!disposed) {
           setStatus('error')
@@ -212,8 +251,13 @@ export const ContainerExecModal: FC<ContainerExecModalProps> = (props) => {
     // Refit on any size change of the terminal box (modal resize, viewport
     // change), not just window resize — keeps cols/rows correct so the shell
     // wraps properly.
+    // Debounce resize-driven refits (~100ms) so a rapid modal/viewport change
+    // doesn't thrash the PTY size; term.onResize then pushes the new cols/rows
+    // to the pod.
+    let fitTimer: ReturnType<typeof setTimeout> | undefined
     const refit = () => {
-      try { fit.fit() } catch { /* ignore */ }
+      clearTimeout(fitTimer)
+      fitTimer = setTimeout(fitNow, 100)
     }
     window.addEventListener('resize', refit)
     const ro = new ResizeObserver(refit)
@@ -221,6 +265,7 @@ export const ContainerExecModal: FC<ContainerExecModalProps> = (props) => {
 
     return () => {
       disposed = true
+      clearTimeout(fitTimer)
       window.removeEventListener('resize', refit)
       ro.disconnect()
       terminalEl.removeEventListener('contextmenu', onContextMenu)
