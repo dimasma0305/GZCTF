@@ -222,6 +222,22 @@ public class GameImportService(
                 Hidden = true // Import as hidden by default
             };
 
+            // Import event-wide A&D config — apply each provided field; omitted
+            // ones keep the Game's platform defaults. (This service hand-maps the
+            // game instead of going through TransferGame.ToGame, so the A&D block
+            // must be applied here too.)
+            if (context.Game.Ad is { } ad)
+            {
+                if (ad.WarmupSeconds is { } ws) game.AdWarmupSeconds = ws;
+                if (ad.TickSeconds is { } ts) game.AdTickSeconds = ts;
+                if (ad.FlagLifetimeTicks is { } fl) game.AdFlagLifetimeTicks = fl;
+                if (ad.ResetCooldownMinutes is { } rc) game.AdResetCooldownMinutes = rc;
+                if (ad.GetflagWindowFraction is { } gw) game.AdGetflagWindowFraction = gw;
+                if (ad.MinGracePeriodSeconds is { } mg) game.AdMinGracePeriodSeconds = mg;
+                if (ad.AllowSnapshotDownload is { } asd) game.AdAllowSnapshotDownload = asd;
+                if (ad.SnapshotRetentionDays is { } srd) game.AdSnapshotRetentionDays = srd;
+            }
+
             // Import blood bonus configuration
             if (context.Game.BloodBonus is not null)
             {
