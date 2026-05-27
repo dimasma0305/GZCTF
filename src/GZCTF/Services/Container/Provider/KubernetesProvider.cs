@@ -30,8 +30,11 @@ public class KubernetesProvider : IContainerProvider<Kubernetes, KubernetesMetad
     private readonly Kubernetes _kubernetesClient;
     private readonly KubernetesMetadata _kubernetesMetadata;
 
+    private readonly string? _flagPullHost;
+    private readonly int _flagPullPort;
+
     public KubernetesProvider(IOptions<RegistrySet<RegistryConfig>> registries, IOptions<ContainerProvider> options,
-        ILogger<KubernetesProvider> logger)
+        IConfiguration configuration, ILogger<KubernetesProvider> logger)
     {
         _kubernetesMetadata = new()
         {
@@ -39,6 +42,18 @@ public class KubernetesProvider : IContainerProvider<Kubernetes, KubernetesMetad
             PortMappingType = options.Value.PortMappingType,
             PublicEntry = options.Value.PublicEntry
         };
+
+        // The A&D flag-writer sidecar pulls rotating flags from this host:port
+        // (must be an IP — see Ad:FlagPullBaseUrl). It's the only egress an A&D
+        // pod strictly needs, so both the open and isolated egress policies
+        // carve out a dedicated allow-rule for it. Without this, an isolated
+        // (deny-all-egress) A&D challenge could never receive its flag.
+        if (Uri.TryCreate(configuration["Ad:FlagPullBaseUrl"], UriKind.Absolute, out var fp)
+            && System.Net.IPAddress.TryParse(fp.Host, out _))
+        {
+            _flagPullHost = fp.Host;
+            _flagPullPort = fp.Port;
+        }
 
         KubernetesClientConfiguration config;
 
@@ -128,28 +143,74 @@ public class KubernetesProvider : IContainerProvider<Kubernetes, KubernetesMetad
     private static readonly string[] EgressDenyBaseline =
         ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"];
 
+    /// <summary>Egress allow-rule for the A&amp;D flag-pull endpoint (control-plane
+    /// host:port), or empty when <c>Ad:FlagPullBaseUrl</c> isn't a usable IP. Both
+    /// policies include it so a pod can always receive its flag regardless of how
+    /// locked-down its egress is.</summary>
+    private IEnumerable<V1NetworkPolicyEgressRule> FlagPullEgressRules() =>
+        _flagPullHost is null
+            ? []
+            :
+            [
+                new V1NetworkPolicyEgressRule
+                {
+                    To = [new V1NetworkPolicyPeer { IpBlock = new() { Cidr = $"{_flagPullHost}/32" } }],
+                    Ports = [new V1NetworkPolicyPort { Port = _flagPullPort.ToString() }]
+                }
+            ];
+
+    /// <summary>Egress allow-rule for cluster DNS (kube-dns) so name resolution
+    /// works even under the isolated policy — the resolver is the only in-cluster
+    /// endpoint reachable.</summary>
+    private static V1NetworkPolicyEgressRule DnsEgressRule => new()
+    {
+        To =
+        [
+            new V1NetworkPolicyPeer
+            {
+                NamespaceSelector = new V1LabelSelector
+                {
+                    MatchLabels = new Dictionary<string, string> { ["kubernetes.io/metadata.name"] = "kube-system" }
+                },
+                PodSelector = new V1LabelSelector
+                {
+                    MatchLabels = new Dictionary<string, string> { ["k8s-app"] = "kube-dns" }
+                }
+            }
+        ],
+        Ports =
+        [
+            new V1NetworkPolicyPort { Protocol = "UDP", Port = "53" },
+            new V1NetworkPolicyPort { Protocol = "TCP", Port = "53" }
+        ]
+    };
+
     /// <summary>
     /// Isolated Network Policy
     /// </summary>
     /// <remarks>
-    ///  Blocks all outbound traffic.
+    ///  Blocks all outbound traffic except the A&amp;D flag-pull endpoint and
+    ///  cluster DNS. This makes "isolated" A&amp;D challenges actually functional on
+    ///  K8s (they can still receive flags) while reaching nothing else — no other
+    ///  team, no node/control-plane, no kube-api/kubelet, no metadata, no internet.
     /// </remarks>
-    private static readonly V1NetworkPolicy IsolatedNetworkPolicy = new()
-    {
-        Metadata = new V1ObjectMeta { Name = IsolatedNetworkPolicyName, },
-        Spec = new V1NetworkPolicySpec
+    private V1NetworkPolicy IsolatedNetworkPolicy =>
+        new()
         {
-            PodSelector = new V1LabelSelector
+            Metadata = new V1ObjectMeta { Name = IsolatedNetworkPolicyName },
+            Spec = new V1NetworkPolicySpec
             {
-                MatchLabels = new Dictionary<string, string>
+                PodSelector = new V1LabelSelector
                 {
-                    ["gzctf.gzti.me/NetworkMode"] = nameof(NetworkMode.Isolated).ToLowerInvariant()
-                }
-            },
-            PolicyTypes = ["Egress"],
-            Egress = []
-        }
-    };
+                    MatchLabels = new Dictionary<string, string>
+                    {
+                        ["gzctf.gzti.me/NetworkMode"] = nameof(NetworkMode.Isolated).ToLowerInvariant()
+                    }
+                },
+                PolicyTypes = ["Egress"],
+                Egress = [.. FlagPullEgressRules(), DnsEgressRule]
+            }
+        };
 
     /// <summary>
     ///  Open Network Policy
@@ -176,6 +237,11 @@ public class KubernetesProvider : IContainerProvider<Kubernetes, KubernetesMetad
                 PolicyTypes = ["Egress"],
                 Egress =
                 [
+                    // Dedicated flag-pull + DNS allow-rules first, so they survive even
+                    // when the operator adds their node/control-plane CIDR to AllowCidr
+                    // (which the broad rule below would otherwise deny).
+                    .. FlagPullEgressRules(),
+                    DnsEgressRule,
                     new V1NetworkPolicyEgressRule
                     {
                         To =

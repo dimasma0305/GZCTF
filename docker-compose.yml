@@ -28,6 +28,11 @@ services:
       - ContainerProvider__KubernetesConfig__Namespace=gzctf-challenges
       # k3d side-loads images (`k3d image import`); don't force a registry pull.
       - ContainerProvider__KubernetesConfig__ImagePullPolicy=IfNotPresent
+      # Deny challenge egress to the k3d node/control-plane network (kube-api,
+      # kubelet, SSH, control-plane non-flag ports). Augments the built-in
+      # private+link-local baseline; the flag-pull endpoint (172.0.12.1:8080) is
+      # still reachable via the dedicated allow-rule the provider adds.
+      - ContainerProvider__KubernetesConfig__AllowCidr__0=172.0.12.0/24
       # A&D flag pull: team pods fetch the planted flag from gzctf. Must be an
       # IP (pods run external DNS, can't resolve cluster/host names). 172.0.12.1
       # is the k3d-gzctf network gateway (= host) → published port 8080.
