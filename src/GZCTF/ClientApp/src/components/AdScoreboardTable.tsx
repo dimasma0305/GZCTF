@@ -52,6 +52,12 @@ const ITEM_COUNT_PER_PAGE = 30
 // across one wide cell.
 const SUBCOL = { atk: 40, sla: 46, def: 42, status: 56 }
 
+// A challenge group spans its 4 metric sub-columns. Bound the tier-2 name to
+// this width so a long challenge title truncates within its own group instead
+// of overflowing into the neighbouring challenge's header (visible overlap once
+// there are several challenges).
+const GROUP_W = SUBCOL.atk + SUBCOL.sla + SUBCOL.def + SUBCOL.status
+
 // Compact point format: integers for large values (SLA), one decimal for the
 // small ones (attack / defense) — keeps the sub-columns narrow.
 const fmtPts = (n: number) => (Math.abs(n) >= 100 ? Math.round(n).toString() : n.toFixed(1))
@@ -291,7 +297,7 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                   {(adScoreboard.challenges ?? []).map((ch) => (
                     <Table.Th key={ch.challengeId} colSpan={4} className={classes.mono}>
                       <Tooltip label={ch.title} withinPortal>
-                        <Text size="xs" fw={700} truncate>
+                        <Text size="xs" fw={700} truncate maw={GROUP_W} mx="auto">
                           {ch.title}
                         </Text>
                       </Tooltip>
