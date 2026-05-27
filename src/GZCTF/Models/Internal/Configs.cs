@@ -576,6 +576,21 @@ public class KubernetesConfig
     /// side-load images (e.g. <c>k3d image import</c>) instead of pulling.
     /// </summary>
     public string ImagePullPolicy { get; set; } = "Always";
+
+    /// <summary>
+    /// At startup, actively verify the CNI enforces NetworkPolicy by spawning a
+    /// throwaway isolated-labeled pod and checking it CANNOT reach the kube-api
+    /// ClusterIP. All A&amp;D network isolation depends on enforcement; a CNI that
+    /// silently ignores NetworkPolicy (e.g. plain flannel) turns it into a no-op.
+    /// Default on for Kubernetes; the probe is best-effort and never blocks boot.
+    /// </summary>
+    public bool VerifyNetworkPolicy { get; set; } = true;
+
+    /// <summary>
+    /// Image for the <see cref="VerifyNetworkPolicy"/> probe pod — needs a shell
+    /// and busybox <c>nc</c>. Must be pullable or already on the node.
+    /// </summary>
+    public string NetworkProbeImage { get; set; } = "busybox:stable";
 }
 
 public class RegistrySet<T> : Dictionary<string, T>
