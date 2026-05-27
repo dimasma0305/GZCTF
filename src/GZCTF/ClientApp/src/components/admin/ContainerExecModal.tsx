@@ -43,6 +43,12 @@ export const ContainerExecModal: FC<ContainerExecModalProps> = (props) => {
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'closed' | 'error'>('idle')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
+  // The async Clipboard API (and JS-driven paste) only works in a secure
+  // context — HTTPS or localhost. On plain HTTP the hint must not promise
+  // shortcuts that can't work, so paste is "Ctrl+V / right-click" (native
+  // paste event) only, and copy is select-to-copy (execCommand fallback).
+  const secureCtx = typeof window !== 'undefined' && window.isSecureContext
+
   // SignalR JSON encodes byte chunks as base64 strings.
   const decodeBase64 = (s: string): Uint8Array => {
     const raw = atob(s)
@@ -158,6 +164,18 @@ export const ContainerExecModal: FC<ContainerExecModalProps> = (props) => {
     }
     terminalEl.addEventListener('contextmenu', onContextMenu)
 
+    // Copy-on-select (PuTTY / tmux style): finishing a drag-selection copies it
+    // immediately, so copy works with ZERO shortcuts — important on plain HTTP
+    // where navigator.clipboard is unavailable and writeText falls back to
+    // execCommand (which needs this user-gesture stack). Refocus so typing
+    // continues; xterm's selection is canvas-rendered, so it stays highlighted.
+    const onMouseUp = () => {
+      if (!term.hasSelection()) return
+      copySelection()
+      term.focus()
+    }
+    terminalEl.addEventListener('mouseup', onMouseUp)
+
     const hub = new HubConnectionBuilder()
       .withUrl('/hub/containerExec')
       .withAutomaticReconnect()
@@ -269,6 +287,7 @@ export const ContainerExecModal: FC<ContainerExecModalProps> = (props) => {
       window.removeEventListener('resize', refit)
       ro.disconnect()
       terminalEl.removeEventListener('contextmenu', onContextMenu)
+      terminalEl.removeEventListener('mouseup', onMouseUp)
       const sid = sessionIdRef.current
       const ref = hubRef.current
       sessionIdRef.current = null
@@ -314,10 +333,15 @@ export const ContainerExecModal: FC<ContainerExecModalProps> = (props) => {
             disabled={status === 'connecting' || status === 'connected'}
           />
           <Text size="xs" c="dimmed" ff="monospace">
-            {t(
-              'admin.content.exec.shortcuts',
-              'Ctrl/⌘+C or right-click copies selection · Ctrl+V / right-click pastes'
-            )}
+            {secureCtx
+              ? t(
+                  'admin.content.exec.shortcuts',
+                  'Select or Ctrl/⌘+C to copy · Ctrl+Shift+V / Ctrl+V / right-click to paste'
+                )
+              : t(
+                  'admin.content.exec.shortcuts_insecure',
+                  'Select to copy · Ctrl+V or right-click to paste · (serve over HTTPS for full clipboard)'
+                )}
           </Text>
         </Group>
         {status === 'error' && errorMsg && (
