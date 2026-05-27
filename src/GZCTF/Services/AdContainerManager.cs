@@ -239,6 +239,11 @@ public sealed class AdContainerManager(
             {
                 sem.Release();
             }
+
+            // Game's over for this service — drop its lock so the static map
+            // doesn't accumulate one semaphore per (team, challenge) forever
+            // across many games. A relaunch (game extended) just re-adds it.
+            _serviceLocks.TryRemove((ended.ParticipationId, ended.ChallengeId), out _);
         }
     }
 

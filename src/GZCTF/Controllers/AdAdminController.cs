@@ -311,6 +311,33 @@ public class AdAdminController(
         if (!string.IsNullOrEmpty(model.Note))
             check.ErrorMessage = $"[admin override: {previous} → {model.NewStatus}] {model.Note}";
 
+        // Recompute SLA so the override actually moves the score, not just the
+        // label. This check's per-tick credit depends on the PREVIOUS round's
+        // verdict; the NEXT round's credit depended on THIS check's verdict, so
+        // re-derive both and apply the running-total deltas. (TickCredit only
+        // looks one tick back, so the ripple stops at the immediately-next round.)
+        var prevStatus = await db.AdCheckResults
+            .Where(cr => cr.AdTeamServiceId == check.AdTeamServiceId && cr.AdRoundId < check.AdRoundId)
+            .OrderByDescending(cr => cr.AdRoundId)
+            .Select(cr => (AdCheckStatus?)cr.Status)
+            .FirstOrDefaultAsync(token);
+        var svc = await db.AdTeamServices.FirstOrDefaultAsync(s => s.Id == check.AdTeamServiceId, token);
+
+        var newCredit = AdScoring.TickCredit(model.NewStatus, prevStatus);
+        if (svc is not null) svc.SlaCreditTotal += newCredit - check.SlaCredit;
+        check.SlaCredit = newCredit;
+
+        var nextCheck = await db.AdCheckResults
+            .Where(cr => cr.AdTeamServiceId == check.AdTeamServiceId && cr.AdRoundId > check.AdRoundId)
+            .OrderBy(cr => cr.AdRoundId)
+            .FirstOrDefaultAsync(token);
+        if (nextCheck is not null)
+        {
+            var newNextCredit = AdScoring.TickCredit(nextCheck.Status, model.NewStatus);
+            if (svc is not null) svc.SlaCreditTotal += newNextCredit - nextCheck.SlaCredit;
+            nextCheck.SlaCredit = newNextCredit;
+        }
+
         await db.SaveChangesAsync(token);
         logger.SystemLog(
             $"A&D check overridden: game={id} check={checkId} {previous} → {model.NewStatus}",

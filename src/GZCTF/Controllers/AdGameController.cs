@@ -241,9 +241,6 @@ public class AdGameController(
             return result;
         }
 
-        var priorCapturers = await db.AdAttacks.CountAsync(a => a.AdFlagId == adFlag.Id, token);
-        var points = AdScoring.AttackPoints(priorCapturers);
-
         var attack = new AdAttack
         {
             AdFlagId = adFlag.Id,
@@ -251,13 +248,13 @@ public class AdGameController(
             VictimParticipationId = victimPart.Id,
             ChallengeId = adFlag.AdTeamService.ChallengeId,
             SubmittedAtRound = currentRound.Number,
-            Points = points
+            Points = 0 // assigned below from the stable capture order
         };
 
         try
         {
             await db.AdAttacks.AddAsync(attack, token);
-            await db.SaveChangesAsync(token);
+            await db.SaveChangesAsync(token); // assigns attack.Id
         }
         catch (DbUpdateException)
         {
@@ -266,6 +263,17 @@ public class AdGameController(
             result.Message = "already submitted";
             return result;
         }
+
+        // First-blood weighting from a STABLE order (the Id sequence) rather than
+        // a pre-insert count: two teams capturing the same flag at the same instant
+        // get distinct Ids → distinct ranks (N and N+1), instead of both reading
+        // the same prior-count and each storing the same first-blood points (which
+        // the scoreboard then sums, inflating attack standings).
+        var priorCapturers = await db.AdAttacks.CountAsync(
+            a => a.AdFlagId == adFlag.Id && a.Id < attack.Id, token);
+        var points = AdScoring.AttackPoints(priorCapturers);
+        attack.Points = points;
+        await db.SaveChangesAsync(token);
 
         logger.SystemLog(
             $"A&D attack landed: attacker={attackerPart.Id} victim={victimPart.Id} chal={adFlag.AdTeamService.ChallengeId} round={currentRound.Number} pts={points:F2}",
