@@ -9,6 +9,7 @@ import {
   Table,
   Text,
   Tooltip,
+  useMantineColorScheme,
   useMantineTheme,
 } from '@mantine/core'
 import { mdiHeartPulse, mdiShieldHalfFull, mdiSwordCross, mdiTimerSandComplete } from '@mdi/js'
@@ -21,10 +22,12 @@ import {
   AdLikeHiddenCols,
   AdLikePinnedHeaderCells,
   AdLikePinnedRowCells,
+  AdLikeStatusLegend,
   AdLikeToolbar,
   ITEM_COUNT_PER_PAGE,
   adLikeRowHighlight,
   fmtPts,
+  statusBg,
   statusColor,
   useAdLikeScoreboardState,
 } from '@Components/AdLikeScoreboard'
@@ -51,6 +54,8 @@ interface AdScoreboardTableProps {
 export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
   const { t } = useTranslation()
   const theme = useMantineTheme()
+  const { colorScheme } = useMantineColorScheme()
+  const dark = colorScheme === 'dark'
   const { adScoreboard } = useAdScoreboard(numId)
   const { game } = useGame(numId)
 
@@ -208,18 +213,21 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                             </Table.Td>,
                           ]
                         }
+                        // Tint all four sub-cells by this service's last check
+                        // verdict so a team's up/broken services read at a glance.
+                        const cellBg = statusBg(svc.lastCheckStatus, theme, dark)
                         return [
-                          <Table.Td key={`${ch.challengeId}-a`} className={cx(classes.mono, classes.groupStart)}>
+                          <Table.Td key={`${ch.challengeId}-a`} className={cx(classes.mono, classes.groupStart)} style={{ backgroundColor: cellBg }}>
                             <Text size="xs" c="teal" className={misc.ffmono} fw={700}>
                               {fmtPts(svc.attackPoints)}
                             </Text>
                           </Table.Td>,
-                          <Table.Td key={`${ch.challengeId}-s`} className={classes.mono}>
+                          <Table.Td key={`${ch.challengeId}-s`} className={classes.mono} style={{ backgroundColor: cellBg }}>
                             <Text size="xs" c="blue" className={misc.ffmono} fw={700}>
                               {fmtPts(svc.slaPoints)}
                             </Text>
                           </Table.Td>,
-                          <Table.Td key={`${ch.challengeId}-d`} className={classes.mono}>
+                          <Table.Td key={`${ch.challengeId}-d`} className={classes.mono} style={{ backgroundColor: cellBg }}>
                             <Text
                               size="xs"
                               c={svc.defenseLoss > 0 ? 'red' : 'dimmed'}
@@ -229,7 +237,7 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                               {svc.defenseLoss > 0 ? `−${fmtPts(svc.defenseLoss)}` : '0'}
                             </Text>
                           </Table.Td>,
-                          <Table.Td key={`${ch.challengeId}-st`} className={classes.mono}>
+                          <Table.Td key={`${ch.challengeId}-st`} className={classes.mono} style={{ backgroundColor: cellBg }}>
                             <Badge
                               size="xs"
                               variant="light"
@@ -253,6 +261,9 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
               </Table.Tbody>
             </Table>
           </Table.ScrollContainer>
+
+          {/* Status color key, floated over the empty top-left header cells. */}
+          <AdLikeStatusLegend />
 
           {filteredList.length === 0 && (
             <Center mih="6rem">

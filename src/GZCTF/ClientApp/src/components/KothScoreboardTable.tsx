@@ -23,10 +23,12 @@ import {
   AdLikeHiddenCols,
   AdLikePinnedHeaderCells,
   AdLikePinnedRowCells,
+  AdLikeStatusLegend,
   AdLikeToolbar,
   ITEM_COUNT_PER_PAGE,
   adLikeRowHighlight,
   fmtPts,
+  statusBg,
   statusColor,
   useAdLikeScoreboardState,
 } from '@Components/AdLikeScoreboard'
@@ -257,9 +259,13 @@ export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => 
                         const ticks = cell?.ticksHeld ?? 0
                         const broken = cell?.brokenTicks ?? 0
                         const holding = cell?.isCurrentHolder ?? false
-                        const tdStyle = holding ? {
-                          background: alpha(theme.colors.violet[colorScheme === 'dark' ? 7 : 4], 0.18),
-                        } : undefined
+                        // Holder keeps the violet wash (who holds the hill is the
+                        // key KotH signal); every other cell gets the hill's
+                        // status tint, matching the A&D board. The hill is shared,
+                        // so the tint is uniform down a column (= hill health).
+                        const tdStyle = holding
+                          ? { background: alpha(theme.colors.violet[colorScheme === 'dark' ? 7 : 4], 0.18) }
+                          : { backgroundColor: statusBg(hill.lastCheckStatus, theme, colorScheme === 'dark') }
                         return [
                           <Table.Td
                             key={`${hill.challengeId}-p`}
@@ -317,6 +323,9 @@ export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => 
               </Table.Tbody>
             </Table>
           </Table.ScrollContainer>
+
+          {/* Status color key, floated over the empty top-left header cells. */}
+          <AdLikeStatusLegend />
 
           {filteredList.length === 0 && (
             <Center mih="6rem">

@@ -1,6 +1,7 @@
 import {
   alpha,
   Avatar,
+  Box,
   Button,
   Grid,
   Group,
@@ -64,6 +65,14 @@ export const statusColor = (s?: string | null) => {
       return 'gray' // InternalError / never-checked
   }
 }
+
+/**
+ * Subtle cell-background tint keyed to a service/hill check status — the same
+ * hue as {@link statusColor} at low alpha, so a row reads as "this service is
+ * Ok / broken" at a glance without drowning the colored mono numbers on top.
+ */
+export const statusBg = (status: string | null | undefined, theme: MantineTheme, dark: boolean): string =>
+  alpha(theme.colors[statusColor(status)][dark ? 6 : 5], dark ? 0.22 : 0.16)
 
 /** Row outline + wash applied to the "find my team" target for 2.5s. */
 export const adLikeRowHighlight = (highlighted: boolean, theme: MantineTheme): CSSProperties | undefined =>
@@ -391,5 +400,37 @@ export const AdLikePinnedRowCells: FC<AdLikePinnedRowCellsProps> = ({
         {total.toFixed(1)}
       </Table.Td>
     </>
+  )
+}
+
+// The check verdicts that carry a cell tint (gray "n/a"/never-checked is the
+// no-color default, so it's left off the key).
+const AD_LIKE_LEGEND_STATUSES = ['Ok', 'Mumble', 'Offline']
+
+/**
+ * Floating status-color key, pinned over the empty top-left header cells
+ * (above the Rank/Team/…/Total labels) on the A&D and KotH boards. Explains
+ * the per-cell {@link statusBg} tints.
+ */
+export const AdLikeStatusLegend: FC = () => {
+  const theme = useMantineTheme()
+  const { t } = useTranslation()
+
+  return (
+    <Box className={classes.legend}>
+      <Stack gap={3}>
+        <Text size="xs" fw={600} c="dimmed">
+          {t('game.content.scoreboard.ad.column.status', 'Status')}
+        </Text>
+        {AD_LIKE_LEGEND_STATUSES.map((st) => (
+          <Group key={st} gap={6} wrap="nowrap">
+            <Box w={11} h={11} style={{ backgroundColor: theme.colors[statusColor(st)][6], borderRadius: 3 }} />
+            <Text size="xs" c="dimmed">
+              {st}
+            </Text>
+          </Group>
+        ))}
+      </Stack>
+    </Box>
   )
 }
