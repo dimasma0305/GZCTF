@@ -13,6 +13,7 @@ import {
   Tabs,
   Text,
   Title,
+  Tooltip,
 } from '@mantine/core'
 import { useLocalStorage } from '@mantine/hooks'
 import { mdiCrown, mdiFileUploadOutline, mdiFlagOutline, mdiPuzzle, mdiSwordCross } from '@mdi/js'
@@ -305,6 +306,9 @@ export const ChallengePanel: FC = () => {
           </>
         )}
         {kindsPresent >= 2 && (
+          // Icon-only segmented control — text labels overflowed the 10.5rem
+          // sidebar at 4 buttons, making the KotH crown nearly unclickable.
+          // Tooltip-on-hover keeps the label discoverable without the squeeze.
           <SegmentedControl
             size="xs"
             w="10.5rem"
@@ -314,37 +318,41 @@ export const ChallengePanel: FC = () => {
               {
                 value: 'all',
                 label: (
-                  <Center style={{ gap: 3 }}>
-                    <Icon path={mdiPuzzle} size={0.55} />
-                    <span>{t('game.button.kind.all', 'All')}</span>
-                  </Center>
+                  <Tooltip label={t('game.button.kind.all', 'All')} withArrow openDelay={200}>
+                    <Center h="1.2rem">
+                      <Icon path={mdiPuzzle} size={0.7} />
+                    </Center>
+                  </Tooltip>
                 ),
               },
               ...(hasJeopardy ? [{
                 value: 'jeopardy',
                 label: (
-                  <Center style={{ gap: 3 }}>
-                    <Icon path={mdiFlagOutline} size={0.55} />
-                    <span>{t('game.button.kind.jeopardy', 'CTF')}</span>
-                  </Center>
+                  <Tooltip label={t('game.button.kind.jeopardy', 'CTF')} withArrow openDelay={200}>
+                    <Center h="1.2rem">
+                      <Icon path={mdiFlagOutline} size={0.7} color="var(--mantine-color-blue-6)" />
+                    </Center>
+                  </Tooltip>
                 ),
               }] : []),
               ...(hasAd ? [{
                 value: 'ad',
                 label: (
-                  <Center style={{ gap: 3 }}>
-                    <Icon path={mdiSwordCross} size={0.55} />
-                    <span>{t('game.button.kind.ad', 'A&D')}</span>
-                  </Center>
+                  <Tooltip label={t('game.button.kind.ad', 'A&D')} withArrow openDelay={200}>
+                    <Center h="1.2rem">
+                      <Icon path={mdiSwordCross} size={0.7} color="var(--mantine-color-red-6)" />
+                    </Center>
+                  </Tooltip>
                 ),
               }] : []),
               ...(hasKoth ? [{
                 value: 'koth',
                 label: (
-                  <Center style={{ gap: 3 }}>
-                    <Icon path={mdiCrown} size={0.55} />
-                    <span>{t('game.button.kind.koth', 'KotH')}</span>
-                  </Center>
+                  <Tooltip label={t('game.button.kind.koth', 'KotH')} withArrow openDelay={200}>
+                    <Center h="1.2rem">
+                      <Icon path={mdiCrown} size={0.7} color="var(--mantine-color-violet-6)" />
+                    </Center>
+                  </Tooltip>
                 ),
               }] : []),
             ]}
