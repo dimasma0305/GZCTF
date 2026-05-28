@@ -169,6 +169,9 @@ internal static class ServicesExtension
             // Kubernetes) is registered per provider in ContainerServiceExtension.
             builder.Services.AddHostedService<Services.AdCheckerService>();
             builder.Services.AddHostedService<Services.AdSnapshotService>();
+            // Docker-only: DOCKER-USER egress isolation (no-ops on K8s, which uses
+            // NetworkPolicy instead). Brings Docker to containment parity.
+            builder.Services.AddHostedService<Services.AdEgressIsolationService>();
         }
 
         internal void AddWebServices()

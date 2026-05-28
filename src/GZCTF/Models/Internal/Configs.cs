@@ -554,6 +554,15 @@ public class DockerConfig
     public string? UserName { get; set; }
     public string? Password { get; set; }
     public string? ChallengeNetwork { get; set; }
+
+    /// <summary>
+    /// Enforce A&amp;D egress isolation on the challenge bridges (default on) — installs
+    /// <c>DOCKER-USER</c> rules so a popped challenge container can't pivot team→team
+    /// or reach cloud metadata / private ranges (the same containment K8s gets from
+    /// its egress NetworkPolicy). Legit paths (the checker, VPN ingress, internet on
+    /// "open") are exempted. Set false to disable (the rules are removed next cycle).
+    /// </summary>
+    public bool EnforceEgressIsolation { get; set; } = true;
 }
 
 public class KubernetesConfig

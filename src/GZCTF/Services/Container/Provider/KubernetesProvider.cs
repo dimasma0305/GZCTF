@@ -170,8 +170,9 @@ public class KubernetesProvider : IContainerProvider<Kubernetes, KubernetesMetad
     /// <see cref="KubernetesConfig.AllowCidr"/>; that list augments this baseline,
     /// it never replaces it, so the private ranges can't be accidentally re-opened.
     /// </summary>
-    private static readonly string[] EgressDenyBaseline =
-        ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"];
+    // Shared with the Docker DOCKER-USER isolation (AdEgressIsolationService) via
+    // AdEgressBaseline so both providers deny the same private + link-local ranges.
+    private static readonly string[] EgressDenyBaseline = AdEgressBaseline.PrivateAndLinkLocal;
 
     /// <summary>Egress allow-rule for the A&amp;D flag-pull endpoint (control-plane
     /// host:port), or empty when <c>Ad:FlagPullBaseUrl</c> isn't a usable IP. Both
