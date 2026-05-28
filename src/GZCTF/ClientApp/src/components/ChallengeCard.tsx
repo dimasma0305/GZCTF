@@ -11,6 +11,7 @@ import {
   Title,
   Tooltip,
   alpha,
+  useMantineColorScheme,
   useMantineTheme,
 } from '@mantine/core'
 import { mdiCrown, mdiFlag, mdiFlagOutline, mdiSwordCross, mdiThumbUp } from '@mdi/js'
@@ -41,6 +42,7 @@ export const ChallengeCard: FC<ChallengeCardProps> = (props: ChallengeCardProps)
   const challengeCategoryLabelMap = useChallengeCategoryLabelMap()
   const cateData = challengeCategoryLabelMap.get(challenge.category!)
   const theme = useMantineTheme()
+  const { colorScheme } = useMantineColorScheme()
   const { locale } = useLanguage()
   const { t } = useTranslation()
   // A&D AND KotH both run on the live-scoring engine — neither has a static
@@ -78,7 +80,24 @@ export const ChallengeCard: FC<ChallengeCardProps> = (props: ChallengeCardProps)
     >
       <Stack gap="xs" pos="relative" style={{ zIndex: 99 }}>
         <Group h="30px" wrap="nowrap" justify="space-between" gap={2}>
-          <ScrollingText text={challenge.title || ''} size="lg" />
+          <Group gap={6} wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+            {/* Category icon at the top-left, matching the ChallengeModal header
+                pattern (`[category icon] [title] [pts/LIVE]`). For jeopardy this
+                is the Web/Pwn/Crypto/Misc tier color; for A&D / KotH it's still
+                the per-challenge category (organizers tag hills too). Without
+                this the card had only the engine badge on the right — the modal
+                showed a colored category icon at top-left and players opening
+                a card expected the same visual cue on the tile. */}
+            {cateData && (
+              <Icon
+                path={cateData.icon}
+                size={0.9}
+                color={theme.colors[cateData.color][colorScheme === 'dark' ? 4 : 6]}
+                style={{ flexShrink: 0 }}
+              />
+            )}
+            <ScrollingText text={challenge.title || ''} size="lg" />
+          </Group>
           <Group gap={4} wrap="nowrap">
             {/* Engine badge — same slot for all three so the icon position is
                 stable across challenges; color matches the kind-switcher +
