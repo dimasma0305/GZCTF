@@ -76,6 +76,84 @@ public sealed partial class AdTeamScoreRow
     public List<AdServiceScore> Services { get; set; } = [];
 }
 
+/// <summary>
+/// Body returned by GET /api/Game/{id}/Ad/Koth/Scoreboard — KotH-only view.
+/// Same shape as <see cref="AdScoreboardModel"/> but stripped to the hill
+/// columns (no A&amp;D services, no attack/defense/SLA breakdown). Useful when
+/// the game is KotH-dominant and the combined scoreboard's empty A&amp;D columns
+/// would just be noise. Also lets the UI render a dedicated KotH page that
+/// can show the live holder per hill — something the combined board doesn't.
+///
+/// <para>Cached separately from the combined board (key
+/// <c>_KothScoreboard_&lt;id&gt;</c>); shares the same invalidation trigger
+/// (<see cref="Services.Cache.CacheHelper.FlushAdScoreboardCache"/>) because
+/// the same events (round-advance + checker tick) move both boards.</para>
+/// </summary>
+[MemoryPackable]
+public sealed partial class KothScoreboardModel
+{
+    public int LatestRound { get; set; }
+    public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
+    public bool IsFrozenView { get; set; }
+    public DateTimeOffset? Freeze { get; set; }
+
+    /// <summary>Enabled KotH hills in display order (one per challenge).</summary>
+    public List<KothScoreboardHill> Hills { get; set; } = [];
+
+    public List<KothTeamScoreRow> Teams { get; set; } = [];
+}
+
+/// <summary>One KotH challenge column on the dedicated KotH board.</summary>
+[MemoryPackable]
+public sealed partial class KothScoreboardHill
+{
+    public int ChallengeId { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+
+    /// <summary>The team currently holding this hill (matches last persisted KothControlResult). Null when nobody holds it this tick.</summary>
+    public int? CurrentHolderParticipationId { get; set; }
+    public string? CurrentHolderTeamName { get; set; }
+
+    /// <summary>Latest functional verdict for the hill (shared, not per-team).</summary>
+    public string? LastCheckStatus { get; set; }
+
+    /// <summary>Round at which the hill was last refreshed (5-tick wipe). 0 = never.</summary>
+    public int LastRefreshRound { get; set; }
+}
+
+[MemoryPackable]
+public sealed partial class KothTeamScoreRow
+{
+    public int Rank { get; set; }
+    public int ParticipationId { get; set; }
+    public int TeamId { get; set; }
+    public string TeamName { get; set; } = string.Empty;
+    public string? Division { get; set; }
+
+    /// <summary>Sum of <see cref="KothHillScore.Points"/> across hills — what the rank is keyed on.</summary>
+    public double Total { get; set; }
+
+    /// <summary>One entry per hill in <see cref="KothScoreboardModel.Hills"/> order.</summary>
+    public List<KothHillScore> Hills { get; set; } = [];
+}
+
+/// <summary>One team's score on one KotH hill (board cell).</summary>
+[MemoryPackable]
+public sealed partial class KothHillScore
+{
+    public int ChallengeId { get; set; }
+
+    /// <summary>Σ HoldCredit − Penalty across every tick of this hill the team controlled.</summary>
+    public double Points { get; set; }
+
+    /// <summary>Number of distinct ticks this team held the hill.</summary>
+    public int TicksHeld { get; set; }
+
+    /// <summary>True when this team is the holder this tick (matches the latest persisted KothControlResult for the hill).</summary>
+    public bool IsCurrentHolder { get; set; }
+}
+
 /// <summary>One team's score on one A&amp;D service (scoreboard cell).</summary>
 [MemoryPackable]
 public sealed partial class AdServiceScore

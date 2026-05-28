@@ -953,6 +953,34 @@ public class AdGameController(
     }
 
     /// <summary>
+    /// KotH-only scoreboard for this game — one column per enabled King of the
+    /// Hill challenge, one row per team, ranked by total hold points. Strips
+    /// A&amp;D services so the dedicated KotH page isn't padded with empty
+    /// attack/defense/SLA columns. Public; respects the game's hidden flag and
+    /// the ICPC freeze the same way as <c>Scoreboard</c>. Returns an empty
+    /// board (not 404) if the game has KotH-engine challenges but none are
+    /// enabled — the UI can render "no hills configured" cleanly.
+    /// </summary>
+    [HttpGet("Koth/Scoreboard")]
+    [ProducesResponseType(typeof(KothScoreboardModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> KothScoreboard(int id, CancellationToken token)
+    {
+        var game = await db.Games.FirstOrDefaultAsync(g => g.Id == id, token);
+        if (game is null || game.Hidden) return NotFound();
+
+        var hasKoth = await db.GameChallenges.AnyAsync(
+            c => c.GameId == id && c.Type == ChallengeType.KingOfTheHill, token);
+        if (!hasKoth) return NotFound();
+
+        var cutoff = await ResolveFreezeCutoffAsync(game, token);
+        Response.Headers.Append("Vary", "Cookie");
+
+        var board = await adScoreboard.TryGetKothScoreboardAsync(id, cutoff != null, token)
+                    ?? await adScoreboard.GetKothScoreboardAsync(id, cutoff, token);
+        return Ok(board);
+    }
+
+    /// <summary>
     /// Per-round, per-team cumulative score timeline for the A&amp;D scoreboard
     /// chart. Mirrors what GameRepository builds for the jeopardy ScoreTimeLine
     /// component. Public; respects the game's hidden flag.

@@ -29,4 +29,15 @@ public interface IAdScoreboardRepository : IRepository
 
     /// <summary>Non-blocking cache read; null on miss.</summary>
     Task<AdScoreTimelineModel?> TryGetTimelineAsync(int gameId, bool frozen, CancellationToken token = default);
+
+    /// <summary>Build the KotH-only scoreboard from the DB (uncached). Strips
+    /// A&amp;D services from the column set and per-team breakdown — useful for a
+    /// dedicated KotH page.</summary>
+    Task<KothScoreboardModel> GenKothScoreboardAsync(int gameId, DateTimeOffset? cutoff, CancellationToken token = default);
+
+    /// <summary>Get the KotH-only scoreboard, building + caching on miss (blocks the first caller).</summary>
+    Task<KothScoreboardModel> GetKothScoreboardAsync(int gameId, DateTimeOffset? cutoff, CancellationToken token = default);
+
+    /// <summary>Non-blocking cache read; null on miss.</summary>
+    Task<KothScoreboardModel?> TryGetKothScoreboardAsync(int gameId, bool frozen, CancellationToken token = default);
 }

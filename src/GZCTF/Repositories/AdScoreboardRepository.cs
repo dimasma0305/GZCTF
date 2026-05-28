@@ -377,4 +377,164 @@ public class AdScoreboardRepository(
 
         return result;
     }
+
+    public Task<KothScoreboardModel> GetKothScoreboardAsync(int gameId, DateTimeOffset? cutoff, CancellationToken token = default)
+        => cacheHelper.GetOrCreateAsync(logger,
+            cutoff == null ? CacheKey.KothScoreboard(gameId) : CacheKey.KothScoreboardFrozen(gameId),
+            entry =>
+            {
+                entry.SlidingExpiration = TimeSpan.FromDays(7);
+                return GenKothScoreboardAsync(gameId, cutoff, token);
+            }, token: token);
+
+    public Task<KothScoreboardModel?> TryGetKothScoreboardAsync(int gameId, bool frozen, CancellationToken token = default)
+        => cacheHelper.GetAsync<KothScoreboardModel>(
+            frozen ? CacheKey.KothScoreboardFrozen(gameId) : CacheKey.KothScoreboard(gameId), token);
+
+    /// <summary>
+    /// Build the KotH-only scoreboard: one column per enabled KotH challenge, one
+    /// row per accepted team, score per cell = Σ (HoldCredit − Penalty) restricted
+    /// to ticks where this team controlled this hill. Mirrors
+    /// <see cref="GenScoreboardAsync"/>'s aggregation style (single SQL group-by
+    /// rather than per-row scan) so it scales the same way.
+    /// </summary>
+    public async Task<KothScoreboardModel> GenKothScoreboardAsync(
+        int gameId, DateTimeOffset? cutoff, CancellationToken token = default)
+    {
+        var freeze = await Context.Games
+            .Where(g => g.Id == gameId).Select(g => g.FreezeTimeUtc).FirstOrDefaultAsync(token);
+
+        var latestRound = await Context.AdRounds
+            .Where(r => r.GameId == gameId && (cutoff == null || r.StartedAt <= cutoff))
+            .OrderByDescending(r => r.Number)
+            .Select(r => r.Number)
+            .FirstOrDefaultAsync(token);
+
+        var hillRows = await Context.GameChallenges
+            .Where(c => c.GameId == gameId && c.IsEnabled && c.Type == ChallengeType.KingOfTheHill)
+            .OrderBy(c => c.Category).ThenBy(c => c.Id)
+            .Select(c => new { c.Id, c.Title, c.Category })
+            .ToListAsync(token);
+
+        var teams = await Context.Participations
+            .Where(p => p.GameId == gameId && p.Status == ParticipationStatus.Accepted)
+            .Include(p => p.Team)
+            .Include(p => p.Division)
+            .ToListAsync(token);
+
+        var result = new KothScoreboardModel
+        {
+            LatestRound = latestRound,
+            IsFrozenView = cutoff != null,
+            Freeze = freeze,
+        };
+
+        if (hillRows.Count == 0)
+        {
+            // No KotH challenges enabled — return an empty board (rather than 404)
+            // so the UI can render a "no hills configured" state gracefully.
+            result.Teams = teams.Select(t => new KothTeamScoreRow
+            {
+                ParticipationId = t.Id,
+                TeamId = t.TeamId,
+                TeamName = t.Team.Name,
+                Division = t.Division?.Name,
+            }).ToList();
+            return result;
+        }
+
+        var hillIds = hillRows.Select(c => c.Id).ToList();
+        var partIds = teams.Select(t => t.Id).ToHashSet();
+
+        // Per-(team, hill) score in one SQL group-by — matches the combined
+        // scoreboard's kothByCell aggregation style (line 98-104). Filter:
+        // only count rows where this team was the controller (NULL = no king
+        // that tick, doesn't contribute to anyone's column).
+        var scoreByCell = (await Context.KothControlResults
+                .Where(r => r.GameId == gameId && r.ControllingParticipationId != null
+                    && hillIds.Contains(r.ChallengeId)
+                    && (cutoff == null || r.CheckedAt <= cutoff))
+                .GroupBy(r => new { Pid = r.ControllingParticipationId!.Value, r.ChallengeId })
+                .Select(g => new
+                {
+                    g.Key.Pid,
+                    g.Key.ChallengeId,
+                    Points = g.Sum(x => x.HoldCredit - x.Penalty),
+                    Ticks = g.Count()
+                })
+                .ToListAsync(token))
+            .ToDictionary(x => (x.Pid, x.ChallengeId), x => (x.Points, x.Ticks));
+
+        // Latest persisted result per hill — gives us both the current functional
+        // verdict and the current holder (so the cell can highlight "they're
+        // holding it RIGHT NOW" without an extra round-trip).
+        var latestPerHill = new Dictionary<int, (int? Holder, AdCheckStatus? Status)>();
+        foreach (var hid in hillIds)
+        {
+            var row = await Context.KothControlResults
+                .Where(r => r.ChallengeId == hid && (cutoff == null || r.CheckedAt <= cutoff))
+                .OrderByDescending(r => r.AdRoundId)
+                .Select(r => new { r.ControllingParticipationId, r.Status })
+                .FirstOrDefaultAsync(token);
+            latestPerHill[hid] = (row?.ControllingParticipationId, (AdCheckStatus?)row?.Status);
+        }
+
+        var lastRefreshByHill = (await Context.KothTargets
+                .Where(t => t.GameId == gameId && hillIds.Contains(t.ChallengeId))
+                .Select(t => new { t.ChallengeId, t.LastRefreshRound })
+                .ToListAsync(token))
+            .ToDictionary(x => x.ChallengeId, x => x.LastRefreshRound);
+
+        var teamNameById = teams.ToDictionary(t => t.Id, t => t.Team.Name);
+
+        result.Hills = hillRows.Select(c =>
+        {
+            var (holder, status) = latestPerHill.GetValueOrDefault(c.Id);
+            return new KothScoreboardHill
+            {
+                ChallengeId = c.Id,
+                Title = c.Title,
+                Category = c.Category.ToString(),
+                CurrentHolderParticipationId = holder,
+                CurrentHolderTeamName = holder is { } h ? teamNameById.GetValueOrDefault(h) : null,
+                LastCheckStatus = status?.ToString(),
+                LastRefreshRound = lastRefreshByHill.GetValueOrDefault(c.Id, 0),
+            };
+        }).ToList();
+
+        result.Teams = teams.Select(t =>
+        {
+            var cells = new List<KothHillScore>(hillRows.Count);
+            double total = 0;
+            foreach (var hill in hillRows)
+            {
+                var (pts, ticks) = scoreByCell.GetValueOrDefault((t.Id, hill.Id), (0d, 0));
+                total += pts;
+                var (holder, _) = latestPerHill.GetValueOrDefault(hill.Id);
+                cells.Add(new KothHillScore
+                {
+                    ChallengeId = hill.Id,
+                    Points = pts,
+                    TicksHeld = ticks,
+                    IsCurrentHolder = holder == t.Id
+                });
+            }
+            return new KothTeamScoreRow
+            {
+                ParticipationId = t.Id,
+                TeamId = t.TeamId,
+                TeamName = t.Team.Name,
+                Division = t.Division?.Name,
+                Total = total,
+                Hills = cells
+            };
+        })
+        .OrderByDescending(r => r.Total)
+        .ToList();
+
+        for (int i = 0; i < result.Teams.Count; i++)
+            result.Teams[i].Rank = i + 1;
+
+        return result;
+    }
 }
