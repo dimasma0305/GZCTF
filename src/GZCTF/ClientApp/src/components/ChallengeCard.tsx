@@ -201,7 +201,30 @@ export const ChallengeCard: FC<ChallengeCardProps> = (props: ChallengeCardProps)
           </Stack>
         </Group>
       </Stack>
-      {cateData && (
+      {/* Big watermark icon at the bottom-left (the card's "visualizer").
+          For jeopardy this is the category icon in the category color — what
+          it's always been. For A&D and KotH the cateData icon is still set
+          (organizers tag hills with a category too), but the engine identity
+          (red sword / violet crown) is way stronger than the per-challenge
+          category, so swap the watermark to the engine icon + engine color
+          for these. Result: KotH cards visibly read as "a hill", A&D as "a
+          service", jeopardy as "a Web/Pwn/Crypto chal" — same way the badge
+          + divider colors already encode it at the top + middle of the card. */}
+      {isKoth ? (
+        <Icon
+          size={4}
+          path={mdiCrown}
+          color={alpha(theme.colors.violet[colorScheme === 'dark' ? 6 : 7], 0.3)}
+          className={classes.icon}
+        />
+      ) : isAd ? (
+        <Icon
+          size={4}
+          path={mdiSwordCross}
+          color={alpha(theme.colors.red[colorScheme === 'dark' ? 6 : 7], 0.3)}
+          className={classes.icon}
+        />
+      ) : cateData && (
         <Icon
           size={4}
           path={cateData.icon}
