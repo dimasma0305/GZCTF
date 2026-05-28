@@ -25,7 +25,9 @@ import cx from 'clsx'
 import { FC, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ScrollingText } from '@Components/ScrollingText'
-import { useGame, useKothScoreboard } from '@Hooks/useGame'
+import { useGame, useKothScoreboard, type KothScoreboardHill } from '@Hooks/useGame'
+import { useChallengeCategoryLabelMap } from '@Utils/Shared'
+import { ChallengeCategory } from '@Api'
 import misc from '@Styles/Misc.module.css'
 import classes from '@Styles/ScoreboardTable.module.css'
 
@@ -83,7 +85,23 @@ export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => 
   const { colorScheme } = useMantineColorScheme()
   const { kothScoreboard } = useKothScoreboard(numId)
   const { game } = useGame(numId)
+  const categoryLabelMap = useChallengeCategoryLabelMap()
   const myTeamName = game?.teamName ?? null
+
+  // Group hills by category — backend returns them already sorted by category
+  // (AdScoreboardRepository: OrderBy(c.Category).ThenBy(c.Id)), so contiguous
+  // hills with the same category live in one group. Renders the same colored
+  // category tier as AdScoreboardTable / ScoreboardTable for parity.
+  const hillGroups = useMemo(() => {
+    const out: { category: string; items: KothScoreboardHill[] }[] = []
+    if (!kothScoreboard) return out
+    for (const h of kothScoreboard.hills) {
+      const last = out[out.length - 1]
+      if (last && last.category === h.category) last.items.push(h)
+      else out.push({ category: h.category, items: [h] })
+    }
+    return out
+  }, [kothScoreboard])
 
   const [activePage, setPage] = useState(1)
   const [divisionName, setDivisionName] = useState<string | null>(null)
@@ -231,9 +249,50 @@ export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => 
           >
             <Table className={classes.table} verticalSpacing={4} horizontalSpacing={8}>
               <Table.Thead className={classes.thead}>
-                {/* Tier 1 — hill name (spans its 2 sub-columns) + current-holder pill.
-                    Violet wash on the group cell mirrors the colored category groups
-                    on the AD/jeopardy boards. */}
+                {/* Tier 1 — colored category bands (Web / Pwn / Crypto / Misc),
+                    one cell per category group spanning its hills' 2 sub-columns
+                    each. Matches AdScoreboardTable + ScoreboardTable so the
+                    category-color cue is consistent across all three boards. */}
+                <Table.Tr className={misc.noBorder}>
+                  {hiddenCol}
+                  {hillGroups.map((grp) => {
+                    const cate = categoryLabelMap.get(grp.category as ChallengeCategory)
+                    return (
+                      <Table.Th
+                        key={grp.category}
+                        colSpan={grp.items.length * 2}
+                        className={classes.groupStart}
+                        h="2.4rem"
+                        style={
+                          cate
+                            ? {
+                                backgroundColor: alpha(
+                                  theme.colors[cate.color][colorScheme === 'dark' ? 8 : 6],
+                                  colorScheme === 'dark' ? 0.15 : 0.2
+                                ),
+                              }
+                            : undefined
+                        }
+                      >
+                        <Group gap={4} wrap="nowrap" justify="center" w="100%">
+                          {cate && (
+                            <Icon
+                              path={cate.icon}
+                              size={0.8}
+                              color={theme.colors[cate.color][colorScheme === 'dark' ? 8 : 6]}
+                            />
+                          )}
+                          <Text c={cate?.color} className={classes.text} ff="text" fz="xs">
+                            {grp.category}
+                          </Text>
+                        </Group>
+                      </Table.Th>
+                    )
+                  })}
+                  <Table.Th rowSpan={3} aria-hidden />
+                </Table.Tr>
+                {/* Tier 2 — hill name (spans its 2 sub-columns) + current-holder pill.
+                    Violet-themed since hills are KotH. */}
                 <Table.Tr className={misc.noBorder}>
                   {hiddenCol}
                   {kothScoreboard.hills.map((hill) => (
@@ -245,7 +304,7 @@ export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => 
                       style={{
                         backgroundColor: alpha(
                           theme.colors.violet[colorScheme === 'dark' ? 8 : 6],
-                          colorScheme === 'dark' ? 0.15 : 0.18
+                          colorScheme === 'dark' ? 0.12 : 0.14
                         ),
                       }}
                     >
@@ -263,9 +322,8 @@ export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => 
                       </Group>
                     </Table.Th>
                   ))}
-                  <Table.Th rowSpan={2} aria-hidden />
                 </Table.Tr>
-                {/* Tier 2 — pinned column labels + per-hill metric icons (hold / status). */}
+                {/* Tier 3 — pinned column labels + per-hill metric icons (hold / status). */}
                 <Table.Tr>
                   {[
                     t('game.label.score_table.rank_total', 'Rank'),

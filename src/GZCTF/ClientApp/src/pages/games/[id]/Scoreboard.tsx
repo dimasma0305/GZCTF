@@ -1,10 +1,11 @@
 import { Alert, Center, SegmentedControl, Stack } from '@mantine/core'
+import { useLocalStorage } from '@mantine/hooks'
 import { mdiCrown, mdiFlagOutline, mdiSnowflake, mdiSwordCross } from '@mdi/js'
 import Icon from '@mdi/react'
 import dayjs from 'dayjs'
-import { FC, useMemo, useState } from 'react'
+import { FC, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useParams } from 'react-router'
+import { useLocation, useNavigate, useParams } from 'react-router'
 import { AdScoreboardTable } from '@Components/AdScoreboardTable'
 import { KothScoreboardTable } from '@Components/KothScoreboardTable'
 import { ScoreboardTable } from '@Components/ScoreboardTable'
@@ -19,12 +20,20 @@ import { useIsMobile } from '@Utils/ThemeOverride'
 import { useGameScoreboard, useGameTeamInfo } from '@Hooks/useGame'
 import api from '@Api'
 
+type ScoreboardTab = 'jeopardy' | 'ad' | 'koth'
+const ALL_TABS: ScoreboardTab[] = ['jeopardy', 'ad', 'koth']
+// Per-game last-tab memory key. Keyed on gameId so switching between games
+// doesn't carry the wrong tab over.
+const tabStorageKey = (gameId: number) => `scoreboard-tab-${gameId}`
+
 const Scoreboard: FC = () => {
   const { id } = useParams()
   const numId = parseInt(id ?? '-1')
   const { teamInfo, error } = useGameTeamInfo(numId)
   const { scoreboard } = useGameScoreboard(numId)
   const { t } = useTranslation()
+  const navigate = useNavigate()
+  const location = useLocation()
 
   const [divisionId, setDivisionId] = useState<number | null>(null)
   const isMobile = useIsMobile(1080)
@@ -46,15 +55,58 @@ const Scoreboard: FC = () => {
   const presentTabs = (hasJeopardyChallenges ? 1 : 0) + (hasAdChallenges ? 1 : 0) + (hasKothChallenges ? 1 : 0)
   const showTabs = presentTabs >= 2
   // Default tab in priority: jeopardy if present, else AD, else KotH.
-  const defaultTab = hasJeopardyChallenges ? 'jeopardy' : hasAdChallenges ? 'ad' : 'koth'
-  const [activeTab, setActiveTab] = useState<string>(defaultTab)
-  // Coerce to a tab that's actually available (kind toggled off after first render).
-  const effectiveTab =
-    (activeTab === 'jeopardy' && !hasJeopardyChallenges)
-      || (activeTab === 'ad' && !hasAdChallenges)
-      || (activeTab === 'koth' && !hasKothChallenges)
+  const defaultTab: ScoreboardTab = hasJeopardyChallenges ? 'jeopardy' : hasAdChallenges ? 'ad' : 'koth'
+
+  // Persisted active tab — per-game key so each game remembers independently.
+  // Navigating away and coming back lands on the last-visited tab; the
+  // useEffect below also re-asserts the URL hash so a deep-linked share
+  // (e.g. /games/1/scoreboard#koth) wins on first load.
+  const [storedTab, setStoredTab] = useLocalStorage<ScoreboardTab>({
+    key: tabStorageKey(numId),
+    defaultValue: defaultTab,
+    getInitialValueInEffect: false,
+  })
+
+  // URL hash → tab mapping. Hash takes precedence over localStorage on
+  // initial mount so a shared link reliably opens the right tab.
+  const hashTab = useMemo<ScoreboardTab | null>(() => {
+    const raw = location.hash.replace(/^#/, '').toLowerCase()
+    // Accept the canonical id and a couple of friendly aliases.
+    if (raw === 'koth' || raw === 'king-of-the-hill' || raw === 'kingofthehill') return 'koth'
+    if (raw === 'ad' || raw === 'attack-defense' || raw === 'attackdefense') return 'ad'
+    if (raw === 'jeopardy' || raw === 'ctf') return 'jeopardy'
+    return null
+  }, [location.hash])
+
+  // Resolve to the tab actually rendered: hash > stored > default. Then coerce
+  // if the resolved tab isn't present in this game (e.g. localStorage said
+  // 'koth' but the operator disabled all KotH challenges since last visit).
+  const requestedTab = hashTab ?? storedTab ?? defaultTab
+  const effectiveTab: ScoreboardTab =
+    (requestedTab === 'jeopardy' && !hasJeopardyChallenges)
+      || (requestedTab === 'ad' && !hasAdChallenges)
+      || (requestedTab === 'koth' && !hasKothChallenges)
       ? defaultTab
-      : activeTab
+      : requestedTab
+
+  // Keep URL hash + localStorage in sync with whatever's actually showing —
+  // so closing/reopening the tab, refreshing, or copy-pasting the URL all
+  // restore the same view. Only fires when something changes.
+  useEffect(() => {
+    if (storedTab !== effectiveTab) setStoredTab(effectiveTab)
+    const currentHash = location.hash.replace(/^#/, '').toLowerCase()
+    const desiredHash = effectiveTab // canonical id
+    if (currentHash !== desiredHash) {
+      // replace: true so the browser back button doesn't accumulate
+      // a step per tab switch.
+      navigate(`${location.pathname}${location.search}#${desiredHash}`, { replace: true })
+    }
+  }, [effectiveTab, storedTab, setStoredTab, navigate, location.hash, location.pathname, location.search])
+
+  const setActiveTab = (v: string | null) => {
+    if (!v) return
+    if (ALL_TABS.includes(v as ScoreboardTab)) setStoredTab(v as ScoreboardTab)
+  }
 
   // Each live board freezes independently (separate endpoints) — read the
   // freeze state from whichever board we're currently showing.
