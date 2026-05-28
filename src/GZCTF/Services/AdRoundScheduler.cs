@@ -61,7 +61,10 @@ public sealed class AdRoundScheduler(
 
         var activeGames = await db.Games
             .Where(g => g.StartTimeUtc <= now && now <= g.EndTimeUtc && !g.AdScoringPaused)
-            .Where(g => g.Challenges.Any(c => c.Type == ChallengeType.AttackDefense && c.IsEnabled))
+            // Both A&D and KotH ride the same round/tick scheduler — minting flags
+            // for one, KothTokens for the other (see AdRoundService.AdvanceAsync).
+            .Where(g => g.Challenges.Any(c => (c.Type == ChallengeType.AttackDefense
+                                            || c.Type == ChallengeType.KingOfTheHill) && c.IsEnabled))
             .Select(g => new
             {
                 g.Id,

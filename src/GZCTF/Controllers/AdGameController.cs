@@ -827,7 +827,8 @@ public class AdGameController(
         if (game is null || game.Hidden) return NotFound();
 
         var hasAd = await db.GameChallenges.AnyAsync(
-            c => c.GameId == id && c.Type == ChallengeType.AttackDefense, token);
+            c => c.GameId == id && (c.Type == ChallengeType.AttackDefense
+                                 || c.Type == ChallengeType.KingOfTheHill), token);
         if (!hasAd) return NotFound();
 
         // ICPC-style freeze: during [FreezeTimeUtc, EndTimeUtc) non-monitor
@@ -857,7 +858,8 @@ public class AdGameController(
         if (game is null || game.Hidden) return NotFound();
 
         var hasAd = await db.GameChallenges.AnyAsync(
-            c => c.GameId == id && c.Type == ChallengeType.AttackDefense, token);
+            c => c.GameId == id && (c.Type == ChallengeType.AttackDefense
+                                 || c.Type == ChallengeType.KingOfTheHill), token);
         if (!hasAd) return NotFound();
 
         // ICPC freeze: cap the timeline at the freeze instant for non-monitors.
@@ -904,8 +906,9 @@ public class AdGameController(
         if (participation is null) return Forbid();
 
         var hasAd = await db.GameChallenges.AnyAsync(
-            c => c.GameId == id && c.Type == ChallengeType.AttackDefense, token);
-        if (!hasAd) return NotFound(new RequestResponse("This game has no A&D challenges"));
+            c => c.GameId == id && (c.Type == ChallengeType.AttackDefense
+                                 || c.Type == ChallengeType.KingOfTheHill), token);
+        if (!hasAd) return NotFound(new RequestResponse("This game has no A&D or KotH challenges"));
 
         var configDir = config["Ad:Vpn:ConfigDir"] ?? "/wg-config";
         var serverPubKeyPath = Path.Combine(configDir, "server.pub");

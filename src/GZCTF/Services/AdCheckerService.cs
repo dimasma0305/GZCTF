@@ -92,7 +92,10 @@ public sealed class AdCheckerService(
 
         var activeGameIds = await db.Games
             .Where(g => g.StartTimeUtc <= now && now <= g.EndTimeUtc && !g.AdScoringPaused)
-            .Where(g => g.Challenges.Any(c => c.Type == ChallengeType.AttackDefense && c.IsEnabled))
+            // KotH challenges share the round/checker plumbing; CheckKothChallengesAsync
+            // below handles their probes after the A&D pass.
+            .Where(g => g.Challenges.Any(c => (c.Type == ChallengeType.AttackDefense
+                                            || c.Type == ChallengeType.KingOfTheHill) && c.IsEnabled))
             .Select(g => g.Id)
             .ToListAsync(token);
 
@@ -277,6 +280,26 @@ public sealed class AdCheckerService(
     /// marker matched against this round's issued tokens → the controller. Writes one
     /// <see cref="KothControlResult"/> per (challenge, round): functional king earns
     /// hold points; a king on a broken hill eats the flat penalty; no valid king → 0.
+    ///
+    /// <para><b>Attribution caveat (known limitation):</b> the controller is whichever
+    /// team's token matches the marker bytes — we cannot tell who actually wrote
+    /// them. A team that observes another team's token in <c>/koth/king</c> (any
+    /// team that can read the shared hill can) and replays it credits the original
+    /// bearer, not the replayer. The bearer is still the legitimate scorer (no
+    /// score transfer happens), but the replayer can force a specific victim to
+    /// stay "controller" — which used to chain into a permanent leader-cooldown.
+    /// Mitigations in place:
+    /// <list type="bullet">
+    ///   <item>Leader cooldown uses a recent-window definition (last refresh interval
+    ///         only) — see <c>ApplyKothLeaderCooldownAsync</c> — so force-feeding a
+    ///         victim controller status rotates the cooldown to them only briefly,
+    ///         not permanently.</item>
+    ///   <item>The matched token id + controller are logged at Information level on
+    ///         every persisted result, giving organizers a post-game audit trail.</item>
+    /// </list>
+    /// A full attribution fix would require an out-of-band write-source channel
+    /// (challenge-image-level source-IP logging, or a packet-capture sidecar on the
+    /// hill bridge). Tracked as future work; not implementable inside the checker.</para>
     /// </summary>
     private async Task CheckKothChallengesAsync(
         AppDbContext db, IAdCheckRunner runner, int gameId, AdRound latest, CancellationToken token)
@@ -315,49 +338,77 @@ public sealed class AdCheckerService(
             if (now < due)
                 continue;
 
-            var target = await db.KothTargets
-                .Include(t => t.Container)
-                .FirstOrDefaultAsync(t => t.GameId == gameId && t.ChallengeId == challenge.Id, token);
-
-            if (target?.Container is null || string.IsNullOrEmpty(target.Container.IP))
+            // Take the same per-challenge lock the reconciler uses on the shared
+            // hill (AdContainerManager.LockFor(0, challenge.Id)). Without this, a
+            // 5-tick refresh that destroys+relaunches the hill mid-probe races us:
+            // we read /koth/king from the just-launched (empty) container and
+            // record "no controller" for a round where the marker had been set
+            // legitimately. The reconciler also defers its refresh trigger to the
+            // round AFTER the boundary so that the boundary round's result is
+            // persisted before any wipe — these two changes work together.
+            await using var checkScope = scopeFactory.CreateAsyncScope();
+            var mgr = checkScope.ServiceProvider.GetRequiredService<AdContainerManager>();
+            await mgr.WithKothChallengeLockAsync(challenge.Id, async () =>
             {
-                await PersistKothResultAsync(scopeFactory, gameId, challenge.Id, latest.Id,
-                    null, AdCheckStatus.Offline, 0, 0, "hill not running", token);
-                continue;
-            }
+                // Re-check inside the lock — the reconciler may have just relaunched.
+                var target = await db.KothTargets
+                    .Include(t => t.Container)
+                    .FirstOrDefaultAsync(t => t.GameId == gameId && t.ChallengeId == challenge.Id, token);
 
-            // Synthesize a transient service wrapping the shared hill so we can reuse
-            // the A&D functional checker + the container file-read unchanged.
-            var hillTs = new AdTeamService
-            {
-                Id = 0,
-                ParticipationId = 0,
-                ChallengeId = challenge.Id,
-                ContainerId = target.ContainerId,
-                Container = target.Container
-            };
+                if (target?.Container is null || string.IsNullOrEmpty(target.Container.IP))
+                {
+                    await PersistKothResultAsync(scopeFactory, gameId, challenge.Id, latest.Id,
+                        null, AdCheckStatus.Offline, 0, 0, "hill not running", token);
+                    return;
+                }
 
-            var outcome = await RunWithRetryAsync(runner, hillTs, latest, challenge, null, token);
+                // Synthesize a transient service wrapping the shared hill so we can
+                // reuse the A&D functional checker + the container file-read unchanged.
+                var hillTs = new AdTeamService
+                {
+                    Id = 0,
+                    ParticipationId = 0,
+                    ChallengeId = challenge.Id,
+                    ContainerId = target.ContainerId,
+                    Container = target.Container
+                };
 
-            int? controller = null;
-            await using (var scope = scopeFactory.CreateAsyncScope())
-            {
-                var mgr = scope.ServiceProvider.GetRequiredService<AdContainerManager>();
-                var blob = await mgr.ReadCurrentFileBytesAsync(scope.ServiceProvider, hillTs, "/koth/king", token);
+                var outcome = await RunWithRetryAsync(runner, hillTs, latest, challenge, null, token);
+
+                int? controller = null;
+                int? matchedTokenId = null;
+                var blob = await mgr.ReadCurrentFileBytesAsync(checkScope.ServiceProvider, hillTs, "/koth/king", token);
                 if (blob is { } b && b.Data.Length > 0)
                 {
                     var marker = Encoding.UTF8.GetString(b.Data).Trim();
                     if (marker.Length > 0)
-                        controller = await db.KothTokens
+                    {
+                        var match = await db.KothTokens
                             .Where(k => k.ChallengeId == challenge.Id && k.RoundNumber == latest.Number && k.Token == marker)
-                            .Select(k => (int?)k.ParticipationId)
+                            .Select(k => new { k.Id, k.ParticipationId })
                             .FirstOrDefaultAsync(token);
+                        if (match is not null)
+                        {
+                            controller = match.ParticipationId;
+                            matchedTokenId = match.Id;
+                        }
+                    }
                 }
-            }
 
-            var (hold, penalty) = AdScoring.KothTickDelta(controller is not null, outcome.Status, holdPerTick, activeTeams);
-            await PersistKothResultAsync(scopeFactory, gameId, challenge.Id, latest.Id,
-                controller, outcome.Status, hold, penalty, outcome.ErrorMessage, token);
+                // Audit trail for the H1 attribution caveat documented above —
+                // record (round, challenge, controller, matched token id) so
+                // organizers can investigate suspected replay patterns post-game
+                // (e.g. the same team being credited every tick without their
+                // VPN showing recent handshakes — visible by cross-referencing
+                // AdVpnPeers + wireguard logs).
+                logger.SystemLog(
+                    $"KotH check: round={latest.Number} chal={challenge.Id} controller={controller?.ToString() ?? "none"} tokenId={matchedTokenId?.ToString() ?? "-"} status={outcome.Status}",
+                    TaskStatus.Success, LogLevel.Information);
+
+                var (hold, penalty) = AdScoring.KothTickDelta(controller is not null, outcome.Status, holdPerTick, activeTeams);
+                await PersistKothResultAsync(scopeFactory, gameId, challenge.Id, latest.Id,
+                    controller, outcome.Status, hold, penalty, outcome.ErrorMessage, token);
+            }, token);
         }
     }
 

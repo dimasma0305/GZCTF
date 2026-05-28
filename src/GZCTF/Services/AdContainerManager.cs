@@ -63,6 +63,23 @@ public sealed class AdContainerManager(
         _serviceLocks.GetOrAdd((participationId, challengeId), _ => new SemaphoreSlim(1, 1));
 
     /// <summary>
+    /// Run <paramref name="action"/> under the same per-challenge lock that
+    /// <see cref="EnsureKothTargetsAsync"/> uses for the shared hill. Lets the
+    /// checker (a separate hosted service) serialize its probe + marker-read +
+    /// result persist against the reconciler's destroy/launch on a refresh tick —
+    /// without that, a check that started just before a refresh would probe the
+    /// freshly-launched empty container and record "no controller" for a round
+    /// where the marker had been set legitimately.
+    /// </summary>
+    public async Task WithKothChallengeLockAsync(int challengeId, Func<Task> action, CancellationToken token)
+    {
+        var sem = LockFor(0, challengeId);
+        await sem.WaitAsync(token);
+        try { await action(); }
+        finally { sem.Release(); }
+    }
+
+    /// <summary>
     /// Authoritative single-container liveness check (fresh docker inspect / pod
     /// read). Used under the per-service lock so we don't act on a stale
     /// tick-level snapshot (a concurrent launch may have replaced the container
@@ -962,7 +979,18 @@ public sealed class AdContainerManager(
                 var cid = target?.Container?.ContainerId;
                 var dead = cid is { Length: > 0 }
                            && !await IsContainerRunningAsync(dockerProvider, k8sProvider, cid, token);
-                var dueRefresh = latestRound > 0 && latestRound % refreshTicks == 0
+                // Refresh BETWEEN rounds, not during them. After every refreshTicks
+                // rounds of play we refresh on the transition INTO the next round —
+                // so the team that held the hill at the boundary round still has
+                // their KothControlResult persisted (by AdCheckerService) before the
+                // container gets wiped. Fires at rounds 6, 11, 16, ... for the default
+                // refreshTicks=5; rounds 1-5 use the original hill, 6-10 the first
+                // refreshed hill, and so on. Combined with the per-challenge lock
+                // taken by AdCheckerService.WithKothChallengeLockAsync, this closes
+                // the refresh-vs-checker race where the just-launched hill was being
+                // probed (empty marker) before the boundary round was scored.
+                var dueRefresh = latestRound > refreshTicks
+                                 && (latestRound - 1) % refreshTicks == 0
                                  && (target?.LastRefreshRound ?? 0) < latestRound;
 
                 var needsLaunch = target is null || target.ContainerId is null || target.Container is null
@@ -1014,13 +1042,23 @@ public sealed class AdContainerManager(
     }
 
     /// <summary>
-    /// At a KotH refresh, hand the current per-challenge score <b>leader</b> (highest
-    /// cumulative <c>HoldCredit − Penalty</c>) a one-tick network cooldown: drop their
-    /// VPN /32(s) → the hill IP on the WireGuard sidecar's FORWARD chain (which runs
-    /// before its MASQUERADE, so the source is still the client IP), so the
-    /// front-runner can't immediately re-pwn the freshly-reset hill. Rules live in a
-    /// per-hill chain (<c>KOTH_CD_&lt;id&gt;</c>) that <see cref="LiftKothCooldownAsync"/>
-    /// flushes next tick. Ties → all tied leaders; nobody scored yet → nobody blocked.
+    /// At a KotH refresh, hand the per-challenge <b>recent leader</b> a one-tick
+    /// network cooldown: drop their VPN /32(s) → the hill IP on the WireGuard
+    /// sidecar's FORWARD chain (which runs before its MASQUERADE, so the source
+    /// is still the client IP). Rules live in a per-hill chain
+    /// (<c>KOTH_CD_&lt;id&gt;</c>) that <see cref="LiftKothCooldownAsync"/>
+    /// flushes next tick.
+    ///
+    /// <para>"Recent leader" = team with the highest <c>HoldCredit − Penalty</c>
+    /// across the rounds <em>since the last refresh</em> (the window that just
+    /// ended). Using cumulative score instead would permanently throttle whoever
+    /// pulls ahead early in the game — a team that wins rounds 1-5 would get
+    /// cooldown'd at every refresh forever even if a different team is winning
+    /// recent rounds. The window-based definition rotates the punishment among
+    /// whoever is actually leading right now and matches the comment about
+    /// preventing the front-runner from immediately re-pwning the fresh hill.</para>
+    ///
+    /// Ties → all tied leaders; nobody scored in the window → nobody blocked.
     /// Docker MVP; best-effort (swallows errors so it never breaks the reconcile).
     /// </summary>
     private async Task ApplyKothLeaderCooldownAsync(
@@ -1030,15 +1068,26 @@ public sealed class AdContainerManager(
     {
         try
         {
+            // Window = rounds since the last refresh boundary. For the default
+            // refreshTicks=5 this is the previous 5 rounds; on the very first
+            // refresh (LastRefreshRound=0) it's rounds 1..round-1, which still
+            // matches "recent" (no earlier history to dilute it).
+            var lastRefresh = await db.KothTargets
+                .Where(t => t.GameId == gameId && t.ChallengeId == challengeId)
+                .Select(t => (int?)t.LastRefreshRound)
+                .FirstOrDefaultAsync(token) ?? 0;
+
             var scores = await db.KothControlResults
-                .Where(r => r.GameId == gameId && r.ChallengeId == challengeId && r.ControllingParticipationId != null)
+                .Where(r => r.GameId == gameId && r.ChallengeId == challengeId
+                         && r.ControllingParticipationId != null
+                         && r.AdRound.Number > lastRefresh && r.AdRound.Number < round)
                 .GroupBy(r => r.ControllingParticipationId!.Value)
                 .Select(g => new { Pid = g.Key, Score = g.Sum(x => x.HoldCredit - x.Penalty) })
                 .ToListAsync(token);
 
             var positive = scores.Where(s => s.Score > 0).ToList();
             if (positive.Count == 0)
-                return; // cold start — nobody has earned the hill yet
+                return; // nobody held the hill in the window — no cooldown earned
 
             var best = positive.Max(s => s.Score);
             var leaders = positive.Where(s => Math.Abs(s.Score - best) < 1e-9).Select(s => s.Pid).ToHashSet();

@@ -42,7 +42,16 @@ public sealed class AdEgressIsolationService(
 {
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(60);
     internal const string Chain = "GZCTF_AD_ISO";
+    // Two ipsets so we can express the asymmetric KotH containment:
+    //   gzctf_chal      — A&D per-team containers; both source AND destination of
+    //                     the pivot DROP (no team→team), and source of the
+    //                     metadata/private DROPs.
+    //   gzctf_chal_koth — KotH shared hills; ONLY source of the metadata/private
+    //                     DROPs (hills can't pivot out either), but EXCLUDED from
+    //                     the dst-side pivot DROP — so an A&D foothold legitimately
+    //                     attacking the hill (a valid play) reaches it.
     internal const string Set = "gzctf_chal";
+    internal const string SetKoth = "gzctf_chal_koth";
     private const string HelperImage = "alpine:3.21";
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -78,50 +87,84 @@ public sealed class AdEgressIsolationService(
         }
 
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        // Every live A&D per-team container + every KotH shared hill = the set of
-        // "challenge containers" we contain. Ephemeral checker containers, gzctf, and
-        // the sidecar are deliberately NOT in this set, so they stay unrestricted.
-        var ips = await db.AdTeamServices
+        // Per-team A&D containers — contained on both directions of the pivot rule
+        // (team A's foothold can't reach team B's foothold) and on the metadata /
+        // private-range blocks.
+        var adIps = await db.AdTeamServices
             .Where(t => t.Container != null && t.Container.IP != "")
             .Select(t => t.Container!.IP)
             .ToListAsync(token);
-        ips.AddRange(await db.KothTargets
+        // KotH shared hills — contained on the metadata/private-range blocks
+        // (source side only) but EXCLUDED from the team↔team pivot drop so an A&D
+        // foothold scripting the hill (a legit play) actually reaches it. The hill
+        // itself still can't reach team A&D containers because the pivot rule still
+        // sees its source IP as in-set (via gzctf_chal_koth → no path to A&D dst).
+        var kothIps = await db.KothTargets
             .Where(t => t.Container != null && t.Container.IP != "")
             .Select(t => t.Container!.IP)
-            .ToListAsync(token));
+            .ToListAsync(token);
 
-        var valid = ips.Where(IsValidIp).Distinct().ToList();
-        if (valid.Count == 0)
+        var validAd = adIps.Where(IsValidIp).Distinct().ToList();
+        var validKoth = kothIps.Where(IsValidIp).Distinct().ToList();
+        if (validAd.Count == 0 && validKoth.Count == 0)
             return; // nothing to contain yet
 
-        await RunHelperAsync(docker, BuildRulesScript(valid), token);
-        logger.SystemLog($"A&D egress isolation applied: {valid.Count} challenge container(s) contained",
+        await RunHelperAsync(docker, BuildRulesScript(validAd, validKoth), token);
+        logger.SystemLog(
+            $"A&D egress isolation applied: {validAd.Count} A&D container(s) + {validKoth.Count} KotH hill(s) contained",
             TaskStatus.Success, LogLevel.Debug);
     }
 
     /// <summary>
-    /// Build the idempotent iptables+ipset script (pure — unit-tested). Populates the
-    /// <see cref="Set"/> ipset with the challenge-container IPs, then rebuilds the
-    /// <see cref="Chain"/>: allow established, DROP in-set→in-set (team↔team pivot)
-    /// and in-set→metadata/private; everything else falls through to internet.
+    /// Build the idempotent iptables+ipset script (pure — unit-tested). Populates
+    /// two ipsets — <see cref="Set"/> (A&amp;D per-team containers) and
+    /// <see cref="SetKoth"/> (shared KotH hills) — then rebuilds the
+    /// <see cref="Chain"/> with these rules in order:
+    /// <list type="number">
+    ///   <item>RETURN on ESTABLISHED/RELATED (replies to the checker, VPN, etc.).</item>
+    ///   <item>DROP <c>{ad,koth} src → ad dst</c> — blocks team↔team pivot AND
+    ///         hill→team backflow. KotH hills are NOT a valid pivot destination
+    ///         either (you can attack the hill from a foothold but not vice versa).</item>
+    ///   <item>DROP <c>{ad,koth} src → 169.254/16, 10/8, 172.16/12, 192.168/16</c>
+    ///         — both A&amp;D and KotH containers are blocked from cloud metadata
+    ///         + the rest of the private ranges (control plane, k8s API, …).</item>
+    /// </list>
+    /// Note: <c>ad src → koth dst</c> is deliberately NOT in this list, so a player
+    /// attacking the hill from inside their own A&amp;D foothold reaches it (a legit
+    /// play). The hill stays contained on egress because of rule (2)/(3).
     /// </summary>
-    internal static string BuildRulesScript(IEnumerable<string> challengeIps)
+    internal static string BuildRulesScript(IEnumerable<string> adContainerIps, IEnumerable<string> kothHillIps)
     {
         var sb = new StringBuilder();
         AppendPreamble(sb);
+
+        // A&D set
         sb.AppendLine($"ipset create {Set} hash:ip -exist");
         sb.AppendLine($"ipset flush {Set}");
-        foreach (var ip in challengeIps.Where(IsValidIp).Distinct())
+        foreach (var ip in adContainerIps.Where(IsValidIp).Distinct())
             sb.AppendLine($"ipset add {Set} {ip} -exist");
+
+        // KotH set (separate; same hash:ip type)
+        sb.AppendLine($"ipset create {SetKoth} hash:ip -exist");
+        sb.AppendLine($"ipset flush {SetKoth}");
+        foreach (var ip in kothHillIps.Where(IsValidIp).Distinct())
+            sb.AppendLine($"ipset add {SetKoth} {ip} -exist");
+
         sb.AppendLine($"\"$IPT\" -N {Chain} 2>/dev/null || true");
         sb.AppendLine($"\"$IPT\" -C DOCKER-USER -j {Chain} 2>/dev/null || \"$IPT\" -I DOCKER-USER -j {Chain}");
         sb.AppendLine($"\"$IPT\" -F {Chain}");
         sb.AppendLine($"\"$IPT\" -A {Chain} -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN");
-        // team↔team lateral pivot (both ends are challenge containers)
-        sb.AppendLine($"\"$IPT\" -A {Chain} -m set --match-set {Set} src -m set --match-set {Set} dst -j DROP");
-        // cloud metadata + private ranges, from any challenge container
+
+        // team↔team lateral pivot + hill→team backflow (any in-set source → A&D dst)
+        sb.AppendLine($"\"$IPT\" -A {Chain} -m set --match-set {Set} src     -m set --match-set {Set} dst -j DROP");
+        sb.AppendLine($"\"$IPT\" -A {Chain} -m set --match-set {SetKoth} src -m set --match-set {Set} dst -j DROP");
+
+        // cloud metadata + private ranges, from any contained container (A&D or KotH)
         foreach (var cidr in AdEgressBaseline.PrivateAndLinkLocal)
-            sb.AppendLine($"\"$IPT\" -A {Chain} -m set --match-set {Set} src -d {cidr} -j DROP");
+        {
+            sb.AppendLine($"\"$IPT\" -A {Chain} -m set --match-set {Set} src     -d {cidr} -j DROP");
+            sb.AppendLine($"\"$IPT\" -A {Chain} -m set --match-set {SetKoth} src -d {cidr} -j DROP");
+        }
         return sb.ToString();
     }
 
@@ -133,6 +176,7 @@ public sealed class AdEgressIsolationService(
         sb.AppendLine($"\"$IPT\" -F {Chain} 2>/dev/null || true");
         sb.AppendLine($"\"$IPT\" -X {Chain} 2>/dev/null || true");
         sb.AppendLine($"ipset destroy {Set} 2>/dev/null || true");
+        sb.AppendLine($"ipset destroy {SetKoth} 2>/dev/null || true");
         return sb.ToString();
     }
 
