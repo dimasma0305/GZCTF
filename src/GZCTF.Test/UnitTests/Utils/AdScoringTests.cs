@@ -55,17 +55,16 @@ public class AdScoringTests
     // instead of the fractional 1×sqrt(teams) the previous SLA-style scaling
     // produced (e.g. 1.73 on a 3-team game).
     [Theory]
-    [InlineData(1.0, 1, 1.0)]
-    [InlineData(1.0, 4, 1.0)]
-    [InlineData(2.0, 9, 2.0)]
-    [InlineData(1.0, 0, 1.0)]
-    public void KothHoldPoints_FlatPerTick(double perTick, int teams, double expected)
-        => Assert.Equal(expected, AdScoring.KothHoldPoints(perTick, teams), 6);
+    [InlineData(1.0, 1.0)]
+    [InlineData(2.0, 2.0)]
+    [InlineData(0.5, 0.5)]
+    public void KothHoldPoints_FlatPerTick(double perTick, double expected)
+        => Assert.Equal(expected, AdScoring.KothHoldPoints(perTick), 6);
 
     [Fact]
     public void KothTickDelta_NoKing_IsZero()
     {
-        var (hold, pen) = AdScoring.KothTickDelta(hasKing: false, AdCheckStatus.Ok, 1.0, 4);
+        var (hold, pen) = AdScoring.KothTickDelta(hasKing: false, AdCheckStatus.Ok, 1.0);
         Assert.Equal(0.0, hold);
         Assert.Equal(0.0, pen);
     }
@@ -73,8 +72,8 @@ public class AdScoringTests
     [Fact]
     public void KothTickDelta_FunctionalKing_EarnsHoldNoPenalty()
     {
-        var (hold, pen) = AdScoring.KothTickDelta(hasKing: true, AdCheckStatus.Ok, 1.0, 4);
-        Assert.Equal(1.0, hold, 6); // flat per-tick, team count doesn't multiply it
+        var (hold, pen) = AdScoring.KothTickDelta(hasKing: true, AdCheckStatus.Ok, 1.0);
+        Assert.Equal(1.0, hold, 6); // flat per-tick
         Assert.Equal(0.0, pen);
     }
 
@@ -84,7 +83,7 @@ public class AdScoringTests
     [InlineData(AdCheckStatus.InternalError)]
     public void KothTickDelta_KingOnBrokenHill_EatsPenaltyNoHold(AdCheckStatus status)
     {
-        var (hold, pen) = AdScoring.KothTickDelta(hasKing: true, status, 1.0, 9);
+        var (hold, pen) = AdScoring.KothTickDelta(hasKing: true, status, 1.0);
         Assert.Equal(0.0, hold);
         Assert.Equal(AdScoring.KothBrokenHillPenalty, pen, 6);
     }
@@ -95,7 +94,7 @@ public class AdScoringTests
         // L4 audit fix — a team that just took over a broken hill gets a
         // one-tick grace (the previous holder broke it; not their fault yet).
         var (hold, pen) = AdScoring.KothTickDelta(
-            hasKing: true, AdCheckStatus.Offline, 1.0, 4, freshlyElected: true);
+            hasKing: true, AdCheckStatus.Offline, 1.0, freshlyElected: true);
         Assert.Equal(0.0, hold);
         Assert.Equal(0.0, pen);
     }

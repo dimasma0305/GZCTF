@@ -504,7 +504,6 @@ public class AdScoreboardRepository(
                 ChallengeId = c.Id,
                 Title = c.Title,
                 Category = c.Category.ToString(),
-                CurrentHolderParticipationId = holder,
                 CurrentHolderTeamName = holder is { } h ? teamNameById.GetValueOrDefault(h) : null,
                 LastCheckStatus = status?.ToString(),
                 LastRefreshRound = lastRefreshByHill.GetValueOrDefault(c.Id, 0),

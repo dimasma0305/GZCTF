@@ -49,11 +49,15 @@ export const ChallengeCard: FC<ChallengeCardProps> = (props: ChallengeCardProps)
   // "challenge.score" worth showing. Without including KotH here, the card
   // would print the default OriginalScore (e.g. "100 pts") which is meaningless
   // for a hill (hold-credit scored, not first-blood scored).
+  // "AD engine" = both AttackDefense and KingOfTheHill — they share the
+  // live-scoring branch (no static challenge.score). `isAttackDefense` is
+  // kept separate from `isKoth` for the one place that needs the strict
+  // AttackDefense distinction (the top-right sword vs crown badge).
   const isAdEngine =
     challenge.type === ChallengeType.AttackDefense
     || challenge.type === ChallengeType.KingOfTheHill
   const isKoth = challenge.type === ChallengeType.KingOfTheHill
-  const isAd = isAdEngine
+  const isAttackDefense = challenge.type === ChallengeType.AttackDefense
 
   const isFaded = useMemo(() => {
     if (!challenge.deadline) return false
@@ -107,7 +111,7 @@ export const ChallengeCard: FC<ChallengeCardProps> = (props: ChallengeCardProps)
                 <Icon path={mdiFlagOutline} size={0.7} color="var(--mantine-color-blue-6)" />
               </Tooltip>
             )}
-            {isAd && !isKoth && (
+            {isAttackDefense && (
               <Tooltip label={t('challenge.tooltip.ad_card', 'Attack & Defense — live scoring, submit via API')} position="top" withArrow>
                 <Icon path={mdiSwordCross} size={0.7} color="var(--mantine-color-red-6)" />
               </Tooltip>
@@ -132,15 +136,15 @@ export const ChallengeCard: FC<ChallengeCardProps> = (props: ChallengeCardProps)
             )}
           </Group>
         </Group>
-        <Divider size="sm" color={isKoth ? 'violet' : isAd ? 'red' : cateData?.color} />
-        <Group wrap="nowrap" justify={isAd ? 'center' : 'space-between'} align="center" gap={2}>
-          {!isAd && (
+        <Divider size="sm" color={isKoth ? 'violet' : isAdEngine ? 'red' : cateData?.color} />
+        <Group wrap="nowrap" justify={isAdEngine ? 'center' : 'space-between'} align="center" gap={2}>
+          {!isAdEngine && (
             <Text ta="center" fw="bold" fz="lg" ff="monospace">
               {challenge.score}&nbsp;pts
             </Text>
           )}
           <Stack gap="xs">
-            {isAd ? (
+            {isAdEngine ? (
               <Title order={6} ta="center" mt={`calc(${theme.spacing.xs} / 2)`} c="dimmed">
                 {isKoth
                   ? t('challenge.content.koth_live_caption', 'Per-tick hold scoring')
@@ -217,7 +221,7 @@ export const ChallengeCard: FC<ChallengeCardProps> = (props: ChallengeCardProps)
           color={alpha(theme.colors.violet[colorScheme === 'dark' ? 6 : 7], 0.3)}
           className={classes.icon}
         />
-      ) : isAd ? (
+      ) : isAdEngine ? (
         <Icon
           size={4}
           path={mdiSwordCross}

@@ -54,6 +54,15 @@ public sealed class AdContainerManager(
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(15);
 
+    // Per-hill iptables chain name for the KotH leader-cooldown (lives inside
+    // the WG sidecar's netns). One chain per challenge so refreshes / lifts
+    // operate independently. Apply/Lift/Destroy all call this helper rather
+    // than re-formatting the string, so a rename in the future only needs to
+    // happen here.
+    private const string KothCooldownChainPrefix = "KOTH_CD_";
+    private static string KothCooldownChain(int challengeId) =>
+        $"{KothCooldownChainPrefix}{challengeId}";
+
     // Per-(participation, challenge) lock serializing all create/move/destroy
     // for a single service, so the reconcile loop, the accept-time ensure, and
     // self-reset/force-restart can't race into double-launches or orphans.
@@ -1199,7 +1208,7 @@ public sealed class AdContainerManager(
                 return;
 
             var docker = dockerProvider.GetProvider();
-            var chain = $"KOTH_CD_{challengeId}";
+            var chain = KothCooldownChain(challengeId);
             await EnsureKothChainAsync(docker, sidecar, chain, token); // create + flush + jump
 
             var peerIps = await db.AdVpnPeers
@@ -1238,7 +1247,7 @@ public sealed class AdContainerManager(
             if (sidecar is null)
                 return;
             await ExecOnSidecarAsync(dockerProvider.GetProvider(), sidecar,
-                ["iptables", "-F", $"KOTH_CD_{challengeId}"], token);
+                ["iptables", "-F", KothCooldownChain(challengeId)], token);
         }
         catch (Exception e)
         {
@@ -1262,7 +1271,7 @@ public sealed class AdContainerManager(
             var sidecar = await ReadVpnSidecarIdAsync(token);
             if (sidecar is null)
                 return;
-            var chain = $"KOTH_CD_{challengeId}";
+            var chain = KothCooldownChain(challengeId);
             await ExecOnSidecarAsync(dockerProvider.GetProvider(), sidecar,
                 ["sh", "-c",
                  $"iptables -D FORWARD -j {chain} 2>/dev/null; iptables -F {chain} 2>/dev/null; iptables -X {chain} 2>/dev/null; true"],

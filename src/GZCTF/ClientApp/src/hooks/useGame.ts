@@ -132,7 +132,6 @@ export interface KothScoreboardHill {
   challengeId: number
   title: string
   category: string
-  currentHolderParticipationId: number | null
   currentHolderTeamName: string | null
   lastCheckStatus: string | null
   lastRefreshRound: number

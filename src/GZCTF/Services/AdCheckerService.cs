@@ -331,9 +331,6 @@ public sealed class AdCheckerService(
         var graceSeconds = game?.AdMinGracePeriodSeconds ?? 3;
         var getFrac = game?.AdGetflagWindowFraction ?? 0.5;
 
-        var activeTeams = await db.Participations
-            .CountAsync(p => p.GameId == gameId && p.Status == ParticipationStatus.Accepted, token);
-
         var tickSeconds = Math.Max(1.0, (latest.EndsAt - latest.StartedAt).TotalSeconds);
         var pollSeconds = PollInterval.TotalSeconds;
         var now = DateTimeOffset.UtcNow;
@@ -439,7 +436,7 @@ public sealed class AdCheckerService(
                 }
 
                 var (hold, penalty) = AdScoring.KothTickDelta(
-                    controller is not null, outcome.Status, holdPerTick, activeTeams, freshlyElected);
+                    controller is not null, outcome.Status, holdPerTick, freshlyElected);
                 await PersistKothResultAsync(scopeFactory, gameId, challenge.Id, latest.Id,
                     controller, outcome.Status, hold, penalty, outcome.ErrorMessage, token);
             }, token);

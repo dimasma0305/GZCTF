@@ -111,8 +111,12 @@ public sealed partial class KothScoreboardHill
     public string Title { get; set; } = string.Empty;
     public string Category { get; set; } = string.Empty;
 
-    /// <summary>The team currently holding this hill (matches last persisted KothControlResult). Null when nobody holds it this tick.</summary>
-    public int? CurrentHolderParticipationId { get; set; }
+    /// <summary>
+    /// Team name currently holding this hill (matches last persisted KothControlResult).
+    /// Null when nobody holds it this tick. The per-team-row's <c>isCurrentHolder</c>
+    /// flag (on <see cref="KothHillScore"/>) tells the UI whether the row IS the holder,
+    /// so the participation id isn't needed on the wire.
+    /// </summary>
     public string? CurrentHolderTeamName { get; set; }
 
     /// <summary>Latest functional verdict for the hill (shared, not per-team).</summary>

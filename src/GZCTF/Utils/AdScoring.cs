@@ -88,18 +88,15 @@ public static class AdScoring
     /// <summary>
     /// King of the Hill — hold points for the controlling team this tick. Flat
     /// <paramref name="holdPointsPerTick"/> (the game's
-    /// <c>KothHoldPointsPerTick</c>, defaults to 1.0) — NO team-count scaling.
+    /// <c>KothHoldPointsPerTick</c>, defaults to 1.0). NO team-count scaling:
     /// SLA scoring scales by <c>sqrt(teams)</c> to keep service-availability
     /// rewards comparable as the field grows, but KotH is a zero-sum race for
-    /// one marker per challenge: one team holds it per tick, and a clean
-    /// integer per held tick matches the mental model ("hold one tick = +1")
-    /// far better than the fractional <c>1×sqrt(3) ≈ 1.73</c> the scaled
-    /// version produced. <paramref name="activeTeams"/> kept in the signature
-    /// for symmetry with the rest of AdScoring + in case a future variant
-    /// wants to opt back in to scaling.
+    /// one marker per challenge — only one team scores per tick, so the field
+    /// size doesn't dilute anything. Clean integer per held tick matches the
+    /// mental model ("hold one tick = +1") far better than the fractional
+    /// <c>1×sqrt(3) ≈ 1.73</c> the scaled version produced.
     /// </summary>
-    public static double KothHoldPoints(double holdPointsPerTick, int activeTeams) =>
-        holdPointsPerTick;
+    public static double KothHoldPoints(double holdPointsPerTick) => holdPointsPerTick;
 
     /// <summary>
     /// King of the Hill per-tick score delta for whoever holds the marker, returned
@@ -116,12 +113,12 @@ public static class AdScoring
     /// on the hook normally.</para>
     /// </summary>
     public static (double HoldCredit, double Penalty) KothTickDelta(
-        bool hasKing, AdCheckStatus status, double holdPointsPerTick, int activeTeams,
+        bool hasKing, AdCheckStatus status, double holdPointsPerTick,
         bool freshlyElected = false) =>
         !hasKing
             ? (0.0, 0.0)
             : status == AdCheckStatus.Ok
-                ? (KothHoldPoints(holdPointsPerTick, activeTeams), 0.0)
+                ? (KothHoldPoints(holdPointsPerTick), 0.0)
                 : freshlyElected
                     ? (0.0, 0.0) // grace tick — broken when they took it, not their fault yet
                     : (0.0, KothBrokenHillPenalty);
