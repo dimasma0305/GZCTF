@@ -405,7 +405,18 @@ public enum ChallengeType : byte
     /// Doesn't fit the static/dynamic × attachment/container matrix — handled by
     /// explicit case in <see cref="ChallengeTypeExtensions"/>.
     /// </summary>
-    AttackDefense = 0b100
+    AttackDefense = 0b100,
+
+    /// <summary>
+    /// King of the Hill challenge.
+    /// ONE shared container per challenge that all teams attack; each tick the team
+    /// whose rotating token sits in the marker (<c>/koth/king</c>) controls it and
+    /// earns hold points, and is penalized if the service breaks. Every few ticks
+    /// the hill resets to base and the per-challenge score leader is briefly
+    /// network-blocked. Reuses the A&amp;D round/checker/scoreboard engine — handled
+    /// by explicit cases like A&amp;D.
+    /// </summary>
+    KingOfTheHill = 0b101
 }
 
 public static class ChallengeTypeExtensions
@@ -443,6 +454,17 @@ public static class ChallengeTypeExtensions
         /// Is it an Attack &amp; Defense challenge
         /// </summary>
         public bool IsAttackDefense() => type is ChallengeType.AttackDefense;
+
+        /// <summary>
+        /// Is it a King of the Hill challenge
+        /// </summary>
+        public bool IsKingOfTheHill() => type is ChallengeType.KingOfTheHill;
+
+        /// <summary>
+        /// Does it run on the shared A&amp;D engine (rounds, ephemeral checker,
+        /// per-tick scoring, scoreboard) — Attack &amp; Defense or King of the Hill.
+        /// </summary>
+        public bool UsesAdEngine() => type is ChallengeType.AttackDefense or ChallengeType.KingOfTheHill;
     }
 }
 

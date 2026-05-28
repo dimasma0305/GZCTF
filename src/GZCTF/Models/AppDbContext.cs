@@ -64,6 +64,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) :
     public DbSet<AdAttack> AdAttacks { get; set; } = null!;
     public DbSet<AdVpnPeer> AdVpnPeers { get; set; } = null!;
     public DbSet<AdTeamApiToken> AdTeamApiTokens { get; set; } = null!;
+    public DbSet<KothTarget> KothTargets { get; set; } = null!;
+    public DbSet<KothToken> KothTokens { get; set; } = null!;
+    public DbSet<KothControlResult> KothControlResults { get; set; } = null!;
 
     private static ValueConverter<T?, string> GetJsonConverter<T>() where T : class, new() =>
         new(
@@ -283,6 +286,25 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) :
             entity.HasOne(e => e.Container)
                 .WithMany()
                 .HasForeignKey(e => e.ContainerId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        builder.Entity<KothTarget>(entity =>
+        {
+            // SetNull on container delete — same reconcile semantics as AdTeamService:
+            // a null ContainerId makes AdContainerManager relaunch the shared hill.
+            entity.HasOne(e => e.Container)
+                .WithMany()
+                .HasForeignKey(e => e.ContainerId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        builder.Entity<KothControlResult>(entity =>
+        {
+            // Keep the audit/score row if the controlling participation is removed.
+            entity.HasOne(e => e.ControllingParticipation)
+                .WithMany()
+                .HasForeignKey(e => e.ControllingParticipationId)
                 .OnDelete(DeleteBehavior.SetNull);
         });
 

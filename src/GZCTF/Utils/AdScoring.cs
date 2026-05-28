@@ -81,4 +81,31 @@ public static class AdScoring
             AdCheckStatus.Ok => SlaCreditOk,
             _ => SlaCreditNone
         };
+
+    /// <summary>Flat penalty debited from a team that holds a broken (Mumble/Offline) hill.</summary>
+    public const double KothBrokenHillPenalty = 1.0;
+
+    /// <summary>
+    /// King of the Hill — hold points for the controlling team this tick, scaled by
+    /// field size (<c>sqrt(max(teams,1))</c>) like SLA so a held hill stays
+    /// comparable as the game grows. <paramref name="holdPointsPerTick"/> is the
+    /// game's <c>KothHoldPointsPerTick</c>.
+    /// </summary>
+    public static double KothHoldPoints(double holdPointsPerTick, int activeTeams) =>
+        holdPointsPerTick * Math.Sqrt(Math.Max(1, activeTeams));
+
+    /// <summary>
+    /// King of the Hill per-tick score delta for whoever holds the marker, returned
+    /// as <c>(HoldCredit, Penalty)</c>. Functional hill + king → (+hold, 0); a king
+    /// holding a broken (Mumble/Offline/InternalError) hill → (0, penalty) — you
+    /// broke the box you hold; no king → (0, 0). The scoreboard sums HoldCredit −
+    /// Penalty per team.
+    /// </summary>
+    public static (double HoldCredit, double Penalty) KothTickDelta(
+        bool hasKing, AdCheckStatus status, double holdPointsPerTick, int activeTeams) =>
+        !hasKing
+            ? (0.0, 0.0)
+            : status == AdCheckStatus.Ok
+                ? (KothHoldPoints(holdPointsPerTick, activeTeams), 0.0)
+                : (0.0, KothBrokenHillPenalty);
 }

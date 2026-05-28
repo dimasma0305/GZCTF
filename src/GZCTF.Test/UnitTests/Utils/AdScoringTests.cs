@@ -49,4 +49,39 @@ public class AdScoringTests
     [InlineData(AdCheckStatus.InternalError, AdCheckStatus.Ok, 0.0)]
     public void TickCredit_RecoveringEarnsHalf(AdCheckStatus current, AdCheckStatus? previous, double expected)
         => Assert.Equal(expected, AdScoring.TickCredit(current, previous), 6);
+
+    [Theory]
+    [InlineData(1.0, 1, 1.0)]   // single team
+    [InlineData(1.0, 4, 2.0)]   // 1 * sqrt(4)
+    [InlineData(2.0, 9, 6.0)]   // 2 * sqrt(9)
+    [InlineData(1.0, 0, 1.0)]   // sqrt(max(1, 0)) = 1
+    public void KothHoldPoints_ScaledByFieldSize(double perTick, int teams, double expected)
+        => Assert.Equal(expected, AdScoring.KothHoldPoints(perTick, teams), 6);
+
+    [Fact]
+    public void KothTickDelta_NoKing_IsZero()
+    {
+        var (hold, pen) = AdScoring.KothTickDelta(hasKing: false, AdCheckStatus.Ok, 1.0, 4);
+        Assert.Equal(0.0, hold);
+        Assert.Equal(0.0, pen);
+    }
+
+    [Fact]
+    public void KothTickDelta_FunctionalKing_EarnsHoldNoPenalty()
+    {
+        var (hold, pen) = AdScoring.KothTickDelta(hasKing: true, AdCheckStatus.Ok, 1.0, 4);
+        Assert.Equal(2.0, hold, 6); // 1 * sqrt(4)
+        Assert.Equal(0.0, pen);
+    }
+
+    [Theory]
+    [InlineData(AdCheckStatus.Mumble)]
+    [InlineData(AdCheckStatus.Offline)]
+    [InlineData(AdCheckStatus.InternalError)]
+    public void KothTickDelta_KingOnBrokenHill_EatsPenaltyNoHold(AdCheckStatus status)
+    {
+        var (hold, pen) = AdScoring.KothTickDelta(hasKing: true, status, 1.0, 9);
+        Assert.Equal(0.0, hold);
+        Assert.Equal(AdScoring.KothBrokenHillPenalty, pen, 6);
+    }
 }

@@ -354,6 +354,20 @@ public partial class Game
     public int? AdMinGracePeriodSeconds { get; set; } = 3;
 
     /// <summary>
+    /// King of the Hill — ticks between hill resets. Every Nth tick the shared
+    /// container is reset to its base image (wiping footholds + the control marker)
+    /// and the current per-challenge score leader is network-blocked from that hill
+    /// for one tick. Event-wide. Default 5.
+    /// </summary>
+    public int? KothRefreshTicks { get; set; } = 5;
+
+    /// <summary>
+    /// King of the Hill — base points the controlling team earns per tick of
+    /// control, scaled by sqrt(active teams) like SLA. Event-wide. Default 1.0.
+    /// </summary>
+    public double? KothHoldPointsPerTick { get; set; } = 1.0;
+
+    /// <summary>
     /// If true, each team's final container state is committed + saved as a
     /// gzipped tarball at game end and made available for download. Event-wide
     /// policy; pairs with <see cref="AdSnapshotRetentionDays"/>. Default true.
