@@ -1,8 +1,6 @@
 import {
   Accordion,
-  Alert,
   Anchor,
-  Box,
   Button,
   Code,
   CopyButton,
@@ -17,29 +15,21 @@ import {
   ThemeIcon,
   Title,
 } from '@mantine/core'
-import { useDisclosure } from '@mantine/hooks'
 import { showNotification } from '@mantine/notifications'
 import {
-  mdiAlertCircleOutline,
   mdiCheck,
   mdiContentCopy,
   mdiCounter,
   mdiCrown,
-  mdiDownload,
   mdiHeartPulse,
-  mdiKeyChain,
   mdiRefresh,
   mdiTimerSandComplete,
   mdiToolboxOutline,
-  mdiVpn,
 } from '@mdi/js'
 import { Icon } from '@mdi/react'
-import dayjs from 'dayjs'
-import { FC, useState } from 'react'
+import { FC } from 'react'
 import { useTranslation } from 'react-i18next'
-import { showErrorMsg } from '@Utils/Shared'
-import { useAdTokenHint } from '@Hooks/useGame'
-import api from '@Api'
+import { useAdToken, AdTokenSection, AdVpnSection, AdTokenRevealModal } from '@Components/AdToolkitSections'
 import misc from '@Styles/Misc.module.css'
 
 interface KothToolkitModalProps extends ModalProps {
@@ -60,30 +50,13 @@ interface KothToolkitModalProps extends ModalProps {
  */
 export const KothGuideModal: FC<KothToolkitModalProps> = ({ gameId, ...modalProps }) => {
   const { t } = useTranslation()
-  const { adTokenHint, mutate: mutateHint } = useAdTokenHint(gameId)
-
-  const [rotating, setRotating] = useState(false)
-  const [freshToken, setFreshToken] = useState<string | null>(null)
-  const [tokenModalOpen, { open: openTokenModal, close: closeTokenModal }] = useDisclosure(false)
-
-  const onRotate = async () => {
-    setRotating(true)
-    try {
-      const { data } = await api.game.gameAdRotateToken(gameId)
-      setFreshToken(data.token)
-      openTokenModal()
-      mutateHint()
-      showNotification({
-        color: 'teal',
-        message: t('game.notification.koth.token.rotated', 'KotH token rotated'),
-        icon: <Icon path={mdiCheck} size={1} />,
-      })
-    } catch (e) {
-      showErrorMsg(e, t)
-    } finally {
-      setRotating(false)
-    }
-  }
+  const { adTokenHint, rotating, freshToken, tokenModalOpen, closeTokenModal, onRotate } = useAdToken(gameId, () =>
+    showNotification({
+      color: 'teal',
+      message: t('game.notification.koth.token.rotated', 'KotH token rotated'),
+      icon: <Icon path={mdiCheck} size={1} />,
+    })
+  )
 
   const apiUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/api/Game/${gameId}/Ad`
   const exampleBearer = freshToken ?? '<your-token>'
@@ -158,94 +131,32 @@ write_to_hill "/koth/king" "$TOKEN"`
             </Text>
 
             <Accordion variant="separated" defaultValue={['token', 'vpn', 'hill']} radius="md" chevronPosition="left" multiple>
-              {/* TOKEN — shared with AD */}
-              <Accordion.Item value="token">
-                <Accordion.Control
-                  icon={<Icon path={mdiKeyChain} size={1} color="var(--mantine-color-orange-6)" />}
-                >
-                  <Text fw={600}>{t('game.content.koth.guide.token.title', 'Your API token')}</Text>
-                </Accordion.Control>
-                <Accordion.Panel>
-                  <Stack gap="sm">
-                    <Text size="sm">
-                      {t(
-                        'game.content.koth.guide.token.intro',
-                        'A personal Bearer token scoped to you + this game. KotH and A&D share it — the same ad_… string authenticates both /Koth/{id}/Token and /Submit.'
-                      )}
-                    </Text>
-                    <Group justify="space-between" wrap="wrap" gap="xs">
-                      <Group gap="xs">
-                        <Text size="sm" fw={600}>
-                          {t('game.content.koth.guide.token.current', 'Your current token')}:
-                        </Text>
-                        {adTokenHint?.exists ? (
-                          <Text size="sm" className={misc.ffmono}>
-                            {adTokenHint.hint}
-                          </Text>
-                        ) : (
-                          <Text size="sm" c="dimmed">
-                            {t('game.content.ad.no_token_yet', 'No token yet')}
-                          </Text>
-                        )}
-                      </Group>
-                      <Button
-                        size="xs"
-                        variant="default"
-                        leftSection={<Icon path={mdiKeyChain} size={0.7} />}
-                        loading={rotating}
-                        onClick={onRotate}
-                      >
-                        {adTokenHint?.exists
-                          ? t('game.button.ad.rotate_token', 'Rotate token')
-                          : t('game.button.ad.generate_token', 'Generate token')}
-                      </Button>
-                    </Group>
-                    {adTokenHint?.exists && (
-                      <Text size="xs" c="dimmed">
-                        {t('game.content.ad.last_used', 'Last used')}:{' '}
-                        {adTokenHint.lastUsedAt
-                          ? dayjs(adTokenHint.lastUsedAt).fromNow()
-                          : t('game.content.ad.never_used', 'never')}
-                      </Text>
-                    )}
-                  </Stack>
-                </Accordion.Panel>
-              </Accordion.Item>
+              {/* TOKEN — shared with A&D (see AdToolkitSections) */}
+              <AdTokenSection
+                hint={adTokenHint}
+                rotating={rotating}
+                onRotate={onRotate}
+                title={t('game.content.koth.guide.token.title', 'Your API token')}
+                intro={t(
+                  'game.content.koth.guide.token.intro',
+                  'A personal Bearer token scoped to you + this game. KotH and A&D share it — the same ad_… string authenticates both /Koth/{id}/Token and /Submit.'
+                )}
+                currentLabel={t('game.content.koth.guide.token.current', 'Your current token')}
+              />
 
-              {/* VPN — shared with AD */}
-              <Accordion.Item value="vpn">
-                <Accordion.Control
-                  icon={<Icon path={mdiVpn} size={1} color="var(--mantine-color-cyan-6)" />}
-                >
-                  <Text fw={600}>{t('game.content.koth.guide.vpn.title', 'VPN config')}</Text>
-                </Accordion.Control>
-                <Accordion.Panel>
-                  <Stack gap="sm">
-                    <Text size="sm">
-                      {t(
-                        'game.content.koth.guide.vpn.intro',
-                        'Per-user WireGuard config. KotH hills live on the same bridges as A&D services — one tunnel reaches everything. The first download generates a fresh keypair + assigns you an IP from the game subnet; subsequent downloads return the same file.'
-                      )}
-                    </Text>
-                    <Group gap="sm">
-                      <Button
-                        leftSection={<Icon path={mdiDownload} size={0.9} />}
-                        component="a"
-                        href={`/api/Game/${gameId}/Ad/Vpn/Config`}
-                        download
-                      >
-                        {t('game.button.ad.download_vpn', 'Download .conf')}
-                      </Button>
-                    </Group>
-                    <Text size="xs" c="dimmed">
-                      {t(
-                        'game.content.koth.guide.vpn.linux_hint',
-                        'Linux: sudo wg-quick up ./ad-game-….conf. macOS / Windows: import via the official WireGuard app.'
-                      )}
-                    </Text>
-                  </Stack>
-                </Accordion.Panel>
-              </Accordion.Item>
+              {/* VPN — shared with A&D (see AdToolkitSections) */}
+              <AdVpnSection
+                gameId={gameId}
+                title={t('game.content.koth.guide.vpn.title', 'VPN config')}
+                intro={t(
+                  'game.content.koth.guide.vpn.intro',
+                  'Per-user WireGuard config. KotH hills live on the same bridges as A&D services — one tunnel reaches everything. The first download generates a fresh keypair + assigns you an IP from the game subnet; subsequent downloads return the same file.'
+                )}
+                linuxHint={t(
+                  'game.content.koth.guide.vpn.linux_hint',
+                  'Linux: sudo wg-quick up ./ad-game-….conf. macOS / Windows: import via the official WireGuard app.'
+                )}
+              />
 
               {/* HILL — KotH-specific: round token + plant flow */}
               <Accordion.Item value="hill">
@@ -559,48 +470,17 @@ write_to_hill "/koth/king" "$TOKEN"`
         </ScrollArea>
       </Modal>
 
-      {/* Fresh-token reveal modal — shows plaintext exactly once. Mirrors
-          AdGuideModal's reveal: we keep freshToken in state past the modal
-          close so the curl examples above can render with the real Bearer
-          token for the rest of the session. */}
-      <Modal
+      {/* Fresh-token reveal — shared with A&D (see AdToolkitSections). */}
+      <AdTokenRevealModal
         opened={tokenModalOpen}
         onClose={closeTokenModal}
+        freshToken={freshToken}
         title={t('game.content.koth.token_modal.title', 'Your new API token (KotH + A&D)')}
-        centered
-      >
-        <Stack gap="sm">
-          <Alert color="orange" icon={<Icon path={mdiAlertCircleOutline} size={1} />}>
-            {t(
-              'game.content.koth.token_modal.warning',
-              'Save this token now — it will not be shown again after this tab closes. The previous token (if any) has been invalidated. The same token authenticates both /Koth/{id}/Token and /Submit.'
-            )}
-          </Alert>
-          <Box style={{ position: 'relative' }}>
-            <Code block className={misc.ffmono}>
-              {freshToken}
-            </Code>
-          </Box>
-          <Group justify="flex-end">
-            <CopyButton value={freshToken ?? ''}>
-              {({ copied, copy }) => (
-                <Button
-                  variant="default"
-                  leftSection={<Icon path={copied ? mdiCheck : mdiContentCopy} size={0.8} />}
-                  onClick={copy}
-                >
-                  {copied
-                    ? t('game.tooltip.copy.copied', 'Copied')
-                    : t('game.button.ad.copy_token', 'Copy token')}
-                </Button>
-              )}
-            </CopyButton>
-            <Button onClick={closeTokenModal}>
-              {t('common.modal.confirm', 'Confirm')}
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
+        warning={t(
+          'game.content.koth.token_modal.warning',
+          'Save this token now — it will not be shown again after this tab closes. The previous token (if any) has been invalidated. The same token authenticates both /Koth/{id}/Token and /Submit.'
+        )}
+      />
     </>
   )
 }

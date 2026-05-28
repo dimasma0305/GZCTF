@@ -37,14 +37,13 @@ import {
   mdiSwordCross,
   mdiToolboxOutline,
   mdiUpload,
-  mdiVpn,
 } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import dayjs from 'dayjs'
 import { FC, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { showErrorMsg } from '@Utils/Shared'
-import { useAdTokenHint } from '@Hooks/useGame'
+import { useAdToken, AdTokenSection, AdVpnSection, AdTokenRevealModal } from '@Components/AdToolkitSections'
 import api from '@Api'
 import misc from '@Styles/Misc.module.css'
 
@@ -61,12 +60,8 @@ interface AdToolkitModalProps extends ModalProps {
  */
 export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps }) => {
   const { t } = useTranslation()
-  const { adTokenHint, mutate: mutateHint } = useAdTokenHint(gameId)
+  const { adTokenHint, rotating, freshToken, tokenModalOpen, closeTokenModal, onRotate } = useAdToken(gameId)
   const { data: sshKey, mutate: mutateSshKey } = api.game.useAdGameGetSshKey(gameId)
-
-  const [rotating, setRotating] = useState(false)
-  const [freshToken, setFreshToken] = useState<string | null>(null)
-  const [tokenModalOpen, { open: openTokenModal, close: closeTokenModal }] = useDisclosure(false)
 
   const [sshTab, setSshTab] = useState<string>('paste')
   const [pastedPubkey, setPastedPubkey] = useState('')
@@ -138,20 +133,6 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
   const sshExample = `ssh <challenge-id>@${jumpHost.split(':')[0]} -p ${jumpHost.split(':')[1] ?? '22022'} -i ~/.ssh/your-key`
 
   const apiUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/api/Game/${gameId}/Ad`
-
-  const onRotate = async () => {
-    setRotating(true)
-    try {
-      const { data } = await api.game.gameAdRotateToken(gameId)
-      setFreshToken(data.token)
-      openTokenModal()
-      mutateHint()
-    } catch (e) {
-      showErrorMsg(e, t)
-    } finally {
-      setRotating(false)
-    }
-  }
 
   // The DB stores only an HMAC hash of the token, so the live UI never
   // has the plaintext after the rotation modal closes — only the
@@ -233,94 +214,32 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
             </Text>
 
             <Accordion variant="separated" defaultValue={['token', 'vpn']} radius="md" chevronPosition="left" multiple>
-              {/* TOKEN */}
-              <Accordion.Item value="token">
-                <Accordion.Control
-                  icon={<Icon path={mdiKeyChain} size={1} color="var(--mantine-color-orange-6)" />}
-                >
-                  <Text fw={600}>{t('game.content.ad.guide.token.title', 'Your API token')}</Text>
-                </Accordion.Control>
-                <Accordion.Panel>
-                  <Stack gap="sm">
-                    <Text size="sm">
-                      {t(
-                        'game.content.ad.guide.token.intro',
-                        'A personal Bearer token scoped to you + this game. Your exploit scripts pass it as Authorization: Bearer <token> when submitting captured flags. Every team member manages their own — rotating yours does not affect anyone else, and if you get kicked from the team your token stops working immediately.'
-                      )}
-                    </Text>
-                    <Group justify="space-between" wrap="wrap" gap="xs">
-                      <Group gap="xs">
-                        <Text size="sm" fw={600}>
-                          {t('game.content.ad.guide.token.current', 'Your current token')}:
-                        </Text>
-                        {adTokenHint?.exists ? (
-                          <Text size="sm" className={misc.ffmono}>
-                            {adTokenHint.hint}
-                          </Text>
-                        ) : (
-                          <Text size="sm" c="dimmed">
-                            {t('game.content.ad.no_token_yet', 'No token yet')}
-                          </Text>
-                        )}
-                      </Group>
-                      <Button
-                        size="xs"
-                        variant="default"
-                        leftSection={<Icon path={mdiKeyChain} size={0.7} />}
-                        loading={rotating}
-                        onClick={onRotate}
-                      >
-                        {adTokenHint?.exists
-                          ? t('game.button.ad.rotate_token', 'Rotate token')
-                          : t('game.button.ad.generate_token', 'Generate token')}
-                      </Button>
-                    </Group>
-                    {adTokenHint?.exists && (
-                      <Text size="xs" c="dimmed">
-                        {t('game.content.ad.last_used', 'Last used')}:{' '}
-                        {adTokenHint.lastUsedAt
-                          ? dayjs(adTokenHint.lastUsedAt).fromNow()
-                          : t('game.content.ad.never_used', 'never')}
-                      </Text>
-                    )}
-                  </Stack>
-                </Accordion.Panel>
-              </Accordion.Item>
+              {/* TOKEN — shared with KotH (see AdToolkitSections) */}
+              <AdTokenSection
+                hint={adTokenHint}
+                rotating={rotating}
+                onRotate={onRotate}
+                title={t('game.content.ad.guide.token.title', 'Your API token')}
+                intro={t(
+                  'game.content.ad.guide.token.intro',
+                  'A personal Bearer token scoped to you + this game. Your exploit scripts pass it as Authorization: Bearer <token> when submitting captured flags. Every team member manages their own — rotating yours does not affect anyone else, and if you get kicked from the team your token stops working immediately.'
+                )}
+                currentLabel={t('game.content.ad.guide.token.current', 'Your current token')}
+              />
 
-              {/* VPN */}
-              <Accordion.Item value="vpn">
-                <Accordion.Control
-                  icon={<Icon path={mdiVpn} size={1} color="var(--mantine-color-cyan-6)" />}
-                >
-                  <Text fw={600}>{t('game.content.ad.guide.vpn.title', 'VPN config')}</Text>
-                </Accordion.Control>
-                <Accordion.Panel>
-                  <Stack gap="sm">
-                    <Text size="sm">
-                      {t(
-                        'game.content.ad.guide.vpn.intro',
-                        'Per-user WireGuard config. The first download generates a fresh keypair + assigns you an IP from the game subnet; subsequent downloads return the same file. Drop the .conf into wg-quick (or wireguard-tools / the WireGuard app) to join the A&D network.'
-                      )}
-                    </Text>
-                    <Group gap="sm">
-                      <Button
-                        leftSection={<Icon path={mdiDownload} size={0.9} />}
-                        component="a"
-                        href={`/api/Game/${gameId}/Ad/Vpn/Config`}
-                        download
-                      >
-                        {t('game.button.ad.download_vpn', 'Download .conf')}
-                      </Button>
-                    </Group>
-                    <Text size="xs" c="dimmed">
-                      {t(
-                        'game.content.ad.guide.vpn.linux_hint',
-                        'Linux: sudo wg-quick up ./ad-game-….conf. macOS / Windows: import via the official WireGuard app.'
-                      )}
-                    </Text>
-                  </Stack>
-                </Accordion.Panel>
-              </Accordion.Item>
+              {/* VPN — shared with KotH (see AdToolkitSections) */}
+              <AdVpnSection
+                gameId={gameId}
+                title={t('game.content.ad.guide.vpn.title', 'VPN config')}
+                intro={t(
+                  'game.content.ad.guide.vpn.intro',
+                  'Per-user WireGuard config. The first download generates a fresh keypair + assigns you an IP from the game subnet; subsequent downloads return the same file. Drop the .conf into wg-quick (or wireguard-tools / the WireGuard app) to join the A&D network.'
+                )}
+                linuxHint={t(
+                  'game.content.ad.guide.vpn.linux_hint',
+                  'Linux: sudo wg-quick up ./ad-game-….conf. macOS / Windows: import via the official WireGuard app.'
+                )}
+              />
 
               {/* SSH */}
               <Accordion.Item value="ssh">
@@ -828,49 +747,17 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
         </ScrollArea>
       </Modal>
 
-      {/* Fresh-token reveal modal — shows plaintext exactly once. We
-          keep `freshToken` in React state past the modal close so the
-          curl examples above can render with the real Bearer token for
-          the rest of the session. Cleared on page reload (the only
-          truly-stored copy is whatever the user saved). */}
-      <Modal
+      {/* Fresh-token reveal — shared with KotH (see AdToolkitSections). */}
+      <AdTokenRevealModal
         opened={tokenModalOpen}
         onClose={closeTokenModal}
+        freshToken={freshToken}
         title={t('game.content.ad.token_modal.title', 'Your new A&D API token')}
-        centered
-      >
-        <Stack gap="sm">
-          <Alert color="orange" icon={<Icon path={mdiAlertCircleOutline} size={1} />}>
-            {t(
-              'game.content.ad.token_modal.warning',
-              'Save this token now — it will not be shown again after this tab closes. The previous token (if any) has been invalidated.'
-            )}
-          </Alert>
-          <Box style={{ position: 'relative' }}>
-            <Code block className={misc.ffmono}>
-              {freshToken}
-            </Code>
-          </Box>
-          <Group justify="flex-end">
-            <CopyButton value={freshToken ?? ''}>
-              {({ copied, copy }) => (
-                <Button
-                  variant="default"
-                  leftSection={<Icon path={copied ? mdiCheck : mdiContentCopy} size={0.8} />}
-                  onClick={copy}
-                >
-                  {copied
-                    ? t('game.tooltip.copy.copied', 'Copied')
-                    : t('game.button.ad.copy_token', 'Copy token')}
-                </Button>
-              )}
-            </CopyButton>
-            <Button onClick={closeTokenModal}>
-              {t('common.modal.confirm', 'Confirm')}
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
+        warning={t(
+          'game.content.ad.token_modal.warning',
+          'Save this token now — it will not be shown again after this tab closes. The previous token (if any) has been invalidated.'
+        )}
+      />
 
       {/* Generated SSH keypair reveal — private key shown ONCE */}
       <Modal
