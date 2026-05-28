@@ -1,11 +1,12 @@
 import { Alert, Center, SegmentedControl, Stack } from '@mantine/core'
-import { mdiFlagOutline, mdiSnowflake, mdiSwordCross } from '@mdi/js'
+import { mdiCrown, mdiFlagOutline, mdiSnowflake, mdiSwordCross } from '@mdi/js'
 import Icon from '@mdi/react'
 import dayjs from 'dayjs'
 import { FC, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router'
 import { AdScoreboardTable } from '@Components/AdScoreboardTable'
+import { KothScoreboardTable } from '@Components/KothScoreboardTable'
 import { ScoreboardTable } from '@Components/ScoreboardTable'
 import { TeamRank } from '@Components/TeamRank'
 import { WithGameTab } from '@Components/WithGameTab'
@@ -28,30 +29,40 @@ const Scoreboard: FC = () => {
   const isMobile = useIsMobile(1080)
   const isVertical = useIsMobile()
 
-  // Derive challenge-type presence from teamInfo.challenges (grouped by category;
-  // each ChallengeInfo carries `type`). KotH rides the AD-engine scoreboard
-  // path (it has its own /Ad/Koth/Scoreboard but the "AD tab" gate just needs
-  // to know there's an AD-engine challenge in play). No new backend endpoint needed.
-  const isAdEngineChallenge = (t?: string | null) => t === 'AttackDefense' || t === 'KingOfTheHill'
-  const { hasJeopardyChallenges, hasAdChallenges } = useMemo(() => {
+  // Derive presence of each engine from teamInfo.challenges. The three boards
+  // are independent: jeopardy uses ScoreboardTable, A&D uses AdScoreboardTable
+  // (which includes hills as columns alongside services), KotH uses the new
+  // dedicated KothScoreboardTable from /Ad/Koth/Scoreboard.
+  const { hasJeopardyChallenges, hasAdChallenges, hasKothChallenges } = useMemo(() => {
     const all = Object.values(teamInfo?.challenges ?? {}).flat()
     return {
-      hasJeopardyChallenges: all.some((c) => !isAdEngineChallenge(c.type)),
-      hasAdChallenges: all.some((c) => isAdEngineChallenge(c.type)),
+      hasJeopardyChallenges: all.some((c) => c.type !== 'AttackDefense' && c.type !== 'KingOfTheHill'),
+      hasAdChallenges: all.some((c) => c.type === 'AttackDefense'),
+      hasKothChallenges: all.some((c) => c.type === 'KingOfTheHill'),
     }
   }, [teamInfo])
 
-  const showTabs = hasJeopardyChallenges && hasAdChallenges
-  const [activeTab, setActiveTab] = useState<string>('jeopardy')
-  // When game is A&D-only, force the A&D view.
-  const effectiveTab = !hasJeopardyChallenges && hasAdChallenges ? 'ad' : activeTab
+  const presentTabs = (hasJeopardyChallenges ? 1 : 0) + (hasAdChallenges ? 1 : 0) + (hasKothChallenges ? 1 : 0)
+  const showTabs = presentTabs >= 2
+  // Default tab in priority: jeopardy if present, else AD, else KotH.
+  const defaultTab = hasJeopardyChallenges ? 'jeopardy' : hasAdChallenges ? 'ad' : 'koth'
+  const [activeTab, setActiveTab] = useState<string>(defaultTab)
+  // Coerce to a tab that's actually available (kind toggled off after first render).
+  const effectiveTab =
+    (activeTab === 'jeopardy' && !hasJeopardyChallenges)
+      || (activeTab === 'ad' && !hasAdChallenges)
+      || (activeTab === 'koth' && !hasKothChallenges)
+      ? defaultTab
+      : activeTab
 
-  // The A&D board freezes independently (it has its own scoreboard endpoint),
-  // so on the A&D tab read the freeze state from there — otherwise an A&D-only
-  // game would never show the banner. Only fetch when the game has A&D.
+  // Each live board freezes independently (separate endpoints) — read the
+  // freeze state from whichever board we're currently showing.
   const { data: adScoreboard } = api.game.useGameAdScoreboard(numId, undefined, hasAdChallenges)
   const onAdTab = effectiveTab === 'ad' && hasAdChallenges
-  const frozenView = onAdTab ? adScoreboard?.isFrozenView : scoreboard?.isFrozenView
+  const onKothTab = effectiveTab === 'koth' && hasKothChallenges
+  const frozenView = onAdTab ? adScoreboard?.isFrozenView
+    : onKothTab ? false  /* KotH board freeze flag is on its own response; banner handled inline */
+    : scoreboard?.isFrozenView
   const frozenAt = onAdTab ? adScoreboard?.freeze : scoreboard?.freeze
 
   const freezeBanner = frozenView ? (
@@ -69,24 +80,33 @@ const Scoreboard: FC = () => {
         value={effectiveTab}
         onChange={(v) => v && setActiveTab(v)}
         data={[
-          {
+          ...(hasJeopardyChallenges ? [{
             value: 'jeopardy',
             label: (
               <Center style={{ gap: 4 }}>
-                <Icon path={mdiFlagOutline} size={0.8} />
+                <Icon path={mdiFlagOutline} size={0.8} color="var(--mantine-color-blue-6)" />
                 <span>{t('game.content.scoreboard.tab.jeopardy', 'Jeopardy')}</span>
               </Center>
             ),
-          },
-          {
+          }] : []),
+          ...(hasAdChallenges ? [{
             value: 'ad',
             label: (
               <Center style={{ gap: 4 }}>
-                <Icon path={mdiSwordCross} size={0.8} />
+                <Icon path={mdiSwordCross} size={0.8} color="var(--mantine-color-red-6)" />
                 <span>{t('game.content.scoreboard.tab.ad', 'Attack & Defense')}</span>
               </Center>
             ),
-          },
+          }] : []),
+          ...(hasKothChallenges ? [{
+            value: 'koth',
+            label: (
+              <Center style={{ gap: 4 }}>
+                <Icon path={mdiCrown} size={0.8} color="var(--mantine-color-violet-6)" />
+                <span>{t('game.content.scoreboard.tab.koth', 'King of the Hill')}</span>
+              </Center>
+            ),
+          }] : []),
         ]}
       />
     </Center>
@@ -94,6 +114,7 @@ const Scoreboard: FC = () => {
 
   const showJeopardy = effectiveTab === 'jeopardy' && hasJeopardyChallenges
   const showAd = effectiveTab === 'ad' && hasAdChallenges
+  const showKoth = effectiveTab === 'koth' && hasKothChallenges
 
   return (
     <WithNavBar width="90%" minWidth={0}>
@@ -107,6 +128,8 @@ const Scoreboard: FC = () => {
               <AdScoreTimeLine divisionName={null} />
               <AdScoreboardTable numId={numId} />
             </>
+          ) : showKoth ? (
+            <KothScoreboardTable numId={numId} />
           ) : isVertical ? (
             <MobileScoreboardTable divisionId={divisionId} setDivisionId={setDivisionId} />
           ) : (
@@ -123,6 +146,8 @@ const Scoreboard: FC = () => {
                 <AdScoreTimeLine divisionName={null} />
                 <AdScoreboardTable numId={numId} />
               </>
+            ) : showKoth ? (
+              <KothScoreboardTable numId={numId} />
             ) : (
               <>
                 {showJeopardy && <ScoreTimeLine divisionId={divisionId} />}

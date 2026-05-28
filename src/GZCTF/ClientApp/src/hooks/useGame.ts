@@ -1,5 +1,6 @@
 import dayjs from 'dayjs'
 import { TFunction } from 'i18next'
+import useSWR from 'swr'
 import { GameStatus } from '@Components/GameCard'
 import { OnceSWRConfig } from '@Hooks/useConfig'
 import api, { ParticipationStatus } from '@Api'
@@ -119,6 +120,58 @@ export const useAdScoreboard = (numId: number) => {
     refreshInterval: status === GameStatus.OnGoing ? 10 * 1000 : 0,
   })
   return { adScoreboard, error, mutate }
+}
+
+/**
+ * King of the Hill — dedicated scoreboard poll. Hits the new
+ * /api/Game/{id}/Ad/Koth/Scoreboard endpoint (not yet in the auto-generated
+ * SDK — using useSWR directly for now; swap to api.game.useGameAdKothScoreboard
+ * once Api.ts is regenerated).
+ */
+export interface KothScoreboardHill {
+  challengeId: number
+  title: string
+  category: string
+  currentHolderParticipationId: number | null
+  currentHolderTeamName: string | null
+  lastCheckStatus: string | null
+  lastRefreshRound: number
+}
+export interface KothHillScore {
+  challengeId: number
+  points: number
+  ticksHeld: number
+  isCurrentHolder: boolean
+}
+export interface KothTeamScoreRow {
+  rank: number
+  participationId: number
+  teamId: number
+  teamName: string
+  division?: string | null
+  total: number
+  hills: KothHillScore[]
+}
+export interface KothScoreboardModel {
+  latestRound: number
+  generatedAt: string
+  isFrozenView: boolean
+  freeze: string | null
+  hills: KothScoreboardHill[]
+  teams: KothTeamScoreRow[]
+}
+
+export const useKothScoreboard = (numId: number, doFetch: boolean = true) => {
+  const { game } = useGame(numId)
+  const { status } = getGameStatus(game)
+  const { data: kothScoreboard, error, mutate } = useSWR<KothScoreboardModel>(
+    doFetch && numId > 0 ? `/api/game/${numId}/ad/koth/scoreboard` : null,
+    {
+      ...OnceSWRConfig,
+      refreshInterval: status === GameStatus.OnGoing ? 10 * 1000 : 0,
+    }
+  )
+  return { kothScoreboard, error, mutate }
 }
 
 /** A&D — per-round per-team timeline for the scoreboard chart. */

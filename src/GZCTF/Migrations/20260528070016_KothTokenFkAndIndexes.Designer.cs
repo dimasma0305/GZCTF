@@ -13,7 +13,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace GZCTF.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260528055508_KothTokenFkAndIndexes")]
+    [Migration("20260528070016_KothTokenFkAndIndexes")]
     partial class KothTokenFkAndIndexes
     {
         /// <inheritdoc />
@@ -1693,6 +1693,9 @@ namespace GZCTF.Migrations
 
                     b.Property<int>("LastRefreshRound")
                         .HasColumnType("integer");
+
+                    b.Property<bool?>("LaunchedWithEgress")
+                        .HasColumnType("boolean");
 
                     b.HasKey("Id");
 

@@ -15,7 +15,7 @@ import {
   Title,
 } from '@mantine/core'
 import { useLocalStorage } from '@mantine/hooks'
-import { mdiFileUploadOutline, mdiFlagOutline, mdiPuzzle } from '@mdi/js'
+import { mdiCrown, mdiFileUploadOutline, mdiFlagOutline, mdiPuzzle, mdiSwordCross } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import dayjs from 'dayjs'
 import { FC, useEffect, useState, useMemo } from 'react'
@@ -80,23 +80,21 @@ export const ChallengePanel: FC = () => {
     getInitialValueInEffect: false,
   })
 
-  // 'all' | 'jeopardy' | 'ad' — visible only when the game has both kinds.
-  const [challengeKind, setChallengeKind] = useLocalStorage<'all' | 'jeopardy' | 'ad'>({
+  // 4-way filter: All / CTF (jeopardy) / A&D / KotH — distinct buckets so a
+  // mixed game can drill into one engine at a time. Visible only when the
+  // game actually has more than one kind to switch between.
+  const [challengeKind, setChallengeKind] = useLocalStorage<'all' | 'jeopardy' | 'ad' | 'koth'>({
     key: 'challenge-kind-filter',
     defaultValue: 'all',
     getInitialValueInEffect: false,
   })
 
-  // KotH rides the A&D engine — for the player's challenge-kind switcher it
-  // belongs in the same "live-scoring" bucket as A&D, not the jeopardy bucket.
-  const isAdEngineType = (t?: ChallengeType | null) =>
-    t === ChallengeType.AttackDefense || t === ChallengeType.KingOfTheHill
+  const kindOf = (c: ChallengeInfo): 'jeopardy' | 'ad' | 'koth' =>
+    c.type === ChallengeType.AttackDefense ? 'ad'
+      : c.type === ChallengeType.KingOfTheHill ? 'koth'
+      : 'jeopardy'
 
-  const matchesKind = (c: ChallengeInfo) => {
-    if (challengeKind === 'all') return true
-    const isAd = isAdEngineType(c.type)
-    return challengeKind === 'ad' ? isAd : !isAd
-  }
+  const matchesKind = (c: ChallengeInfo) => challengeKind === 'all' || kindOf(c) === challengeKind
 
   const allChallenges = useMemo(() => {
     const all = Object.values(challenges ?? {}).flat()
@@ -104,16 +102,26 @@ export const ChallengePanel: FC = () => {
     return all.sort((a, b) => a.id - b.id)
   }, [challenges])
 
-  // For deciding whether to render the kind switcher (only when both exist).
-  const { hasJeopardy, hasAd } = useMemo(() => {
-    let j = false, a = false
+  // Switcher visibility — show only when there's more than one bucket to choose between.
+  const { hasJeopardy, hasAd, hasKoth, kindsPresent } = useMemo(() => {
+    let j = false, a = false, k = false
     for (const c of allChallenges) {
-      if (isAdEngineType(c.type)) a = true
-      else j = true
-      if (j && a) break
+      const kind = kindOf(c)
+      if (kind === 'jeopardy') j = true
+      else if (kind === 'ad') a = true
+      else k = true
+      if (j && a && k) break
     }
-    return { hasJeopardy: j, hasAd: a }
+    return { hasJeopardy: j, hasAd: a, hasKoth: k, kindsPresent: [j, a, k].filter(Boolean).length }
   }, [allChallenges])
+
+  // Coerce out-of-band state if the game doesn't actually have the selected kind
+  // (e.g. operator disabled all KotH challenges while the user had it selected).
+  useEffect(() => {
+    if (challengeKind === 'jeopardy' && !hasJeopardy) setChallengeKind('all')
+    if (challengeKind === 'ad' && !hasAd) setChallengeKind('all')
+    if (challengeKind === 'koth' && !hasKoth) setChallengeKind('all')
+  }, [challengeKind, hasJeopardy, hasAd, hasKoth, setChallengeKind])
 
   const currentChallenges = useMemo(() => {
     if (!challenges) return []
@@ -166,6 +174,33 @@ export const ChallengePanel: FC = () => {
     })
     return result
   }, [challenges, activeTab, allChallenges, hideSolved, teamInfo, categories, challengeKind])
+
+  // When the user is viewing "All" on a mixed game, split the rendered list
+  // into kind-segregated sections (Jeopardy / A&D / KotH) with a visual
+  // header + divider between them — otherwise a hill tile sandwiched between
+  // jeopardy tiles is easy to miss. Single-kind games skip the headers
+  // (no value in a "KotH" header when everything is KotH anyway).
+  const groupedSections = useMemo(() => {
+    const filtered = currentChallenges
+    const groupingEnabled = challengeKind === 'all' && kindsPresent >= 2
+    if (!groupingEnabled) {
+      return [{ kind: null as 'jeopardy' | 'ad' | 'koth' | null, items: filtered }]
+    }
+    const j: ChallengeInfo[] = []
+    const a: ChallengeInfo[] = []
+    const k: ChallengeInfo[] = []
+    for (const c of filtered) {
+      const kind = kindOf(c)
+      if (kind === 'jeopardy') j.push(c)
+      else if (kind === 'ad') a.push(c)
+      else k.push(c)
+    }
+    return [
+      { kind: 'jeopardy' as const, items: j },
+      { kind: 'ad' as const, items: a },
+      { kind: 'koth' as const, items: k },
+    ].filter((s) => s.items.length > 0)
+  }, [currentChallenges, challengeKind, kindsPresent])
 
   const [challenge, setChallenge] = useState<ChallengeInfo | null>(null)
   const [detailOpened, setDetailOpened] = useState(false)
@@ -269,16 +304,49 @@ export const ChallengePanel: FC = () => {
             <Divider />
           </>
         )}
-        {hasJeopardy && hasAd && (
+        {kindsPresent >= 2 && (
           <SegmentedControl
             size="xs"
             w="10.5rem"
             value={challengeKind}
-            onChange={(v) => setChallengeKind(v as 'all' | 'jeopardy' | 'ad')}
+            onChange={(v) => setChallengeKind(v as 'all' | 'jeopardy' | 'ad' | 'koth')}
             data={[
-              { value: 'all', label: t('game.button.kind.all', 'All') },
-              { value: 'jeopardy', label: t('game.button.kind.jeopardy', 'CTF') },
-              { value: 'ad', label: t('game.button.kind.ad', 'A&D') },
+              {
+                value: 'all',
+                label: (
+                  <Center style={{ gap: 3 }}>
+                    <Icon path={mdiPuzzle} size={0.55} />
+                    <span>{t('game.button.kind.all', 'All')}</span>
+                  </Center>
+                ),
+              },
+              ...(hasJeopardy ? [{
+                value: 'jeopardy',
+                label: (
+                  <Center style={{ gap: 3 }}>
+                    <Icon path={mdiFlagOutline} size={0.55} />
+                    <span>{t('game.button.kind.jeopardy', 'CTF')}</span>
+                  </Center>
+                ),
+              }] : []),
+              ...(hasAd ? [{
+                value: 'ad',
+                label: (
+                  <Center style={{ gap: 3 }}>
+                    <Icon path={mdiSwordCross} size={0.55} />
+                    <span>{t('game.button.kind.ad', 'A&D')}</span>
+                  </Center>
+                ),
+              }] : []),
+              ...(hasKoth ? [{
+                value: 'koth',
+                label: (
+                  <Center style={{ gap: 3 }}>
+                    <Icon path={mdiCrown} size={0.55} />
+                    <span>{t('game.button.kind.koth', 'KotH')}</span>
+                  </Center>
+                ),
+              }] : []),
             ]}
           />
         )}
@@ -350,36 +418,67 @@ export const ChallengePanel: FC = () => {
             </Stack>
           </Center>
         ) : currentChallenges && currentChallenges.length ? (
-          <SimpleGrid
-            p="xs"
-            w="100%"
-            pt={0}
-            spacing="sm"
-            cols={{ base: 3, w18: 4, w24: 6, w30: 8, w36: 10, w42: 12, w48: 14 }}
-          >
-            {currentChallenges?.map((chal) => {
-              const status = teamInfo?.rank?.solvedChallenges?.find((c) => c.id === chal.id)?.type
-              const solved = status !== SubmissionType.Unaccepted && status !== undefined
-
+          <Stack gap="sm" p="xs" pt={0}>
+            {groupedSections.map((section, idx) => {
+              const sectionHeader = section.kind ? (
+                <Group gap="xs" align="center" wrap="nowrap" mt={idx === 0 ? 0 : 'sm'}>
+                  <Icon
+                    path={section.kind === 'jeopardy' ? mdiFlagOutline
+                      : section.kind === 'ad' ? mdiSwordCross
+                      : mdiCrown}
+                    size={0.8}
+                    color={section.kind === 'jeopardy' ? 'var(--mantine-color-blue-6)'
+                      : section.kind === 'ad' ? 'var(--mantine-color-red-6)'
+                      : 'var(--mantine-color-violet-6)'}
+                  />
+                  <Title order={5} c={section.kind === 'jeopardy' ? 'blue'
+                    : section.kind === 'ad' ? 'red'
+                    : 'violet'}>
+                    {section.kind === 'jeopardy' ? t('game.content.section.jeopardy', 'Jeopardy challenges')
+                      : section.kind === 'ad' ? t('game.content.section.ad', 'Attack & Defense')
+                      : t('game.content.section.koth', 'King of the Hill')}
+                  </Title>
+                  <Text size="xs" c="dimmed">({section.items.length})</Text>
+                  <Divider flex={1} ml="xs" color={section.kind === 'jeopardy' ? 'blue'
+                    : section.kind === 'ad' ? 'red'
+                    : 'violet'} opacity={0.4} />
+                </Group>
+              ) : null
               return (
-                <ChallengeCard
-                  key={chal.id}
-                  challenge={chal}
-                  iconMap={iconMap}
-                  colorMap={colorMap}
-                  onClick={() => {
-                    setChallenge(chal)
-                    setDetailOpened(true)
-                    // update hash after modal opened, so don't trigger useEffect
-                    window.location.hash = `#${chal.id}-${encodeURIComponent(chal.title?.replace(/ /g, '-') ?? '')}`
-                  }}
-                  solved={solved}
-                  teamId={teamInfo?.rank?.id}
-                  rating={solved || dayjs(game?.end) < dayjs() ? ratingMap.get(chal.id) : undefined}
-                />
+                <Stack key={section.kind ?? 'all'} gap="xs">
+                  {sectionHeader}
+                  <SimpleGrid
+                    w="100%"
+                    spacing="sm"
+                    cols={{ base: 3, w18: 4, w24: 6, w30: 8, w36: 10, w42: 12, w48: 14 }}
+                  >
+                    {section.items.map((chal) => {
+                      const status = teamInfo?.rank?.solvedChallenges?.find((c) => c.id === chal.id)?.type
+                      const solved = status !== SubmissionType.Unaccepted && status !== undefined
+
+                      return (
+                        <ChallengeCard
+                          key={chal.id}
+                          challenge={chal}
+                          iconMap={iconMap}
+                          colorMap={colorMap}
+                          onClick={() => {
+                            setChallenge(chal)
+                            setDetailOpened(true)
+                            // update hash after modal opened, so don't trigger useEffect
+                            window.location.hash = `#${chal.id}-${encodeURIComponent(chal.title?.replace(/ /g, '-') ?? '')}`
+                          }}
+                          solved={solved}
+                          teamId={teamInfo?.rank?.id}
+                          rating={solved || dayjs(game?.end) < dayjs() ? ratingMap.get(chal.id) : undefined}
+                        />
+                      )
+                    })}
+                  </SimpleGrid>
+                </Stack>
               )
             })}
-          </SimpleGrid>
+          </Stack>
         ) : (
           <Center h="calc(100vh - 10rem)">
             <Stack gap={0}>

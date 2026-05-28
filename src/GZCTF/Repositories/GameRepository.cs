@@ -368,7 +368,16 @@ public class GameRepository(
                         Title = c.Title,
                         Category = c.Category,
                         Type = c.Type,
-                        Score = c.OriginalScore,
+                        // KotH (and A&D) are live-scored — they have no static
+                        // challenge.score worth showing. Surface 0 here so any
+                        // UI path that reads ChallengeInfo.Score for these
+                        // engines renders "0 pts" instead of leaking the
+                        // default OriginalScore (e.g. "100 pts") that's
+                        // meaningless for a hill. (Plain equality — EF expression
+                        // trees can't translate the `is` pattern.)
+                        Score = c.Type == ChallengeType.AttackDefense || c.Type == ChallengeType.KingOfTheHill
+                            ? 0
+                            : c.OriginalScore,
                         SolvedCount = 0,
                         DeadlineUtc = c.DeadlineUtc,
                         DisableBloodBonus = c.DisableBloodBonus
@@ -460,6 +469,10 @@ public class GameRepository(
             var meta = challengeMetas[challengeId];
             var solvedCount = challengeAcceptedCounts.GetValueOrDefault(challengeId);
             info.SolvedCount = solvedCount;
+            // AD-engine (A&D + KotH) have no first-blood-decay scoring — leave
+            // Score at the 0 already set above instead of computing a stale value.
+            if (info.Type is ChallengeType.AttackDefense or ChallengeType.KingOfTheHill)
+                continue;
             info.Score = GameChallenge.CalculateChallengeScore(meta.OriginalScore,
                 meta.MinScoreRate, meta.Difficulty, solvedCount);
         }

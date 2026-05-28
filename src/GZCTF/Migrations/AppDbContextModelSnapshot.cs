@@ -1691,6 +1691,9 @@ namespace GZCTF.Migrations
                     b.Property<int>("LastRefreshRound")
                         .HasColumnType("integer");
 
+                    b.Property<bool?>("LaunchedWithEgress")
+                        .HasColumnType("boolean");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ChallengeId");

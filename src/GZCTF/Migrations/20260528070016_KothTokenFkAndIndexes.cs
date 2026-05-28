@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
@@ -10,23 +10,21 @@ namespace GZCTF.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // ----- KothToken: drop+rebuild Token index as UNIQUE, add AdRoundId FK -----
             migrationBuilder.DropIndex(
                 name: "IX_KothTokens_Token",
                 table: "KothTokens");
 
-            // Step 1: add AdRoundId as nullable so existing rows can be backfilled.
-            // The model declares it NOT NULL; we tighten to NOT NULL below after
-            // the backfill + orphan cleanup. Default 0 would point at no real
-            // round and break the FK creation otherwise.
+            // Step 1: add AdRoundId as NULLABLE so existing rows can be backfilled.
+            // Tightened to NOT NULL below after backfill + orphan cleanup.
             migrationBuilder.AddColumn<int>(
                 name: "AdRoundId",
                 table: "KothTokens",
                 type: "integer",
                 nullable: true);
 
-            // Step 2: backfill from (ParticipationId → GameId) + RoundNumber →
-            // AdRound.Id. Tokens from games that have since been deleted will
-            // miss and get pruned in Step 3.
+            // Step 2: backfill from (ParticipationId → GameId) + RoundNumber → AdRound.Id.
+            // Tokens for games that have since been deleted will miss and get pruned next.
             migrationBuilder.Sql("""
                 UPDATE "KothTokens" k
                 SET "AdRoundId" = r."Id"
@@ -36,21 +34,19 @@ namespace GZCTF.Migrations
                   AND r."Number" = k."RoundNumber";
                 """);
 
-            // Step 3: orphan cleanup — tokens for rounds that no longer exist
-            // (or never did) get dropped so the NOT NULL + FK can be applied.
+            // Step 3: orphan cleanup — tokens that didn't match any round get dropped.
             migrationBuilder.Sql("""DELETE FROM "KothTokens" WHERE "AdRoundId" IS NULL;""");
 
-            // Step 4: duplicate-token cleanup before the unique index. The 144-bit
-            // random token makes collisions astronomically unlikely, but if a
-            // test rerun or a botched mint produced any, keep only the lowest-Id
-            // copy so the new unique index can be built.
+            // Step 4: duplicate-token cleanup before the unique index. 144-bit random
+            // tokens collide with astronomical unlikelihood; this is defensive against
+            // test reruns / botched mints.
             migrationBuilder.Sql("""
                 DELETE FROM "KothTokens" a
                 USING "KothTokens" b
                 WHERE a."Token" = b."Token" AND a."Id" > b."Id";
                 """);
 
-            // Step 5: tighten AdRoundId to NOT NULL now that every surviving row has one.
+            // Step 5: tighten AdRoundId to NOT NULL now that every row has one.
             migrationBuilder.AlterColumn<int>(
                 name: "AdRoundId",
                 table: "KothTokens",
@@ -71,11 +67,6 @@ namespace GZCTF.Migrations
                 column: "Token",
                 unique: true);
 
-            migrationBuilder.CreateIndex(
-                name: "IX_KothControlResults_GameId_ChallengeId",
-                table: "KothControlResults",
-                columns: new[] { "GameId", "ChallengeId" });
-
             migrationBuilder.AddForeignKey(
                 name: "FK_KothTokens_AdRounds_AdRoundId",
                 table: "KothTokens",
@@ -84,9 +75,15 @@ namespace GZCTF.Migrations
                 principalColumn: "Id",
                 onDelete: ReferentialAction.Cascade);
 
-            // M4: snapshot of AdAllowEgress at launch — nullable so existing hill
-            // rows survive the migration (null reads as "unknown", which the
-            // drift check treats as "no drift" → next refresh will populate it).
+            // ----- KothControlResults: covering composite index for the scoreboard aggregate -----
+            migrationBuilder.CreateIndex(
+                name: "IX_KothControlResults_GameId_ChallengeId",
+                table: "KothControlResults",
+                columns: new[] { "GameId", "ChallengeId" });
+
+            // ----- KothTargets: snapshot of AdAllowEgress for live-toggle drift detection -----
+            // Nullable so existing rows survive the migration; the drift check treats
+            // null as "unknown" so it doesn't force a spurious refresh on first read.
             migrationBuilder.AddColumn<bool>(
                 name: "LaunchedWithEgress",
                 table: "KothTargets",
