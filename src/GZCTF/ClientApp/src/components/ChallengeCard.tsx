@@ -136,7 +136,7 @@ export const ChallengeCard: FC<ChallengeCardProps> = (props: ChallengeCardProps)
             )}
           </Group>
         </Group>
-        <Divider size="sm" color={isKoth ? 'violet' : isAdEngine ? 'red' : cateData?.color} />
+        <Divider size="sm" color={cateData?.color} />
         <Group wrap="nowrap" justify={isAdEngine ? 'center' : 'space-between'} align="center" gap={2}>
           {!isAdEngine && (
             <Text ta="center" fw="bold" fz="lg" ff="monospace">
@@ -205,34 +205,15 @@ export const ChallengeCard: FC<ChallengeCardProps> = (props: ChallengeCardProps)
           </Stack>
         </Group>
       </Stack>
-      {/* Big watermark icon at the bottom-left (the card's "visualizer").
-          For jeopardy this is the category icon in the category color — what
-          it's always been. For A&D and KotH the cateData icon is still set
-          (organizers tag hills with a category too), but the engine identity
-          (red sword / violet crown) is way stronger than the per-challenge
-          category, so swap the watermark to the engine icon + engine color
-          for these. Result: KotH cards visibly read as "a hill", A&D as "a
-          service", jeopardy as "a Web/Pwn/Crypto chal" — same way the badge
-          + divider colors already encode it at the top + middle of the card. */}
-      {isKoth ? (
-        <Icon
-          size={4}
-          path={mdiCrown}
-          color={alpha(theme.colors.violet[colorScheme === 'dark' ? 6 : 7], 0.3)}
-          className={classes.icon}
-        />
-      ) : isAdEngine ? (
-        <Icon
-          size={4}
-          path={mdiSwordCross}
-          color={alpha(theme.colors.red[colorScheme === 'dark' ? 6 : 7], 0.3)}
-          className={classes.icon}
-        />
-      ) : cateData && (
+      {/* Big category watermark icon (the card's "visualizer") — identical for
+          all three engines: jeopardy, A&D and KotH all use the per-challenge
+          category icon + color, exactly like the jeopardy card always has. The
+          only per-engine cue is the top-right badge (flag / sword / crown). */}
+      {cateData && (
         <Icon
           size={4}
           path={cateData.icon}
-          color={alpha(theme.colors[cateData?.color][7], 0.3)}
+          color={alpha(theme.colors[cateData.color][7], 0.3)}
           className={classes.icon}
         />
       )}
