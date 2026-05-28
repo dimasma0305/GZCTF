@@ -17,12 +17,12 @@ services:
       - ConnectionStrings__Database=Host=postgres;Database=gzctf;Username=gzctf;Password=gzctf
       - ConnectionStrings__Redis=redis:6379,password=gzctf
       - XorKey=gzctf-xor-key
-      - ContainerProvider__DockerConfig__ChallengeNetwork=z-test-challenges
+      - ContainerProvider__DockerConfig__ChallengeNetwork=challenges
       - ContainerProvider__PortMappingType=PlatformProxy
       - ContainerProvider__EnableTrafficCapture=true
       # --- Container backend ---
       # Docker provider: challenges spawn as host docker containers on the
-      # z-test-challenges-{open,isolated} networks; /flag is the read-only
+      # challenges-{open,isolated} networks; /flag is the read-only
       # ad-flags bind-mount (no pull sidecar); precise `docker diff` + post-game
       # snapshot tarballs are available. Set Type=Kubernetes to use the k3d
       # backend instead (KubernetesConfig + Ad__FlagPullBaseUrl below apply then).
@@ -111,7 +111,7 @@ services:
       - redis
     # No explicit challenge networks here either — DockerProvider's
     # EnsureNetworkCreated calls AttachSelfToNetwork on startup, so gzctf
-    # auto-joins the platform-managed z-test-challenges-{open,isolated} bridges
+    # auto-joins the platform-managed challenges-{open,isolated} bridges
     # right after the Docker provider initializes. Compose only needs to give
     # it the default network for control-plane connectivity (postgres + redis).
     networks:
