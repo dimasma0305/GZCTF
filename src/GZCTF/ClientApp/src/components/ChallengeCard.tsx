@@ -13,7 +13,7 @@ import {
   alpha,
   useMantineTheme,
 } from '@mantine/core'
-import { mdiFlag, mdiSwordCross, mdiThumbUp } from '@mdi/js'
+import { mdiCrown, mdiFlag, mdiSwordCross, mdiThumbUp } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import cx from 'clsx'
 import dayjs from 'dayjs'
@@ -43,7 +43,15 @@ export const ChallengeCard: FC<ChallengeCardProps> = (props: ChallengeCardProps)
   const theme = useMantineTheme()
   const { locale } = useLanguage()
   const { t } = useTranslation()
-  const isAd = challenge.type === ChallengeType.AttackDefense
+  // A&D AND KotH both run on the live-scoring engine — neither has a static
+  // "challenge.score" worth showing. Without including KotH here, the card
+  // would print the default OriginalScore (e.g. "100 pts") which is meaningless
+  // for a hill (hold-credit scored, not first-blood scored).
+  const isAdEngine =
+    challenge.type === ChallengeType.AttackDefense
+    || challenge.type === ChallengeType.KingOfTheHill
+  const isKoth = challenge.type === ChallengeType.KingOfTheHill
+  const isAd = isAdEngine
 
   const isFaded = useMemo(() => {
     if (!challenge.deadline) return false
@@ -72,9 +80,14 @@ export const ChallengeCard: FC<ChallengeCardProps> = (props: ChallengeCardProps)
         <Group h="30px" wrap="nowrap" justify="space-between" gap={2}>
           <ScrollingText text={challenge.title || ''} size="lg" />
           <Group gap={4} wrap="nowrap">
-            {isAd && (
+            {isAd && !isKoth && (
               <Tooltip label={t('challenge.tooltip.ad_card', 'Attack & Defense — live scoring, submit via API')} position="top" withArrow>
                 <Icon path={mdiSwordCross} size={0.7} color="var(--mantine-color-red-6)" />
+              </Tooltip>
+            )}
+            {isKoth && (
+              <Tooltip label={t('challenge.tooltip.koth_card', 'King of the Hill — hold the marker to score')} position="top" withArrow>
+                <Icon path={mdiCrown} size={0.7} color="var(--mantine-color-violet-6)" />
               </Tooltip>
             )}
             {ratingBadge && (
@@ -92,7 +105,7 @@ export const ChallengeCard: FC<ChallengeCardProps> = (props: ChallengeCardProps)
             )}
           </Group>
         </Group>
-        <Divider size="sm" color={isAd ? 'red' : cateData?.color} />
+        <Divider size="sm" color={isKoth ? 'violet' : isAd ? 'red' : cateData?.color} />
         <Group wrap="nowrap" justify={isAd ? 'center' : 'space-between'} align="center" gap={2}>
           {!isAd && (
             <Text ta="center" fw="bold" fz="lg" ff="monospace">
@@ -102,7 +115,9 @@ export const ChallengeCard: FC<ChallengeCardProps> = (props: ChallengeCardProps)
           <Stack gap="xs">
             {isAd ? (
               <Title order={6} ta="center" mt={`calc(${theme.spacing.xs} / 2)`} c="dimmed">
-                {t('challenge.content.ad_live_caption', 'Per-round scoring')}
+                {isKoth
+                  ? t('challenge.content.koth_live_caption', 'Per-tick hold scoring')
+                  : t('challenge.content.ad_live_caption', 'Per-round scoring')}
               </Title>
             ) : (
               <Title order={6} ta="center" mt={`calc(${theme.spacing.xs} / 2)`}>

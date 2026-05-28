@@ -29,12 +29,15 @@ const Scoreboard: FC = () => {
   const isVertical = useIsMobile()
 
   // Derive challenge-type presence from teamInfo.challenges (grouped by category;
-  // each ChallengeInfo carries `type`). No new backend endpoint needed.
+  // each ChallengeInfo carries `type`). KotH rides the AD-engine scoreboard
+  // path (it has its own /Ad/Koth/Scoreboard but the "AD tab" gate just needs
+  // to know there's an AD-engine challenge in play). No new backend endpoint needed.
+  const isAdEngineChallenge = (t?: string | null) => t === 'AttackDefense' || t === 'KingOfTheHill'
   const { hasJeopardyChallenges, hasAdChallenges } = useMemo(() => {
     const all = Object.values(teamInfo?.challenges ?? {}).flat()
     return {
-      hasJeopardyChallenges: all.some((c) => c.type !== 'AttackDefense'),
-      hasAdChallenges: all.some((c) => c.type === 'AttackDefense'),
+      hasJeopardyChallenges: all.some((c) => !isAdEngineChallenge(c.type)),
+      hasAdChallenges: all.some((c) => isAdEngineChallenge(c.type)),
     }
   }, [teamInfo])
 

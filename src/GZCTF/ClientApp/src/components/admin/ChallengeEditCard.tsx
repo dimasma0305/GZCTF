@@ -145,6 +145,13 @@ export const ChallengeEditCard: FC<ChallengeEditCardProps> = ({
                 </Badge>
               </Tooltip>
             )}
+            {challenge.type === 'KingOfTheHill' && (
+              <Tooltip label={t('admin.content.review.badge.koth_help', 'King of the Hill — single shared hill, hold-time scoring')} multiline w={260}>
+                <Badge size="xs" color="violet" variant="filled">
+                  {t('admin.content.review.badge.koth', 'KotH')}
+                </Badge>
+              </Tooltip>
+            )}
             {challenge.reviewStatus === 'Pending' && (
               <Badge size="xs" color="yellow" variant="filled">
                 {t('admin.content.review.badge.pending')}

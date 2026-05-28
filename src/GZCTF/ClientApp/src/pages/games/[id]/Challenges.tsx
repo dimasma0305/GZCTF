@@ -24,10 +24,16 @@ const Challenges: FC = () => {
   const { t } = useTranslation()
 
   const { teamInfo } = useGameTeamInfo(numId)
+  // KotH and A&D both ride the AD-engine plumbing — the toolkit / SSH-jump /
+  // VPN config / adState polling are equally relevant for both. Without
+  // including KotH here, a pure-KotH game would skip useAdState polling
+  // and the player would never see live state.
   const hasAd = useMemo(() => {
     if (!teamInfo?.challenges) return false
     for (const list of Object.values(teamInfo.challenges)) {
-      if (list?.some((c) => c.type === ChallengeType.AttackDefense)) return true
+      if (list?.some((c) =>
+        c.type === ChallengeType.AttackDefense || c.type === ChallengeType.KingOfTheHill
+      )) return true
     }
     return false
   }, [teamInfo])

@@ -87,9 +87,14 @@ export const ChallengePanel: FC = () => {
     getInitialValueInEffect: false,
   })
 
+  // KotH rides the A&D engine — for the player's challenge-kind switcher it
+  // belongs in the same "live-scoring" bucket as A&D, not the jeopardy bucket.
+  const isAdEngineType = (t?: ChallengeType | null) =>
+    t === ChallengeType.AttackDefense || t === ChallengeType.KingOfTheHill
+
   const matchesKind = (c: ChallengeInfo) => {
     if (challengeKind === 'all') return true
-    const isAd = c.type === ChallengeType.AttackDefense
+    const isAd = isAdEngineType(c.type)
     return challengeKind === 'ad' ? isAd : !isAd
   }
 
@@ -103,7 +108,7 @@ export const ChallengePanel: FC = () => {
   const { hasJeopardy, hasAd } = useMemo(() => {
     let j = false, a = false
     for (const c of allChallenges) {
-      if (c.type === ChallengeType.AttackDefense) a = true
+      if (isAdEngineType(c.type)) a = true
       else j = true
       if (j && a) break
     }

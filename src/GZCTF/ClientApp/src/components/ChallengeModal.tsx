@@ -27,6 +27,7 @@ dayjs.extend(relativeTime)
 import { FC, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AdChallengePanel } from '@Components/AdChallengePanel'
+import { KothChallengePanel } from '@Components/KothChallengePanel'
 import { InstanceEntry } from '@Components/InstanceEntry'
 import { ContentPlaceholder, InlineMarkdown, Markdown } from '@Components/MarkdownRenderer'
 import { ScrollingText } from '@Components/ScrollingText'
@@ -142,7 +143,11 @@ export const ChallengeModal: FC<ChallengeModalProps> = (props) => {
     gameId,
     ...modalProps
   } = props
-  const isAd = challenge?.type === ChallengeType.AttackDefense
+  // A&D and KotH both run on the live engine — neither has a static challenge
+  // score worth showing. Without including KotH, the modal would print the
+  // default OriginalScore (e.g. "100 pts") in the header — meaningless for a hill.
+  const isKoth = challenge?.type === ChallengeType.KingOfTheHill
+  const isAd = challenge?.type === ChallengeType.AttackDefense || isKoth
   const { t } = useTranslation()
   const theme = useMantineTheme()
   const { locale } = useLanguage()
@@ -210,7 +215,7 @@ export const ChallengeModal: FC<ChallengeModalProps> = (props) => {
           </Title>
         </Group>
         {isAd ? (
-          <Text miw="6rem" fw="bold" c="red" ff="monospace" ta="right">
+          <Text miw="6rem" fw="bold" c={isKoth ? 'violet' : 'red'} ff="monospace" ta="right">
             {t('challenge.content.ad_live', 'LIVE')}
           </Text>
         ) : (
@@ -219,7 +224,7 @@ export const ChallengeModal: FC<ChallengeModalProps> = (props) => {
           </Text>
         )}
       </Group>
-      <Divider size="md" color={isAd ? 'red' : cateData?.color} />
+      <Divider size="md" color={isKoth ? 'violet' : isAd ? 'red' : cateData?.color} />
     </Stack>
   )
 
@@ -477,7 +482,13 @@ export const ChallengeModal: FC<ChallengeModalProps> = (props) => {
   const footer = isAd && gameId ? (
     <Stack gap="xs" className={classes.footer}>
       <Divider />
-      <AdChallengePanel gameId={gameId} challengeId={challenge?.id ?? 0} />
+      {/* KotH has a shared hill, no per-team service — AdChallengePanel's
+          adState.services.find would return undefined and render the
+          misleading "no service for your team yet" alert. Route to the
+          KotH-specific panel that knows about the hill + per-tick token. */}
+      {isKoth
+        ? <KothChallengePanel gameId={gameId} challengeId={challenge?.id ?? 0} />
+        : <AdChallengePanel gameId={gameId} challengeId={challenge?.id ?? 0} />}
     </Stack>
   ) : (
     <Stack gap="xs" className={classes.footer}>
