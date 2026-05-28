@@ -1,5 +1,4 @@
 import {
-  Badge,
   Box,
   Center,
   Group,
@@ -12,7 +11,7 @@ import {
   useMantineColorScheme,
   useMantineTheme,
 } from '@mantine/core'
-import { mdiHeartPulse, mdiShieldHalfFull, mdiSwordCross, mdiTimerSandComplete } from '@mdi/js'
+import { mdiShieldHalfFull, mdiSwordCross, mdiTimerSandComplete } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import cx from 'clsx'
 import { FC, useMemo } from 'react'
@@ -28,7 +27,6 @@ import {
   adLikeRowHighlight,
   fmtPts,
   statusBg,
-  statusColor,
   useAdLikeScoreboardState,
 } from '@Components/AdLikeScoreboard'
 import { useAdScoreboard, useGame } from '@Hooks/useGame'
@@ -38,14 +36,14 @@ import classes from '@Styles/ScoreboardTable.module.css'
 
 // Fixed sub-column widths (px) for each service group. With table-layout:fixed
 // the tier-2 icon header + the body numbers share these widths, so a tight
-// icon sits directly over its number — the icons cluster instead of spreading
-// across one wide cell.
-const SUBCOL = { atk: 40, sla: 46, def: 42, status: 56 }
+// icon sits directly over its number. Status has no column of its own — it's
+// the cell background tint (see statusBg).
+const SUBCOL = { atk: 40, sla: 46, def: 42 }
 
-// A challenge group spans its 4 metric sub-columns. Bound the tier-2 name to
+// A challenge group spans its 3 metric sub-columns. Bound the tier-2 name to
 // this width so a long challenge title truncates within its own group instead
 // of overflowing into the neighbouring challenge's header.
-const GROUP_W = SUBCOL.atk + SUBCOL.sla + SUBCOL.def + SUBCOL.status
+const GROUP_W = SUBCOL.atk + SUBCOL.sla + SUBCOL.def
 
 interface AdScoreboardTableProps {
   numId: number
@@ -132,12 +130,12 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
             <Table className={classes.table} verticalSpacing={4} horizontalSpacing={8}>
               <Table.Thead className={classes.thead}>
                 {/* Tier 1 — colored category groups (shared with KotH board). */}
-                <AdLikeCategoryHeaderRow groups={challengeGroups} subColsPerItem={4} />
-                {/* Tier 2 — challenge name, spanning its 4 metric sub-columns. */}
+                <AdLikeCategoryHeaderRow groups={challengeGroups} subColsPerItem={3} />
+                {/* Tier 2 — challenge name, spanning its 3 metric sub-columns. */}
                 <Table.Tr>
                   <AdLikeHiddenCols />
                   {(adScoreboard.challenges ?? []).map((ch) => (
-                    <Table.Th key={ch.challengeId} colSpan={4} className={cx(classes.mono, classes.groupStart)}>
+                    <Table.Th key={ch.challengeId} colSpan={3} className={cx(classes.mono, classes.groupStart)}>
                       <Tooltip label={ch.title} withinPortal>
                         <Text size="xs" fw={700} truncate maw={GROUP_W} mx="auto">
                           {ch.title}
@@ -147,7 +145,7 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                   ))}
                 </Table.Tr>
                 {/* Tier 3 — pinned column labels + metric icons (attack / SLA /
-                    defense / status) as narrow sub-columns. */}
+                    defense). Status has no column — it's the cell tint. */}
                 <Table.Tr>
                   <AdLikePinnedHeaderCells
                     countLabel={t('game.content.scoreboard.ad.column.captures', 'Captures')}
@@ -167,11 +165,6 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                     <Table.Th key={`${ch.challengeId}-d`} className={classes.mono} style={{ width: SUBCOL.def }}>
                       <Tooltip label={t('game.content.scoreboard.ad.legend.defense', 'Defense loss')} withinPortal>
                         <Center><Icon path={mdiShieldHalfFull} size={0.6} color={theme.colors.red[6]} /></Center>
-                      </Tooltip>
-                    </Table.Th>,
-                    <Table.Th key={`${ch.challengeId}-st`} className={classes.mono} style={{ width: SUBCOL.status }}>
-                      <Tooltip label={t('game.content.scoreboard.ad.column.status', 'Status')} withinPortal>
-                        <Center><Icon path={mdiHeartPulse} size={0.6} color="var(--mantine-color-dimmed)" /></Center>
                       </Tooltip>
                     </Table.Th>,
                   ])}
@@ -199,21 +192,21 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                         countValue={row.flagsCaptured}
                       />
 
-                      {/* Per-service cells — four real sub-columns (attack / SLA /
-                          defense / status) per challenge, aligned under the icon
-                          headers. */}
+                      {/* Per-service cells — three sub-columns (attack / SLA /
+                          defense) per challenge, each tinted by the service's
+                          last check status. */}
                       {(adScoreboard.challenges ?? []).flatMap((ch) => {
                         const svc = row.services?.find((s) => s.challengeId === ch.challengeId)
                         if (!svc) {
                           return [
-                            <Table.Td key={ch.challengeId} colSpan={4} className={cx(classes.mono, classes.groupStart)}>
+                            <Table.Td key={ch.challengeId} colSpan={3} className={cx(classes.mono, classes.groupStart)}>
                               <Text size="xs" c="dimmed">
                                 {t('game.content.scoreboard.ad.no_service_cell', 'no service')}
                               </Text>
                             </Table.Td>,
                           ]
                         }
-                        // Tint all four sub-cells by this service's last check
+                        // Tint the three sub-cells by this service's last check
                         // verdict so a team's up/broken services read at a glance.
                         const cellBg = statusBg(svc.lastCheckStatus, theme, dark)
                         return [
@@ -236,20 +229,6 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                             >
                               {svc.defenseLoss > 0 ? `−${fmtPts(svc.defenseLoss)}` : '0'}
                             </Text>
-                          </Table.Td>,
-                          <Table.Td key={`${ch.challengeId}-st`} className={classes.mono} style={{ backgroundColor: cellBg }}>
-                            <Badge
-                              size="xs"
-                              variant="light"
-                              color={statusColor(svc.lastCheckStatus)}
-                              px={5}
-                              styles={{ root: { textTransform: 'none' }, label: { fontSize: 9 } }}
-                            >
-                              {svc.lastCheckStatus === 'InternalError'
-                                ? 'Error'
-                                : (svc.lastCheckStatus ??
-                                  t('game.content.scoreboard.ad.cell.no_check', 'n/a'))}
-                            </Badge>
                           </Table.Td>,
                         ]
                       })}

@@ -29,18 +29,18 @@ import {
   adLikeRowHighlight,
   fmtPts,
   statusBg,
-  statusColor,
   useAdLikeScoreboardState,
 } from '@Components/AdLikeScoreboard'
 import { useGame, useKothScoreboard, type KothScoreboardHill } from '@Hooks/useGame'
 import misc from '@Styles/Misc.module.css'
 import classes from '@Styles/ScoreboardTable.module.css'
 
-// Per-hill sub-columns: hold points + status. Points column renders the
-// +earned / −penalty breakdown side by side, so it needs room for two short
-// mono tokens without truncation.
-const SUBCOL = { pts: 96, status: 56 }
-const GROUP_W = SUBCOL.pts + SUBCOL.status
+// One sub-column per hill: hold points (the +earned / −penalty breakdown side
+// by side, net below). Status has no column of its own — it's the cell
+// background tint (see statusBg); the current holder is the violet wash + a
+// crown by the net + the header pill.
+const SUBCOL = { pts: 140 }
+const GROUP_W = SUBCOL.pts
 
 interface KothScoreboardTableProps {
   numId: number
@@ -50,7 +50,8 @@ interface KothScoreboardTableProps {
  * King of the Hill — dedicated scoreboard. Shares the toolbar / pinned-left
  * columns / category tier / highlight / footer-pagination scaffolding with
  * AdScoreboardTable (see AdLikeScoreboard), and differs only in the per-hill
- * columns: two sub-cells (hold points + status) with a current-holder pill.
+ * column: one hold-points sub-cell tinted by the hill's status, with the
+ * current holder marked by a violet wash + the header pill.
  */
 export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => {
   const { t } = useTranslation()
@@ -136,15 +137,15 @@ export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => 
             <Table className={classes.table} verticalSpacing={4} horizontalSpacing={8}>
               <Table.Thead className={classes.thead}>
                 {/* Tier 1 — colored category bands (shared with A&D board). */}
-                <AdLikeCategoryHeaderRow groups={hillGroups} subColsPerItem={2} />
-                {/* Tier 2 — hill name (spans its 2 sub-columns) + current-holder pill.
-                    Violet-themed since hills are KotH. */}
+                <AdLikeCategoryHeaderRow groups={hillGroups} subColsPerItem={1} />
+                {/* Tier 2 — hill name + current-holder pill. Violet-themed since
+                    hills are KotH. */}
                 <Table.Tr className={misc.noBorder}>
                   <AdLikeHiddenCols />
                   {kothScoreboard.hills.map((hill) => (
                     <Table.Th
                       key={hill.challengeId}
-                      colSpan={2}
+                      colSpan={1}
                       className={classes.groupStart}
                       h="2.4rem"
                       style={{
@@ -169,7 +170,8 @@ export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => 
                     </Table.Th>
                   ))}
                 </Table.Tr>
-                {/* Tier 3 — pinned column labels + per-hill metric icons (hold / status). */}
+                {/* Tier 3 — pinned column labels + per-hill holder pill. Status
+                    has no column — it's the cell tint. */}
                 <Table.Tr>
                   <AdLikePinnedHeaderCells
                     countLabel={t('game.content.scoreboard.koth.column.ticks', 'Ticks')}
@@ -205,23 +207,6 @@ export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => 
                         </Center>
                       </Tooltip>
                     </Table.Th>,
-                    <Table.Th key={`${hill.challengeId}-st`} className={classes.mono} style={{ width: SUBCOL.status }}>
-                      <Tooltip label={t('game.content.scoreboard.koth.column.status', 'Hill status')} withinPortal>
-                        <Center>
-                          <Badge
-                            size="xs"
-                            variant="light"
-                            color={statusColor(hill.lastCheckStatus)}
-                            px={5}
-                            styles={{ root: { textTransform: 'none' }, label: { fontSize: 9 } }}
-                          >
-                            {hill.lastCheckStatus === 'InternalError'
-                              ? 'Error'
-                              : (hill.lastCheckStatus ?? t('game.content.scoreboard.ad.cell.no_check', 'n/a'))}
-                          </Badge>
-                        </Center>
-                      </Tooltip>
-                    </Table.Th>,
                   ])}
                 </Table.Tr>
               </Table.Thead>
@@ -248,9 +233,9 @@ export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => 
                         countValue={totalTicks}
                       />
 
-                      {/* Per-hill cells — points (broken into +earned / −penalty
-                          side by side) + status. Violet wash + crown when the team
-                          is the current holder. */}
+                      {/* Per-hill cell — points (broken into +earned / −penalty
+                          side by side, net below), tinted by the hill's status.
+                          Violet wash + a crown by the net when the team holds it. */}
                       {kothScoreboard.hills.flatMap((hill) => {
                         const cell = row.hills.find((h) => h.challengeId === hill.challengeId)
                         const earned = cell?.earned ?? 0
@@ -296,23 +281,17 @@ export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => 
                                   </Text>
                                 </Group>
                                 {ticks > 0 && (
-                                  <Text size="xs" c={holding ? 'violet' : 'dimmed'} className={misc.ffmono} fw={holding ? 800 : 600} style={{ fontSize: 9, lineHeight: 1 }}>
-                                    = {fmtPts(net)}
-                                  </Text>
+                                  <Group gap={2} wrap="nowrap" justify="center">
+                                    {holding && (
+                                      <Icon path={mdiCrown} size={0.4} color={theme.colors.violet[colorScheme === 'dark' ? 4 : 7]} />
+                                    )}
+                                    <Text size="xs" c={holding ? 'violet' : 'dimmed'} className={misc.ffmono} fw={holding ? 800 : 600} style={{ fontSize: 9, lineHeight: 1 }}>
+                                      = {fmtPts(net)}
+                                    </Text>
+                                  </Group>
                                 )}
                               </Stack>
                             </Tooltip>
-                          </Table.Td>,
-                          <Table.Td
-                            key={`${hill.challengeId}-st`}
-                            className={classes.mono}
-                            style={tdStyle}
-                          >
-                            {holding ? (
-                              <Center>
-                                <Icon path={mdiCrown} size={0.55} color={theme.colors.violet[colorScheme === 'dark' ? 4 : 7]} />
-                              </Center>
-                            ) : null}
                           </Table.Td>,
                         ]
                       })}

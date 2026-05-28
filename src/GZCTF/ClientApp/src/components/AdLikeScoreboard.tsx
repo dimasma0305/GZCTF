@@ -416,21 +416,23 @@ export const AdLikeStatusLegend: FC = () => {
   const theme = useMantineTheme()
   const { t } = useTranslation()
 
+  // Single compact row so it fits inside the empty top-left header cells
+  // without spilling down over the body rows.
   return (
     <Box className={classes.legend}>
-      <Stack gap={3}>
+      <Group gap="sm" wrap="nowrap">
         <Text size="xs" fw={600} c="dimmed">
           {t('game.content.scoreboard.ad.column.status', 'Status')}
         </Text>
         {AD_LIKE_LEGEND_STATUSES.map((st) => (
-          <Group key={st} gap={6} wrap="nowrap">
-            <Box w={11} h={11} style={{ backgroundColor: theme.colors[statusColor(st)][6], borderRadius: 3 }} />
+          <Group key={st} gap={4} wrap="nowrap">
+            <Box w={9} h={9} style={{ backgroundColor: theme.colors[statusColor(st)][6], borderRadius: 2 }} />
             <Text size="xs" c="dimmed">
               {st}
             </Text>
           </Group>
         ))}
-      </Stack>
+      </Group>
     </Box>
   )
 }
