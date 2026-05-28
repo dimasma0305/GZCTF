@@ -50,12 +50,16 @@ public class AdScoringTests
     public void TickCredit_RecoveringEarnsHalf(AdCheckStatus current, AdCheckStatus? previous, double expected)
         => Assert.Equal(expected, AdScoring.TickCredit(current, previous), 6);
 
+    // KotH hold credit is flat per-tick — no team-count scaling — so the
+    // displayed cell value is a clean integer per tick ("hold one tick = +1")
+    // instead of the fractional 1×sqrt(teams) the previous SLA-style scaling
+    // produced (e.g. 1.73 on a 3-team game).
     [Theory]
-    [InlineData(1.0, 1, 1.0)]   // single team
-    [InlineData(1.0, 4, 2.0)]   // 1 * sqrt(4)
-    [InlineData(2.0, 9, 6.0)]   // 2 * sqrt(9)
-    [InlineData(1.0, 0, 1.0)]   // sqrt(max(1, 0)) = 1
-    public void KothHoldPoints_ScaledByFieldSize(double perTick, int teams, double expected)
+    [InlineData(1.0, 1, 1.0)]
+    [InlineData(1.0, 4, 1.0)]
+    [InlineData(2.0, 9, 2.0)]
+    [InlineData(1.0, 0, 1.0)]
+    public void KothHoldPoints_FlatPerTick(double perTick, int teams, double expected)
         => Assert.Equal(expected, AdScoring.KothHoldPoints(perTick, teams), 6);
 
     [Fact]
@@ -70,7 +74,7 @@ public class AdScoringTests
     public void KothTickDelta_FunctionalKing_EarnsHoldNoPenalty()
     {
         var (hold, pen) = AdScoring.KothTickDelta(hasKing: true, AdCheckStatus.Ok, 1.0, 4);
-        Assert.Equal(2.0, hold, 6); // 1 * sqrt(4)
+        Assert.Equal(1.0, hold, 6); // flat per-tick, team count doesn't multiply it
         Assert.Equal(0.0, pen);
     }
 
@@ -83,5 +87,16 @@ public class AdScoringTests
         var (hold, pen) = AdScoring.KothTickDelta(hasKing: true, status, 1.0, 9);
         Assert.Equal(0.0, hold);
         Assert.Equal(AdScoring.KothBrokenHillPenalty, pen, 6);
+    }
+
+    [Fact]
+    public void KothTickDelta_FreshlyElectedOnBrokenHill_GraceTick()
+    {
+        // L4 audit fix — a team that just took over a broken hill gets a
+        // one-tick grace (the previous holder broke it; not their fault yet).
+        var (hold, pen) = AdScoring.KothTickDelta(
+            hasKing: true, AdCheckStatus.Offline, 1.0, 4, freshlyElected: true);
+        Assert.Equal(0.0, hold);
+        Assert.Equal(0.0, pen);
     }
 }

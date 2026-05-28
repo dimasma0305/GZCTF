@@ -86,13 +86,20 @@ public static class AdScoring
     public const double KothBrokenHillPenalty = 1.0;
 
     /// <summary>
-    /// King of the Hill — hold points for the controlling team this tick, scaled by
-    /// field size (<c>sqrt(max(teams,1))</c>) like SLA so a held hill stays
-    /// comparable as the game grows. <paramref name="holdPointsPerTick"/> is the
-    /// game's <c>KothHoldPointsPerTick</c>.
+    /// King of the Hill — hold points for the controlling team this tick. Flat
+    /// <paramref name="holdPointsPerTick"/> (the game's
+    /// <c>KothHoldPointsPerTick</c>, defaults to 1.0) — NO team-count scaling.
+    /// SLA scoring scales by <c>sqrt(teams)</c> to keep service-availability
+    /// rewards comparable as the field grows, but KotH is a zero-sum race for
+    /// one marker per challenge: one team holds it per tick, and a clean
+    /// integer per held tick matches the mental model ("hold one tick = +1")
+    /// far better than the fractional <c>1×sqrt(3) ≈ 1.73</c> the scaled
+    /// version produced. <paramref name="activeTeams"/> kept in the signature
+    /// for symmetry with the rest of AdScoring + in case a future variant
+    /// wants to opt back in to scaling.
     /// </summary>
     public static double KothHoldPoints(double holdPointsPerTick, int activeTeams) =>
-        holdPointsPerTick * Math.Sqrt(Math.Max(1, activeTeams));
+        holdPointsPerTick;
 
     /// <summary>
     /// King of the Hill per-tick score delta for whoever holds the marker, returned
