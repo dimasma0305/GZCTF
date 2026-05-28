@@ -70,15 +70,14 @@ public class AdScoreboardRepository(
 
         var partIds = teams.Select(p => p.Id).ToList();
 
+        // A&D scoreboard is pure A&D — KotH hills have their own dedicated board
+        // (GenKothScoreboardAsync) and are intentionally excluded here, both as
+        // columns and from the team Total.
         var challengeRows = await Context.GameChallenges
-            .Where(c => c.GameId == gameId && c.IsEnabled
-                && (c.Type == ChallengeType.AttackDefense || c.Type == ChallengeType.KingOfTheHill))
+            .Where(c => c.GameId == gameId && c.IsEnabled && c.Type == ChallengeType.AttackDefense)
             .OrderBy(c => c.Category).ThenBy(c => c.Id)
-            .Select(c => new { c.Id, c.Title, c.Category, c.Type })
+            .Select(c => new { c.Id, c.Title, c.Category })
             .ToListAsync(token);
-
-        var kothChallengeIds = challengeRows
-            .Where(c => c.Type == ChallengeType.KingOfTheHill).Select(c => c.Id).ToHashSet();
 
         var challenges = challengeRows.Select(c => new AdScoreboardChallenge
         {
@@ -86,32 +85,7 @@ public class AdScoreboardRepository(
             Title = c.Title,
             Category = c.Category.ToString()
         }).ToList();
-        // A&D-only ids for the attack/defense/SLA aggregations below.
-        var challengeIds = challengeRows
-            .Where(c => c.Type == ChallengeType.AttackDefense).Select(c => c.Id).ToList();
-
-        // KotH hold score per (controlling team, hill) = Σ HoldCredit − Penalty.
-        Dictionary<(int, int), double> kothLookup = new();
-        Dictionary<int, AdCheckStatus?> kothStatusByChallenge = new();
-        if (kothChallengeIds.Count > 0)
-        {
-            var kothByCell = await Context.KothControlResults
-                .Where(r => r.GameId == gameId && r.ControllingParticipationId != null
-                    && kothChallengeIds.Contains(r.ChallengeId)
-                    && (cutoff == null || r.CheckedAt <= cutoff))
-                .GroupBy(r => new { Pid = r.ControllingParticipationId!.Value, r.ChallengeId })
-                .Select(g => new { g.Key.Pid, g.Key.ChallengeId, Score = g.Sum(x => x.HoldCredit - x.Penalty) })
-                .ToListAsync(token);
-            kothLookup = kothByCell.ToDictionary(x => (x.Pid, x.ChallengeId), x => x.Score);
-
-            // Latest functional verdict per hill (shared target → per-challenge, not per-team).
-            foreach (var cid in kothChallengeIds)
-                kothStatusByChallenge[cid] = await Context.KothControlResults
-                    .Where(r => r.ChallengeId == cid && (cutoff == null || r.CheckedAt <= cutoff))
-                    .OrderByDescending(r => r.AdRoundId)
-                    .Select(r => (AdCheckStatus?)r.Status)
-                    .FirstOrDefaultAsync(token);
-        }
+        var challengeIds = challengeRows.Select(c => c.Id).ToList();
 
         // Attack points + flags captured, per (attacker, challenge).
         var attackByCell = await Context.AdAttacks
@@ -181,29 +155,12 @@ public class AdScoreboardRepository(
         var rows = teams.Select(p =>
         {
             var services = new List<AdServiceScore>(challenges.Count);
-            double tAttack = 0, tDefense = 0, tSla = 0, tKoth = 0;
+            double tAttack = 0, tDefense = 0, tSla = 0;
             int tFlags = 0, tCaptured = 0;
 
             foreach (var ch in challenges)
             {
                 var key = (p.Id, ch.ChallengeId);
-
-                // King of the Hill column: hold points only (no per-team attack/
-                // defense/SLA — the hill is shared). Status is the hill's verdict.
-                if (kothChallengeIds.Contains(ch.ChallengeId))
-                {
-                    var kothPts = kothLookup.GetValueOrDefault(key, 0);
-                    tKoth += kothPts;
-                    services.Add(new AdServiceScore
-                    {
-                        ChallengeId = ch.ChallengeId,
-                        IsKoth = true,
-                        KothPoints = kothPts,
-                        Net = kothPts,
-                        LastCheckStatus = kothStatusByChallenge.GetValueOrDefault(ch.ChallengeId)?.ToString()
-                    });
-                    continue;
-                }
 
                 var (atkPts, atkCnt) = attackLookup.GetValueOrDefault(key, (0d, 0));
                 var caps = defenseLookup.GetValueOrDefault(key, 0);
@@ -236,8 +193,7 @@ public class AdScoreboardRepository(
                 AttackPoints = tAttack,
                 DefenseLoss = tDefense,
                 SlaPoints = tSla,
-                KothPoints = tKoth,
-                Total = tAttack + tSla - tDefense + tKoth,
+                Total = tAttack + tSla - tDefense,
                 TimesCaptured = tCaptured,
                 FlagsCaptured = tFlags,
                 Services = services
@@ -316,22 +272,6 @@ public class AdScoreboardRepository(
                 .ToListAsync(token))
             .ToDictionary(x => (x.ParticipationId, x.Number), x => x.Credit);
 
-        // KotH hold credit per (team, round) — without this the chart line for any
-        // team with KotH points diverges from the scoreboard total (Scoreboard adds
-        // tKoth at line 240; the chart historically didn't). Join through AdRound
-        // to translate the result's AdRoundId into a round Number, so the cumulative
-        // axis lines up exactly with cumAttack / cumSla below.
-        var kothByTeamRound = (await Context.KothControlResults
-                .Where(r => r.GameId == gameId && r.ControllingParticipationId != null
-                    && (cutoff == null || r.CheckedAt <= cutoff))
-                .Join(Context.AdRounds, r => r.AdRoundId, ar => ar.Id,
-                    (r, ar) => new { Pid = r.ControllingParticipationId!.Value, ar.Number, Delta = r.HoldCredit - r.Penalty })
-                .Where(x => partIds.Contains(x.Pid))
-                .GroupBy(x => new { x.Pid, x.Number })
-                .Select(g => new { g.Key.Pid, g.Key.Number, Delta = g.Sum(x => x.Delta) })
-                .ToListAsync(token))
-            .ToDictionary(x => (x.Pid, x.Number), x => x.Delta);
-
         // Emit at most MaxTimelinePoints points per team (downsample the rounds).
         var emitEvery = Math.Max(1, (int)Math.Ceiling(rounds.Count / (double)MaxTimelinePoints));
 
@@ -345,7 +285,7 @@ public class AdScoreboardRepository(
                 Division = team.Division?.Name,
             };
 
-            double cumAttack = 0, cumSla = 0, cumKoth = 0;
+            double cumAttack = 0, cumSla = 0;
             var cumCaps = new Dictionary<int, int>();
 
             for (var i = 0; i < rounds.Count; i++)
@@ -353,7 +293,6 @@ public class AdScoreboardRepository(
                 var round = rounds[i];
                 cumAttack += atkByTeamRound.GetValueOrDefault((team.Id, round.Number), 0);
                 cumSla += slaByTeamRound.GetValueOrDefault((team.Id, round.Number), 0);
-                cumKoth += kothByTeamRound.GetValueOrDefault((team.Id, round.Number), 0);
                 if (capsByTeamRound.TryGetValue((team.Id, round.Number), out var caps))
                     foreach (var (ch, cnt) in caps)
                         cumCaps[ch] = cumCaps.GetValueOrDefault(ch) + cnt;
@@ -367,8 +306,8 @@ public class AdScoreboardRepository(
                 {
                     Round = round.Number,
                     Time = round.EndsAt,
-                    // Same shape as Scoreboard's Total = tAttack + tSla - tDefense + tKoth.
-                    Score = cumAttack + AdScoring.SlaPoints(cumSla, activeTeams) - defenseLoss + cumKoth
+                    // Same shape as Scoreboard's Total = tAttack + tSla - tDefense (A&D only).
+                    Score = cumAttack + AdScoring.SlaPoints(cumSla, activeTeams) - defenseLoss
                 });
             }
 
