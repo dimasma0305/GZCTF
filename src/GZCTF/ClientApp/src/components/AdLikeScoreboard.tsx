@@ -123,7 +123,10 @@ export const useAdLikeScoreboardState = <T extends AdLikeRow>(
 
   const selectValue = divisionName ?? 'all'
   const hasDivisionFilter = divisionOptions.length > 0
-  const allRank = divisionName === null
+  // When a keyword search is active the list is filtered by name (not by
+  // division), so the per-page position is neither a division rank nor an
+  // overall rank — fall back to showing the true overall rank instead.
+  const allRank = divisionName === null || debouncedKeyword.trim().length > 0
 
   const filteredList = useMemo(() => {
     if (!rows) return []

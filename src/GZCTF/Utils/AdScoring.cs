@@ -59,12 +59,23 @@ public static class AdScoring
         Math.Pow(timesCaptured, DefenseExponent) * DefensePenaltyScale;
 
     /// <summary>
-    /// SLA points from a sum of per-tick credits, scaled by field size.
-    /// <c>sqrt(max(teams,1))</c> keeps SLA comparable to attack as the game
-    /// grows — the FAUST weighting.
+    /// Field-size weight (<c>sqrt(max(teams,1))</c>, the FAUST weighting that
+    /// keeps SLA comparable to attack as the game grows). Folded into each
+    /// tick's SLA credit WHEN THE CHECK LANDS, using that round's accepted-team
+    /// count — so the stored credit is already field-scaled and a later roster
+    /// change (accept/reject) can't retroactively rescale a team's whole SLA
+    /// history (the bug an earlier render-time multiply had). The scoreboard
+    /// then just SUMs the stored credit.
     /// </summary>
-    public static double SlaPoints(double creditSum, int activeTeams) =>
-        creditSum * SlaPerTickScale * Math.Sqrt(Math.Max(1, activeTeams));
+    public static double SlaFieldFactor(int activeTeams) => Math.Sqrt(Math.Max(1, activeTeams));
+
+    /// <summary>
+    /// SLA points from a sum of already-field-scaled per-tick credits (see
+    /// <see cref="SlaFieldFactor" />). Just the per-tick scale — the team-count
+    /// weight is baked into each stored credit, not applied here at render time.
+    /// </summary>
+    public static double SlaPoints(double creditSum) =>
+        creditSum * SlaPerTickScale;
 
     /// <summary>
     /// Per-tick SLA credit for a fresh verdict given the service's previous
@@ -114,12 +125,21 @@ public static class AdScoring
     /// </summary>
     public static (double HoldCredit, double Penalty) KothTickDelta(
         bool hasKing, AdCheckStatus status, double holdPointsPerTick,
-        bool freshlyElected = false) =>
-        !hasKing
-            ? (0.0, 0.0)
-            : status == AdCheckStatus.Ok
-                ? (KothHoldPoints(holdPointsPerTick), 0.0)
-                : freshlyElected
-                    ? (0.0, 0.0) // grace tick — broken when they took it, not their fault yet
-                    : (0.0, KothBrokenHillPenalty);
+        bool freshlyElected = false)
+    {
+        if (!hasKing)
+            return (0.0, 0.0);
+        if (status == AdCheckStatus.Ok)
+            return (KothHoldPoints(holdPointsPerTick), 0.0);
+        // Only a genuine box-down verdict the holder is responsible for is
+        // penalized. InternalError is a CHECKER / infra fault (pruned image, no
+        // network, container failed to start) — like the SLA TickCredit path, a
+        // checker fault must never debit whoever happens to hold the hill at
+        // fault time. A freshly-elected holder also gets one grace tick (they
+        // inherited the previous holder's damage, not their fault yet).
+        var holderAtFault = status is AdCheckStatus.Mumble or AdCheckStatus.Offline;
+        return holderAtFault && !freshlyElected
+            ? (0.0, KothBrokenHillPenalty)
+            : (0.0, 0.0);
+    }
 }

@@ -323,7 +323,14 @@ public class AdAdminController(
             .FirstOrDefaultAsync(token);
         var svc = await db.AdTeamServices.FirstOrDefaultAsync(s => s.Id == check.AdTeamServiceId, token);
 
-        var newCredit = AdScoring.TickCredit(model.NewStatus, prevStatus);
+        // Stored SLA credit is field-scaled at earn time (AdScoring.SlaFieldFactor),
+        // so the recomputed credit must carry the same factor or it would write a
+        // raw value that disagrees with the rest of the running total.
+        var activeTeams = await db.Participations
+            .CountAsync(p => p.GameId == id && p.Status == ParticipationStatus.Accepted, token);
+        var fieldFactor = AdScoring.SlaFieldFactor(activeTeams);
+
+        var newCredit = AdScoring.TickCredit(model.NewStatus, prevStatus) * fieldFactor;
         if (svc is not null) svc.SlaCreditTotal += newCredit - check.SlaCredit;
         check.SlaCredit = newCredit;
 
@@ -333,7 +340,7 @@ public class AdAdminController(
             .FirstOrDefaultAsync(token);
         if (nextCheck is not null)
         {
-            var newNextCredit = AdScoring.TickCredit(nextCheck.Status, model.NewStatus);
+            var newNextCredit = AdScoring.TickCredit(nextCheck.Status, model.NewStatus) * fieldFactor;
             if (svc is not null) svc.SlaCreditTotal += newNextCredit - nextCheck.SlaCredit;
             nextCheck.SlaCredit = newNextCredit;
         }

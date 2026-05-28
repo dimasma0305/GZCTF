@@ -150,8 +150,6 @@ public class AdScoreboardRepository(
             .ToListAsync(token);
         var statusLookup = statusRows.ToDictionary(x => (x.ParticipationId, x.ChallengeId), x => x.Last);
 
-        var activeTeams = teams.Count;
-
         var rows = teams.Select(p =>
         {
             var services = new List<AdServiceScore>(challenges.Count);
@@ -165,7 +163,7 @@ public class AdScoreboardRepository(
                 var (atkPts, atkCnt) = attackLookup.GetValueOrDefault(key, (0d, 0));
                 var caps = defenseLookup.GetValueOrDefault(key, 0);
                 var defLoss = AdScoring.DefenseLoss(caps);
-                var sla = AdScoring.SlaPoints(slaLookup.GetValueOrDefault(key, 0), activeTeams);
+                var sla = AdScoring.SlaPoints(slaLookup.GetValueOrDefault(key, 0));
                 var net = atkPts + sla - defLoss;
 
                 tAttack += atkPts; tDefense += defLoss; tSla += sla;
@@ -200,6 +198,7 @@ public class AdScoreboardRepository(
             };
         })
         .OrderByDescending(r => r.Total)
+        .ThenBy(r => r.ParticipationId) // stable, deterministic tie-break for equal Totals
         .ToList();
 
         for (int i = 0; i < rows.Count; i++)
@@ -240,7 +239,6 @@ public class AdScoreboardRepository(
             return result;
 
         var partIds = teams.Select(p => p.Id).ToHashSet();
-        var activeTeams = teams.Count;
 
         // Aggregate in SQL per (team, round) instead of loading every row — avoids
         // pulling the whole (unbounded) AdCheckResults / AdAttacks tables into memory.
@@ -307,7 +305,7 @@ public class AdScoreboardRepository(
                     Round = round.Number,
                     Time = round.EndsAt,
                     // Same shape as Scoreboard's Total = tAttack + tSla - tDefense (A&D only).
-                    Score = cumAttack + AdScoring.SlaPoints(cumSla, activeTeams) - defenseLoss
+                    Score = cumAttack + AdScoring.SlaPoints(cumSla) - defenseLoss
                 });
             }
 
@@ -482,6 +480,7 @@ public class AdScoreboardRepository(
             };
         })
         .OrderByDescending(r => r.Total)
+        .ThenBy(r => r.ParticipationId) // stable, deterministic tie-break for equal Totals
         .ToList();
 
         for (int i = 0; i < result.Teams.Count; i++)
@@ -537,10 +536,19 @@ public class AdScoreboardRepository(
 
         var partIds = teams.Select(p => p.Id).ToHashSet();
 
+        // Restrict to currently-enabled hills, exactly like GenKothScoreboardAsync —
+        // otherwise a hill disabled mid-game keeps contributing to the chart but
+        // not the leaderboard, so the two permanently disagree.
+        var hillIds = (await Context.GameChallenges
+            .Where(c => c.GameId == gameId && c.IsEnabled && c.Type == ChallengeType.KingOfTheHill)
+            .Select(c => c.Id)
+            .ToListAsync(token)).ToHashSet();
+
         // Same aggregate the combined timeline uses, but kept ALONE — no other
         // engine's score added in.
         var kothByTeamRound = (await Context.KothControlResults
                 .Where(r => r.GameId == gameId && r.ControllingParticipationId != null
+                    && hillIds.Contains(r.ChallengeId)
                     && (cutoff == null || r.CheckedAt <= cutoff))
                 .Join(Context.AdRounds, r => r.AdRoundId, ar => ar.Id,
                     (r, ar) => new { Pid = r.ControllingParticipationId!.Value, ar.Number, Delta = r.HoldCredit - r.Penalty })

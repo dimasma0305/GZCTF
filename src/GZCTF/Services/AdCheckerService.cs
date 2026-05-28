@@ -428,11 +428,19 @@ public sealed class AdCheckerService(
                 var freshlyElected = false;
                 if (controller is { } cid && outcome.Status != AdCheckStatus.Ok)
                 {
-                    var prevController = await db.KothControlResults
-                        .Where(r => r.ChallengeId == challenge.Id && r.AdRound.Number == latest.Number - 1)
+                    // Grace only for a GENUINE fresh entrant: a team that
+                    // controlled this hill in NEITHER of the previous two ticks.
+                    // Keying it on "differs from N-1" alone let a team re-arm the
+                    // grace every other tick — drop the marker for one tick, or
+                    // alternate with a colluder — to dodge the broken-hill penalty
+                    // indefinitely. Looking back two ticks denies that oscillation.
+                    var recentControllers = await db.KothControlResults
+                        .Where(r => r.ChallengeId == challenge.Id
+                            && (r.AdRound.Number == latest.Number - 1
+                                || r.AdRound.Number == latest.Number - 2))
                         .Select(r => r.ControllingParticipationId)
-                        .FirstOrDefaultAsync(token);
-                    freshlyElected = prevController != cid;
+                        .ToListAsync(token);
+                    freshlyElected = recentControllers.All(c => c != cid);
                 }
 
                 var (hold, penalty) = AdScoring.KothTickDelta(
@@ -542,7 +550,18 @@ public sealed class AdCheckerService(
             .Select(cr => (AdCheckStatus?)cr.Status)
             .FirstOrDefaultAsync(token);
 
-        var credit = AdScoring.TickCredit(outcome.Status, prevStatus);
+        // Field-size weight for THIS round, frozen into the stored credit at earn
+        // time (AdScoring.SlaFieldFactor) so a later accept/reject can't
+        // retroactively rescale historical SLA. activeTeams = accepted teams in
+        // this game now (= this round's field size, the check runs within it).
+        var gameId = await db.AdTeamServices
+            .Where(s => s.Id == adTeamServiceId)
+            .Select(s => s.Participation.GameId)
+            .FirstOrDefaultAsync(token);
+        var activeTeams = await db.Participations
+            .CountAsync(p => p.GameId == gameId && p.Status == ParticipationStatus.Accepted, token);
+
+        var credit = AdScoring.TickCredit(outcome.Status, prevStatus) * AdScoring.SlaFieldFactor(activeTeams);
         await db.AdCheckResults.AddAsync(new AdCheckResult
         {
             AdTeamServiceId = adTeamServiceId,

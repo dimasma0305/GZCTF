@@ -507,7 +507,10 @@ public class GameRepository(
             };
 
             // 5.1. generate bloods
-            if (solve.BloodEligible && challenge is { DisableBloodBonus: false, Bloods.Count: < 3 })
+            // ScoreEligible too: a team that cannot receive points must not
+            // consume a first/second/third-blood SLOT, which would downgrade the
+            // bonus tier of every legitimately-scoring solver after it.
+            if (solve.BloodEligible && solve.ScoreEligible && challenge is { DisableBloodBonus: false, Bloods.Count: < 3 })
             {
                 item.Type = challenge.Bloods.Count switch
                 {

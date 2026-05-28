@@ -108,6 +108,7 @@ public class ChallengeUpdateModel
     /// <summary>
     /// Initial score
     /// </summary>
+    [Range(0, int.MaxValue)]
     public int? OriginalScore { get; set; }
 
     /// <summary>
@@ -119,6 +120,7 @@ public class ChallengeUpdateModel
     /// <summary>
     /// Difficulty coefficient
     /// </summary>
+    [Range(0.01, double.MaxValue)]
     public double? Difficulty { get; set; }
 
     #region Attack & Defense (per-challenge)

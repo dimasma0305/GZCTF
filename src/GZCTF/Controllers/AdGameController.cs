@@ -258,6 +258,12 @@ public class AdGameController(
         }
         catch (DbUpdateException)
         {
+            // Lost the unique (attacker, flag) race. Detach the failed insert so
+            // it doesn't stay tracked in Added state — otherwise the NEXT flag's
+            // SaveChanges in this shared per-request context retries this poisoned
+            // row and fails too, silently dropping every later valid capture in
+            // the batch (mirrors the VPN-peer detach pattern below).
+            db.Entry(attack).State = EntityState.Detached;
             result.Status = "duplicate";
             result.FlagPlantedAtRound = adFlag.PlantedAtRound;
             result.Message = "already submitted";

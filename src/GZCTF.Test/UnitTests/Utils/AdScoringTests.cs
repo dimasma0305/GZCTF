@@ -32,11 +32,17 @@ public class AdScoringTests
         => Assert.Equal(expected, AdScoring.DefenseLoss(timesCaptured), 6);
 
     [Theory]
-    [InlineData(5.0, 4, 10.0)]  // 5 * sqrt(4)
-    [InlineData(3.0, 0, 3.0)]   // sqrt(max(1, 0)) = 1 → no divide-by-zero
-    [InlineData(0.0, 100, 0.0)]
-    public void SlaPoints_ScaledByFieldSize(double creditSum, int teams, double expected)
-        => Assert.Equal(expected, AdScoring.SlaPoints(creditSum, teams), 6);
+    [InlineData(4, 2.0)]    // sqrt(4)
+    [InlineData(0, 1.0)]    // sqrt(max(1, 0)) = 1 → no divide-by-zero
+    [InlineData(9, 3.0)]
+    public void SlaFieldFactor_SqrtTeams(int teams, double expected)
+        => Assert.Equal(expected, AdScoring.SlaFieldFactor(teams), 6);
+
+    [Theory]
+    [InlineData(10.0, 10.0)] // SLA is just the SUM of already-field-scaled credit
+    [InlineData(0.0, 0.0)]
+    public void SlaPoints_SumsStoredCredit(double creditSum, double expected)
+        => Assert.Equal(expected, AdScoring.SlaPoints(creditSum), 6);
 
     [Theory]
     [InlineData(AdCheckStatus.Ok, null, 1.0)]                       // clean Ok (first tick)
@@ -80,12 +86,21 @@ public class AdScoringTests
     [Theory]
     [InlineData(AdCheckStatus.Mumble)]
     [InlineData(AdCheckStatus.Offline)]
-    [InlineData(AdCheckStatus.InternalError)]
     public void KothTickDelta_KingOnBrokenHill_EatsPenaltyNoHold(AdCheckStatus status)
     {
         var (hold, pen) = AdScoring.KothTickDelta(hasKing: true, status, 1.0);
         Assert.Equal(0.0, hold);
         Assert.Equal(AdScoring.KothBrokenHillPenalty, pen, 6);
+    }
+
+    [Fact]
+    public void KothTickDelta_KingOnInternalError_NoPenalty()
+    {
+        // A checker/infra fault (pruned image, no network) is NOT the holder's
+        // fault — like the SLA path it must never debit them (no hold, no penalty).
+        var (hold, pen) = AdScoring.KothTickDelta(hasKing: true, AdCheckStatus.InternalError, 1.0);
+        Assert.Equal(0.0, hold);
+        Assert.Equal(0.0, pen);
     }
 
     [Fact]
