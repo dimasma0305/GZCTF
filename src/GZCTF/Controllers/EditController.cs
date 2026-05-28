@@ -853,12 +853,20 @@ public class EditController(
                 StatusCodes.Status404NotFound));
 
         // NOTE: IsEnabled can only be updated outside the edit page.
-        // DynamicContainer and AttackDefense generate their flags at runtime
-        // (per-team flag templates / round-planted A&D flags), so they have no
-        // FlagContext rows and must be exempt from the flag-presence guard.
-        if (model.IsEnabled is true && !res.IsEnabled
-            && res.Type != ChallengeType.DynamicContainer
-            && res.Type != ChallengeType.AttackDefense)
+        // Any "dynamic" challenge type generates its flags at runtime and has
+        // no FlagContext rows — must be exempt from the flag-presence guard:
+        //   - DynamicContainer / DynamicAttachment: per-team flag templates
+        //     (substituted at instance / download time, never persisted as
+        //     a FlagContext row);
+        //   - AttackDefense: per-round flag planted by AdRoundService and
+        //     verified by submission against AdFlags, not FlagContexts;
+        //   - KingOfTheHill: scoring is via control tokens (KothToken),
+        //     no flag submission path at all.
+        // Without this exemption the user can't activate any DynamicAttachment
+        // or KotH challenge from the admin UI — the BadRequest "no flag"
+        // fires even though the type doesn't use FlagContexts. IsDynamic()
+        // already covers all four cases.
+        if (model.IsEnabled is true && !res.IsEnabled && !res.Type.IsDynamic())
         {
             await challengeRepository.LoadFlags(res, token);
 

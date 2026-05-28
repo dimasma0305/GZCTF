@@ -197,11 +197,15 @@ public class DockerProvider : IContainerProvider<DockerClient, DockerMetadata>
 
         try
         {
+            // alpine has neither iproute2 (for `ip route`) nor docker-cli
+            // (for `docker inspect`) by default — both are required.
+            // Without docker-cli the PID lookup silently returned empty
+            // (initial bug) and the helper exited 0 having done nothing.
             var script =
-                "apk add --no-cache iproute2 >/dev/null 2>&1 || true; " +
-                $"PID=$(docker inspect {selfId} --format '{{{{.State.Pid}}}}' 2>/dev/null); " +
-                "[ -n \"$PID\" ] || exit 0; " +
-                $"nsenter -t \"$PID\" -n ip route replace default via {gateway} >/dev/null 2>&1 || true";
+                "apk add --no-cache iproute2 docker-cli >/dev/null 2>&1 || exit 1; " +
+                $"PID=$(docker inspect {selfId} --format '{{{{.State.Pid}}}}' 2>&1); " +
+                "[ -n \"$PID\" ] || { echo \"docker inspect failed: $PID\" 1>&2; exit 2; }; " +
+                $"nsenter -t \"$PID\" -n ip route replace default via {gateway} 2>&1 || exit 3";
 
             var create = await _dockerClient.Containers.CreateContainerAsync(new CreateContainerParameters
             {
