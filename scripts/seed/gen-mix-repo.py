@@ -653,9 +653,11 @@ def render(t: str, cat: str, *, has_attachment: bool, is_full_build: bool) -> st
         out.append(f"  {line}")
     out.append(f'category: "{cat}"')
     out.append(f'type: "{t}"')
-    out.append('value: 0' if t in ("AttackDefense","KingOfTheHill") else 'value: 200')
-    out.append('minScoreRate: 0.25')
-    out.append('difficulty: 5')
+    # value / minScoreRate / difficulty intentionally omitted — they have sane
+    # server-side defaults (OriginalScore=1000, MinScoreRate=0.25, Difficulty=5),
+    # and AD/KotH ignore them entirely (Score is overridden to 0 in
+    # GameRepository for AD-engine challenges so the player UI doesn't render
+    # a meaningless "pts" value).
 
     if t in ("StaticAttachment","StaticContainer"):
         out.append('flags:')
