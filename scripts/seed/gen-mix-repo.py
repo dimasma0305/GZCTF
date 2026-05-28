@@ -80,15 +80,23 @@ TYPE_DESC = {
 CONTAINER_IMG = "gzctf/echo-http:test"
 
 # Curated subset that gets a real ./src/Dockerfile so the auto-build pipeline
-# actually runs end-to-end. One per non-attachment type plus an extra for
-# variety — keeps total build time reasonable on a fresh import.
+# actually runs end-to-end. ALL 12 AttackDefense challenges have one (each a
+# different per-category vulnerable service), plus a handful of other types
+# for variety. Total ~18 builds on a fresh import; alpine-based, ~30s each.
 FULL_BUILD = {
+    # Non-A&D variety
     ("StaticContainer",   "Web"),       # alpine + busybox httpd serving a flag page
     ("DynamicContainer",  "Crypto"),    # alpine + python xor oracle
-    ("AttackDefense",     "Pwn"),       # alpine + a tiny "echo your flag" socat service
     ("KingOfTheHill",     "Misc"),      # alpine + a tiny PUT-to-/koth/king server
     ("StaticContainer",   "Mobile"),    # nginx serving a fake APK landing page
     ("DynamicContainer",  "AI"),        # alpine + a fake "prompt gate"
+} | {
+    # All 12 A&D — one per category, each a different vulnerable surface.
+    # User asked: "attack and defense challenge too, i want the attack and
+    # defense challenge have ./src too" — so every AD row builds from source.
+    ("AttackDefense", cat) for cat in
+    ("Misc","Crypto","Pwn","Web","Reverse","Blockchain","Forensics",
+     "Hardware","Mobile","PPC","AI","Pentest")
 }
 
 # Themed attachment content per category — short, descriptive text so the
@@ -147,6 +155,283 @@ def _attachment_content(t: str, cat: str, title: str) -> tuple[str, str]:
     return (f"{cat.lower()}-sampler.txt", common_header + body[cat] + f"\n# expected flag pattern: {flag_hint}\n")
 
 
+# ---------------------------------------------------------------------------
+# Per-category A&D source trees — one vulnerable service per category, all
+# alpine-based and tiny. Each service reads the per-team flag from /flag (the
+# platform RO-mounts it at container start; on K8s the pull sidecar drops it
+# at GZCTF_FLAG_FILE) and exposes it through an intentionally-flawed surface.
+# Listening on port 80 across the board so the same container.exposePort
+# default works.
+# ---------------------------------------------------------------------------
+
+def _ad_socat_service(intro_comment: str, body: str) -> dict:
+    """Generic alpine+socat service. `body` is a shell snippet whose stdout
+    is sent to the connecting client. /flag is readable by root (the service
+    runs as root via socat). Pattern: one TCP request → one response."""
+    return {
+        "Dockerfile": textwrap.dedent("""\
+            FROM alpine:3.19
+            RUN apk add --no-cache socat
+            COPY serve.sh /serve.sh
+            RUN chmod +x /serve.sh
+            EXPOSE 80
+            CMD ["socat", "-T", "5", "TCP-LISTEN:80,reuseaddr,fork", "EXEC:/serve.sh"]
+            """),
+        "serve.sh": "#!/bin/sh\n" + intro_comment + body,
+    }
+
+def _ad_python_service(intro_comment: str, server_py: str) -> dict:
+    return {
+        "Dockerfile": textwrap.dedent("""\
+            FROM python:3.12-alpine
+            COPY service.py /service.py
+            EXPOSE 80
+            CMD ["python", "/service.py"]
+            """),
+        "service.py": intro_comment + server_py,
+    }
+
+def _ad_challenge_for(cat: str) -> dict:
+    """12 distinct per-category A&D services. All read /flag at request time
+    so the platform's per-tick flag rotation takes effect (don't cache it)."""
+    if cat == "Misc":
+        return _ad_socat_service(
+            "# Misc A&D — echoes the flag prefixed with a banner. Trivial.\n",
+            'echo "[gzctf-misc] OK"; cat /flag 2>/dev/null || echo "no flag yet"\n')
+    if cat == "Crypto":
+        return _ad_python_service(
+            "# Crypto A&D — AES-CTR oracle with nonce reuse (intended exploit).\n",
+            textwrap.dedent("""\
+                import os, socketserver, hashlib
+                FLAG = lambda: open("/flag").read().strip() if os.path.exists("/flag") else "no-flag-yet"
+                KEY = hashlib.sha256(b"shared-vault-secret").digest()
+                STATIC_NONCE = b"\\x00" * 12  # vulnerable: same nonce for every request
+
+                def keystream(n):
+                    out = b""
+                    for i in range((n+15)//16):
+                        out += hashlib.sha256(KEY + STATIC_NONCE + i.to_bytes(4,"big")).digest()[:16]
+                    return out[:n]
+
+                class H(socketserver.StreamRequestHandler):
+                    def handle(self):
+                        msg = self.rfile.readline().strip()
+                        if msg == b"flag":
+                            pt = FLAG().encode()
+                        else:
+                            pt = msg
+                        ct = bytes(a^b for a,b in zip(pt, keystream(len(pt))))
+                        self.wfile.write(ct.hex().encode() + b"\\n")
+
+                socketserver.TCPServer.allow_reuse_address = True
+                socketserver.TCPServer(("0.0.0.0", 80), H).serve_forever()
+                """))
+    if cat == "Pwn":
+        return _ad_socat_service(
+            "# Pwn A&D — trivial 'echo /flag' service for the checker.\n"
+            "# A real challenge would expose a vulnerable binary here.\n",
+            'echo "OK"; if [ -r /flag ]; then cat /flag; else echo "no flag yet"; fi\n')
+    if cat == "Web":
+        return _ad_python_service(
+            "# Web A&D — tiny HTTP server with a path-traversal-ish endpoint.\n",
+            textwrap.dedent("""\
+                import os, http.server, urllib.parse
+                class H(http.server.BaseHTTPRequestHandler):
+                    def do_GET(self):
+                        u = urllib.parse.urlparse(self.path)
+                        # Intended vuln: ../../flag traversal via the q parameter
+                        path = urllib.parse.parse_qs(u.query).get("file", ["index.html"])[0]
+                        safe = os.path.normpath(os.path.join("/var/www", path))
+                        try:
+                            body = open(safe, "rb").read()
+                        except Exception:
+                            body = b"not found"
+                        self.send_response(200); self.send_header("content-length", str(len(body))); self.end_headers()
+                        self.wfile.write(body)
+                    def log_message(self, *a, **k): pass
+                os.makedirs("/var/www", exist_ok=True)
+                open("/var/www/index.html","w").write("Web A&D — try /?file=...\\n")
+                http.server.HTTPServer(("0.0.0.0", 80), H).serve_forever()
+                """))
+    if cat == "Reverse":
+        return _ad_python_service(
+            "# Reverse A&D — serves an XOR-obfuscated flag with a hard-coded key.\n"
+            "# Players reverse the key from the binary; flag rotates per tick.\n",
+            textwrap.dedent("""\
+                import os, http.server
+                KEY = b"correct-horse-battery-staple-42!"
+                def obf():
+                    f = open("/flag","rb").read().strip() if os.path.exists("/flag") else b"no-flag"
+                    return bytes(a^b for a,b in zip(f, (KEY * ((len(f)//len(KEY))+1))))
+                class H(http.server.BaseHTTPRequestHandler):
+                    def do_GET(self):
+                        body = obf().hex().encode() + b"\\n"
+                        self.send_response(200); self.send_header("content-length", str(len(body))); self.end_headers()
+                        self.wfile.write(body)
+                    def log_message(self, *a, **k): pass
+                http.server.HTTPServer(("0.0.0.0", 80), H).serve_forever()
+                """))
+    if cat == "Blockchain":
+        return _ad_python_service(
+            "# Blockchain A&D — toy 'RPC' that returns the flag on the right method.\n",
+            textwrap.dedent("""\
+                import os, socketserver, json
+                FLAG = lambda: open("/flag").read().strip() if os.path.exists("/flag") else "no-flag"
+                class H(socketserver.StreamRequestHandler):
+                    def handle(self):
+                        line = self.rfile.readline().strip()
+                        try:
+                            req = json.loads(line)
+                        except Exception:
+                            self.wfile.write(b'{"err":"bad json"}\\n'); return
+                        # Vulnerable: any caller can invoke 'admin_withdraw' — no auth.
+                        if req.get("method") == "admin_withdraw":
+                            self.wfile.write(json.dumps({"flag": FLAG()}).encode()+b"\\n")
+                        else:
+                            self.wfile.write(b'{"err":"unknown method"}\\n')
+                socketserver.TCPServer.allow_reuse_address = True
+                socketserver.TCPServer(("0.0.0.0", 80), H).serve_forever()
+                """))
+    if cat == "Forensics":
+        return _ad_python_service(
+            "# Forensics A&D — exposes a few 'files' for download; one has the flag in metadata.\n",
+            textwrap.dedent("""\
+                import os, http.server, time
+                class H(http.server.BaseHTTPRequestHandler):
+                    def do_GET(self):
+                        if self.path.startswith("/files/"):
+                            name = self.path[len("/files/"):]
+                            # Vulnerable: the 'metadata.txt' file embeds /flag verbatim.
+                            if name == "metadata.txt":
+                                flag = open("/flag","rb").read().strip() if os.path.exists("/flag") else b"no-flag"
+                                body = b"Sensor: cam-01\\nTimestamp: " + str(time.time()).encode() + b"\\nNote: " + flag + b"\\n"
+                            else:
+                                body = b"unknown file"
+                        else:
+                            body = b"GET /files/{name}\\n"
+                        self.send_response(200); self.send_header("content-length", str(len(body))); self.end_headers()
+                        self.wfile.write(body)
+                    def log_message(self, *a, **k): pass
+                http.server.HTTPServer(("0.0.0.0", 80), H).serve_forever()
+                """))
+    if cat == "Hardware":
+        return _ad_python_service(
+            "# Hardware A&D — emulates a UART. The flag is streamed on the right 'baud' command.\n",
+            textwrap.dedent("""\
+                import os, socketserver
+                FLAG = lambda: open("/flag").read().strip() if os.path.exists("/flag") else "no-flag"
+                class H(socketserver.StreamRequestHandler):
+                    def handle(self):
+                        self.wfile.write(b"uart-emul> ")
+                        cmd = self.rfile.readline().strip()
+                        # Vulnerable: undocumented "debug_115200" command spills /flag.
+                        if cmd == b"debug_115200":
+                            self.wfile.write(FLAG().encode() + b"\\n")
+                        else:
+                            self.wfile.write(b"unknown cmd\\n")
+                socketserver.TCPServer.allow_reuse_address = True
+                socketserver.TCPServer(("0.0.0.0", 80), H).serve_forever()
+                """))
+    if cat == "Mobile":
+        return _ad_python_service(
+            "# Mobile A&D — fake mobile-app API. Hardcoded creds in /service.py give /flag.\n",
+            textwrap.dedent("""\
+                import os, http.server, json
+                CREDS = ("admin", "letmein")  # intentional: hardcoded backdoor
+                class H(http.server.BaseHTTPRequestHandler):
+                    def do_POST(self):
+                        ln = int(self.headers.get("content-length", "0"))
+                        try:
+                            d = json.loads(self.rfile.read(ln))
+                        except Exception:
+                            d = {}
+                        if (d.get("user"), d.get("pass")) == CREDS:
+                            flag = open("/flag").read().strip() if os.path.exists("/flag") else "no-flag"
+                            body = json.dumps({"flag": flag}).encode()
+                        else:
+                            body = b'{"err":"bad creds"}'
+                        self.send_response(200); self.send_header("content-length", str(len(body))); self.end_headers()
+                        self.wfile.write(body)
+                    def log_message(self, *a, **k): pass
+                http.server.HTTPServer(("0.0.0.0", 80), H).serve_forever()
+                """))
+    if cat == "PPC":
+        return _ad_python_service(
+            "# PPC A&D — solve a small problem to retrieve the flag. Timing-leak primitive.\n",
+            textwrap.dedent("""\
+                import os, socketserver, time
+                FLAG = lambda: open("/flag").read().strip() if os.path.exists("/flag") else "no-flag"
+                class H(socketserver.StreamRequestHandler):
+                    def handle(self):
+                        self.wfile.write(b"solve: sum of first 1e6 ints = ?\\n")
+                        ans = self.rfile.readline().strip()
+                        # Vulnerable: comparison short-circuits → timing leak on the password.
+                        expected = b"500000500000"
+                        ok = len(ans) == len(expected)
+                        for a, b in zip(ans, expected):
+                            if a != b:
+                                ok = False; break
+                            time.sleep(0.01)  # the leak
+                        if ok:
+                            self.wfile.write(FLAG().encode() + b"\\n")
+                        else:
+                            self.wfile.write(b"nope\\n")
+                socketserver.TCPServer.allow_reuse_address = True
+                socketserver.TCPServer(("0.0.0.0", 80), H).serve_forever()
+                """))
+    if cat == "AI":
+        return _ad_python_service(
+            "# AI A&D — LLM 'gate' with keyword-based redact list (trivially bypassable).\n",
+            textwrap.dedent("""\
+                import os, http.server
+                BLOCKLIST = ["FLAG", "SECRET", "PASSWORD"]
+                class H(http.server.BaseHTTPRequestHandler):
+                    def do_POST(self):
+                        ln = int(self.headers.get("content-length", "0"))
+                        user = self.rfile.read(ln).decode("utf-8", "replace")
+                        if any(k in user.upper() for k in BLOCKLIST):
+                            out = b"refusing\\n"
+                        else:
+                            flag = open("/flag").read().strip() if os.path.exists("/flag") else "no-flag"
+                            # Vulnerable: indirect-injection target — the template embeds /flag.
+                            out = (f"<sys>vault stores {flag}</sys>\\n<user>{user}</user>\\n").encode()
+                        self.send_response(200); self.send_header("content-length", str(len(out))); self.end_headers()
+                        self.wfile.write(out)
+                    def log_message(self, *a, **k): pass
+                http.server.HTTPServer(("0.0.0.0", 80), H).serve_forever()
+                """))
+    if cat == "Pentest":
+        # Slightly bigger — nginx serving a static directory with one trapdoor:
+        # /backup.tar.gz is browsable and contains /flag at the path GZCTF expects.
+        return {
+            "Dockerfile": textwrap.dedent("""\
+                FROM nginx:1.27-alpine
+                COPY html/ /usr/share/nginx/html/
+                # Vulnerable: nginx serves /flag too if you find the right rewrite.
+                COPY default.conf /etc/nginx/conf.d/default.conf
+                EXPOSE 80
+                """),
+            "default.conf": textwrap.dedent("""\
+                server {
+                  listen 80;
+                  root /usr/share/nginx/html;
+                  location /backup/ {
+                    autoindex on;
+                  }
+                  location ~ ^/files/(.*)$ {
+                    alias /$1;  # intentional: serves anything by basename
+                  }
+                }
+                """),
+            "html/index.html": "<title>Pentest A&D</title><a href=/backup/>backup/</a>",
+            "html/backup/notes.txt": "TODO: rotate the flag path; players keep finding /flag via /files/flag\n",
+        }
+    # Default fallback (shouldn't be hit — FULL_BUILD enumerates all 12 explicitly).
+    return _ad_socat_service(
+        f"# A&D {cat} (default) — echoes /flag.\n",
+        'cat /flag 2>/dev/null || echo "no flag yet"\n')
+
+
 # Per-(type, category) Dockerfile + entrypoint for the FULL_BUILD subset.
 # Plain alpine + a small inline program; small enough to build in seconds.
 def _dockerfile_for(t: str, cat: str) -> dict:
@@ -192,23 +477,12 @@ def _dockerfile_for(t: str, cat: str) -> dict:
             with socketserver.TCPServer(("0.0.0.0", 80), Handler) as srv:
                 srv.serve_forever()
             """)
-    elif (t, cat) == ("AttackDefense", "Pwn"):
-        files["Dockerfile"] = textwrap.dedent("""\
-            FROM alpine:3.19
-            RUN apk add --no-cache socat
-            COPY serve.sh /serve.sh
-            RUN chmod +x /serve.sh
-            EXPOSE 80
-            CMD ["socat", "-T", "5", "TCP-LISTEN:80,reuseaddr,fork", "EXEC:/serve.sh"]
-            """)
-        files["serve.sh"] = textwrap.dedent("""\
-            #!/bin/sh
-            # Trivial demo "service" — echoes the contents of /flag so the
-            # A&D checker has something to verify. Real challenges would
-            # expose a vulnerable protocol here.
-            echo "OK"
-            if [ -r /flag ]; then cat /flag; else echo "no flag yet"; fi
-            """)
+    elif t == "AttackDefense":
+        # Dispatch to per-category A&D builder — every category gets its
+        # own vulnerable surface so the auto-build pipeline runs across all
+        # 12 A&D rows (user explicitly asked: "attack and defense challenge
+        # too, i want the attack and defense challenge have ./src too").
+        files = _ad_challenge_for(cat)
     elif (t, cat) == ("KingOfTheHill", "Misc"):
         files["Dockerfile"] = textwrap.dedent("""\
             FROM python:3.12-alpine
@@ -296,9 +570,11 @@ content: |
   one challenge each. The challenges themselves are placeholder/showcase entries so the
   player scoreboard, kind switcher, and category bands render with content in every cell.
 
-  Six of the container challenges are FULLY BUILT (have a real ./src/Dockerfile so GZCTF
-  auto-builds them); all 24 attachment challenges ship a real downloadable file. The rest
-  reuse the gzctf/echo-http:test demo image so they stand up immediately on any deploy.
+  Seventeen of the container challenges are FULLY BUILT (have a real ./src/Dockerfile so
+  GZCTF auto-builds them — including ALL 12 AttackDefense entries, each with a different
+  per-category vulnerable surface); all 24 attachment challenges ship a real downloadable
+  file. The remaining 55 container rows reuse gzctf/echo-http:test so they stand up
+  immediately on any deploy.
 acceptWithoutReview: true
 practiceMode: true
 teamMemberCountLimit: 0
@@ -336,19 +612,28 @@ under each category folder.
   Solidity stub for Blockchain, …). The `provide:` field in the yaml
   points at it so GZCTF serves the file to players.
 
-- **6 container-type challenges have a real `./src/Dockerfile`** — leaving
-  `containerImage:` empty in the yaml so GZCTF's auto-build pipeline
-  picks them up (`ChallengeImportService.ResolveBuildIntent`):
-    - `Web/web-service` — alpine + busybox httpd
-    - `Crypto/crypto-per-team-box` — python XOR oracle
-    - `Pwn/and-pwn` — A&D socat service that serves /flag
-    - `Misc/koth-misc-hill` — KotH hill with PUT /koth/king
-    - `Mobile/mobile-service` — nginx APK-landing page
-    - `AI/ai-per-team-box` — fake LLM prompt gate
-  These exercise the build pipeline end-to-end on import (you'll see
-  BuildStatus go Queued → Building → Built in /admin/games/<id>/challenges).
+- **All 12 AttackDefense challenges** (one per category) have a real
+  `./src/Dockerfile` with a category-themed vulnerable service — every
+  one reads `/flag` at request time so the platform's per-tick flag
+  rotation takes effect. Surfaces vary: Crypto = AES-CTR nonce reuse,
+  Web = path-traversal alias, Mobile = hardcoded creds, AI = redact-list
+  bypass, Forensics = metadata leak, Hardware = undocumented UART cmd,
+  Pentest = nginx wildcard alias, etc.
 
-- **The remaining 60 container challenges** reuse `gzctf/echo-http:test`
+- **+5 more buildable showcase challenges** (one per category sampler)
+  to exercise the build path for non-A&D types:
+    - `Web/web-service` (StaticContainer) — alpine + busybox httpd
+    - `Crypto/crypto-per-team-box` (DynamicContainer) — python XOR oracle
+    - `Misc/koth-misc-hill` (KingOfTheHill) — hill with PUT /koth/king
+    - `Mobile/mobile-service` (StaticContainer) — nginx APK-landing page
+    - `AI/ai-per-team-box` (DynamicContainer) — fake LLM prompt gate
+
+  All 17 buildable rows leave `containerImage:` empty so
+  `ChallengeImportService.ResolveBuildIntent` resolves to BuildNeeded
+  (BuildStatus goes Queued → Building → Built on import; ~30s each on
+  alpine; visible in /admin/games/<id>/challenges).
+
+- **The remaining 55 container challenges** reuse `gzctf/echo-http:test`
   (a published demo image) so they stand up without a build.
 
 Regenerated from `scripts/seed/gen-mix-repo.py` in the GZCTF repo.
@@ -438,7 +723,9 @@ def main():
                 src = d / "src"
                 src.mkdir(exist_ok=True)
                 for fname, content in _dockerfile_for(t, cat).items():
-                    (src / fname).write_text(content)
+                    target = src / fname
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(content)
                 n_build += 1
 
     print(f"wrote {n_yaml} challenge.yaml files, {n_att} attachments, {n_build} ./src trees under {OUT}")
