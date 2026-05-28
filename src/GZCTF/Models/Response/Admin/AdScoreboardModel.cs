@@ -144,11 +144,20 @@ public sealed partial class KothHillScore
 {
     public int ChallengeId { get; set; }
 
-    /// <summary>Σ HoldCredit − Penalty across every tick of this hill the team controlled.</summary>
+    /// <summary>Σ (HoldCredit − Penalty) across every tick of this hill the team controlled — the net the row's Total is summed from.</summary>
     public double Points { get; set; }
 
-    /// <summary>Number of distinct ticks this team held the hill.</summary>
+    /// <summary>Σ HoldCredit only — the positive earned over every Ok tick the team held. Surfaced so the UI can show the gross alongside the penalty for visibility.</summary>
+    public double Earned { get; set; }
+
+    /// <summary>Σ Penalty only — the negative debited over every broken-hill tick the team held (after the freshly-elected grace). Always &gt;= 0; subtract from <see cref="Earned"/> to recover <see cref="Points"/>.</summary>
+    public double Penalty { get; set; }
+
+    /// <summary>Number of distinct ticks this team held the hill (any status).</summary>
     public int TicksHeld { get; set; }
+
+    /// <summary>Number of those ticks where the hill was broken — what produced the Penalty above (a freshly-elected grace tick counts toward TicksHeld but NOT toward this count).</summary>
+    public int BrokenTicks { get; set; }
 
     /// <summary>True when this team is the holder this tick (matches the latest persisted KothControlResult for the hill).</summary>
     public bool IsCurrentHolder { get; set; }

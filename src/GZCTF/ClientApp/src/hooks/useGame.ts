@@ -139,8 +139,16 @@ export interface KothScoreboardHill {
 }
 export interface KothHillScore {
   challengeId: number
+  /** Net: earned − penalty (what the team's Total is summed from). */
   points: number
+  /** Σ HoldCredit only — positive earned across every Ok tick the team held. */
+  earned: number
+  /** Σ Penalty only (always >= 0; subtract from earned for points). */
+  penalty: number
+  /** Number of distinct ticks this team held the hill (any status). */
   ticksHeld: number
+  /** Of TicksHeld, how many were broken-hill ticks that produced a Penalty. */
+  brokenTicks: number
   isCurrentHolder: boolean
 }
 export interface KothTeamScoreRow {

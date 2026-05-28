@@ -45,9 +45,11 @@ const Lefts = Widths.reduce(
 
 const ITEM_COUNT_PER_PAGE = 30
 
-// Per-hill sub-columns: hold points + status. Two narrow columns keep the
-// table compact regardless of hill count (vs A&D's 4 metrics per service).
-const SUBCOL = { pts: 56, status: 56 }
+// Per-hill sub-columns: hold points + status. Points column now renders the
+// +earned / −penalty breakdown side by side (was just the net), so it needs
+// a bit more room — bumped from 56 to 96 to fit two short mono tokens
+// without truncation.
+const SUBCOL = { pts: 96, status: 56 }
 const GROUP_W = SUBCOL.pts + SUBCOL.status
 
 const fmtPts = (n: number) => (Math.abs(n) >= 100 ? Math.round(n).toString() : n.toFixed(1))
@@ -450,13 +452,19 @@ export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => 
                         {row.total.toFixed(1)}
                       </Table.Td>
 
-                      {/* Per-hill cells — points + status. Highlight the cell violet when
-                          this team is the current holder of THIS hill (matches the
-                          "you hold it" affordance in the KothChallengePanel). */}
+                      {/* Per-hill cells — points (broken into +earned / −penalty
+                          side by side) + status. Violet wash + crown when the team
+                          is the current holder. Showing both the gross AND the
+                          penalty makes the broken-hill cost actually visible —
+                          before, a team that held a broken hill saw only the net
+                          and couldn't tell their service breaking was costing them. */}
                       {kothScoreboard.hills.flatMap((hill) => {
                         const cell = row.hills.find((h) => h.challengeId === hill.challengeId)
-                        const pts = cell?.points ?? 0
+                        const earned = cell?.earned ?? 0
+                        const penalty = cell?.penalty ?? 0
+                        const net = cell?.points ?? 0
                         const ticks = cell?.ticksHeld ?? 0
+                        const broken = cell?.brokenTicks ?? 0
                         const holding = cell?.isCurrentHolder ?? false
                         const tdStyle = holding ? {
                           background: alpha(theme.colors.violet[colorScheme === 'dark' ? 7 : 4], 0.18),
@@ -468,18 +476,34 @@ export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => 
                             style={tdStyle}
                           >
                             <Tooltip
-                              label={t('game.content.koth.ticks', '{{n}} ticks', { n: ticks })}
+                              label={
+                                ticks === 0
+                                  ? ''
+                                  : penalty > 0
+                                    ? t('game.tooltip.koth.cell.with_penalty',
+                                        '{{ticks}} ticks held — earned {{earned}}, broken {{broken}} ticks (penalty −{{penalty}}) → net {{net}}',
+                                        { ticks, earned: earned.toFixed(1), broken, penalty: penalty.toFixed(1), net: net.toFixed(1) })
+                                    : t('game.tooltip.koth.cell.no_penalty',
+                                        '{{ticks}} ticks held — earned {{earned}}, hill stayed Ok', { ticks, earned: earned.toFixed(1) })
+                              }
                               withinPortal
                               disabled={ticks === 0}
                             >
-                              <Text
-                                size="xs"
-                                c={holding ? 'violet' : pts > 0 ? undefined : 'dimmed'}
-                                className={misc.ffmono}
-                                fw={holding ? 800 : 700}
-                              >
-                                {pts > 0 ? fmtPts(pts) : '0'}
-                              </Text>
+                              <Stack gap={0} align="center">
+                                <Group gap={4} wrap="nowrap" justify="center">
+                                  <Text size="xs" c="teal" className={misc.ffmono} fw={700}>
+                                    {earned > 0 ? `+${fmtPts(earned)}` : '0'}
+                                  </Text>
+                                  <Text size="xs" c={penalty > 0 ? 'red' : 'dimmed'} className={misc.ffmono} fw={700}>
+                                    {penalty > 0 ? `−${fmtPts(penalty)}` : '−0'}
+                                  </Text>
+                                </Group>
+                                {ticks > 0 && (
+                                  <Text size="xs" c={holding ? 'violet' : 'dimmed'} className={misc.ffmono} fw={holding ? 800 : 600} style={{ fontSize: 9, lineHeight: 1 }}>
+                                    = {fmtPts(net)}
+                                  </Text>
+                                )}
+                              </Stack>
                             </Tooltip>
                           </Table.Td>,
                           <Table.Td
@@ -518,14 +542,38 @@ export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => 
             <Tooltip.Group>
               <Group gap="lg">
                 <Tooltip
-                  label={t('game.content.scoreboard.koth.legend.hold_tip',
-                    'Points per tick while your token is in /koth/king (scaled by team count).')}
+                  label={t('game.content.scoreboard.koth.legend.earned_tip',
+                    'Per-tick credit while your token is in /koth/king AND the hill is Ok (scaled by team count).')}
+                  transitionProps={{ transition: 'pop' }}
+                >
+                  <Group justify="left" gap={4}>
+                    <Text size="sm" c="teal" fw={700} ff="monospace">+</Text>
+                    <Text size="sm" c="teal">
+                      {t('game.content.scoreboard.koth.legend.earned', 'Hold credit')}
+                    </Text>
+                  </Group>
+                </Tooltip>
+                <Tooltip
+                  label={t('game.content.scoreboard.koth.legend.penalty_tip',
+                    'Flat −1 per tick when you hold a broken hill (Mumble / Offline / Corrupt). One-tick grace on takeover so previous-holder damage isn\'t your fault.')}
+                  transitionProps={{ transition: 'pop' }}
+                >
+                  <Group justify="left" gap={4}>
+                    <Text size="sm" c="red" fw={700} ff="monospace">−</Text>
+                    <Text size="sm" c="red">
+                      {t('game.content.scoreboard.koth.legend.penalty', 'Broken-hill penalty')}
+                    </Text>
+                  </Group>
+                </Tooltip>
+                <Tooltip
+                  label={t('game.content.scoreboard.koth.legend.holder_tip',
+                    'Crown marks the team currently holding the hill (last persisted check).')}
                   transitionProps={{ transition: 'pop' }}
                 >
                   <Group justify="left" gap={4}>
                     <Icon path={mdiCrown} size={0.8} color={theme.colors.violet[6]} />
                     <Text size="sm" c="violet">
-                      {t('game.content.scoreboard.koth.legend.hold', 'Hold points')}
+                      {t('game.content.scoreboard.koth.legend.holder', 'Current holder')}
                     </Text>
                   </Group>
                 </Tooltip>
@@ -557,7 +605,7 @@ export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => 
             </Tooltip.Group>
             <Text size="xs" c="dimmed">
               {t('game.content.scoreboard.koth.tip',
-                'Total = Σ (hold credit − penalty) across all hills. Updated after every check.')}
+                'Each cell shows +earned and −penalty side by side; the team Total is the sum of (earned − penalty) across all hills. Updated after every check.')}
             </Text>
           </Stack>
           <Pagination

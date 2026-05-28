@@ -449,7 +449,10 @@ public class AdScoreboardRepository(
         // Per-(team, hill) score in one SQL group-by — matches the combined
         // scoreboard's kothByCell aggregation style (line 98-104). Filter:
         // only count rows where this team was the controller (NULL = no king
-        // that tick, doesn't contribute to anyone's column).
+        // that tick, doesn't contribute to anyone's column). Now also sums
+        // Earned (Σ HoldCredit) and Penalty (Σ Penalty) separately, plus a
+        // count of broken-hill ticks held — so the UI can render the +/−
+        // breakdown side by side instead of only the net.
         var scoreByCell = (await Context.KothControlResults
                 .Where(r => r.GameId == gameId && r.ControllingParticipationId != null
                     && hillIds.Contains(r.ChallengeId)
@@ -459,11 +462,17 @@ public class AdScoreboardRepository(
                 {
                     g.Key.Pid,
                     g.Key.ChallengeId,
-                    Points = g.Sum(x => x.HoldCredit - x.Penalty),
-                    Ticks = g.Count()
+                    Earned = g.Sum(x => x.HoldCredit),
+                    Penalty = g.Sum(x => x.Penalty),
+                    Ticks = g.Count(),
+                    // A broken-hill tick is one that produced a Penalty (the freshly-
+                    // elected grace tick records Penalty=0 even on Status != Ok, so
+                    // counting "Status != Ok" would over-count those grace ticks).
+                    BrokenTicks = g.Count(x => x.Penalty > 0)
                 })
                 .ToListAsync(token))
-            .ToDictionary(x => (x.Pid, x.ChallengeId), x => (x.Points, x.Ticks));
+            .ToDictionary(x => (x.Pid, x.ChallengeId),
+                x => (x.Earned, x.Penalty, x.Ticks, x.BrokenTicks));
 
         // Latest persisted result per hill — gives us both the current functional
         // verdict and the current holder (so the cell can highlight "they're
@@ -508,14 +517,19 @@ public class AdScoreboardRepository(
             double total = 0;
             foreach (var hill in hillRows)
             {
-                var (pts, ticks) = scoreByCell.GetValueOrDefault((t.Id, hill.Id), (0d, 0));
+                var (earned, penalty, ticks, broken) =
+                    scoreByCell.GetValueOrDefault((t.Id, hill.Id), (0d, 0d, 0, 0));
+                var pts = earned - penalty;
                 total += pts;
                 var (holder, _) = latestPerHill.GetValueOrDefault(hill.Id);
                 cells.Add(new KothHillScore
                 {
                     ChallengeId = hill.Id,
                     Points = pts,
+                    Earned = earned,
+                    Penalty = penalty,
                     TicksHeld = ticks,
+                    BrokenTicks = broken,
                     IsCurrentHolder = holder == t.Id
                 });
             }
