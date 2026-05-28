@@ -386,6 +386,43 @@ public class AdGameController(
     }
 
     /// <summary>
+    /// King of the Hill — the caller's current-tick control token for a hill. Write
+    /// this exact value into the hill's <c>/koth/king</c> marker to claim control for
+    /// the round; it rotates every tick, so re-fetch + re-plant each round to hold
+    /// the hill. Accepts the same auth as Submit (<c>Bearer ad_...</c> for scripted
+    /// play, or the session cookie).
+    /// </summary>
+    [HttpGet("Koth/{challengeId:int}/Token")]
+    [ProducesResponseType(typeof(KothTokenModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> KothToken(int id, int challengeId, CancellationToken token)
+    {
+        var part = await ResolveTeamApiTokenAsync(id, token) ?? await ResolveUserParticipationAsync(id, token);
+        if (part is null)
+            return Unauthorized(new RequestResponse("not an accepted member of this game", StatusCodes.Status401Unauthorized));
+
+        var isKoth = await db.GameChallenges.AnyAsync(
+            c => c.Id == challengeId && c.GameId == id
+                 && c.Type == ChallengeType.KingOfTheHill && c.IsEnabled, token);
+        if (!isKoth)
+            return NotFound(new RequestResponse("not a King of the Hill challenge in this game"));
+
+        var latestRound = await db.AdRounds
+            .Where(r => r.GameId == id)
+            .OrderByDescending(r => r.Number)
+            .Select(r => r.Number)
+            .FirstOrDefaultAsync(token);
+
+        var tok = latestRound == 0
+            ? null
+            : await db.KothTokens
+                .Where(k => k.ParticipationId == part.Id && k.ChallengeId == challengeId && k.RoundNumber == latestRound)
+                .Select(k => k.Token)
+                .FirstOrDefaultAsync(token);
+
+        return Ok(new KothTokenModel { Round = latestRound, Token = tok });
+    }
+
+    /// <summary>
     /// Generate or rotate the caller's own A&amp;D API token for this game.
     /// Any team member can manage their own token — no captain check.
     /// Returns the plaintext token exactly once.

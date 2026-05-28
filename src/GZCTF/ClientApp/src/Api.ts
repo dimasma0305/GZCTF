@@ -82,6 +82,7 @@ export enum ChallengeType {
   DynamicAttachment = "DynamicAttachment",
   DynamicContainer = "DynamicContainer",
   AttackDefense = "AttackDefense",
+  KingOfTheHill = "KingOfTheHill",
 }
 
 /** Per-tick checker result for an A&D service. */
@@ -1932,6 +1933,10 @@ export interface AdServiceScore {
   attackPoints: number;
   defenseLoss: number;
   slaPoints: number;
+  /** King-of-the-Hill hold points on this hill (0 for A&D services). */
+  kothPoints: number;
+  /** True when this column is a King-of-the-Hill hill rather than an A&D service. */
+  isKoth: boolean;
   flagsCaptured: number;
   timesCaptured: number;
   lastCheckStatus?: string | null;
@@ -1948,6 +1953,8 @@ export interface AdTeamScoreRow {
   attackPoints: number;
   defenseLoss: number;
   slaPoints: number;
+  /** Aggregate King-of-the-Hill hold points across all hills. */
+  kothPoints: number;
   timesCaptured: number;
   flagsCaptured: number;
   /** Per-service breakdown, in AdScoreboardModel.challenges order. */

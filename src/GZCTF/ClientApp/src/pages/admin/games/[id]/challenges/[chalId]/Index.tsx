@@ -112,6 +112,9 @@ const GameChallengeEdit: FC = () => {
   const [category, setCategory] = useState<string | null>(challenge?.category ?? ChallengeCategory.Misc)
   const [networkMode, setNetworkMode] = useState<string | null>(challenge?.networkMode ?? NetworkMode.Open)
   const [type, setType] = useState<string | null>(challenge?.type ?? ChallengeType.StaticAttachment)
+  // A&D and KotH share the same editor treatment (managed containers, no per-flag
+  // scoring, the A&D config card for the checker image + egress).
+  const isAdEngine = type === ChallengeType.AttackDefense || type === ChallengeType.KingOfTheHill
   const [currentAcceptCount, setCurrentAcceptCount] = useState(0)
   const [previewOpened, setPreviewOpened] = useState(false)
   const [execOpened, setExecOpened] = useState(false)
@@ -168,7 +171,8 @@ const GameChallengeEdit: FC = () => {
   const isBuildable =
     (challenge?.type === 'StaticContainer'
       || challenge?.type === 'DynamicContainer'
-      || challenge?.type === 'AttackDefense')
+      || challenge?.type === 'AttackDefense'
+      || challenge?.type === 'KingOfTheHill')
     && challenge?.buildStatus !== 'NotApplicable'
 
   // While a build is in flight, the worker streams the docker output
@@ -434,7 +438,7 @@ const GameChallengeEdit: FC = () => {
           </Grid.Col>
           <Grid.Col span={1}>
             <Stack gap="0.425625rem">
-              {type !== ChallengeType.AttackDefense && (
+              {!isAdEngine && (
                 <NumberInput
                   label={t('admin.content.games.challenges.submission_limit.label')}
                   description={t('admin.content.games.challenges.submission_limit.description')}
@@ -470,7 +474,7 @@ const GameChallengeEdit: FC = () => {
               difficulty / ScoreFunc columns are hidden (A&D mode), so
               the grid doesn't leave two empty 1/3-width slots staring
               at the user. */}
-          <Grid.Col span={type === ChallengeType.AttackDefense ? 3 : 1}>
+          <Grid.Col span={isAdEngine ? 3 : 1}>
             <Stack gap="sm">
               <HintList
                 label={
@@ -488,7 +492,7 @@ const GameChallengeEdit: FC = () => {
               />
             </Stack>
           </Grid.Col>
-          {type !== ChallengeType.AttackDefense && (
+          {!isAdEngine && (
             <>
               <Grid.Col span={1}>
                 <Stack h="100%">
@@ -576,7 +580,7 @@ const GameChallengeEdit: FC = () => {
         )}
         {(type === ChallengeType.StaticContainer
           || type === ChallengeType.DynamicContainer
-          || type === ChallengeType.AttackDefense) && (
+          || isAdEngine) && (
           <Grid columns={12}>
             <Grid.Col span={8}>
               <Group justify="space-between" align="flex-end">
@@ -726,7 +730,7 @@ const GameChallengeEdit: FC = () => {
         )}
 
         {/* Attack & Defense — per-challenge config */}
-        {type === ChallengeType.AttackDefense && (
+        {isAdEngine && (
           <Stack gap="sm">
             <Divider
               label={t('admin.content.games.challenges.ad.title')}

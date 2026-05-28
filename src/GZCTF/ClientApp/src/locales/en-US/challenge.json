@@ -200,6 +200,10 @@
     "attack_defense": {
       "desrc": "Each team gets a persistent container; players attack other teams and defend their own. Scored on attack + defense + SLA per round.",
       "label": "Attack & Defense"
+    },
+    "king_of_the_hill": {
+      "desrc": "One shared container all teams attack. Each tick, whoever planted their rotating token in /koth/king controls the hill and earns hold points (penalized if they break it). The hill resets every few ticks and the leader is briefly blocked.",
+      "label": "King of the Hill"
     }
   }
 }

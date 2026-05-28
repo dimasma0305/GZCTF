@@ -434,10 +434,10 @@ public static class ChallengeTypeExtensions
         public bool IsStatic() => type is ChallengeType.StaticAttachment or ChallengeType.StaticContainer;
 
         /// <summary>
-        /// Is it a dynamic (per-team) challenge — includes A&amp;D
+        /// Is it a dynamic (per-team) challenge — includes A&amp;D and KotH
         /// </summary>
         public bool IsDynamic() => type is ChallengeType.DynamicAttachment or ChallengeType.DynamicContainer
-            or ChallengeType.AttackDefense;
+            or ChallengeType.AttackDefense or ChallengeType.KingOfTheHill;
 
         /// <summary>
         /// Is it an attachment challenge
@@ -445,10 +445,10 @@ public static class ChallengeTypeExtensions
         public bool IsAttachment() => type is ChallengeType.StaticAttachment or ChallengeType.DynamicAttachment;
 
         /// <summary>
-        /// Is it a container challenge — includes A&amp;D
+        /// Is it a container challenge — includes A&amp;D and KotH
         /// </summary>
         public bool IsContainer() => type is ChallengeType.StaticContainer or ChallengeType.DynamicContainer
-            or ChallengeType.AttackDefense;
+            or ChallengeType.AttackDefense or ChallengeType.KingOfTheHill;
 
         /// <summary>
         /// Is it an Attack &amp; Defense challenge

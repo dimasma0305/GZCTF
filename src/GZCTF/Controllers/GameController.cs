@@ -1192,7 +1192,9 @@ public class GameController(
         ChallengeDetailModel model;
         GameInstance? instance = null;
 
-        if (rawChallenge.Type == ChallengeType.AttackDefense)
+        // A&D and KotH are both managed outside the GameInstance table — synthesize
+        // the detail model for either rather than going through the instance path.
+        if (rawChallenge.Type.UsesAdEngine())
         {
             model = new ChallengeDetailModel
             {

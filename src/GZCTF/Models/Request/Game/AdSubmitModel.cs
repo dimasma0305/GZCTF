@@ -239,3 +239,19 @@ public class AdSshKeyGeneratedModel
     public string Fingerprint { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; }
 }
+
+/// <summary>
+/// Response from GET /api/Game/{id}/Ad/Koth/{challengeId}/Token — the caller's
+/// current-tick King of the Hill control token. Write <see cref="Token"/> verbatim
+/// into the hill's <c>/koth/king</c> marker to claim control for the round; it
+/// rotates every tick, so re-fetch + re-plant each round to keep the hill. Null
+/// before round 1 (warmup).
+/// </summary>
+public class KothTokenModel
+{
+    /// <summary>Round this token is valid for (0 = the game hasn't started ticking yet).</summary>
+    public int Round { get; set; }
+
+    /// <summary>The token to plant; null during warmup / before the first round.</summary>
+    public string? Token { get; set; }
+}
