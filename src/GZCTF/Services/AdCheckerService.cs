@@ -1,3 +1,4 @@
+using System.Text;
 using GZCTF.Models;
 using GZCTF.Models.Data;
 using GZCTF.Utils;
@@ -184,7 +185,13 @@ public sealed class AdCheckerService(
         logger.LogDebug("AdChecker: game={Gid} round={Round} pending={N}",
             gameId, latest.Number, pending.Count);
 
-        if (pending.Count == 0) return;
+        if (pending.Count == 0)
+        {
+            // No A&D services this game, but it may still have KotH hills to check.
+            await CheckKothChallengesAsync(db, runner, gameId, latest, token);
+            await cacheHelper.FlushAdScoreboardCache(gameId, token);
+            return;
+        }
 
         // Getflag jitter + grace: each service's check fires at a per-(service,
         // round) randomized offset inside the tick — never before
@@ -256,9 +263,130 @@ public sealed class AdCheckerService(
         if (builtinDue.Count > 0)
             await RunBuiltinBatchAsync(runner, builtinDue, latest, token);
 
+        // KotH hills in this game (independent of the A&D per-team checks above).
+        await CheckKothChallengesAsync(db, runner, gameId, latest, token);
+
         // New verdicts persisted → SLA changed; refresh the cached board
         // (background regen, de-bounced by CacheMaker so frequent ticks collapse).
         await cacheHelper.FlushAdScoreboardCache(gameId, token);
+    }
+
+    /// <summary>
+    /// King of the Hill per-tick evaluation for every hill in the game: a functional
+    /// probe (reuses the A&amp;D checker) + an external read of the <c>/koth/king</c>
+    /// marker matched against this round's issued tokens → the controller. Writes one
+    /// <see cref="KothControlResult"/> per (challenge, round): functional king earns
+    /// hold points; a king on a broken hill eats the flat penalty; no valid king → 0.
+    /// </summary>
+    private async Task CheckKothChallengesAsync(
+        AppDbContext db, IAdCheckRunner runner, int gameId, AdRound latest, CancellationToken token)
+    {
+        var kothChallenges = await db.GameChallenges
+            .Where(c => c.GameId == gameId && c.Type == ChallengeType.KingOfTheHill && c.IsEnabled)
+            .ToListAsync(token);
+        if (kothChallenges.Count == 0)
+            return;
+
+        var game = await db.Games
+            .Where(g => g.Id == gameId)
+            .Select(g => new { g.KothHoldPointsPerTick, g.AdMinGracePeriodSeconds, g.AdGetflagWindowFraction })
+            .FirstOrDefaultAsync(token);
+        var holdPerTick = game?.KothHoldPointsPerTick ?? 1.0;
+        var graceSeconds = game?.AdMinGracePeriodSeconds ?? 3;
+        var getFrac = game?.AdGetflagWindowFraction ?? 0.5;
+
+        var activeTeams = await db.Participations
+            .CountAsync(p => p.GameId == gameId && p.Status == ParticipationStatus.Accepted, token);
+
+        var tickSeconds = Math.Max(1.0, (latest.EndsAt - latest.StartedAt).TotalSeconds);
+        var pollSeconds = PollInterval.TotalSeconds;
+        var now = DateTimeOffset.UtcNow;
+
+        foreach (var challenge in kothChallenges)
+        {
+            // One result per hill per round (idempotent across the 10s cadence).
+            if (await db.KothControlResults.AnyAsync(
+                    r => r.ChallengeId == challenge.Id && r.AdRoundId == latest.Id, token))
+                continue;
+
+            // Jitter the check time within the tick, same as A&D getflag — keyed on
+            // the challenge id so teams can't predict when the marker is sampled.
+            var due = GetflagDueAt(new AdTeamService { Id = challenge.Id }, latest, tickSeconds, pollSeconds, graceSeconds, getFrac);
+            if (now < due)
+                continue;
+
+            var target = await db.KothTargets
+                .Include(t => t.Container)
+                .FirstOrDefaultAsync(t => t.GameId == gameId && t.ChallengeId == challenge.Id, token);
+
+            if (target?.Container is null || string.IsNullOrEmpty(target.Container.IP))
+            {
+                await PersistKothResultAsync(scopeFactory, gameId, challenge.Id, latest.Id,
+                    null, AdCheckStatus.Offline, 0, 0, "hill not running", token);
+                continue;
+            }
+
+            // Synthesize a transient service wrapping the shared hill so we can reuse
+            // the A&D functional checker + the container file-read unchanged.
+            var hillTs = new AdTeamService
+            {
+                Id = 0,
+                ParticipationId = 0,
+                ChallengeId = challenge.Id,
+                ContainerId = target.ContainerId,
+                Container = target.Container
+            };
+
+            var outcome = await RunWithRetryAsync(runner, hillTs, latest, challenge, null, token);
+
+            int? controller = null;
+            await using (var scope = scopeFactory.CreateAsyncScope())
+            {
+                var mgr = scope.ServiceProvider.GetRequiredService<AdContainerManager>();
+                var blob = await mgr.ReadCurrentFileBytesAsync(scope.ServiceProvider, hillTs, "/koth/king", token);
+                if (blob is { } b && b.Data.Length > 0)
+                {
+                    var marker = Encoding.UTF8.GetString(b.Data).Trim();
+                    if (marker.Length > 0)
+                        controller = await db.KothTokens
+                            .Where(k => k.ChallengeId == challenge.Id && k.RoundNumber == latest.Number && k.Token == marker)
+                            .Select(k => (int?)k.ParticipationId)
+                            .FirstOrDefaultAsync(token);
+                }
+            }
+
+            var (hold, penalty) = AdScoring.KothTickDelta(controller is not null, outcome.Status, holdPerTick, activeTeams);
+            await PersistKothResultAsync(scopeFactory, gameId, challenge.Id, latest.Id,
+                controller, outcome.Status, hold, penalty, outcome.ErrorMessage, token);
+        }
+    }
+
+    /// <summary>Insert one <see cref="KothControlResult"/> (idempotent on (challenge, round)).</summary>
+    private static async Task PersistKothResultAsync(
+        IServiceScopeFactory scopeFactory, int gameId, int challengeId, int adRoundId,
+        int? controller, AdCheckStatus status, double hold, double penalty, string? error, CancellationToken token)
+    {
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        if (await db.KothControlResults.AnyAsync(r => r.ChallengeId == challengeId && r.AdRoundId == adRoundId, token))
+            return;
+
+        await db.KothControlResults.AddAsync(new KothControlResult
+        {
+            GameId = gameId,
+            ChallengeId = challengeId,
+            AdRoundId = adRoundId,
+            ControllingParticipationId = controller,
+            Status = status,
+            HoldCredit = hold,
+            Penalty = penalty,
+            ErrorMessage = error,
+            CheckedAt = DateTimeOffset.UtcNow
+        }, token);
+
+        try { await db.SaveChangesAsync(token); }
+        catch (DbUpdateException) { /* concurrent tick won the (challenge, round) race — fine */ }
     }
 
     /// <summary>

@@ -38,12 +38,20 @@ public sealed class AdRoundService(
     /// </summary>
     public async Task<Result?> AdvanceAsync(int gameId, CancellationToken token)
     {
-        var adChallenges = await db.GameChallenges
-            .Where(c => c.GameId == gameId && c.Type == ChallengeType.AttackDefense && c.IsEnabled)
+        // Both A&D and KotH run on this round engine. A&D plants a per-team flag
+        // into each team's own container; KotH instead mints a per-team rotating
+        // token the team must itself plant into the shared hill's marker.
+        var engineChallenges = await db.GameChallenges
+            .Where(c => c.GameId == gameId && c.IsEnabled
+                && (c.Type == ChallengeType.AttackDefense || c.Type == ChallengeType.KingOfTheHill))
+            .Select(c => new { c.Id, c.Type })
             .ToListAsync(token);
 
-        if (adChallenges.Count == 0)
+        if (engineChallenges.Count == 0)
             return null;
+
+        var kothChallengeIds = engineChallenges
+            .Where(c => c.Type == ChallengeType.KingOfTheHill).Select(c => c.Id).ToList();
 
         var prev = await db.AdRounds
             .Where(r => r.GameId == gameId)
@@ -158,8 +166,37 @@ public sealed class AdRoundService(
             injected += injectedLegacy;
         }
 
+        // KotH: mint each accepted team's rotating control token for this round.
+        // The platform does NOT plant it — the team writes it into /koth/king once
+        // they have a foothold; the king-check reads the marker and matches it back.
+        if (kothChallengeIds.Count > 0)
+        {
+            var participationIds = await db.Participations
+                .Where(p => p.GameId == gameId && p.Status == ParticipationStatus.Accepted)
+                .Select(p => p.Id)
+                .ToListAsync(token);
+
+            foreach (var cid in kothChallengeIds)
+                foreach (var pid in participationIds)
+                {
+                    var tbytes = new byte[FlagRandomBytes];
+                    RandomNumberGenerator.Fill(tbytes);
+                    var tpayload = Convert.ToBase64String(tbytes).TrimEnd('=').Replace('+', '_').Replace('/', '-');
+                    await db.KothTokens.AddAsync(new KothToken
+                    {
+                        ParticipationId = pid,
+                        ChallengeId = cid,
+                        RoundNumber = nextNumber,
+                        Token = $"koth_{tpayload}",
+                        IssuedAt = now
+                    }, token);
+                }
+
+            await db.SaveChangesAsync(token);
+        }
+
         logger.SystemLog(
-            $"A&D round advanced: game={gameId} round={nextNumber} flags_planted={toInject.Count} flags_injected={injected}",
+            $"A&D round advanced: game={gameId} round={nextNumber} flags_planted={toInject.Count} flags_injected={injected} koth_tokens={kothChallengeIds.Count}",
             TaskStatus.Success, LogLevel.Information);
 
         // New round → flags rotated, a tick of SLA settled. Refresh the cached

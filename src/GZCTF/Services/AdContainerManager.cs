@@ -168,7 +168,8 @@ public sealed class AdContainerManager(
         var activeGames = await db.Games
             .Where(g => g.StartTimeUtc <= now && now <= g.EndTimeUtc)
             .Include(g => g.Challenges)
-            .Where(g => g.Challenges.Any(c => c.Type == ChallengeType.AttackDefense && c.IsEnabled))
+            .Where(g => g.Challenges.Any(c =>
+                (c.Type == ChallengeType.AttackDefense || c.Type == ChallengeType.KingOfTheHill) && c.IsEnabled))
             .Select(g => g.Id)
             .ToListAsync(token);
 
@@ -856,57 +857,369 @@ public sealed class AdContainerManager(
         IReadOnlySet<string>? runningDockerIds,
         CancellationToken token)
     {
-        // Pull A&D challenges for this game.
+        // Pull A&D + KotH challenges for this game.
         var adChallenges = await db.GameChallenges
             .Where(c => c.GameId == gameId && c.Type == ChallengeType.AttackDefense && c.IsEnabled)
             .ToListAsync(token);
-
-        if (adChallenges.Count == 0)
-            return;
-
-        // Pull all accepted participations for this game.
-        var participations = await db.Participations
-            .Where(p => p.GameId == gameId && p.Status == ParticipationStatus.Accepted)
-            .Select(p => p.Id)
+        var kothChallenges = await db.GameChallenges
+            .Where(c => c.GameId == gameId && c.Type == ChallengeType.KingOfTheHill && c.IsEnabled)
             .ToListAsync(token);
 
-        if (participations.Count == 0)
+        if (adChallenges.Count == 0 && kothChallenges.Count == 0)
             return;
 
-        // Existing AdTeamService rows for this game.
-        var existing = await db.AdTeamServices
-            .Where(ts => participations.Contains(ts.ParticipationId))
-            .Include(ts => ts.Container)
-            .ToListAsync(token);
-
-        var keyed = existing.ToDictionary(ts => (ts.ParticipationId, ts.ChallengeId));
-
-        // For every (participation, challenge): cheap, lock-free pre-check on the
-        // bulk-loaded state + tick-level running set. Only when something looks
-        // off do we take the per-service lock and re-verify authoritatively —
-        // so the common (healthy) case stays lock- and inspect-free.
-        foreach (var participationId in participations)
-        foreach (var challenge in adChallenges)
+        // --- Attack & Defense: one container per (accepted team, challenge) ---
+        if (adChallenges.Count > 0)
         {
-            keyed.TryGetValue((participationId, challenge.Id), out var ts);
+            var participations = await db.Participations
+                .Where(p => p.GameId == gameId && p.Status == ParticipationStatus.Accepted)
+                .Select(p => p.Id)
+                .ToListAsync(token);
 
-            var cid = ts?.Container?.ContainerId;
-            var maybeDead = runningDockerIds is not null && cid is { Length: > 0 }
-                            && !runningDockerIds.Contains(cid);
-            var maybeDrift = ts?.LaunchedWithEgress is { } le && le != challenge.AdAllowEgress;
+            if (participations.Count > 0)
+            {
+                // Existing AdTeamService rows for this game.
+                var existing = await db.AdTeamServices
+                    .Where(ts => participations.Contains(ts.ParticipationId))
+                    .Include(ts => ts.Container)
+                    .ToListAsync(token);
 
-            var needsAction = ts is null
-                              || ts.ContainerId is null
-                              || ts.Container is null
-                              || ts.Container.Status == ContainerStatus.Destroyed
-                              || maybeDead
-                              || maybeDrift;
+                var keyed = existing.ToDictionary(ts => (ts.ParticipationId, ts.ChallengeId));
 
-            if (!needsAction)
-                continue;
+                // For every (participation, challenge): cheap, lock-free pre-check on
+                // the bulk-loaded state + tick-level running set. Only when something
+                // looks off do we take the per-service lock and re-verify — so the
+                // common (healthy) case stays lock- and inspect-free.
+                foreach (var participationId in participations)
+                foreach (var challenge in adChallenges)
+                {
+                    keyed.TryGetValue((participationId, challenge.Id), out var ts);
 
-            await EnsureOneServiceAsync(db, containerManager, dockerProvider, k8sProvider, participationId, challenge, token);
+                    var cid = ts?.Container?.ContainerId;
+                    var maybeDead = runningDockerIds is not null && cid is { Length: > 0 }
+                                    && !runningDockerIds.Contains(cid);
+                    var maybeDrift = ts?.LaunchedWithEgress is { } le && le != challenge.AdAllowEgress;
+
+                    var needsAction = ts is null
+                                      || ts.ContainerId is null
+                                      || ts.Container is null
+                                      || ts.Container.Status == ContainerStatus.Destroyed
+                                      || maybeDead
+                                      || maybeDrift;
+
+                    if (!needsAction)
+                        continue;
+
+                    await EnsureOneServiceAsync(db, containerManager, dockerProvider, k8sProvider, participationId, challenge, token);
+                }
+            }
         }
+
+        // --- King of the Hill: ONE shared container per challenge (+ 5-tick refresh) ---
+        if (kothChallenges.Count > 0)
+            await EnsureKothTargetsAsync(db, containerManager, dockerProvider, k8sProvider, gameId, kothChallenges, token);
+    }
+
+    /// <summary>
+    /// Reconcile the shared King-of-the-Hill target containers for a game — one per
+    /// KotH challenge (not per team). Launches a missing/dead hill, and every
+    /// <c>Game.KothRefreshTicks</c> ticks resets it to base image (wiping footholds
+    /// and the <c>/koth/king</c> marker) and hands the current per-challenge score
+    /// leader a one-tick network cooldown.
+    /// </summary>
+    private async Task EnsureKothTargetsAsync(
+        AppDbContext db,
+        IContainerManager containerManager,
+        IContainerProvider<DockerClient, DockerMetadata>? dockerProvider,
+        IContainerProvider<Kubernetes, KubernetesMetadata>? k8sProvider,
+        int gameId,
+        List<GameChallenge> kothChallenges,
+        CancellationToken token)
+    {
+        var latestRound = await db.AdRounds
+            .Where(r => r.GameId == gameId)
+            .OrderByDescending(r => r.Number)
+            .Select(r => (int?)r.Number)
+            .FirstOrDefaultAsync(token) ?? 0;
+
+        var refreshTicks = await db.Games
+            .Where(g => g.Id == gameId)
+            .Select(g => g.KothRefreshTicks)
+            .FirstOrDefaultAsync(token) ?? 5;
+        if (refreshTicks < 1) refreshTicks = 1;
+
+        foreach (var challenge in kothChallenges)
+        {
+            // participation 0 keys the shared hill lock — no real team owns it.
+            var sem = LockFor(0, challenge.Id);
+            await sem.WaitAsync(token);
+            try
+            {
+                var target = await db.KothTargets
+                    .Include(t => t.Container)
+                    .FirstOrDefaultAsync(t => t.GameId == gameId && t.ChallengeId == challenge.Id, token);
+
+                var cid = target?.Container?.ContainerId;
+                var dead = cid is { Length: > 0 }
+                           && !await IsContainerRunningAsync(dockerProvider, k8sProvider, cid, token);
+                var dueRefresh = latestRound > 0 && latestRound % refreshTicks == 0
+                                 && (target?.LastRefreshRound ?? 0) < latestRound;
+
+                var needsLaunch = target is null || target.ContainerId is null || target.Container is null
+                                  || target.Container.Status == ContainerStatus.Destroyed || dead || dueRefresh;
+
+                if (needsLaunch)
+                {
+                    // Destroy any existing container first — for a refresh this is the
+                    // "reset to base" that wipes footholds + the marker.
+                    if (target?.Container is not null)
+                    {
+                        target.Container.Status = ContainerStatus.Destroyed;
+                        try { await containerManager.DestroyContainerAsync(target.Container, token); }
+                        catch { /* already gone / raced */ }
+                        target.ContainerId = null;
+                        await db.SaveChangesAsync(token);
+                    }
+
+                    await LaunchKothTargetAsync(db, containerManager, gameId, challenge, target, dockerProvider is null, token);
+
+                    if (dueRefresh)
+                    {
+                        target = await db.KothTargets
+                            .FirstOrDefaultAsync(t => t.GameId == gameId && t.ChallengeId == challenge.Id, token);
+                        if (target is not null)
+                        {
+                            target.LastRefreshRound = latestRound;
+                            await db.SaveChangesAsync(token);
+                        }
+                    }
+                }
+
+                // Cooldown lifecycle (Docker only) — apply the per-challenge leader's
+                // one-tick block exactly on the refresh tick, lift it once the round
+                // advances past it. Best-effort; never breaks the reconcile.
+                if (dockerProvider is not null)
+                {
+                    if (dueRefresh)
+                        await ApplyKothLeaderCooldownAsync(db, dockerProvider, gameId, challenge.Id, latestRound, token);
+                    else if (latestRound > (target?.LastRefreshRound ?? 0))
+                        await LiftKothCooldownAsync(dockerProvider, challenge.Id, token);
+                }
+            }
+            finally
+            {
+                sem.Release();
+            }
+        }
+    }
+
+    /// <summary>
+    /// At a KotH refresh, hand the current per-challenge score <b>leader</b> (highest
+    /// cumulative <c>HoldCredit − Penalty</c>) a one-tick network cooldown: drop their
+    /// VPN /32(s) → the hill IP on the WireGuard sidecar's FORWARD chain (which runs
+    /// before its MASQUERADE, so the source is still the client IP), so the
+    /// front-runner can't immediately re-pwn the freshly-reset hill. Rules live in a
+    /// per-hill chain (<c>KOTH_CD_&lt;id&gt;</c>) that <see cref="LiftKothCooldownAsync"/>
+    /// flushes next tick. Ties → all tied leaders; nobody scored yet → nobody blocked.
+    /// Docker MVP; best-effort (swallows errors so it never breaks the reconcile).
+    /// </summary>
+    private async Task ApplyKothLeaderCooldownAsync(
+        AppDbContext db,
+        IContainerProvider<DockerClient, DockerMetadata> dockerProvider,
+        int gameId, int challengeId, int round, CancellationToken token)
+    {
+        try
+        {
+            var scores = await db.KothControlResults
+                .Where(r => r.GameId == gameId && r.ChallengeId == challengeId && r.ControllingParticipationId != null)
+                .GroupBy(r => r.ControllingParticipationId!.Value)
+                .Select(g => new { Pid = g.Key, Score = g.Sum(x => x.HoldCredit - x.Penalty) })
+                .ToListAsync(token);
+
+            var positive = scores.Where(s => s.Score > 0).ToList();
+            if (positive.Count == 0)
+                return; // cold start — nobody has earned the hill yet
+
+            var best = positive.Max(s => s.Score);
+            var leaders = positive.Where(s => Math.Abs(s.Score - best) < 1e-9).Select(s => s.Pid).ToHashSet();
+
+            var hillIp = await db.KothTargets
+                .Where(t => t.GameId == gameId && t.ChallengeId == challengeId && t.Container != null)
+                .Select(t => t.Container!.IP)
+                .FirstOrDefaultAsync(token);
+            if (string.IsNullOrEmpty(hillIp))
+                return;
+
+            var sidecar = await ReadVpnSidecarIdAsync(token);
+            if (sidecar is null)
+                return;
+
+            var docker = dockerProvider.GetProvider();
+            var chain = $"KOTH_CD_{challengeId}";
+            await EnsureKothChainAsync(docker, sidecar, chain, token); // create + flush + jump
+
+            var peerIps = await db.AdVpnPeers
+                .Where(p => p.GameId == gameId && p.RevokedAt == null && leaders.Contains(p.ParticipationId))
+                .Select(p => p.AssignedIp)
+                .ToListAsync(token);
+
+            var blocked = 0;
+            foreach (var raw in peerIps)
+            {
+                var ip = (raw ?? string.Empty).Split('/')[0];
+                if (!System.Net.IPAddress.TryParse(ip, out _))
+                    continue;
+                await ExecOnSidecarAsync(docker, sidecar,
+                    ["iptables", "-A", chain, "-s", ip, "-d", hillIp, "-j", "DROP"], token);
+                blocked++;
+            }
+
+            logger.SystemLog(
+                $"KotH cooldown: blocked {blocked} leader IP(s) from hill challenge={challengeId} for round {round}",
+                TaskStatus.Success, LogLevel.Information);
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "KotH cooldown apply failed for challenge={Cid}", challengeId);
+        }
+    }
+
+    /// <summary>Lift a KotH cooldown by flushing the per-hill chain (idempotent).</summary>
+    private async Task LiftKothCooldownAsync(
+        IContainerProvider<DockerClient, DockerMetadata> dockerProvider, int challengeId, CancellationToken token)
+    {
+        try
+        {
+            var sidecar = await ReadVpnSidecarIdAsync(token);
+            if (sidecar is null)
+                return;
+            await ExecOnSidecarAsync(dockerProvider.GetProvider(), sidecar,
+                ["iptables", "-F", $"KOTH_CD_{challengeId}"], token);
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "KotH cooldown lift failed for challenge={Cid}", challengeId);
+        }
+    }
+
+    /// <summary>Ensure the per-hill cooldown chain exists, is jumped to from FORWARD,
+    /// and starts empty (flushed) before fresh blocks are added.</summary>
+    private static async Task EnsureKothChainAsync(
+        DockerClient docker, string sidecar, string chain, CancellationToken token) =>
+        await ExecOnSidecarAsync(docker, sidecar,
+            ["sh", "-c",
+             $"iptables -N {chain} 2>/dev/null; iptables -C FORWARD -j {chain} 2>/dev/null || iptables -I FORWARD -j {chain}; iptables -F {chain}"],
+            token);
+
+    /// <summary>Read the WireGuard sidecar container id from the shared
+    /// <c>sidecar.id</c> file (written by the sidecar entrypoint, hex-validated).
+    /// Null if VPN isn't configured / the file is missing or malformed.</summary>
+    private async Task<string?> ReadVpnSidecarIdAsync(CancellationToken token)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var configDir = scope.ServiceProvider.GetRequiredService<IConfiguration>()["Ad:Vpn:ConfigDir"];
+        if (string.IsNullOrWhiteSpace(configDir))
+            return null;
+        var path = Path.Combine(configDir, "sidecar.id");
+        if (!File.Exists(path))
+            return null;
+        var raw = (await File.ReadAllTextAsync(path, token)).Trim();
+        return raw.Length is >= 12 and <= 64 && raw.All(Uri.IsHexDigit) ? raw : null;
+    }
+
+    /// <summary>Fire-and-forget docker exec on the WG sidecar (it has iptables +
+    /// NET_ADMIN). No stdout capture needed — the cooldown rules are write-only.</summary>
+    private static async Task ExecOnSidecarAsync(
+        DockerClient docker, string sidecar, string[] cmd, CancellationToken token)
+    {
+        var exec = await docker.Exec.CreateContainerExecAsync(sidecar,
+            new DockerModels.ContainerExecCreateParameters { AttachStdout = false, AttachStderr = false, Cmd = cmd },
+            token);
+        await docker.Exec.StartContainerExecAsync(exec.ID, new DockerModels.ContainerExecStartParameters(), token);
+    }
+
+    /// <summary>
+    /// Launch the single shared container for a KotH challenge and record it on the
+    /// <see cref="KothTarget"/> (one per game·challenge). Unlike A&amp;D there is no
+    /// platform-planted flag — teams write their own rotating token into the marker —
+    /// so no flag bind-mount / pull-sidecar is configured.
+    /// </summary>
+    private async Task LaunchKothTargetAsync(
+        AppDbContext db,
+        IContainerManager containerManager,
+        int gameId,
+        GameChallenge challenge,
+        KothTarget? existing,
+        bool isK8s,
+        CancellationToken token)
+    {
+        if (string.IsNullOrWhiteSpace(challenge.ContainerImage))
+        {
+            logger.SystemLog($"KotH challenge {challenge.Id} has no ContainerImage; skipping launch",
+                TaskStatus.Failed, LogLevel.Warning);
+            return;
+        }
+
+        var config = new ContainerConfig
+        {
+            Image = challenge.ContainerImage,
+            TeamId = $"koth-{challenge.Id}",
+            ChallengeId = challenge.Id,
+            GameId = gameId,
+            ExposedPort = challenge.ExposePort ?? 80,
+            // No platform flag for KotH — teams plant their own token into /koth/king.
+            CPUCount = challenge.CPUCount ?? 1,
+            MemoryLimit = challenge.MemoryLimit ?? 128,
+            StorageLimit = challenge.StorageLimit ?? 256,
+            // The hill must be reachable by every team; honour AdAllowEgress for the
+            // open/isolated bridge like A&D (default open).
+            NetworkMode = challenge.AdAllowEgress ? NetworkMode.Open : NetworkMode.Isolated,
+            EnableTrafficCapture = false
+        };
+
+        Models.Data.Container? container;
+        try { container = await containerManager.CreateContainerAsync(config, token); }
+        catch (Exception e)
+        {
+            logger.LogErrorMessage(e, $"Failed to launch KotH hill for challenge={challenge.Id}");
+            return;
+        }
+        if (container is null)
+        {
+            logger.SystemLog($"KotH hill launch returned null for challenge={challenge.Id}",
+                TaskStatus.Failed, LogLevel.Warning);
+            return;
+        }
+
+        var game = await db.Games.FirstOrDefaultAsync(g => g.Id == gameId, token);
+        if (game is not null)
+            container.ExpectStopAt = game.EndTimeUtc;
+
+        try
+        {
+            await db.Containers.AddAsync(container, token);
+            if (existing is null)
+                await db.KothTargets.AddAsync(new KothTarget
+                {
+                    GameId = gameId,
+                    ChallengeId = challenge.Id,
+                    ContainerId = container.Id
+                }, token);
+            else
+                existing.ContainerId = container.Id;
+
+            await db.SaveChangesAsync(token);
+        }
+        catch (Exception e)
+        {
+            logger.LogErrorMessage(e, $"KotH launch: recording container failed; destroying orphan challenge={challenge.Id}");
+            try { await containerManager.DestroyContainerAsync(container, token); }
+            catch (Exception de) { logger.LogErrorMessage(de, "KotH launch: orphan cleanup also failed"); }
+            return;
+        }
+
+        logger.SystemLog($"KotH hill launched: challenge={challenge.Id} ip={container.IP}:{container.Port}",
+            TaskStatus.Success, LogLevel.Information);
     }
 
     /// <summary>

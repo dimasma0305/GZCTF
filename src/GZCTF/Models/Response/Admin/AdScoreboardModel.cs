@@ -63,6 +63,9 @@ public sealed partial class AdTeamScoreRow
     /// <summary>Aggregate SLA points across all services.</summary>
     public double SlaPoints { get; set; }
 
+    /// <summary>Aggregate King-of-the-Hill hold points (Σ HoldCredit − Penalty) across all hills.</summary>
+    public double KothPoints { get; set; }
+
     /// <summary>Total times this team's services were captured (raw count).</summary>
     public int TimesCaptured { get; set; }
 
@@ -85,6 +88,12 @@ public sealed partial class AdServiceScore
     public double AttackPoints { get; set; }
     public double DefenseLoss { get; set; }
     public double SlaPoints { get; set; }
+
+    /// <summary>King-of-the-Hill hold points on this hill (0 for A&amp;D services).</summary>
+    public double KothPoints { get; set; }
+
+    /// <summary>True when this column is a King-of-the-Hill hill (shared target) rather than an A&amp;D service.</summary>
+    public bool IsKoth { get; set; }
 
     /// <summary>Flags this team captured on this service.</summary>
     public int FlagsCaptured { get; set; }
