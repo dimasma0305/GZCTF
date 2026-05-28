@@ -13,7 +13,7 @@ import {
   alpha,
   useMantineTheme,
 } from '@mantine/core'
-import { mdiCrown, mdiFlag, mdiSwordCross, mdiThumbUp } from '@mdi/js'
+import { mdiCrown, mdiFlag, mdiFlagOutline, mdiSwordCross, mdiThumbUp } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import cx from 'clsx'
 import dayjs from 'dayjs'
@@ -80,6 +80,14 @@ export const ChallengeCard: FC<ChallengeCardProps> = (props: ChallengeCardProps)
         <Group h="30px" wrap="nowrap" justify="space-between" gap={2}>
           <ScrollingText text={challenge.title || ''} size="lg" />
           <Group gap={4} wrap="nowrap">
+            {/* Engine badge — same slot for all three so the icon position is
+                stable across challenges; color matches the kind-switcher +
+                section dividers so the three are visually consistent. */}
+            {!isAdEngine && (
+              <Tooltip label={t('challenge.tooltip.jeopardy_card', 'Jeopardy — submit the flag once for points')} position="top" withArrow>
+                <Icon path={mdiFlagOutline} size={0.7} color="var(--mantine-color-blue-6)" />
+              </Tooltip>
+            )}
             {isAd && !isKoth && (
               <Tooltip label={t('challenge.tooltip.ad_card', 'Attack & Defense — live scoring, submit via API')} position="top" withArrow>
                 <Icon path={mdiSwordCross} size={0.7} color="var(--mantine-color-red-6)" />
