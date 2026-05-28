@@ -75,8 +75,6 @@ public sealed class AdRoundService(
             StartedAt = now,
             EndsAt = now.AddSeconds(tickSeconds)
         };
-        await db.AdRounds.AddAsync(round, token);
-        await db.SaveChangesAsync(token);
 
         var services = await db.AdTeamServices
             .Where(ts => ts.Participation.GameId == gameId)
@@ -87,6 +85,21 @@ public sealed class AdRoundService(
         // DB save commits. Collected up-front so the exec calls don't race
         // with the row inserts.
         var toInject = new List<(AdTeamService Service, string Flag)>();
+
+        // Single transaction wrapping the round insert + flag inserts + KotH
+        // token inserts: under Postgres read-committed isolation, other
+        // connections (AdCheckerService, AdContainerManager, the AdGameController
+        // endpoints) don't see the new round until the transaction commits, so
+        // they can't observe a window where the round is live but its tokens /
+        // flags aren't yet — which previously let a checker tick fire against
+        // a freshly-advanced round whose KothTokens hadn't been minted, recording
+        // "no controller" for what should have been a normal tick. Docker exec
+        // (best-effort flag plant) deliberately stays OUTSIDE the transaction —
+        // we don't want a slow container to block the round from going visible.
+        await using var tx = await db.Database.BeginTransactionAsync(token);
+
+        await db.AdRounds.AddAsync(round, token);
+        await db.SaveChangesAsync(token); // populates round.Id for AdFlags FK
 
         foreach (var ts in services)
         {
@@ -106,10 +119,44 @@ public sealed class AdRoundService(
             toInject.Add((ts, flag));
         }
 
-        await db.SaveChangesAsync(token);
+        // KotH: mint each accepted team's rotating control token for this round.
+        // The platform does NOT plant it — the team writes it into /koth/king once
+        // they have a foothold; the king-check reads the marker and matches it back.
+        if (kothChallengeIds.Count > 0)
+        {
+            var participationIds = await db.Participations
+                .Where(p => p.GameId == gameId && p.Status == ParticipationStatus.Accepted)
+                .Select(p => p.Id)
+                .ToListAsync(token);
 
-        // Plant each flag. Best-effort — a failure only loses one tick of
-        // attackability for that team; the next round retries.
+            foreach (var cid in kothChallengeIds)
+                foreach (var pid in participationIds)
+                {
+                    var tbytes = new byte[FlagRandomBytes];
+                    RandomNumberGenerator.Fill(tbytes);
+                    var tpayload = Convert.ToBase64String(tbytes).TrimEnd('=').Replace('+', '_').Replace('/', '-');
+                    await db.KothTokens.AddAsync(new KothToken
+                    {
+                        ParticipationId = pid,
+                        ChallengeId = cid,
+                        RoundNumber = nextNumber,
+                        AdRoundId = round.Id, // FK — cascade-deletes if the round is rolled back
+                        Token = $"koth_{tpayload}",
+                        IssuedAt = now
+                    }, token);
+                }
+        }
+
+        // Commit flags + KotH tokens together with the round. After this point the
+        // round (and its tokens) are visible to checkers / queries — before this
+        // point they're invisible (other connections see nothing because of the
+        // transaction).
+        await db.SaveChangesAsync(token);
+        await tx.CommitAsync(token);
+
+        // Plant each flag. Best-effort, OUTSIDE the transaction — a slow container
+        // can't block the round from going visible, and a failure only loses one
+        // tick of attackability for that team; the next round retries.
         var docker = serviceProvider
             .GetService<IContainerProvider<DockerClient, DockerMetadata>>()
             ?.GetProvider();
@@ -164,35 +211,6 @@ public sealed class AdRoundService(
                 finally { gate.Release(); }
             }));
             injected += injectedLegacy;
-        }
-
-        // KotH: mint each accepted team's rotating control token for this round.
-        // The platform does NOT plant it — the team writes it into /koth/king once
-        // they have a foothold; the king-check reads the marker and matches it back.
-        if (kothChallengeIds.Count > 0)
-        {
-            var participationIds = await db.Participations
-                .Where(p => p.GameId == gameId && p.Status == ParticipationStatus.Accepted)
-                .Select(p => p.Id)
-                .ToListAsync(token);
-
-            foreach (var cid in kothChallengeIds)
-                foreach (var pid in participationIds)
-                {
-                    var tbytes = new byte[FlagRandomBytes];
-                    RandomNumberGenerator.Fill(tbytes);
-                    var tpayload = Convert.ToBase64String(tbytes).TrimEnd('=').Replace('+', '_').Replace('/', '-');
-                    await db.KothTokens.AddAsync(new KothToken
-                    {
-                        ParticipationId = pid,
-                        ChallengeId = cid,
-                        RoundNumber = nextNumber,
-                        Token = $"koth_{tpayload}",
-                        IssuedAt = now
-                    }, token);
-                }
-
-            await db.SaveChangesAsync(token);
         }
 
         logger.SystemLog(

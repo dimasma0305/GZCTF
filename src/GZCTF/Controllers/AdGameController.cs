@@ -412,14 +412,73 @@ public class AdGameController(
             .Select(r => r.Number)
             .FirstOrDefaultAsync(token);
 
-        var tok = latestRound == 0
-            ? null
-            : await db.KothTokens
-                .Where(k => k.ParticipationId == part.Id && k.ChallengeId == challengeId && k.RoundNumber == latestRound)
-                .Select(k => k.Token)
-                .FirstOrDefaultAsync(token);
+        if (latestRound == 0)
+            return Ok(new KothTokenModel { Round = 0, Token = null, Status = "warmup" });
 
-        return Ok(new KothTokenModel { Round = latestRound, Token = tok });
+        var tok = await db.KothTokens
+            .Where(k => k.ParticipationId == part.Id && k.ChallengeId == challengeId && k.RoundNumber == latestRound)
+            .Select(k => k.Token)
+            .FirstOrDefaultAsync(token);
+
+        return Ok(new KothTokenModel
+        {
+            Round = latestRound,
+            Token = tok,
+            // Distinguish "we missed the mint this round" from "token here, plant it"
+            // so the UI can stop showing a generic spinner indefinitely.
+            Status = tok is null ? "no-token-this-round" : "ready"
+        });
+    }
+
+    /// <summary>
+    /// King of the Hill — current hill state for the caller's team. Lets a player
+    /// confirm a plant took effect without polling the scoreboard (which only
+    /// updates once per tick). Returns the round being checked, who the platform
+    /// currently records as the holder, and the last functional verdict on the
+    /// hill itself. Auth: same dual-auth as Submit / Token.
+    /// </summary>
+    [HttpGet("Koth/{challengeId:int}/State")]
+    [ProducesResponseType(typeof(KothHillStateModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> KothState(int id, int challengeId, CancellationToken token)
+    {
+        var part = await ResolveTeamApiTokenAsync(id, token) ?? await ResolveUserParticipationAsync(id, token);
+        if (part is null)
+            return Unauthorized(new RequestResponse("not an accepted member of this game", StatusCodes.Status401Unauthorized));
+
+        var isKoth = await db.GameChallenges.AnyAsync(
+            c => c.Id == challengeId && c.GameId == id
+                 && c.Type == ChallengeType.KingOfTheHill && c.IsEnabled, token);
+        if (!isKoth)
+            return NotFound(new RequestResponse("not a King of the Hill challenge in this game"));
+
+        var latest = await db.KothControlResults
+            .Where(r => r.ChallengeId == challengeId)
+            .OrderByDescending(r => r.AdRound.Number)
+            .Select(r => new
+            {
+                Round = r.AdRound.Number,
+                r.ControllingParticipationId,
+                HolderName = r.ControllingParticipation != null ? r.ControllingParticipation.Team.Name : null,
+                Status = (AdCheckStatus?)r.Status,
+                r.CheckedAt
+            })
+            .FirstOrDefaultAsync(token);
+
+        var lastRefresh = await db.KothTargets
+            .Where(t => t.GameId == id && t.ChallengeId == challengeId)
+            .Select(t => (int?)t.LastRefreshRound)
+            .FirstOrDefaultAsync(token) ?? 0;
+
+        return Ok(new KothHillStateModel
+        {
+            Round = latest?.Round ?? 0,
+            HolderParticipationId = latest?.ControllingParticipationId,
+            HolderTeamName = latest?.HolderName,
+            IsYou = latest?.ControllingParticipationId == part.Id,
+            Status = latest?.Status?.ToString(),
+            CheckedAt = latest?.CheckedAt,
+            LastRefreshRound = lastRefresh
+        });
     }
 
     /// <summary>
@@ -739,13 +798,43 @@ public class AdGameController(
             .FirstOrDefaultAsync(token);
 
         var enabledChallenges = await db.GameChallenges
-            .Where(c => c.GameId == id && c.Type == ChallengeType.AttackDefense && c.IsEnabled)
+            .Where(c => c.GameId == id && c.IsEnabled
+                && (c.Type == ChallengeType.AttackDefense || c.Type == ChallengeType.KingOfTheHill))
             .OrderBy(c => c.Id)
             .ToListAsync(token);
 
         var result = new AdTargetsModel { CurrentRound = currentRound };
         if (currentRound == 0)
             return Ok(result); // warmup — no targets yet
+
+        // KotH hills — single shared container per challenge. Loaded up-front
+        // so each enabledChallenges entry can stamp Hill in the loop below.
+        // We need the latest functional verdict per hill too, sourced from
+        // KothControlResults (the equivalent of AdCheckResults for hills).
+        var kothChallengeIds = enabledChallenges
+            .Where(c => c.Type == ChallengeType.KingOfTheHill).Select(c => c.Id).ToList();
+        var hillByChallenge = kothChallengeIds.Count == 0
+            ? new Dictionary<int, (string? Ip, int? Port, int LastRefreshRound)>()
+            : (await db.KothTargets
+                .Where(t => t.GameId == id && kothChallengeIds.Contains(t.ChallengeId))
+                .Include(t => t.Container)
+                .Select(t => new
+                {
+                    t.ChallengeId,
+                    Ip = t.Container != null ? t.Container.IP : null,
+                    Port = t.Container != null ? t.Container.Port : (int?)null,
+                    t.LastRefreshRound
+                })
+                .ToListAsync(token))
+                .ToDictionary(t => t.ChallengeId, t => (t.Ip, t.Port, t.LastRefreshRound));
+        var hillStatusByChallenge = kothChallengeIds.Count == 0
+            ? new Dictionary<int, AdCheckStatus?>()
+            : (await db.KothControlResults
+                .Where(r => kothChallengeIds.Contains(r.ChallengeId))
+                .GroupBy(r => r.ChallengeId)
+                .Select(g => new { ChallengeId = g.Key, Status = (AdCheckStatus?)g.OrderByDescending(r => r.AdRound.Number).First().Status })
+                .ToListAsync(token))
+                .ToDictionary(x => x.ChallengeId, x => x.Status);
 
         var services = await db.AdTeamServices
             .Where(ts => ts.Participation.GameId == id
@@ -779,20 +868,38 @@ public class AdGameController(
                 ChallengeId = chal.Id,
                 Title = chal.Title,
                 TickSeconds = tickSeconds,
-                Teams = services
-                    .Where(s => s.ChallengeId == chal.Id)
-                    .OrderBy(s => s.Participation.Team.Name, StringComparer.OrdinalIgnoreCase)
-                    .Select(s => new AdTeamTarget
-                    {
-                        ParticipationId = s.ParticipationId,
-                        TeamName = s.Participation.Team.Name,
-                        Division = s.Participation.Division?.Name,
-                        Ip = s.Container?.IP,
-                        Port = s.Container?.Port,
-                        LastCheckStatus = lastChecksByService.GetValueOrDefault(s.Id)?.Status.ToString(),
-                    })
-                    .ToList()
+                Teams = chal.Type == ChallengeType.KingOfTheHill
+                    ? [] // KotH is shared — no per-team targets
+                    : services
+                        .Where(s => s.ChallengeId == chal.Id)
+                        .OrderBy(s => s.Participation.Team.Name, StringComparer.OrdinalIgnoreCase)
+                        .Select(s => new AdTeamTarget
+                        {
+                            ParticipationId = s.ParticipationId,
+                            TeamName = s.Participation.Team.Name,
+                            Division = s.Participation.Division?.Name,
+                            Ip = s.Container?.IP,
+                            Port = s.Container?.Port,
+                            LastCheckStatus = lastChecksByService.GetValueOrDefault(s.Id)?.Status.ToString(),
+                        })
+                        .ToList()
             };
+
+            // Surface the shared hill so players can target it after the 5-tick
+            // refresh moves its IP — otherwise they'd be stuck on a static
+            // operator-shared value that goes stale every refresh.
+            if (chal.Type == ChallengeType.KingOfTheHill
+                && hillByChallenge.TryGetValue(chal.Id, out var hill))
+            {
+                row.Hill = new AdHillTarget
+                {
+                    Ip = hill.Ip,
+                    Port = hill.Port,
+                    LastCheckStatus = hillStatusByChallenge.GetValueOrDefault(chal.Id)?.ToString(),
+                    LastRefreshRound = hill.LastRefreshRound
+                };
+            }
+
             result.Challenges.Add(row);
         }
 

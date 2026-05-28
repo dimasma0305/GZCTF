@@ -94,6 +94,13 @@ public class AdChallengeTargets
     public string Title { get; set; } = string.Empty;
     public int TickSeconds { get; set; }
     public List<AdTeamTarget> Teams { get; set; } = [];
+    /// <summary>
+    /// Populated for King of the Hill challenges only. The hill is a single
+    /// shared container — there's no per-team row in <see cref="Teams"/>. The
+    /// IP rotates on each 5-tick refresh, so players should re-read this every
+    /// few ticks rather than caching it.
+    /// </summary>
+    public AdHillTarget? Hill { get; set; }
 }
 
 public class AdTeamTarget
@@ -105,6 +112,17 @@ public class AdTeamTarget
     public int? Port { get; set; }
     /// <summary>Last check verdict — Ok / Mumble / Offline / null if not checked yet.</summary>
     public string? LastCheckStatus { get; set; }
+}
+
+/// <summary>The shared KotH hill target for one challenge.</summary>
+public class AdHillTarget
+{
+    public string? Ip { get; set; }
+    public int? Port { get; set; }
+    /// <summary>Last functional verdict on the hill (Ok / Mumble / Offline / null).</summary>
+    public string? LastCheckStatus { get; set; }
+    /// <summary>Round at which the hill was last refreshed (5-tick wipe).</summary>
+    public int LastRefreshRound { get; set; }
 }
 
 /// <summary>
@@ -249,9 +267,36 @@ public class AdSshKeyGeneratedModel
 /// </summary>
 public class KothTokenModel
 {
-    /// <summary>Round this token is valid for (0 = the game hasn't started ticking yet).</summary>
+    /// <summary>Round this token is valid for (0 = no round has started yet).</summary>
     public int Round { get; set; }
 
-    /// <summary>The token to plant; null during warmup / before the first round.</summary>
+    /// <summary>The token to plant; null when no token has been minted yet (see <see cref="Status"/>).</summary>
     public string? Token { get; set; }
+
+    /// <summary>
+    /// Explains a null <see cref="Token"/> so the UI can render a useful message
+    /// instead of guessing. <c>"ready"</c> when the token is populated; otherwise
+    /// one of <c>"warmup"</c> (no round yet), <c>"no-token-this-round"</c> (round
+    /// exists but the caller wasn't accepted in time to be issued one — should
+    /// resolve next round), or <c>"ready"</c> when Token is non-null.
+    /// </summary>
+    public string Status { get; set; } = "ready";
+}
+
+/// <summary>
+/// Response for GET /api/Game/{id}/Ad/Koth/{challengeId}/State — current hill
+/// holder + functional status, so the player UI can confirm a plant took effect
+/// without polling the scoreboard.
+/// </summary>
+public class KothHillStateModel
+{
+    public int Round { get; set; }
+    public int? HolderParticipationId { get; set; }
+    public string? HolderTeamName { get; set; }
+    /// <summary>True when the caller's team is the holder this tick.</summary>
+    public bool IsYou { get; set; }
+    /// <summary>Functional probe verdict — Ok / Mumble / Offline / null.</summary>
+    public string? Status { get; set; }
+    public DateTimeOffset? CheckedAt { get; set; }
+    public int LastRefreshRound { get; set; }
 }

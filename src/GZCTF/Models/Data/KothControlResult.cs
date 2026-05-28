@@ -9,9 +9,22 @@ namespace GZCTF.Models.Data;
 /// whether the service was functional, and the resulting score delta. One row per
 /// (Challenge, Round). The scoreboard sums <see cref="HoldCredit"/> −
 /// <see cref="Penalty"/> grouped by <see cref="ControllingParticipationId"/>.
+///
+/// <para><b>IsEnabled toggle semantics (D3):</b> historical KothControlResult rows
+/// for a given KotH <see cref="GameChallenge"/> persist when an organizer toggles
+/// <see cref="GameChallenge.IsEnabled"/> off; the rows are NOT cleared. Re-enabling
+/// the same challenge resumes scoring against the existing history (so a hill
+/// briefly disabled to fix a bug doesn't lose its accumulated leaderboard state).
+/// If the organizer wants a clean slate they have to DELETE the GameChallenge
+/// (cascade-removes results via the FK) — disabling is intentionally non-destructive.</para>
 /// </summary>
 [Index(nameof(ChallengeId), nameof(AdRoundId), IsUnique = true)]
 [Index(nameof(AdRoundId))]
+// Covers the per-game scoreboard aggregate query
+// (AdScoreboardRepository.GenScoreboardAsync filters by GameId + ChallengeId
+// then sums HoldCredit−Penalty per ControllingParticipationId). Without this
+// the per-tick aggregate cost grows linearly with rounds×hills on long games.
+[Index(nameof(GameId), nameof(ChallengeId))]
 public class KothControlResult
 {
     [Key]

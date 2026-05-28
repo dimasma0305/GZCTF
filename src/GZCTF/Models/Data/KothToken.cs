@@ -11,7 +11,13 @@ namespace GZCTF.Models.Data;
 /// <c>chattr +i</c>'d stale token) no longer counts as control.
 /// </summary>
 [Index(nameof(ParticipationId), nameof(ChallengeId), nameof(RoundNumber), IsUnique = true)]
-[Index(nameof(Token))]
+// Unique on Token: 24 random bytes → 144 bits, collisions are astronomically
+// unlikely but the marker-lookup uses FirstOrDefault, so a collision would
+// otherwise silently arbitrate to whichever row sorted first. The unique
+// constraint makes the lookup deterministic and lets the DB catch the
+// (impossible-but-non-zero) collision instead of mis-attributing a controller.
+[Index(nameof(Token), IsUnique = true)]
+[Index(nameof(AdRoundId))]
 public class KothToken
 {
     [Key]
@@ -30,6 +36,17 @@ public class KothToken
     /// <summary>Round number this token is valid for (matches <see cref="AdRound.Number"/>).</summary>
     [Required]
     public int RoundNumber { get; set; }
+
+    /// <summary>
+    /// FK back to <see cref="AdRound"/>. Without this, a manually-deleted round
+    /// leaves orphan KothToken rows that accumulate forever (the previous
+    /// schema only stored RoundNumber as a bare int with no constraint). Cascade
+    /// delete so dropping a round cleans up its tokens atomically.
+    /// </summary>
+    [Required]
+    public int AdRoundId { get; set; }
+
+    public AdRound AdRound { get; set; } = null!;
 
     /// <summary>The unguessable token string the team plants into the marker.</summary>
     [Required]

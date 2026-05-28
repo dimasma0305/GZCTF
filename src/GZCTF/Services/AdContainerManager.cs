@@ -263,6 +263,54 @@ public sealed class AdContainerManager(
             // across many games. A relaunch (game extended) just re-adds it.
             _serviceLocks.TryRemove((ended.ParticipationId, ended.ChallengeId), out _);
         }
+
+        // Ended games — KotH hills + cooldown chains. Same shape as the A&D
+        // teardown above: destroy the container, then tear down the
+        // per-challenge cooldown chain in the WG sidecar so it doesn't leak
+        // across games. KotH uses participationId 0 in the lock map (shared hill).
+        var endedHills = await db.KothTargets
+            .Where(t => t.ContainerId != null && t.Game.EndTimeUtc < now)
+            .Select(t => new { t.Id, t.ChallengeId })
+            .ToListAsync(token);
+
+        foreach (var ended in endedHills)
+        {
+            var sem = LockFor(0, ended.ChallengeId);
+            await sem.WaitAsync(token);
+            try
+            {
+                var target = await db.KothTargets
+                    .Include(t => t.Container)
+                    .Include(t => t.Game)
+                    .FirstOrDefaultAsync(t => t.Id == ended.Id, token);
+
+                // Re-check under the lock: game may have been extended.
+                if (target?.Container is null || target.Game.EndTimeUtc >= now)
+                    continue;
+
+                await containerManager.DestroyContainerAsync(target.Container, token);
+                target.ContainerId = null;
+                await db.SaveChangesAsync(token);
+
+                // Tear down the cooldown chain — Docker-only feature, so the
+                // call is a no-op on K8s (no sidecar id → returns early).
+                if (dockerProvider is not null)
+                    await DestroyKothCooldownChainAsync(dockerProvider, ended.ChallengeId, token);
+
+                logger.SystemLog($"KotH hill destroyed (game ended): challenge={ended.ChallengeId}",
+                    TaskStatus.Success, LogLevel.Information);
+            }
+            catch (Exception e)
+            {
+                logger.LogErrorMessage(e, $"Failed to destroy KotH hill (game ended) target={ended.Id}");
+            }
+            finally
+            {
+                sem.Release();
+            }
+
+            _serviceLocks.TryRemove((0, ended.ChallengeId), out _);
+        }
     }
 
     /// <summary>
@@ -934,7 +982,37 @@ public sealed class AdContainerManager(
 
         // --- King of the Hill: ONE shared container per challenge (+ 5-tick refresh) ---
         if (kothChallenges.Count > 0)
+        {
+            // Known limitation (D1): the leader-cooldown mechanic is implemented
+            // via iptables in the WG sidecar's netns, which only the Docker
+            // provider can exec into. On Kubernetes the hill itself still launches
+            // and the marker-based scoring still works, but there's no per-tick
+            // throttle on whoever just held the hill — they can immediately
+            // re-pwn the freshly-reset container. KotH on K8s is therefore
+            // strictly easier for whoever's ahead than on Docker; mention it
+            // once per process per game so operators see it in the log.
+            if (dockerProvider is null && k8sProvider is not null)
+                WarnKothK8sCooldownOnce(gameId);
+
             await EnsureKothTargetsAsync(db, containerManager, dockerProvider, k8sProvider, gameId, kothChallenges, token);
+        }
+    }
+
+    /// <summary>Per-process set of games we've already warned about K8s+KotH
+    /// for; bounded by the number of distinct K8s+KotH games seen in the lifetime
+    /// of the process (small).</summary>
+    private static readonly HashSet<int> _kothK8sWarnedGames = [];
+    private void WarnKothK8sCooldownOnce(int gameId)
+    {
+        lock (_kothK8sWarnedGames)
+        {
+            if (!_kothK8sWarnedGames.Add(gameId)) return;
+        }
+        logger.SystemLog(
+            $"KotH on Kubernetes (game={gameId}): leader-cooldown is NOT applied — the front-runner can " +
+            "re-pwn the freshly-reset hill without a tick of network block. Implement K8s NetworkPolicy " +
+            "parity to remove this limitation; for now KotH on K8s is best-effort.",
+            TaskStatus.Pending, LogLevel.Warning);
     }
 
     /// <summary>
@@ -993,8 +1071,16 @@ public sealed class AdContainerManager(
                                  && (latestRound - 1) % refreshTicks == 0
                                  && (target?.LastRefreshRound ?? 0) < latestRound;
 
+                // Operator flipped AdAllowEgress on this challenge mid-game — the
+                // running hill was launched on the wrong bridge. Force a refresh
+                // immediately so the new policy takes effect; otherwise it'd be
+                // ignored until the next 5-tick boundary (M4). Mirrors A&D's
+                // LaunchedWithEgress drift handling at line 1317.
+                var egressDrift = target?.LaunchedWithEgress is { } le && le != challenge.AdAllowEgress;
+
                 var needsLaunch = target is null || target.ContainerId is null || target.Container is null
-                                  || target.Container.Status == ContainerStatus.Destroyed || dead || dueRefresh;
+                                  || target.Container.Status == ContainerStatus.Destroyed || dead
+                                  || dueRefresh || egressDrift;
 
                 if (needsLaunch)
                 {
@@ -1013,8 +1099,22 @@ public sealed class AdContainerManager(
 
                     if (dueRefresh)
                     {
+                        // Refetch the freshly-launched target so we have the new
+                        // container's IP for the cooldown rule.
                         target = await db.KothTargets
+                            .Include(t => t.Container)
                             .FirstOrDefaultAsync(t => t.GameId == gameId && t.ChallengeId == challenge.Id, token);
+
+                        // Apply the leader cooldown BEFORE saving LastRefreshRound,
+                        // so a crash between the launch and the LastRefreshRound save
+                        // re-fires dueRefresh on the next tick (instead of silently
+                        // skipping the cooldown — which would happen if LastRefresh
+                        // were saved first → dueRefresh=false → cooldown never
+                        // installed). The cooldown apply is itself idempotent
+                        // (creates+flushes its own chain).
+                        if (dockerProvider is not null)
+                            await ApplyKothLeaderCooldownAsync(db, dockerProvider, gameId, challenge.Id, latestRound, token);
+
                         if (target is not null)
                         {
                             target.LastRefreshRound = latestRound;
@@ -1023,16 +1123,11 @@ public sealed class AdContainerManager(
                     }
                 }
 
-                // Cooldown lifecycle (Docker only) — apply the per-challenge leader's
-                // one-tick block exactly on the refresh tick, lift it once the round
-                // advances past it. Best-effort; never breaks the reconcile.
-                if (dockerProvider is not null)
-                {
-                    if (dueRefresh)
-                        await ApplyKothLeaderCooldownAsync(db, dockerProvider, gameId, challenge.Id, latestRound, token);
-                    else if (latestRound > (target?.LastRefreshRound ?? 0))
-                        await LiftKothCooldownAsync(dockerProvider, challenge.Id, token);
-                }
+                // Cooldown lifecycle (Docker only) — lift the previous refresh's
+                // cooldown once the round advances past it. Best-effort.
+                if (dockerProvider is not null && !dueRefresh
+                    && latestRound > (target?.LastRefreshRound ?? 0))
+                    await LiftKothCooldownAsync(dockerProvider, challenge.Id, token);
             }
             finally
             {
@@ -1151,8 +1246,47 @@ public sealed class AdContainerManager(
         }
     }
 
+    /// <summary>
+    /// Fully tear down a hill's cooldown chain on game-end: unhook from FORWARD,
+    /// flush, and remove the chain itself. Without this, the per-game
+    /// <c>KOTH_CD_&lt;cid&gt;</c> chains stay attached to FORWARD inside the WG
+    /// sidecar forever; reusing the same challengeId for a new game would have
+    /// the new game inherit the previous game's leader-block rules. Idempotent
+    /// (every step silently no-ops if the chain doesn't exist).
+    /// </summary>
+    private async Task DestroyKothCooldownChainAsync(
+        IContainerProvider<DockerClient, DockerMetadata> dockerProvider, int challengeId, CancellationToken token)
+    {
+        try
+        {
+            var sidecar = await ReadVpnSidecarIdAsync(token);
+            if (sidecar is null)
+                return;
+            var chain = $"KOTH_CD_{challengeId}";
+            await ExecOnSidecarAsync(dockerProvider.GetProvider(), sidecar,
+                ["sh", "-c",
+                 $"iptables -D FORWARD -j {chain} 2>/dev/null; iptables -F {chain} 2>/dev/null; iptables -X {chain} 2>/dev/null; true"],
+                token);
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "KotH cooldown destroy failed for challenge={Cid}", challengeId);
+        }
+    }
+
     /// <summary>Ensure the per-hill cooldown chain exists, is jumped to from FORWARD,
-    /// and starts empty (flushed) before fresh blocks are added.</summary>
+    /// and starts empty (flushed) before fresh blocks are added.
+    ///
+    /// <para><b>Known caveat (M1):</b> uses <c>iptables -I FORWARD -j chain</c> which
+    /// inserts at position 1. On the stock <c>linuxserver/wireguard</c> sidecar this
+    /// is fine — its own PostUp inserts go before, so our chain ends up running
+    /// before MASQUERADE (we need the original source IP). A custom sidecar image
+    /// whose entrypoint also runs <c>iptables -I FORWARD</c> on every restart could
+    /// land in front of our chain depending on whose insert wins the race; the
+    /// observable symptom would be cooldowns silently not taking effect (no error;
+    /// the leader just keeps reaching the hill). If you ever swap the WG sidecar
+    /// image, verify with <c>iptables -L FORWARD --line-numbers</c> that
+    /// KOTH_CD_* sits above any MASQUERADE rule.</para></summary>
     private static async Task EnsureKothChainAsync(
         DockerClient docker, string sidecar, string chain, CancellationToken token) =>
         await ExecOnSidecarAsync(docker, sidecar,
@@ -1252,10 +1386,16 @@ public sealed class AdContainerManager(
                 {
                     GameId = gameId,
                     ChallengeId = challenge.Id,
-                    ContainerId = container.Id
+                    ContainerId = container.Id,
+                    LaunchedWithEgress = challenge.AdAllowEgress
                 }, token);
             else
+            {
                 existing.ContainerId = container.Id;
+                // Record what we launched with so EnsureKothTargetsAsync can
+                // detect a future AdAllowEgress toggle and force a refresh.
+                existing.LaunchedWithEgress = challenge.AdAllowEgress;
+            }
 
             await db.SaveChangesAsync(token);
         }

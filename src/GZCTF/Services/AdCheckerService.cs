@@ -136,6 +136,19 @@ public sealed class AdCheckerService(
         }
     }
 
+    /// <summary>KotH-namespaced jitter — the hill has no AdTeamService, only a
+    /// GameChallenge.Id, which would alias against a real A&amp;D service whose
+    /// AdTeamService.Id happens to equal that challenge id. Bias the seed with
+    /// distinct prime constants so the two namespaces don't share a draw.</summary>
+    internal static double StableKothJitterFraction(int challengeId, int roundId)
+    {
+        unchecked
+        {
+            var h = (uint)(challengeId * 49979687) ^ (uint)(roundId * 67867967);
+            return h % 100000u / 100000.0;
+        }
+    }
+
     /// <summary>Run the checker, retrying up to <see cref="MaxCheckAttempts"/>
     /// times on any non-Ok verdict (returns on the first Ok). Absorbs transient
     /// network blips and unlucky jittered timing so they don't zero a team's
@@ -332,9 +345,15 @@ public sealed class AdCheckerService(
                     r => r.ChallengeId == challenge.Id && r.AdRoundId == latest.Id, token))
                 continue;
 
-            // Jitter the check time within the tick, same as A&D getflag — keyed on
-            // the challenge id so teams can't predict when the marker is sampled.
-            var due = GetflagDueAt(new AdTeamService { Id = challenge.Id }, latest, tickSeconds, pollSeconds, graceSeconds, getFrac);
+            // Jitter the check time within the tick, same shape as A&D getflag —
+            // KotH-namespaced seed so it doesn't share a draw with a real A&D
+            // service whose AdTeamService.Id happens to equal this challenge id.
+            var grace = Math.Max(0, graceSeconds);
+            var graceSec = Math.Min(grace, tickSeconds * 0.5);
+            var maxJitter = Math.Max(0.0, tickSeconds - graceSec - pollSeconds);
+            var jitterSec = Math.Min(Math.Clamp(getFrac, 0.0, 1.0) * tickSeconds, maxJitter);
+            var due = latest.StartedAt.AddSeconds(
+                graceSec + StableKothJitterFraction(challenge.Id, latest.Id) * jitterSec);
             if (now < due)
                 continue;
 
@@ -405,7 +424,22 @@ public sealed class AdCheckerService(
                     $"KotH check: round={latest.Number} chal={challenge.Id} controller={controller?.ToString() ?? "none"} tokenId={matchedTokenId?.ToString() ?? "-"} status={outcome.Status}",
                     TaskStatus.Success, LogLevel.Information);
 
-                var (hold, penalty) = AdScoring.KothTickDelta(controller is not null, outcome.Status, holdPerTick, activeTeams);
+                // Grace tick: if this controller wasn't the controller in the
+                // previous round, they just took over — don't penalize them for
+                // a hill broken by the previous holder. They get the normal
+                // penalty starting from the second tick of their hold (L4).
+                var freshlyElected = false;
+                if (controller is { } cid && outcome.Status != AdCheckStatus.Ok)
+                {
+                    var prevController = await db.KothControlResults
+                        .Where(r => r.ChallengeId == challenge.Id && r.AdRound.Number == latest.Number - 1)
+                        .Select(r => r.ControllingParticipationId)
+                        .FirstOrDefaultAsync(token);
+                    freshlyElected = prevController != cid;
+                }
+
+                var (hold, penalty) = AdScoring.KothTickDelta(
+                    controller is not null, outcome.Status, holdPerTick, activeTeams, freshlyElected);
                 await PersistKothResultAsync(scopeFactory, gameId, challenge.Id, latest.Id,
                     controller, outcome.Status, hold, penalty, outcome.ErrorMessage, token);
             }, token);

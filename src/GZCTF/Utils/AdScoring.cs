@@ -100,12 +100,22 @@ public static class AdScoring
     /// holding a broken (Mumble/Offline/InternalError) hill → (0, penalty) — you
     /// broke the box you hold; no king → (0, 0). The scoreboard sums HoldCredit −
     /// Penalty per team.
+    ///
+    /// <para><paramref name="freshlyElected"/> grants a one-tick grace on the broken-hill
+    /// penalty: a team that just took over the marker (different controller from
+    /// the previous tick) didn't have time to fix damage left by the previous
+    /// holder, so they get (0, 0) on a broken hill instead of (0, penalty). Once
+    /// they hold the hill into a second tick (<c>freshlyElected=false</c>) they're
+    /// on the hook normally.</para>
     /// </summary>
     public static (double HoldCredit, double Penalty) KothTickDelta(
-        bool hasKing, AdCheckStatus status, double holdPointsPerTick, int activeTeams) =>
+        bool hasKing, AdCheckStatus status, double holdPointsPerTick, int activeTeams,
+        bool freshlyElected = false) =>
         !hasKing
             ? (0.0, 0.0)
             : status == AdCheckStatus.Ok
                 ? (KothHoldPoints(holdPointsPerTick, activeTeams), 0.0)
-                : (0.0, KothBrokenHillPenalty);
+                : freshlyElected
+                    ? (0.0, 0.0) // grace tick — broken when they took it, not their fault yet
+                    : (0.0, KothBrokenHillPenalty);
 }

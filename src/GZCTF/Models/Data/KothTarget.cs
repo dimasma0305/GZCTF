@@ -34,4 +34,14 @@ public class KothTarget
 
     /// <summary>Round number at which the hill was last reset to its base image.</summary>
     public int LastRefreshRound { get; set; }
+
+    /// <summary>
+    /// Snapshot of <c>GameChallenge.AdAllowEgress</c> at the time this container
+    /// was last launched. <c>EnsureKothTargetsAsync</c> compares this to the
+    /// challenge's current value and forces a refresh on drift, so an operator
+    /// flipping "deny egress" mid-game takes effect immediately instead of
+    /// waiting for the next 5-tick boundary. Mirrors A&amp;D's
+    /// <c>AdTeamService.LaunchedWithEgress</c> field.
+    /// </summary>
+    public bool? LaunchedWithEgress { get; set; }
 }
