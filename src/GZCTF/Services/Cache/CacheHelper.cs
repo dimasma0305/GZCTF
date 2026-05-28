@@ -85,6 +85,7 @@ public class CacheHelper(
         // checker tick) — invalidate it alongside the combined boards so the
         // dedicated KotH page never reads a stale tick.
         await channelWriter.WriteAsync(KothScoreboardCacheHandler.MakeCacheRequest(gameId), token);
+        await channelWriter.WriteAsync(KothTimelineCacheHandler.MakeCacheRequest(gameId), token);
     }
 
     public async Task FlushRecentGamesCache(CancellationToken token) =>
@@ -233,6 +234,9 @@ public static class CacheKey
     /// </summary>
     public const string KothScoreboardBase = "_KothScoreboard";
 
+    /// <summary>King of the Hill score timeline (live) — base key for the CacheMaker handler.</summary>
+    public const string KothTimelineBase = "_KothTimeline";
+
     /// <summary>
     /// Recent games
     /// </summary>
@@ -324,6 +328,15 @@ public static class CacheKey
 
     /// <summary>KotH-only scoreboard cache (frozen view).</summary>
     public static string KothScoreboardFrozen(int id) => $"_KothScoreboardFrozen_{id}";
+
+    /// <summary>KotH score timeline cache (live).</summary>
+    public static string KothTimeline(int id) => $"_KothTimeline_{id}";
+
+    /// <summary>KotH score timeline cache (live).</summary>
+    public static string KothTimeline(string id) => $"_KothTimeline_{id}";
+
+    /// <summary>KotH score timeline cache (frozen view).</summary>
+    public static string KothTimelineFrozen(int id) => $"_KothTimelineFrozen_{id}";
 
     /// <summary>
     /// Game cache

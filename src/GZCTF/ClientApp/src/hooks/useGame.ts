@@ -174,6 +174,25 @@ export const useKothScoreboard = (numId: number, doFetch: boolean = true) => {
   return { kothScoreboard, error, mutate }
 }
 
+/**
+ * KotH — per-round per-team cumulative hold credit, used by the KotH
+ * scoreboard chart. Same shape as AdScoreTimelineModel so the existing
+ * AdScoreTimeLine echarts component can render it without changes (we just
+ * point it at a different data source).
+ */
+export const useKothTimeline = (numId: number, doFetch: boolean = true) => {
+  const { game } = useGame(numId)
+  const { status } = getGameStatus(game)
+  const { data: kothTimeline, error, mutate } = useSWR(
+    doFetch && numId > 0 ? `/api/game/${numId}/ad/koth/timeline` : null,
+    {
+      ...OnceSWRConfig,
+      refreshInterval: status === GameStatus.OnGoing ? 30 * 1000 : 0,
+    }
+  )
+  return { kothTimeline, error, mutate }
+}
+
 /** A&D — per-round per-team timeline for the scoreboard chart. */
 export const useAdTimeline = (numId: number) => {
   const { game } = useGame(numId)

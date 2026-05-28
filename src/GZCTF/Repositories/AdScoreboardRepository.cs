@@ -537,4 +537,99 @@ public class AdScoreboardRepository(
 
         return result;
     }
+
+    public Task<AdScoreTimelineModel> GetKothTimelineAsync(int gameId, DateTimeOffset? cutoff, CancellationToken token = default)
+        => cacheHelper.GetOrCreateAsync(logger,
+            cutoff == null ? CacheKey.KothTimeline(gameId) : CacheKey.KothTimelineFrozen(gameId),
+            entry =>
+            {
+                entry.SlidingExpiration = TimeSpan.FromDays(7);
+                return GenKothTimelineAsync(gameId, cutoff, token);
+            }, token: token);
+
+    public Task<AdScoreTimelineModel?> TryGetKothTimelineAsync(int gameId, bool frozen, CancellationToken token = default)
+        => cacheHelper.GetAsync<AdScoreTimelineModel>(
+            frozen ? CacheKey.KothTimelineFrozen(gameId) : CacheKey.KothTimeline(gameId), token);
+
+    /// <summary>
+    /// KotH-only cumulative score chart. Same shape as
+    /// <see cref="GenTimelineAsync"/> but the per-tick delta is
+    /// <c>HoldCredit − Penalty</c> on KotH hills only — A&amp;D attack /
+    /// SLA / defense are excluded so the chart matches the KotH-only
+    /// scoreboard total. Downsampled to MaxTimelinePoints points/team.
+    /// </summary>
+    public async Task<AdScoreTimelineModel> GenKothTimelineAsync(
+        int gameId, DateTimeOffset? cutoff, CancellationToken token = default)
+    {
+        var rounds = await Context.AdRounds
+            .Where(r => r.GameId == gameId && (cutoff == null || r.StartedAt <= cutoff))
+            .OrderBy(r => r.Number)
+            .Select(r => new { r.Number, r.StartedAt, r.EndsAt })
+            .ToListAsync(token);
+
+        var teams = await Context.Participations
+            .Where(p => p.GameId == gameId && p.Status == ParticipationStatus.Accepted)
+            .Include(p => p.Team)
+            .Include(p => p.Division)
+            .ToListAsync(token);
+
+        var result = new AdScoreTimelineModel
+        {
+            LatestRound = rounds.Count > 0 ? rounds[^1].Number : 0,
+            StartedAt = rounds.Count > 0 ? rounds[0].StartedAt : null,
+            EndsAt = rounds.Count > 0 ? rounds[^1].EndsAt : null,
+        };
+
+        if (rounds.Count == 0 || teams.Count == 0)
+            return result;
+
+        var partIds = teams.Select(p => p.Id).ToHashSet();
+
+        // Same aggregate the combined timeline uses, but kept ALONE — no other
+        // engine's score added in.
+        var kothByTeamRound = (await Context.KothControlResults
+                .Where(r => r.GameId == gameId && r.ControllingParticipationId != null
+                    && (cutoff == null || r.CheckedAt <= cutoff))
+                .Join(Context.AdRounds, r => r.AdRoundId, ar => ar.Id,
+                    (r, ar) => new { Pid = r.ControllingParticipationId!.Value, ar.Number, Delta = r.HoldCredit - r.Penalty })
+                .Where(x => partIds.Contains(x.Pid))
+                .GroupBy(x => new { x.Pid, x.Number })
+                .Select(g => new { g.Key.Pid, g.Key.Number, Delta = g.Sum(x => x.Delta) })
+                .ToListAsync(token))
+            .ToDictionary(x => (x.Pid, x.Number), x => x.Delta);
+
+        var emitEvery = Math.Max(1, (int)Math.Ceiling(rounds.Count / (double)MaxTimelinePoints));
+
+        foreach (var team in teams)
+        {
+            var tl = new AdTeamTimeline
+            {
+                ParticipationId = team.Id,
+                TeamId = team.TeamId,
+                TeamName = team.Team.Name,
+                Division = team.Division?.Name,
+            };
+
+            double cumKoth = 0;
+            for (var i = 0; i < rounds.Count; i++)
+            {
+                var round = rounds[i];
+                cumKoth += kothByTeamRound.GetValueOrDefault((team.Id, round.Number), 0);
+
+                if (i % emitEvery != 0 && i != rounds.Count - 1)
+                    continue;
+
+                tl.Items.Add(new AdTimelinePoint
+                {
+                    Round = round.Number,
+                    Time = round.EndsAt,
+                    Score = cumKoth
+                });
+            }
+
+            result.Teams.Add(tl);
+        }
+
+        return result;
+    }
 }

@@ -50,6 +50,7 @@ public class CacheMaker(
         AddCacheRequestHandler<AdScoreboardCacheHandler>(CacheKey.AdScoreBoardBase);
         AddCacheRequestHandler<AdTimelineCacheHandler>(CacheKey.AdTimelineBase);
         AddCacheRequestHandler<KothScoreboardCacheHandler>(CacheKey.KothScoreboardBase);
+        AddCacheRequestHandler<KothTimelineCacheHandler>(CacheKey.KothTimelineBase);
         AddCacheRequestHandler<RecentGamesCacheHandler>(CacheKey.RecentGames);
         AddCacheRequestHandler<GameListCacheHandler>(CacheKey.GameList);
 

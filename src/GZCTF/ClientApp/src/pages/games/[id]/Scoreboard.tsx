@@ -12,6 +12,7 @@ import { TeamRank } from '@Components/TeamRank'
 import { WithGameTab } from '@Components/WithGameTab'
 import { WithNavBar } from '@Components/WithNavbar'
 import { AdScoreTimeLine } from '@Components/charts/AdScoreTimeLine'
+import { KothScoreTimeLine } from '@Components/charts/KothScoreTimeLine'
 import { ScoreTimeLine } from '@Components/charts/ScoreTimeLine'
 import { MobileScoreboardTable } from '@Components/mobile/ScoreboardTable'
 import { useIsMobile } from '@Utils/ThemeOverride'
@@ -129,7 +130,10 @@ const Scoreboard: FC = () => {
               <AdScoreboardTable numId={numId} />
             </>
           ) : showKoth ? (
-            <KothScoreboardTable numId={numId} />
+            <>
+              <KothScoreTimeLine divisionName={null} />
+              <KothScoreboardTable numId={numId} />
+            </>
           ) : isVertical ? (
             <MobileScoreboardTable divisionId={divisionId} setDivisionId={setDivisionId} />
           ) : (
@@ -147,7 +151,10 @@ const Scoreboard: FC = () => {
                 <AdScoreboardTable numId={numId} />
               </>
             ) : showKoth ? (
-              <KothScoreboardTable numId={numId} />
+              <>
+                <KothScoreTimeLine divisionName={null} />
+                <KothScoreboardTable numId={numId} />
+              </>
             ) : (
               <>
                 {showJeopardy && <ScoreTimeLine divisionId={divisionId} />}

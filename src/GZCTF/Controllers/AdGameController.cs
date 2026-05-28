@@ -981,6 +981,31 @@ public class AdGameController(
     }
 
     /// <summary>
+    /// KotH-only score timeline — per-round per-team cumulative hold credit
+    /// (Σ HoldCredit − Penalty across all hills). Drives the chart on the
+    /// dedicated KotH scoreboard tab; same shape as the A&amp;D timeline so the
+    /// front-end can reuse the AdScoreTimeLine echarts component.
+    /// </summary>
+    [HttpGet("Koth/Timeline")]
+    [ProducesResponseType(typeof(AdScoreTimelineModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> KothTimeline(int id, CancellationToken token)
+    {
+        var game = await db.Games.FirstOrDefaultAsync(g => g.Id == id, token);
+        if (game is null || game.Hidden) return NotFound();
+
+        var hasKoth = await db.GameChallenges.AnyAsync(
+            c => c.GameId == id && c.Type == ChallengeType.KingOfTheHill, token);
+        if (!hasKoth) return NotFound();
+
+        var cutoff = await ResolveFreezeCutoffAsync(game, token);
+        Response.Headers.Append("Vary", "Cookie");
+
+        var result = await adScoreboard.TryGetKothTimelineAsync(id, cutoff != null, token)
+                     ?? await adScoreboard.GetKothTimelineAsync(id, cutoff, token);
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Per-round, per-team cumulative score timeline for the A&amp;D scoreboard
     /// chart. Mirrors what GameRepository builds for the jeopardy ScoreTimeLine
     /// component. Public; respects the game's hidden flag.

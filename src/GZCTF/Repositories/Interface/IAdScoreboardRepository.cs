@@ -40,4 +40,16 @@ public interface IAdScoreboardRepository : IRepository
 
     /// <summary>Non-blocking cache read; null on miss.</summary>
     Task<KothScoreboardModel?> TryGetKothScoreboardAsync(int gameId, bool frozen, CancellationToken token = default);
+
+    /// <summary>Build the KotH-only score timeline from the DB (uncached,
+    /// downsampled). Same shape as <see cref="AdScoreTimelineModel"/> but
+    /// each team's cumulative score is restricted to KotH hold credit only
+    /// (no A&amp;D attack / SLA / defense).</summary>
+    Task<AdScoreTimelineModel> GenKothTimelineAsync(int gameId, DateTimeOffset? cutoff, CancellationToken token = default);
+
+    /// <summary>Get the KotH timeline, building + caching on miss.</summary>
+    Task<AdScoreTimelineModel> GetKothTimelineAsync(int gameId, DateTimeOffset? cutoff, CancellationToken token = default);
+
+    /// <summary>Non-blocking cache read; null on miss.</summary>
+    Task<AdScoreTimelineModel?> TryGetKothTimelineAsync(int gameId, bool frozen, CancellationToken token = default);
 }
