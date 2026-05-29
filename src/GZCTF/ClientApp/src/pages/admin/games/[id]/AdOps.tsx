@@ -19,6 +19,7 @@ import {
   SegmentedControl,
   Select,
   Stack,
+  Switch,
   Table,
   Text,
   TextInput,
@@ -41,6 +42,7 @@ import {
   mdiClose,
   mdiCloseCircle,
   mdiConsole,
+  mdiCrown,
   mdiDownload,
   mdiFileOutline,
   mdiFileTree,
@@ -63,7 +65,12 @@ import { ContainerExecModal } from '@Components/admin/ContainerExecModal'
 import { WithGameEditTab } from '@Components/admin/WithGameEditTab'
 import { showErrorMsg } from '@Utils/Shared'
 import { useIsMobile } from '@Utils/ThemeOverride'
-import { useAdminAdState } from '@Hooks/useGame'
+import {
+  useAdminAdState,
+  useAdminKothState,
+  type AdminKothHill,
+  type AdminKothStateModel,
+} from '@Hooks/useGame'
 import { useTicker } from '@Hooks/useTicker'
 import { highlight } from '@Utils/marked/ShikiExtension'
 import api, {
@@ -767,13 +774,229 @@ const HealthChip: FC<{ icon: string; color: string; count: number; label: string
   </Tooltip>
 )
 
+// Format a hold-points value compactly: whole numbers bare, else one decimal.
+const fmtPts = (n: number): string => (Number.isInteger(n) ? String(n) : n.toFixed(1))
+
+// King-of-the-Hill operator view: a per-hill control table (shared container,
+// current king, health, enable toggle, shell) + the hold-points leaderboard.
+// The KotH analogue of the A&D team×challenge grid — each hill is ONE shared
+// box, so it's rows-of-hills, not a grid.
+const KothOpsPanel: FC<{
+  koth: AdminKothStateModel
+  onShell: (guid: string, title: string) => void
+  onToggleHill: (hill: AdminKothHill) => void
+  busyHill: number | null
+}> = ({ koth, onShell, onToggleHill, busyHill }) => {
+  const { t } = useTranslation()
+  const enabledHills = koth.hills.filter((h) => h.isEnabled)
+
+  return (
+    <Stack gap="lg">
+      <ScrollArea type="auto">
+        <Table verticalSpacing="xs" highlightOnHover>
+          <Table.Thead className={tableClasses.thead}>
+            <Table.Tr>
+              <Table.Th>{t('admin.content.ad_ops.koth.col_hill', 'Hill')}</Table.Th>
+              <Table.Th>{t('admin.content.ad_ops.koth.col_status', 'Health')}</Table.Th>
+              <Table.Th>{t('admin.content.ad_ops.koth.col_king', 'Current king')}</Table.Th>
+              <Table.Th>{t('admin.content.ad_ops.koth.col_refresh', 'Last wipe')}</Table.Th>
+              <Table.Th>{t('admin.content.ad_ops.koth.col_endpoint', 'Endpoint')}</Table.Th>
+              <Table.Th w={90}>{t('admin.content.ad_ops.koth.col_enabled', 'Enabled')}</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {koth.hills.map((h) => {
+              const sm = statusMeta(h.lastCheckStatus)
+              return (
+                <Table.Tr key={h.challengeId} style={{ opacity: h.isEnabled ? 1 : 0.5 }}>
+                  <Table.Td>
+                    <Text fw="bold" size="sm">
+                      {h.title}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Badge
+                      size="sm"
+                      color={sm.color}
+                      variant={h.lastCheckStatus ? 'light' : 'outline'}
+                      leftSection={<Icon path={sm.icon} size={0.55} />}
+                    >
+                      {h.lastCheckStatus ?? '—'}
+                    </Badge>
+                  </Table.Td>
+                  <Table.Td>
+                    {h.currentHolderTeamName ? (
+                      <Group gap={4} wrap="nowrap">
+                        <Icon path={mdiCrown} size={0.7} color="var(--mantine-color-yellow-6)" />
+                        <Text size="sm" truncate maw="12rem">
+                          {h.currentHolderTeamName}
+                        </Text>
+                      </Group>
+                    ) : (
+                      <Text size="sm" c="dimmed">
+                        {t('admin.content.ad_ops.koth.no_king', 'Uncontrolled')}
+                      </Text>
+                    )}
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="sm" c="dimmed">
+                      {h.lastRefreshRound > 0
+                        ? t('admin.content.ad_ops.koth.wiped_round', {
+                            round: h.lastRefreshRound,
+                            defaultValue: 'round {{round}}',
+                          })
+                        : '—'}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    {h.containerIp ? (
+                      <Group gap={4} wrap="nowrap">
+                        <CopyButton value={`${h.containerIp}:${h.containerPort ?? ''}`}>
+                          {({ copied, copy }) => (
+                            <Tooltip
+                              label={
+                                copied
+                                  ? t('game.tooltip.copy.copied', 'Copied')
+                                  : t('game.tooltip.copy.ip_port', 'Copy IP:port')
+                              }
+                            >
+                              <Text
+                                className={misc.ffmono}
+                                size="xs"
+                                style={{ cursor: 'pointer' }}
+                                onClick={copy}
+                              >
+                                {h.containerIp}:{h.containerPort}
+                              </Text>
+                            </Tooltip>
+                          )}
+                        </CopyButton>
+                        {h.containerGuid && (
+                          <Tooltip
+                            label={t('admin.tooltip.ad_ops.shell', 'Open a shell in this container')}
+                            withArrow
+                          >
+                            <ActionIcon
+                              size="sm"
+                              variant="subtle"
+                              color="blue"
+                              onClick={() => onShell(h.containerGuid!, h.title)}
+                            >
+                              <Icon path={mdiConsole} size={0.7} />
+                            </ActionIcon>
+                          </Tooltip>
+                        )}
+                      </Group>
+                    ) : (
+                      <Text size="xs" c="dimmed">
+                        {t('admin.content.ad_ops.koth.no_container', 'no container')}
+                      </Text>
+                    )}
+                  </Table.Td>
+                  <Table.Td>
+                    <Switch
+                      checked={h.isEnabled}
+                      disabled={busyHill === h.challengeId}
+                      onChange={() => onToggleHill(h)}
+                      aria-label="toggle-hill"
+                    />
+                  </Table.Td>
+                </Table.Tr>
+              )
+            })}
+          </Table.Tbody>
+        </Table>
+      </ScrollArea>
+
+      <Stack gap="xs">
+        <Group gap="xs" align="center">
+          <Title order={5}>
+            {t('admin.content.ad_ops.koth.leaderboard', 'Hold-points leaderboard')}
+          </Title>
+          <Badge variant="light" color="gray">
+            {t('admin.content.ad_ops.koth.points_per_tick', {
+              n: fmtPts(koth.holdPointsPerTick),
+              defaultValue: '{{n}} pt/tick',
+            })}
+          </Badge>
+        </Group>
+        {koth.teams.length === 0 || enabledHills.length === 0 ? (
+          <Text size="sm" c="dimmed">
+            {t('admin.content.ad_ops.koth.no_scores', 'No hold points scored yet.')}
+          </Text>
+        ) : (
+          <ScrollArea h="40vh" type="auto">
+            <Table verticalSpacing="xs" striped highlightOnHover withColumnBorders>
+              <Table.Thead className={tableClasses.thead}>
+                <Table.Tr>
+                  <Table.Th className={tableClasses.corner} w={40}>
+                    #
+                  </Table.Th>
+                  <Table.Th>{t('admin.content.ad_ops.column_team', 'Team')}</Table.Th>
+                  <Table.Th w={70}>{t('admin.content.ad_ops.koth.total', 'Total')}</Table.Th>
+                  {enabledHills.map((h) => (
+                    <Table.Th key={h.challengeId}>
+                      <Text truncate fw="bold" size="xs" maw="8rem">
+                        {h.title}
+                      </Text>
+                    </Table.Th>
+                  ))}
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {koth.teams.map((row) => (
+                  <Table.Tr key={row.participationId}>
+                    <Table.Td>
+                      <Text size="sm" c="dimmed">
+                        {row.rank}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td className={tableClasses.left}>
+                      <Text truncate fw="bold" size="sm" maw="12rem">
+                        {row.teamName}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Text fw="bold" size="sm">
+                        {fmtPts(row.total)}
+                      </Text>
+                    </Table.Td>
+                    {enabledHills.map((h) => {
+                      const cell = row.hills.find((x) => x.challengeId === h.challengeId)
+                      return (
+                        <Table.Td key={h.challengeId}>
+                          <Group gap={4} wrap="nowrap">
+                            <Text size="sm">{cell ? fmtPts(cell.points) : '0'}</Text>
+                            {cell?.isCurrentHolder && (
+                              <Icon path={mdiCrown} size={0.55} color="var(--mantine-color-yellow-6)" />
+                            )}
+                          </Group>
+                        </Table.Td>
+                      )
+                    })}
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </ScrollArea>
+        )}
+      </Stack>
+    </Stack>
+  )
+}
+
 const AdOps: FC = () => {
   const { id } = useParams()
   const numId = parseInt(id ?? '-1', 10)
   const { t } = useTranslation()
   const modals = useModals()
   const { adminAdState: state, error, mutate } = useAdminAdState(numId)
+  const { adminKothState: koth, error: kothError, mutate: mutateKoth } = useAdminKothState(numId)
   const [busy, setBusy] = useState(false)
+  const [busyHill, setBusyHill] = useState<number | null>(null)
+  // Which side of the console is showing. A&D vs KotH challenges are disjoint
+  // sets in a game; the switch only appears when both exist (see showViewSwitch).
+  const [view, setView] = useState<'ad' | 'koth'>('ad')
   // inspectorSid set ⇒ a throwaway inspector container we must destroy on close.
   const [execTarget, setExecTarget] = useState<{
     guid: string
@@ -828,7 +1051,30 @@ const AdOps: FC = () => {
   const now = useTicker()
   const isMobile = useIsMobile(1080)
 
-  const isLoading = !state && !error
+  // Wait for BOTH consoles' first load — the A&D state always resolves (even
+  // empty) for any game, and the KotH state resolves to an object too, so a
+  // KotH-only game doesn't flash the "no A&D challenges" empty state.
+  const isLoading = (!state && !error) || (koth === undefined && !kothError)
+
+  // A&D and KotH challenges are disjoint within a game. Derive which sides
+  // exist + which to render. showKoth is flash-free (doesn't wait for an
+  // effect): a KotH-only game renders KotH immediately even before any toggle.
+  const hasAd = (state?.challenges.length ?? 0) > 0
+  const hasKoth = (koth?.hills.length ?? 0) > 0
+  const showViewSwitch = hasAd && hasKoth
+  const showKoth = hasKoth && (view === 'koth' || !hasAd)
+
+  const toggleHill = async (hill: AdminKothHill) => {
+    setBusyHill(hill.challengeId)
+    try {
+      await api.edit.editAdToggleChallenge(numId, hill.challengeId)
+      await mutateKoth()
+    } catch (e) {
+      showErrorMsg(e, t)
+    } finally {
+      setBusyHill(null)
+    }
+  }
 
   const advanceRound = async () => {
     setBusy(true)
@@ -845,6 +1091,7 @@ const AdOps: FC = () => {
         }),
       })
       mutate()
+      mutateKoth()
     } catch (e) {
       showErrorMsg(e, t)
     } finally {
@@ -863,7 +1110,10 @@ const AdOps: FC = () => {
         message: t('admin.notification.ad_ops.ensure_queued.message',
           'Missing A&D containers will spin up shortly.'),
       })
-      setTimeout(() => mutate(), 3_000)
+      setTimeout(() => {
+        mutate()
+        mutateKoth()
+      }, 3_000)
     } catch (e) {
       showErrorMsg(e, t)
     } finally {
@@ -919,6 +1169,7 @@ const AdOps: FC = () => {
           : t('admin.notification.ad_ops.scoring_resumed', 'Scoring resumed.'),
       })
       mutate()
+      mutateKoth()
     } catch (e) {
       showErrorMsg(e, t)
     } finally {
@@ -953,18 +1204,18 @@ const AdOps: FC = () => {
     )
   }
 
-  if (!state || state.challenges.length === 0) {
+  if (!state || (!hasAd && !hasKoth)) {
     return (
       <WithGameEditTab>
         <Center h="40vh">
           <Stack align="center" gap="xs">
             <Icon path={mdiSwordCross} size={2.5} color="var(--mantine-color-dimmed)" />
             <Text fw="bold" c="dimmed">
-              {t('admin.content.ad_ops.empty.title', 'No A&D challenges in this game')}
+              {t('admin.content.ad_ops.empty.title', 'No A&D or KotH challenges in this game')}
             </Text>
             <Text size="sm" c="dimmed">
               {t('admin.content.ad_ops.empty.description',
-                'Add a challenge with type Attack & Defense to use this console.')}
+                'Add a challenge with type Attack & Defense or King of the Hill to use this console.')}
             </Text>
           </Stack>
         </Center>
@@ -1015,6 +1266,22 @@ const AdOps: FC = () => {
   const visibleTeams = state.teams.filter(
     (r) => debouncedSearch === '' || r.teamName.toLowerCase().includes(debouncedSearch.toLowerCase())
   )
+
+  // KotH equivalents for the header stats when the KotH view is active. Health
+  // is per-hill (one shared box), not per-(team × challenge).
+  const kothHills = koth?.hills ?? []
+  const kothEnabledHills = kothHills.filter((h) => h.isEnabled).length
+  const kothCounts = { Ok: 0, Mumble: 0, Offline: 0, InternalError: 0, unchecked: 0 }
+  kothHills.forEach((h) => {
+    const k = h.lastCheckStatus
+    if (k === 'Ok' || k === 'Mumble' || k === 'Offline' || k === 'InternalError') kothCounts[k]++
+    else kothCounts.unchecked++
+  })
+  // View-aware header values (A&D grid vs KotH hills).
+  const headerCounts = showKoth ? kothCounts : counts
+  const headerEnabled = showKoth ? kothEnabledHills : enabledChallenges
+  const headerTotal = showKoth ? kothHills.length : state.challenges.length
+  const tickSeconds = state.challenges[0]?.tickSeconds ?? koth?.tickSeconds ?? 60
 
   return (
     <WithGameEditTab>
@@ -1080,45 +1347,57 @@ const AdOps: FC = () => {
                 </Stack>
               </Group>
 
-              {/* Challenges enabled */}
+              {/* Challenges / hills enabled */}
               <Stack gap={2}>
                 <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-                  {t('admin.content.ad_ops.challenges_active', 'Challenges')}
+                  {showKoth
+                    ? t('admin.content.ad_ops.hills_active', 'Hills')
+                    : t('admin.content.ad_ops.challenges_active', 'Challenges')}
                 </Text>
                 <Text fw="bold" size="xl" lh={1}>
-                  {enabledChallenges}/{state.challenges.length}
+                  {headerEnabled}/{headerTotal}
                 </Text>
               </Stack>
 
-              {/* Flag cycle — game-global tick + lifetime */}
+              {/* Flag cycle (A&D) / hill refresh cadence (KotH) — game-global tick */}
               <Stack gap={2}>
                 <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-                  {t('admin.content.ad_ops.flag_cycle', 'Flag cycle')}
+                  {showKoth
+                    ? t('admin.content.ad_ops.hill_cycle', 'Hill cycle')
+                    : t('admin.content.ad_ops.flag_cycle', 'Flag cycle')}
                 </Text>
                 <Text fw={600} size="sm" lh={1.3}>
-                  {t('admin.content.ad_ops.tick_summary', {
-                    tick: state.challenges[0].tickSeconds,
-                    lifetime: state.challenges[0].flagLifetimeTicks,
-                    defaultValue: 'tick {{tick}}s · lifetime {{lifetime}} ticks',
-                  })}
+                  {showKoth
+                    ? t('admin.content.ad_ops.koth.tick_summary', {
+                        tick: tickSeconds,
+                        refresh: koth?.refreshTicks ?? 5,
+                        defaultValue: 'tick {{tick}}s · wipe every {{refresh}} ticks',
+                      })
+                    : t('admin.content.ad_ops.tick_summary', {
+                        tick: tickSeconds,
+                        lifetime: state.challenges[0]?.flagLifetimeTicks ?? 5,
+                        defaultValue: 'tick {{tick}}s · lifetime {{lifetime}} ticks',
+                      })}
                 </Text>
               </Stack>
 
-              {/* Fleet-wide service health */}
+              {/* Fleet-wide health — A&D services or KotH hills */}
               <Stack gap={4}>
                 <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-                  {t('admin.content.ad_ops.service_health', 'Service health')}
+                  {showKoth
+                    ? t('admin.content.ad_ops.hill_health', 'Hill health')
+                    : t('admin.content.ad_ops.service_health', 'Service health')}
                 </Text>
                 <Group gap="md" wrap="nowrap">
-                  <HealthChip icon={mdiCheckCircle} color="teal" count={counts.Ok} label="Ok" />
-                  <HealthChip icon={mdiAlertCircle} color="yellow" count={counts.Mumble} label="Mumble" />
-                  <HealthChip icon={mdiCloseCircle} color="red" count={counts.Offline} label="Offline" />
-                  <HealthChip icon={mdiHelpCircle} color="gray" count={counts.InternalError} label="Error" />
-                  {counts.unchecked > 0 && (
+                  <HealthChip icon={mdiCheckCircle} color="teal" count={headerCounts.Ok} label="Ok" />
+                  <HealthChip icon={mdiAlertCircle} color="yellow" count={headerCounts.Mumble} label="Mumble" />
+                  <HealthChip icon={mdiCloseCircle} color="red" count={headerCounts.Offline} label="Offline" />
+                  <HealthChip icon={mdiHelpCircle} color="gray" count={headerCounts.InternalError} label="Error" />
+                  {headerCounts.unchecked > 0 && (
                     <HealthChip
                       icon={mdiHelpCircle}
                       color="dark"
-                      count={counts.unchecked}
+                      count={headerCounts.unchecked}
                       label={t('admin.content.ad_ops.health_unchecked', 'Unchecked')}
                     />
                   )}
@@ -1132,7 +1411,10 @@ const AdOps: FC = () => {
                 variant="default"
                 size={isMobile ? 'xs' : 'sm'}
                 disabled={busy}
-                onClick={() => mutate()}
+                onClick={() => {
+                  mutate()
+                  mutateKoth()
+                }}
               >
                 {t('admin.button.ad_ops.refresh', 'Refresh')}
               </Button>
@@ -1175,27 +1457,56 @@ const AdOps: FC = () => {
         {/* Team × challenge grid */}
         <Paper p="md" withBorder radius="md">
           <Group justify="space-between" mb="sm" wrap="wrap" gap="sm">
-            <Group gap="xs" align="center">
-              <Title order={4}>{t('admin.content.ad_ops.grid_title', 'Team status')}</Title>
+            <Group gap="sm" align="center">
+              {showViewSwitch && (
+                <SegmentedControl
+                  size="xs"
+                  value={showKoth ? 'koth' : 'ad'}
+                  onChange={(v) => setView(v as 'ad' | 'koth')}
+                  data={[
+                    { value: 'ad', label: t('admin.content.ad_ops.view_ad', 'A&D') },
+                    { value: 'koth', label: t('admin.content.ad_ops.view_koth', 'KotH') },
+                  ]}
+                />
+              )}
+              <Title order={4}>
+                {showKoth
+                  ? t('admin.content.ad_ops.koth.grid_title', 'Hills')
+                  : t('admin.content.ad_ops.grid_title', 'Team status')}
+              </Title>
               <Badge variant="light" color="gray">
-                {t('admin.content.ad_ops.teams_count', {
-                  count: visibleTeams.length,
-                  defaultValue: '{{count}} teams',
-                })}
+                {showKoth
+                  ? t('admin.content.ad_ops.koth.hills_count', {
+                      count: kothHills.length,
+                      defaultValue: '{{count}} hills',
+                    })
+                  : t('admin.content.ad_ops.teams_count', {
+                      count: visibleTeams.length,
+                      defaultValue: '{{count}} teams',
+                    })}
               </Badge>
             </Group>
-            <TextInput
-              size="xs"
-              w={260}
-              maw="100%"
-              leftSection={<Icon path={mdiMagnify} size={0.8} />}
-              placeholder={t('admin.placeholder.ad_ops.search_team', 'Filter teams…')}
-              value={search}
-              onChange={(e) => setSearch(e.currentTarget.value)}
-            />
+            {!showKoth && (
+              <TextInput
+                size="xs"
+                w={260}
+                maw="100%"
+                leftSection={<Icon path={mdiMagnify} size={0.8} />}
+                placeholder={t('admin.placeholder.ad_ops.search_team', 'Filter teams…')}
+                value={search}
+                onChange={(e) => setSearch(e.currentTarget.value)}
+              />
+            )}
           </Group>
 
-          {state.teams.length === 0 ? (
+          {showKoth && koth ? (
+            <KothOpsPanel
+              koth={koth}
+              onShell={openShell}
+              onToggleHill={toggleHill}
+              busyHill={busyHill}
+            />
+          ) : state.teams.length === 0 ? (
             <Alert color="orange" icon={<Icon path={mdiAlertCircleOutline} size={1} />}>
               {t('admin.content.ad_ops.no_teams',
                 'No accepted teams yet. Once you accept teams from the participations page, their containers will spin up automatically.')}

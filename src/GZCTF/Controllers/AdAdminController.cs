@@ -32,6 +32,7 @@ public class AdAdminController(
     AppDbContext db,
     AdContainerManager adContainerManager,
     AdRoundService adRoundService,
+    IAdScoreboardRepository adScoreboard,
     CacheHelper cacheHelper,
     IBlobStorage blobStorage,
     UserManager<UserInfo> userManager,
@@ -188,6 +189,97 @@ public class AdAdminController(
     }
 
     /// <summary>
+    /// Operator view of the live King-of-the-Hill state: every hill (its shared
+    /// container, current king, and functional verdict) plus the hold-points
+    /// leaderboard. The KotH analogue of <see cref="State"/> — the AdOps console
+    /// toggles between the two. The shared round/scoring header still comes from
+    /// <see cref="State"/> (same engine), so it isn't repeated here.
+    /// </summary>
+    [RequireGameAdmin]
+    [HttpGet("Koth/State")]
+    [ProducesResponseType(typeof(AdminKothStateModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> KothState(int id, CancellationToken token)
+    {
+        var game = await db.Games.FirstOrDefaultAsync(g => g.Id == id, token);
+        if (game is null) return NotFound();
+
+        // All KotH hills — enabled AND disabled — so an organizer who toggled one
+        // off mid-event still sees it (and can flip it back from this console).
+        var hills = await db.GameChallenges
+            .Where(c => c.GameId == id && c.Type == ChallengeType.KingOfTheHill)
+            .OrderBy(c => c.Category).ThenBy(c => c.Id)
+            .Select(c => new { c.Id, c.Title, c.IsEnabled })
+            .ToListAsync(token);
+
+        if (hills.Count == 0)
+            return Ok(new AdminKothStateModel
+            {
+                RefreshTicks = game.KothRefreshTicks ?? 5,
+                HoldPointsPerTick = game.KothHoldPointsPerTick ?? 1.0,
+                TickSeconds = game.AdTickSeconds ?? 60
+            });
+
+        var hillIds = hills.Select(h => h.Id).ToList();
+
+        // The shared hill container (one per challenge), for IP:port + shell access.
+        var targets = (await db.KothTargets
+                .Where(t => t.GameId == id && hillIds.Contains(t.ChallengeId))
+                .Include(t => t.Container)
+                .ToListAsync(token))
+            .ToDictionary(t => t.ChallengeId);
+
+        // Latest persisted control result per hill → current king + functional verdict.
+        var latestByHill = new Dictionary<int, (int? Holder, AdCheckStatus? Status)>();
+        foreach (var hid in hillIds)
+        {
+            var row = await db.KothControlResults
+                .Where(r => r.ChallengeId == hid)
+                .OrderByDescending(r => r.AdRoundId)
+                .Select(r => new { r.ControllingParticipationId, r.Status })
+                .FirstOrDefaultAsync(token);
+            latestByHill[hid] = (row?.ControllingParticipationId, (AdCheckStatus?)row?.Status);
+        }
+
+        var teamNames = await db.Participations
+            .Where(p => p.GameId == id && p.Status == ParticipationStatus.Accepted)
+            .Include(p => p.Team)
+            .ToDictionaryAsync(p => p.Id, p => p.Team.Name, token);
+
+        var hillModels = hills.Select(h =>
+        {
+            targets.TryGetValue(h.Id, out var tgt);
+            var (holder, status) = latestByHill.GetValueOrDefault(h.Id);
+            return new AdminKothHillModel
+            {
+                ChallengeId = h.Id,
+                Title = h.Title,
+                IsEnabled = h.IsEnabled,
+                ContainerGuid = tgt?.ContainerId,
+                ContainerIp = tgt?.Container?.IP,
+                ContainerPort = tgt?.Container?.Port,
+                LastRefreshRound = tgt?.LastRefreshRound ?? 0,
+                LastCheckStatus = status?.ToString(),
+                CurrentHolderParticipationId = holder,
+                CurrentHolderTeamName = holder is { } hh ? teamNames.GetValueOrDefault(hh) : null
+            };
+        }).ToList();
+
+        // Leaderboard: reuse the cached KotH scoreboard (live view, cutoff=null).
+        // Safe here because the endpoint is already [RequireGameAdmin] — unlike the
+        // player scoreboard endpoint, which requires accepted participation.
+        var board = await adScoreboard.GetKothScoreboardAsync(id, null, token);
+
+        return Ok(new AdminKothStateModel
+        {
+            RefreshTicks = game.KothRefreshTicks ?? 5,
+            HoldPointsPerTick = game.KothHoldPointsPerTick ?? 1.0,
+            TickSeconds = game.AdTickSeconds ?? 60,
+            Hills = hillModels,
+            Teams = board.Teams
+        });
+    }
+
+    /// <summary>
     /// Toggle a single A&amp;D challenge enabled/disabled mid-event. Disabled =
     /// checker stops, no flag rotation, no SLA scoring; containers stay up so
     /// teams can still patch.
@@ -200,14 +292,16 @@ public class AdAdminController(
         var c = await db.GameChallenges
             .FirstOrDefaultAsync(c => c.Id == challengeId && c.GameId == id, token);
         if (c is null) return NotFound();
-        if (c.Type != ChallengeType.AttackDefense)
-            return BadRequest(new RequestResponse("Not an A&D challenge"));
+        // Both A&D and KotH ride the AD engine and have a meaningful enabled toggle
+        // (KotH disable is non-destructive — see KothControlResult docs), so allow both.
+        if (!c.Type.UsesAdEngine())
+            return BadRequest(new RequestResponse("Not an A&D / KotH challenge"));
 
         c.IsEnabled = !c.IsEnabled;
         await db.SaveChangesAsync(token);
 
         logger.SystemLog(
-            $"A&D challenge toggled: game={id} challenge={challengeId} enabled={c.IsEnabled}",
+            $"AD-engine challenge toggled: game={id} challenge={challengeId} type={c.Type} enabled={c.IsEnabled}",
             TaskStatus.Success, LogLevel.Information);
 
         return Ok(new { c.IsEnabled });

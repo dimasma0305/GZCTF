@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using GZCTF.Models.Response.Admin;
 using GZCTF.Utils;
 
 namespace GZCTF.Models.Request.Admin;
@@ -22,6 +23,55 @@ public class AdGameStateModel
     public DateTimeOffset? ScoringPausedAt { get; set; }
     public List<AdChallengeStateModel> Challenges { get; set; } = [];
     public List<AdTeamRowModel> Teams { get; set; } = [];
+}
+
+/// <summary>
+/// Operator console state for the King-of-the-Hill side of a game — the KotH
+/// analogue of <see cref="AdGameStateModel"/>. Unlike A&amp;D (one container per
+/// team), each hill is ONE shared container, so the shape is per-hill ops rows
+/// plus a hold-points leaderboard rather than a team×challenge grid. The
+/// round/scoring header is shared with A&amp;D (same engine), so it isn't
+/// duplicated here — the AdOps page reads it from <see cref="AdGameStateModel"/>.
+/// </summary>
+public class AdminKothStateModel
+{
+    /// <summary>Game-level hill reset cadence (<c>Game.KothRefreshTicks</c>) — surfaced so the console can show "wipes every N ticks".</summary>
+    public int RefreshTicks { get; set; }
+
+    /// <summary>Hold points credited per Ok tick to the controller (<c>Game.KothHoldPointsPerTick</c>).</summary>
+    public double HoldPointsPerTick { get; set; }
+
+    /// <summary>Game tick length in seconds (shared with A&amp;D).</summary>
+    public int TickSeconds { get; set; }
+
+    /// <summary>Every KotH hill in the game (enabled AND disabled, so off hills still show).</summary>
+    public List<AdminKothHillModel> Hills { get; set; } = [];
+
+    /// <summary>Hold-points leaderboard (reuses the player KotH scoreboard rows), ranked by total.</summary>
+    public List<KothTeamScoreRow> Teams { get; set; } = [];
+}
+
+/// <summary>One KotH hill in the operator console: the shared container + its current king + functional verdict.</summary>
+public class AdminKothHillModel
+{
+    public int ChallengeId { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public bool IsEnabled { get; set; }
+
+    /// <summary>The shared hill container GUID — target for the in-browser shell. Null during a reset/refresh or before first launch.</summary>
+    public Guid? ContainerGuid { get; set; }
+    public string? ContainerIp { get; set; }
+    public int? ContainerPort { get; set; }
+
+    /// <summary>Latest functional verdict for the hill (shared, not per-team) — Ok / Mumble / Offline / InternalError / null if never checked.</summary>
+    public string? LastCheckStatus { get; set; }
+
+    /// <summary>Team currently holding the hill (their token sat in the marker last tick). Null = no valid king.</summary>
+    public string? CurrentHolderTeamName { get; set; }
+    public int? CurrentHolderParticipationId { get; set; }
+
+    /// <summary>Round at which the hill was last reset to its base image. 0 = never.</summary>
+    public int LastRefreshRound { get; set; }
 }
 
 public class AdChallengeStateModel

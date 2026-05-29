@@ -230,3 +230,46 @@ export const useAdminAdState = (numId: number) => {
   })
   return { adminAdState, error, mutate }
 }
+
+/** One KotH hill in the operator console — the shared container + its current king + verdict. */
+export interface AdminKothHill {
+  challengeId: number
+  title: string
+  isEnabled: boolean
+  containerGuid: string | null
+  containerIp: string | null
+  containerPort: number | null
+  lastCheckStatus: string | null
+  currentHolderTeamName: string | null
+  currentHolderParticipationId: number | null
+  lastRefreshRound: number
+}
+export interface AdminKothStateModel {
+  refreshTicks: number
+  holdPointsPerTick: number
+  tickSeconds: number
+  hills: AdminKothHill[]
+  teams: KothTeamScoreRow[]
+}
+
+/**
+ * KotH admin — operator console state poll (the KotH analogue of
+ * {@link useAdminAdState}). Hits the new /api/edit/games/{id}/ad/koth/state
+ * endpoint directly via useSWR (same pattern as {@link useKothScoreboard} —
+ * not yet in the auto-generated SDK). Always resolves to an object (empty
+ * hills for games with no KotH challenges), so callers can branch on
+ * `hills.length` without a separate loading guard.
+ */
+export const useAdminKothState = (numId: number) => {
+  const { game } = useGame(numId)
+  const { status } = getGameStatus(game)
+  const { data: adminKothState, error, mutate } = useSWR<AdminKothStateModel>(
+    numId > 0 ? `/api/edit/games/${numId}/ad/koth/state` : null,
+    {
+      ...OnceSWRConfig,
+      shouldRetryOnError: false,
+      refreshInterval: status === GameStatus.OnGoing ? 5 * 1000 : 0,
+    }
+  )
+  return { adminKothState, error, mutate }
+}
