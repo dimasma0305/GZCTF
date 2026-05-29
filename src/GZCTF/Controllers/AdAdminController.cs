@@ -7,6 +7,7 @@ using GZCTF.Models.Internal;
 using GZCTF.Models.Request.Admin;
 using GZCTF.Repositories.Interface;
 using GZCTF.Services;
+using GZCTF.Services.Cache;
 using GZCTF.Services.Container.Manager;
 using GZCTF.Storage.Interface;
 using GZCTF.Utils;
@@ -31,6 +32,7 @@ public class AdAdminController(
     AppDbContext db,
     AdContainerManager adContainerManager,
     AdRoundService adRoundService,
+    CacheHelper cacheHelper,
     IBlobStorage blobStorage,
     UserManager<UserInfo> userManager,
     IContainerManager containerService,
@@ -346,6 +348,22 @@ public class AdAdminController(
         }
 
         await db.SaveChangesAsync(token);
+
+        // The override moved an already-scored tick — invalidate the cached boards
+        // so the correction is actually visible. Nothing else regenerates them
+        // while the game is paused (the usual time for a ruling) or after it ends,
+        // so without this the public board stays stale vs the corrected DB score.
+        // FlushAdScoreboardCache skips the frozen variants by design, so if the
+        // overridden tick predates the freeze, drop those snapshots too.
+        await cacheHelper.FlushAdScoreboardCache(id, token);
+        var freeze = await db.Games.Where(g => g.Id == id)
+            .Select(g => g.FreezeTimeUtc).FirstOrDefaultAsync(token);
+        if (freeze is not null && check.CheckedAt <= freeze)
+        {
+            await cacheHelper.RemoveAsync(CacheKey.AdScoreBoardFrozen(id), token);
+            await cacheHelper.RemoveAsync(CacheKey.AdTimelineFrozen(id), token);
+        }
+
         logger.SystemLog(
             $"A&D check overridden: game={id} check={checkId} {previous} → {model.NewStatus}",
             TaskStatus.Success, LogLevel.Information);

@@ -151,7 +151,7 @@ public class ScoringSection
     /// <summary>
     /// Difficulty coefficient
     /// </summary>
-    [Range(0.0, double.MaxValue, ErrorMessage = "Difficulty coefficient must be non-negative")]
+    [Range(0.01, double.MaxValue, ErrorMessage = "Difficulty coefficient must be at least 0.01")]
     public double Difficulty { get; set; } = 5.0;
 }
 

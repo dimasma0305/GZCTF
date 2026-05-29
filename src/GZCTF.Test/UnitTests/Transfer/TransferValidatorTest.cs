@@ -443,7 +443,7 @@ public class TransferValidatorTest
 
         var ex = Assert.Throws<InvalidOperationException>(() =>
             TransferValidator.ValidateRecursive(challenge, "Challenge"));
-        Assert.Contains("Difficulty coefficient must be non-negative", ex.Message);
+        Assert.Contains("Difficulty coefficient must be at least 0.01", ex.Message);
     }
 
     [Fact]
