@@ -447,6 +447,41 @@ public class TransferValidatorTest
     }
 
     [Fact]
+    public void ValidateChallenge_ZeroDifficulty_ShouldThrow()
+    {
+        // Round-3 scoring-audit gap: the ZIP game-import path must reject
+        // difficulty 0.0 too — it collapses the dynamic-decay curve — matching the
+        // API PUT + YAML import floor of 0.01.
+        var challenge = new TransferChallenge
+        {
+            Title = "Test Challenge",
+            Category = ChallengeCategory.Web,
+            Type = ChallengeType.StaticAttachment,
+            Scoring = new ScoringSection { Original = 500, MinRate = 0.25, Difficulty = 0.0 }
+        };
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            TransferValidator.ValidateRecursive(challenge, "Challenge"));
+        Assert.Contains("Difficulty coefficient must be at least 0.01", ex.Message);
+    }
+
+    [Fact]
+    public void ValidateChallenge_MinDifficulty_ShouldPass()
+    {
+        var challenge = new TransferChallenge
+        {
+            Title = "Test Challenge",
+            Category = ChallengeCategory.Web,
+            Type = ChallengeType.StaticAttachment,
+            Scoring = new ScoringSection { Original = 500, MinRate = 0.25, Difficulty = 0.01 },
+            Flags = new FlagsSection { Static = [new() { Value = "flag{test}" }] }
+        };
+
+        // 0.01 is the enforced floor — must pass.
+        TransferValidator.ValidateRecursive(challenge, "Challenge");
+    }
+
+    [Fact]
     public void ValidateChallenge_NegativeSubmissionLimit_ShouldThrow()
     {
         var challenge = new TransferChallenge
