@@ -467,11 +467,25 @@ public sealed class AdContainerManager(
                 await docker.Images.SaveImageAsync(imageRef, token);
 
             var blobKey = $"ad-snapshots/{ts.Participation.GameId}/{ts.ParticipationId}-{ts.ChallengeId}.tar.gz";
-            using var ms = new MemoryStream();
-            await using (var gz = new GZipStream(ms, CompressionLevel.Fastest, leaveOpen: true))
-                await imageStream.CopyToAsync(gz, token);
-            ms.Position = 0;
-            await blobStorage.WriteAsync(blobKey, ms, append: false, cancellationToken: token);
+            // Stream the gzipped image to a temp FILE, then upload from disk — buffering the
+            // whole (potentially multi-hundred-MB) tarball in a MemoryStream risked OOM at
+            // end-of-game when snapshotting large A&D images.
+            var tmpPath = Path.Combine(Path.GetTempPath(), $"ad-snapshot-{ts.Id}-{Guid.NewGuid():N}.tar.gz");
+            try
+            {
+                await using (var tmp = new FileStream(tmpPath, FileMode.Create, FileAccess.Write,
+                                 FileShare.None, 81920, useAsync: true))
+                await using (var gz = new GZipStream(tmp, CompressionLevel.Fastest, leaveOpen: true))
+                    await imageStream.CopyToAsync(gz, token);
+
+                await using var upload = new FileStream(tmpPath, FileMode.Open, FileAccess.Read,
+                    FileShare.Read, 81920, useAsync: true);
+                await blobStorage.WriteAsync(blobKey, upload, append: false, cancellationToken: token);
+            }
+            finally
+            {
+                try { File.Delete(tmpPath); } catch { /* best-effort temp cleanup */ }
+            }
 
             // Clean up the local image — the tarball is the deliverable.
             try
