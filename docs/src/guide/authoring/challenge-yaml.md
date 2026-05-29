@@ -12,7 +12,7 @@ The file may be named either `challenge.yaml` or `challenge.yml`. The importer t
 
 - **Keys are camelCase.** The deserializer is built with `CamelCaseNamingConvention`. A key like `container_image` (snake_case) is silently dropped — use `containerImage`. This applies to nested blocks too (`memoryLimit`, `cpuCount`, `checkerImage`, `allowEgress`, …).
 - **Unknown keys are ignored, not errors.** The parser runs with `IgnoreUnmatchedProperties()`, so a typo or an upstream gzcli field we don't map simply has no effect. There is no validation warning for an unrecognized key — double-check spelling against the tables below.
-- **Some keys are intentionally ignored even when recognized.** `value:` and `visible:` are parsed-but-discarded (see below). They exist in templates only so the file round-trips with gzcli.
+- **Some template keys have no effect.** `value:` and `visible:` are not fields the importer maps — like any unrecognized key they are silently dropped by `IgnoreUnmatchedProperties()`. They exist in templates only so the file round-trips with gzcli; scoring and visibility stay admin-controlled.
 - **A missing `containerImage` triggers an auto-build.** For any container-type challenge, if `container.containerImage` is omitted (or is a gzcli template placeholder like `{{.slug}}:latest`), the platform looks for `./src/Dockerfile`, then `./Dockerfile`, and builds it. See [Auto-build behavior](#auto-build-behavior).
 
 ## Top-level keys
@@ -40,7 +40,7 @@ These keys sit at the root of `challenge.yml`.
 | `ad` | block | A&D / KotH engine settings — see [The `ad:` block](#the-ad-block). | none |
 
 :::warning
-`value:` is read by the parser but **never applied**. Scoring (`OriginalScore`) is admin-controlled in the UI or the admin scoring API. Putting `value: 500` in the file does nothing — see [Scoring](/guide/features/scoring). Likewise `visible:` is ignored; only an admin flips `IsEnabled`.
+`value:` is not a mapped field — it is silently ignored like any unknown key, so it **never affects** `OriginalScore`. Scoring is admin-controlled in the UI or the admin scoring API. Putting `value: 500` in the file does nothing — see [Scoring](/guide/features/scoring). Likewise `visible:` is ignored; only an admin flips `IsEnabled`.
 :::
 
 ### The `type` enum
@@ -85,7 +85,7 @@ container:
   storageLimit: 256
   # containerImage: ghcr.io/your-org/web-chal:latest   # or omit to auto-build ./src/Dockerfile
   # flagTemplate: "flag{[GUID]}"
-  # networkMode: Bridge
+  # networkMode: Isolated   # one of: Open | Isolated | Custom
   # enableTrafficCapture: false
 ```
 
@@ -134,7 +134,7 @@ ad:
 :::
 
 :::info
-**Event-wide** A&D policy is NOT set here. Tick length, flag lifetime, warmup, reset cooldown, snapshot toggles, and the checker timing fractions (`putflagWindowFraction`, `getflagWindowFraction`, `minGracePeriodSeconds`) are configured **once per event** in the `ad:` block of the `.gzevent` manifest (or admin game settings), because rounds span the whole game and every service shares one tick. KotH hold scoring (`KothHoldPointsPerTick`, `KothRefreshTicks`) is currently fixed at defaults on the `Game` row. Putting any of these on a single challenge has no effect. See [appsettings / config](/config/appsettings).
+**Event-wide** A&D policy is NOT set here. Tick length, flag lifetime, warmup, reset cooldown, snapshot toggles, and the checker timing fractions (`getflagWindowFraction`, `minGracePeriodSeconds`) are configured **once per event** in the `ad:` block of the `.gzevent` manifest (or admin game settings), because rounds span the whole game and every service shares one tick. KotH hold scoring (`KothHoldPointsPerTick`, `KothRefreshTicks`) is currently fixed at defaults on the `Game` row. Putting any of these on a single challenge has no effect. See [appsettings / config](/config/appsettings).
 :::
 
 ## Complete example: Attack & Defense

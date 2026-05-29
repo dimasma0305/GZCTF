@@ -27,7 +27,7 @@ The platform decides the king by reading one file from the hill container each t
 
 ### How the platform reads and matches
 
-Each tick the checker reads the raw bytes of `/koth/king` straight from the container filesystem (via the Docker archive API, or `exec` on Kubernetes — no shell/coreutils required in the image), then:
+Each tick the checker reads the raw bytes of `/koth/king` straight from the container filesystem. On Docker this uses the daemon's tar archive API (no shell/coreutils needed in the image); on Kubernetes it execs a small `sh -c` reader, so a K8s hill image must contain `sh`, `head`, `base64`, and `tr`. Then:
 
 ```text
 marker = UTF8(bytes(/koth/king)).Trim()
@@ -41,7 +41,7 @@ if marker is non-empty:
 So the match is **exact** (after trimming surrounding whitespace) against the token minted for *this* round. A token from a previous round will not match — it has rotated. An empty or absent file means "no controller this tick".
 
 :::info
-The read is exact-byte and shell-free, so your hill image does **not** need `cat`, `sh`, or any coreutils. Just make `/koth/king` writable through whatever vulnerability the challenge exposes.
+Under the **Docker** provider the read is exact-byte and shell-free — your hill image needs no `cat`, `sh`, or coreutils to be read. Under **Kubernetes** the platform reads the marker with `sh -c 'head -c N /koth/king | base64 | tr ...'` exec'd inside the hill container, so on K8s the image **must** contain `sh`, `head`, `base64`, and `tr`; otherwise the read fails and no controller is recorded that tick. Either way, just make `/koth/king` writable through whatever vulnerability the challenge exposes.
 :::
 
 ## Getting your control token
@@ -100,7 +100,7 @@ Returns the last persisted verdict so you can confirm a plant without polling th
 | `round` | Round the last result was scored for |
 | `holderParticipationId` / `holderTeamName` | Who the platform currently records as king |
 | `isYou` | True when your team is the recorded holder |
-| `status` | Last functional verdict on the hill: `Ok` / `Mumble` / `Offline` |
+| `status` | Last functional verdict on the hill: `Ok` / `Mumble` / `Offline` / `InternalError` (or `null` until the first check is scored) |
 | `checkedAt` | When that verdict was taken |
 | `lastRefreshRound` | The round the hill was last wiped (see refresh below) |
 

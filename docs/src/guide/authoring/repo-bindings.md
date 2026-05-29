@@ -6,9 +6,9 @@ How organizers get challenges onto the platform — by hand for a one-off, or as
 If you are authoring the challenges themselves, start with [Challenge YAML](/guide/authoring/challenge-yaml) and the [Templates](/guide/authoring/templates) — this page assumes you already have `challenge.yml` files in hand and want to get them imported at scale.
 :::
 
-## The four import paths
+## The five import paths
 
-There are four ways a challenge (or a whole game) reaches the platform. They differ in **who can call them**, **whether the result is auto-approved or lands in a review queue**, and **whether it's a one-shot or a continuous sync**.
+There are five ways a challenge (or a whole game) reaches the platform — four one-shot endpoints plus the continuous repo binding. They differ in **who can call them**, **whether the result is auto-approved or lands in a review queue**, and **whether it's a one-shot or a continuous sync**.
 
 | Path | Endpoint | Who | Approval | Shape |
 |---|---|---|---|---|

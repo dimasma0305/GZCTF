@@ -149,7 +149,7 @@ Content-Type: application/json
 { "publicKey": "ssh-ed25519 AAAAC3Nza... alice@laptop" }
 ```
 
-The key is parsed and validated; only `ssh-ed25519`, `ssh-rsa`, and `ssh-ecdsa-*` algorithms are accepted, and the SHA256 fingerprint is computed and stored. Returns an `AdSshKeyInfoModel`.
+The key is parsed and validated; only `ssh-ed25519`, `ssh-rsa`, and the ECDSA algorithms `ecdsa-sha2-nistp256` / `ecdsa-sha2-nistp384` / `ecdsa-sha2-nistp521` are accepted, and the SHA256 fingerprint is computed and stored. Returns an `AdSshKeyInfoModel`.
 
 **2. Have the platform generate one (ed25519):**
 

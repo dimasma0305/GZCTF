@@ -89,8 +89,8 @@ Each row records the round it was captured in (`AdRoundId`), `CapturedAt`, and t
 
 A frequent point of confusion: **restarting an A&D container does not preserve its filesystem.** There is one restart path, `RestartContainerAsync`, and it always **destroys the container and recreates it from the same challenge image** — the box reverts to baseline and gets a new IP. It backs both:
 
-- **Player self-reset** — `POST /api/ad/games/{id}/Services/{adTeamServiceId}/Reset`. Gated by the per-challenge `AdAllowSelfReset` flag, the game-wide `AdResetCooldownMinutes` cooldown, and the game window (only while running).
-- **Operator force-restart** — `POST /api/ad/games/{id}/Services/{adTeamServiceId}/Restart` (game admin). Bypasses the player cooldown — for when a team's box is wedged and they can't recover it themselves.
+- **Player self-reset** — `POST /api/Game/{id}/Ad/Services/{adTeamServiceId}/Reset`. Gated by the per-challenge `AdAllowSelfReset` flag, the game-wide `AdResetCooldownMinutes` cooldown, and the game window (only while running).
+- **Operator force-restart** — `POST /api/edit/games/{id}/ad/Services/{adTeamServiceId}/Restart` (game admin). Bypasses the player cooldown — for when a team's box is wedged and they can't recover it themselves.
 
 :::info There is no "keep the filesystem" restart
 Resetting/restarting reverts the box to the image; the team's patches are gone. The *only* thing that survives a wiped container is what was already captured into a snapshot. The end-of-game tarball captures the box's final state at teardown; the per-round manifests capture the timeline up to that point. If you need a team's mid-game state preserved, it has to be in a manifest before the reset — the live `docker diff` is computed fresh, so once the layer is gone, so is the evidence.
@@ -105,7 +105,7 @@ Provider note: on K8s a reset/restart still destroys and recreates the pod from 
 Players can pull **their own team's** end-of-game tarball, but only when all of these hold:
 
 ```text
-GET /api/ad/games/{id}/Services/{adTeamServiceId}/Snapshot   (RequireUser)
+GET /api/Game/{id}/Ad/Services/{adTeamServiceId}/Snapshot   (RequireUser)
 ```
 
 - The caller is a member of the team that owns the service (else `403`).
@@ -119,7 +119,7 @@ The response is the gzipped tarball as `application/gzip`, filename `ad-snapshot
 
 ### Admin download and inspection (any team)
 
-Game admins are not team-scoped — they can pull any team's snapshot and inspect changes:
+Game admins are not team-scoped — they can pull any team's snapshot and inspect changes. The admin endpoints live under `/api/edit/games/{id}/ad/…` (where `…` below stands for that prefix):
 
 | Endpoint | Purpose |
 |----------|---------|
@@ -138,8 +138,8 @@ Retention is governed per game by **`AdSnapshotRetentionDays`**:
 
 | Value | Meaning |
 |-------|---------|
-| `null` (default) | Keep indefinitely — operators opt in to expiration explicitly |
-| positive integer `N` | Retain for `N` days after game end |
+| `null` (default) | Keep indefinitely |
+| positive integer `N` | *Intended:* retain for `N` days after game end. **Not yet enforced** — the value is persisted and round-trips through export/import, but no cleanup job currently reads it to delete expired tarballs, so storage must be reclaimed manually. |
 
 ```csharp
 // Game.cs
@@ -150,19 +150,19 @@ public int? AdSnapshotRetentionDays { get; set; }            // null = keep fore
 Both settings are part of the game definition: they round-trip through game export/import and can be set in a `.gzevent` manifest (`SnapshotRetentionDays`) for repo-bound games, or edited in the admin game-info UI.
 
 :::tip Set retention before the game ends
-`AdAllowSnapshotDownload` is read at teardown to decide whether the tarball is even created — so toggle it before the game ends, not after. `AdSnapshotRetentionDays` only affects how long an already-captured tarball is kept; leaving it `null` keeps your forensic record around for as long as you need it.
+`AdAllowSnapshotDownload` is read at teardown to decide whether the tarball is even created — so toggle it before the game ends, not after. `AdSnapshotRetentionDays` is a stored policy value only — as of now no cleanup job reads it, so tarballs are never auto-expired regardless of the setting; it round-trips through export/import but does not yet affect tarball lifetime, and your forensic record stays until you remove it manually.
 :::
 
 :::warning "retained-out" 404s
-If a download returns `"Snapshot blob is missing — may have been retained-out"`, the DB still has a `SnapshotBlobKey` but the underlying blob is gone (expired per the retention policy, or manually removed from storage). The change manifests and `SnapshotChanges` in the DB are unaffected — only the downloadable tarball is gone.
+If a download returns `"Snapshot blob is missing — may have been retained-out"`, the DB still has a `SnapshotBlobKey` but the underlying blob is gone from storage (manually or externally removed — note `AdSnapshotRetentionDays` is recorded but not yet enforced by any cleanup job, so there is no automatic expiry). The change manifests and `SnapshotChanges` in the DB are unaffected — only the downloadable tarball is gone.
 :::
 
 ## Quick reference
 
 - **Capture (tarball):** automatic, once, at game end — Docker only, gated by `AdAllowSnapshotDownload`.
 - **Capture (manifests):** automatic, every 30s poll / once-per-round-per-service, deduped — Docker + K8s.
-- **Player download:** `GET /api/ad/games/{id}/Services/{adTeamServiceId}/Snapshot` — own team, post-game, gated.
-- **Admin:** same path plus `/Snapshot/Changes`, `/Snapshots`, `/SnapshotDiff` — any team.
+- **Player download:** `GET /api/Game/{id}/Ad/Services/{adTeamServiceId}/Snapshot` — own team, post-game, gated.
+- **Admin:** `GET /api/edit/games/{id}/ad/Services/{adTeamServiceId}/Snapshot` plus `…/Snapshot/Changes`, `…/Snapshots`, `…/SnapshotDiff` — any team.
 - **Restart/reset:** always reverts the box to its image; only snapshots survive a wipe.
 
 Related: [/guide/features/attack-defense](/guide/features/attack-defense) · [/config/appsettings](/config/appsettings)

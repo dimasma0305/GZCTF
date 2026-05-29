@@ -29,7 +29,7 @@ The sender (`SendWebhookService`) has these characteristics:
 |---|---|---|
 | HTTP method | `POST` | `WebhookClient.PostAsync` |
 | Content type | `application/json; charset=utf-8` | `StringContent(..., "application/json")` |
-| Allowed URL schemes | `http` and `https` only | `SanitizeMessage` URL guard |
+| Allowed URL schemes | `http` and `https` only | `SendAsync` URL guard (`Uri.TryCreate` + `Scheme` check) |
 | Request timeout | 10 seconds | `HttpClient.Timeout` |
 | JSON casing | camelCase, null fields omitted | `JsonNamingPolicy.CamelCase`, `JsonIgnoreCondition.WhenWritingNull` |
 | Retries | none | single `PostAsync` per event |

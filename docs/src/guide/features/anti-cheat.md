@@ -23,7 +23,7 @@ Task AddSuspicion(
 
 `SuspicionService.AddSuspicion` does three things:
 
-1. Looks up the rule weight. It reads a `SuspicionRule` row matching `ruleCode`; if none exists it falls back to `SuspicionType.GetDefaultWeight(ruleCode)` (and ultimately to `10` for an unknown code).
+1. Looks up the rule weight. It reads a `SuspicionRule` row matching `ruleCode`; if none exists it falls back to `SuspicionService.GetDefaultWeight(ruleCode)` (which looks up `SuspicionType.Defaults`, ultimately returning `10` for an unknown code).
 2. **De-duplicates.** If a `SuspicionEvent` with the same `ParticipationId`, `Type`, and `Details` already exists, it returns without writing anything. This is why re-running the report does not inflate scores for already-known events.
 3. Inserts the `SuspicionEvent` and adds its `ScoreDelta` (the weight) to `Participation.SuspicionScore`.
 
@@ -41,7 +41,7 @@ Weights are defined in `SuspicionType.Defaults`. A selection relevant to this pa
 | `DelayedSolveSubmission` | 40 | Submitter opened the container long before they submitted |
 | `SubmitterNeverAccessedContainer` | 30 | A teammate, not the submitter, opened the container |
 | `AccessIpMismatchAtSubmission` | 30 | Submitter's IP at submit time matches no IP they used to access the container |
-| `SubnetOverlap` | 5 | Teams share the same /24 — soft amplifier |
+| `SubnetOverlap` | 5 | Teams share the same /28 (16-address block) — soft amplifier |
 
 Signals are graded into three tiers in `SuspicionType.cs`:
 
@@ -71,8 +71,8 @@ If the download IP is parseable but is not in the team's own known-IP set and no
 ### `ClusteredRegistration` — shared first-login IP + tight registration window
 Using each user's **first-ever** `AccountController` log IP (more accurate than `UserInfo.IP`, which is the last-login IP), accounts from multiple teams that share a registration IP **and registered within 48 hours** are flagged. Groups where more than 4 teams share the IP are suppressed (large shared NAT, e.g. a university).
 
-### `SubnetOverlap` — shared /24 (soft)
-Teams whose IPs fall in the same /24 are flagged with the soft `SubnetOverlap` signal (weight 5). Groups larger than 4 teams are suppressed. Computed by `GetSubnet28` (the masked-octet helper) and only meaningful when corroborated by a harder signal.
+### `SubnetOverlap` — shared /28 (soft)
+Teams whose IPs fall in the same /28 are flagged with the soft `SubnetOverlap` signal (weight 5). Groups larger than 4 teams are suppressed. Computed by `GetSubnet28` (masks the bottom 4 bits of the final octet, 255.255.255.240) and only meaningful when corroborated by a harder signal.
 
 ### `SessionConcurrency` — one account, two distant networks at once
 The same username appearing from two IPs in **different /20 subnets** within a 10-minute window, **≥3 times**, is flagged. The `SameSubnet20` helper suppresses same-ISP-pool churn (mobile/DHCP), and the ≥3-occurrence requirement filters one-off VPN switches.

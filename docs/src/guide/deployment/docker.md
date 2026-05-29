@@ -293,7 +293,7 @@ Once the stack is up:
 - WireGuard: UDP `<host>:51820`
 
 :::tip
-The very first registered user becomes the platform administrator. Register immediately after first boot, before exposing the host, to claim the admin account.
+Admin is not granted by registration order. The platform seeds a fixed `Admin` account at first boot when `ADMIN_PASSWORD` (e.g. `GZCTF_ADMIN_PASSWORD`) is set — log in as `Admin` with that password. Self-registered users are created as ordinary Users in production. (Note: this compose pins `ASPNETCORE_ENVIRONMENT=Development`, which both auto-seeds an `Admin`/`Admin@2022` account and makes every self-registered user an Admin — set it to `Production` for a real event.)
 :::
 
 ## Viewing logs

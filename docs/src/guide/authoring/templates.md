@@ -139,15 +139,13 @@ ad:
   # checkerImage: "ghcr.io/your-org/attack-defense-checker:latest"
   allowEgress: true         # default true; false = no outbound at all
   allowSelfReset: true      # default true; can teams self-reset this container?
-  # Checker timing (anti-fingerprinting), defaults shown:
-  # putflagWindowFraction: 0.4
-  # getflagWindowFraction: 0.5
-  # minGracePeriodSeconds: 3
+  # Checker timing (getflagWindowFraction default 0.5, minGracePeriodSeconds
+  # default 3) is EVENT-WIDE — set it in the .gzevent manifest, not here.
 ```
 
 Key points specific to A&D:
 
-- **`/flag`** — you do **not** author flags for A&D. The platform plants a fresh per-team flag into `/flag` inside every team's container at the start of each tick (and exposes the first round's flag via the `GZCTF_FLAG` env var). Your service must surface that flag through the intended bug.
+- **`/flag`** — you do **not** author flags for A&D. The platform plants a fresh per-team flag into `/flag` inside every team's container at the start of each tick. There is **no `GZCTF_FLAG` env var** for A&D (an env baked at container start would go stale after the first rotation); read the live flag from `/flag` (its path is also in `GZCTF_FLAG_FILE`). Your service must surface that flag through the intended bug.
 - **The `checker/` harness** — build `./checker` and push it, then set `ad.checkerImage`. Add your tests in `checker/checks.py`: write a function taking a `Target`, decorate it with `@check`, return normally to pass, or `raise Mumble("why")` if the service is up but wrong. `t.get(path)` / `t.post(path)` raise `Offline` for you when unreachable. Don't edit `checker.py` or `run.py`. The harness speaks the enochecker3 exit-code contract (`0 Ok / 1 Mumble / 2 Offline / 3 InternalError`) and reports the worst verdict each tick.
 - **`allowEgress: true`** (default) lets team containers reach the public internet — most A&D services expect outbound access. Private and link-local ranges are blocked regardless. Set `false` to sandbox a service with no egress.
 
@@ -156,7 +154,7 @@ Key points specific to A&D:
 :::
 
 :::info
-Tick length, flag lifetime, warmup, reset cooldown, and snapshot-download are **event-wide** settings — they live in the `ad:` block of the `.gzevent` manifest (and admin → game → Info), not in `challenge.yml`. A round spans the whole game, so every A&D service shares one tick. The per-challenge `ad:` block only carries `checkerImage`, `allowEgress`, `allowSelfReset`, and the optional checker-timing fields.
+Tick length, flag lifetime, warmup, reset cooldown, and snapshot-download are **event-wide** settings — they live in the `ad:` block of the `.gzevent` manifest (and admin → game → Info), not in `challenge.yml`. A round spans the whole game, so every A&D service shares one tick. The per-challenge `ad:` block only carries `checkerImage`, `allowEgress`, and `allowSelfReset`. The checker-timing knobs (`getflagWindowFraction`, `minGracePeriodSeconds`) are event-wide too — set them in the `.gzevent` manifest's `ad:` block, not per challenge.
 :::
 
 ### king-of-the-hill

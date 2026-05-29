@@ -92,7 +92,7 @@ DefenseLoss = 2.0 * timesCaptured^0.75
 | 2 | 3.36 |
 | 5 | 6.69 |
 | 10 | 11.25 |
-| 20 | 18.92 |
+| 20 | 18.91 |
 
 :::warning
 The penalty is **sub-linear**, so the first time your box is owned hurts the most per-incident, and the marginal cost of each additional capture shrinks. The exponent (`0.75`) and scale (`2.0`) are fixed constants in `AdScoring.cs` — they are not per-game or per-challenge tunable.
@@ -282,10 +282,10 @@ With the defaults (`OriginalScore=1000`, `MinScoreRate=0.25`, `Difficulty=5`):
 | Accepted solves | Current score |
 | --- | --- |
 | 1 | 1000 |
-| 2 | 928 |
-| 5 | 700 |
-| 10 | 387 |
-| 20 | 261 |
+| 2 | 864 |
+| 5 | 586 |
+| 10 | 373 |
+| 20 | 266 |
 | 50 | 250 (floor) |
 
 :::info
@@ -351,13 +351,14 @@ All three boards break ties **deterministically**, but by different keys.
 ```csharp
 .OrderByDescending(i => i.Score)
 .ThenBy(i => i.LastSubmissionTime)
+.ThenBy(i => i.Id)  // final deterministic key (team id) on a full tie
 ```
 
-Only **scoring-eligible** solves update `LastSubmissionTime`, so an ineligible late submission can never push a team's tie-break time later and unfairly rank it below an earlier eligible team.
+Only **scoring-eligible** solves update `LastSubmissionTime`, so an ineligible late submission can never push a team's tie-break time later and unfairly rank it below an earlier eligible team. When both score and submission time are equal, `Id` (team id) is the final fallback that makes the ordering fully deterministic.
 
 | Board | Primary | Tie-break |
 | --- | --- | --- |
 | A&D | `Total` (desc) | `ParticipationId` (asc) |
 | KotH | `Total` (desc) | `ParticipationId` (asc) |
-| Jeopardy | `Score` (desc) | `LastSubmissionTime` (asc) |
+| Jeopardy | `Score` (desc) | `LastSubmissionTime` (asc), then `Id` (asc) |
 ```

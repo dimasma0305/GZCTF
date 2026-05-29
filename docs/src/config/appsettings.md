@@ -191,7 +191,7 @@ The two King of the Hill tuning parameters live on the `Game` row but are **not*
 
 | Field (`Game.*`) | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `KothHoldPointsPerTick` | double? | `1.0` | Base points the controlling team earns per tick of control, scaled by `sqrt(active teams)` like SLA. Event-wide. |
+| `KothHoldPointsPerTick` | double? | `1.0` | Flat base points the controlling team earns per tick of control. NOT scaled by team count — unlike SLA (KotH is a zero-sum, one-marker-per-challenge race, so field size doesn't dilute it). Event-wide. |
 | `KothRefreshTicks` | int? | `5` | Ticks between hill resets. Every Nth tick the shared container is reset to its base image (wiping footholds + the control marker) and the current per-challenge score leader is network-blocked from that hill for one tick. Event-wide. |
 
 :::warning
@@ -205,7 +205,7 @@ WHERE "Id" = <gameId>;
 ```
 :::
 
-See [/guide/features/king-of-the-hill](/guide/features/king-of-the-hill) for how these feed into scoring, and [/guide/features/scoring](/guide/features/scoring) for the SLA `sqrt(active teams)` scaling that hold points share.
+See [/guide/features/king-of-the-hill](/guide/features/king-of-the-hill) for how these feed into scoring, and [/guide/features/scoring](/guide/features/scoring) for SLA scoring details. Unlike SLA (which scales by `sqrt(active teams)`), KotH hold points are flat per held tick — KotH is a zero-sum race for one marker, so field size doesn't dilute it.
 
 ---
 
@@ -215,7 +215,7 @@ A&D challenge knobs live on the `GameChallenge` row and are authored in the `ad:
 
 | YAML field (`ad:`) | DB field (`GameChallenge.*`) | Type | Default | Meaning |
 | --- | --- | --- | --- | --- |
-| `checkerImage` | `AdCheckerImage` | string? | null | Docker image for the per-challenge checker container. Must speak the enochecker3 HTTP contract (`PUT /putflag` / `/getflag` / `/havoc`). |
+| `checkerImage` | `AdCheckerImage` | string? | null | Docker image for the per-challenge checker container. Run as a one-shot container with an enochecker3-style env contract (`GZCTF_ACTION=check`, `GZCTF_TARGET_IP`, `GZCTF_TARGET_PORT`, `GZCTF_FLAG`, `GZCTF_ROUND`, `GZCTF_TEAM_ID`, `GZCTF_CHALLENGE_ID`); the container exit code maps to the verdict (0=Ok, 1=Mumble, 2=Offline, other=InternalError). When omitted, the platform falls back to a TCP-reachability probe (`nc -z -w3`). |
 | `allowEgress` | `AdAllowEgress` | bool | `true` | If true, team containers can reach the public internet. Set `false` to sandbox a service that should have no egress. |
 | `allowSelfReset` | `AdAllowSelfReset` | bool | `true` | If true, teams can self-reset their own container to the baseline image, subject to the event-wide `AdResetCooldownMinutes` cooldown. Set `false` for fragile services that shouldn't be resettable. |
 

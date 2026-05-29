@@ -59,7 +59,7 @@ Each container lands on one of two provider networks depending on the challenge'
 
 Toggling `ad.allowEgress` mid-game is detected as **network drift**. A live container is moved between the Open and Isolated bridges *in place* (connect-new-then-disconnect-old) so the team keeps its patches; the engine only recreates the container if the live move fails.
 
-Resource limits come from the challenge: `CPUCount` (default `1`), `MemoryLimit` (default `128` MiB), `StorageLimit` (default `256` MiB). The exposed service port is `ExposePort` (default `80`).
+Resource limits come from the challenge: `CPUCount` (default `1`), `MemoryLimit` (default `64` MiB), `StorageLimit` (default `256` MiB). The exposed service port is `ExposePort` (default `80`).
 
 :::warning
 King of the Hill is the exception to "one container per team": a KotH challenge has **one shared hill container** for the whole game. Every team attacks the same box and plants its rotating token into the `/koth/king` marker. The hill resets to base image every `Game.KothRefreshTicks` ticks (default `5`), wiping footholds and the marker.
@@ -224,9 +224,9 @@ Content-Type: application/json
 ```json
 {
   "acceptedCount": 1,
-  "totalPoints": 1.0,
+  "totalPoints": 10.0,
   "results": [
-    { "flag": "flag{stolen_from_team_b}", "status": "accepted", "points": 1.0, "flagPlantedAtRound": 12 },
+    { "flag": "flag{stolen_from_team_b}", "status": "accepted", "points": 10.0, "flagPlantedAtRound": 12 },
     { "flag": "flag{stolen_from_team_c}", "status": "expired", "flagPlantedAtRound": 4 }
   ]
 }
@@ -260,7 +260,7 @@ The "what did the team change" diff (admin view + post-game) filters out runtime
 
 ### Post-game snapshot (Docker only)
 
-If `ad.allowSnapshotDownload` is set, at game end the engine commits each team's container to a gzipped image tarball and stores it. Teams can download their own box's final state from `/Services/{adTeamServiceId}/Snapshot` **only after the game ends**. Snapshotting is a Docker-only feature for v1; on Kubernetes only a filesystem-change list is captured.
+Snapshotting is **on by default**: at game end the engine commits each team's container to a gzipped image tarball and stores it, unless the operator disables it. This is an event-wide policy (`ad.allowSnapshotDownload`, default `true`) set in the `.gzevent` manifest's `ad:` block (or admin game settings) — **not** a per-challenge key. Teams can download their own box's final state from `/Services/{adTeamServiceId}/Snapshot` **only after the game ends**. Snapshotting is a Docker-only feature for v1; on Kubernetes only a filesystem-change list is captured.
 
 ## Provider notes
 
