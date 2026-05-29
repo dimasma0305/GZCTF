@@ -293,6 +293,142 @@ public class ChallengeImportYamlTests(GZCTFApplicationFactory factory, ITestOutp
         Assert.StartsWith("Author: **alice**", ch.Content);
         Assert.Contains("Body text only.", ch.Content);
     }
+
+    // ----------------------------------------------------------------------
+    // KingOfTheHill / Attack&Defense parity QA (commit 2630de57). KotH
+    // UsesAdEngine() but is NOT IsAttackDefense(); the import gates must treat
+    // both engine types identically. These exercise the full tarball → API → DB
+    // path against a real Postgres, and would FAIL on the pre-fix code.
+    // ----------------------------------------------------------------------
+
+    [Fact]
+    public async Task Import_KingOfTheHill_AppliesAdBlock_EgressFalse()
+    {
+        // The major fix (ApplyYamlToChallenge). Pre-fix the `ad:` block was gated
+        // on IsAttackDefense() and silently dropped for KotH, so the shared hill
+        // kept AdAllowEgress=true (public egress) despite `allowEgress: false`,
+        // and a custom checkerImage was ignored.
+        using var client = await AdminClientAsync();
+        var game = await TestDataSeeder.CreateGameAsync(factory.Services, $"Koth {TestDataSeeder.RandomName()}");
+        var slug = TestDataSeeder.RandomName();
+        var yaml = $$"""
+            name: "{{slug}}"
+            type: "KingOfTheHill"
+            category: "Misc"
+            description: "Hold the hill."
+            container:
+              containerImage: "registry.example.com/hill:1"
+              exposePort: 80
+            ad:
+              allowEgress: false
+              allowSelfReset: false
+              checkerImage: "ghcr.io/org/hill-checker:1"
+            """;
+        var tar = BuildTarball(new Dictionary<string, string> { ["challenge.yml"] = yaml });
+
+        var resp = await PostTarballAsync(client, game.Id, tar);
+        resp.EnsureSuccessStatusCode();
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var ch = await db.GameChallenges.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.GameId == game.Id && c.Title == slug);
+        Assert.NotNull(ch);
+        Assert.Equal(ChallengeType.KingOfTheHill, ch.Type);
+        Assert.False(ch.AdAllowEgress);      // the fix: ad: block now applied to KotH
+        Assert.False(ch.AdAllowSelfReset);
+        Assert.Equal("ghcr.io/org/hill-checker:1", ch.AdCheckerImage);
+        Assert.Equal("registry.example.com/hill:1", ch.ContainerImage);
+    }
+
+    [Fact]
+    public async Task Import_AttackDefense_AppliesAdBlock_StillWorks()
+    {
+        // Regression: the UsesAdEngine() widening must not break the A&D path.
+        using var client = await AdminClientAsync();
+        var game = await TestDataSeeder.CreateGameAsync(factory.Services, $"Ad {TestDataSeeder.RandomName()}");
+        var slug = TestDataSeeder.RandomName();
+        var yaml = $$"""
+            name: "{{slug}}"
+            type: "AttackDefense"
+            category: "Web"
+            description: "Vulnerable service."
+            container:
+              containerImage: "registry.example.com/svc:1"
+              exposePort: 8080
+            ad:
+              allowEgress: false
+              checkerImage: "ghcr.io/org/svc-checker:1"
+            """;
+        var tar = BuildTarball(new Dictionary<string, string> { ["challenge.yml"] = yaml });
+
+        var resp = await PostTarballAsync(client, game.Id, tar);
+        resp.EnsureSuccessStatusCode();
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var ch = await db.GameChallenges.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.GameId == game.Id && c.Title == slug);
+        Assert.NotNull(ch);
+        Assert.Equal(ChallengeType.AttackDefense, ch.Type);
+        Assert.False(ch.AdAllowEgress);
+        Assert.Equal("ghcr.io/org/svc-checker:1", ch.AdCheckerImage);
+    }
+
+    [Fact]
+    public async Task Submit_KingOfTheHill_NoFlag_NotRejected()
+    {
+        // The submission-path fix (ValidateSubmissionShape). The public Submit
+        // endpoint runs the shape check (AutoApprove:false); pre-fix a flagless
+        // KotH package was Skipped with "No flag declared" (no DB row), because
+        // KotH was not exempted like AttackDefense.
+        using var client = await AdminClientAsync();
+        var game = await TestDataSeeder.CreateGameAsync(factory.Services, $"KothSubmit {TestDataSeeder.RandomName()}");
+        await EnableUserSubmissionsAsync(game.Id);
+        var slug = TestDataSeeder.RandomName();
+        var yaml = $$"""
+            name: "{{slug}}"
+            type: "KingOfTheHill"
+            category: "Misc"
+            description: "Hold the hill."
+            container:
+              exposePort: 80
+            ad:
+              allowEgress: false
+              allowSelfReset: false
+            """;
+        // Shape check requires a non-empty solver/ file + a buildable Dockerfile.
+        var tar = BuildTarball(new Dictionary<string, string>
+        {
+            ["challenge.yml"] = yaml,
+            ["solver/solve.py"] = "print('exploit')\n",
+            ["src/Dockerfile"] = "FROM python:3.12-alpine\n",
+        });
+
+        using var content = new MultipartFormDataContent();
+        var stream = new ByteArrayContent(tar);
+        stream.Headers.ContentType = new MediaTypeHeaderValue("application/gzip");
+        content.Add(stream, "archive", "koth.tar.gz");
+        var resp = await client.PostAsync($"/api/Edit/Games/{game.Id}/Challenges/Submit", content);
+        resp.EnsureSuccessStatusCode();
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var ch = await db.GameChallenges.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.GameId == game.Id && c.Title == slug);
+        // Created (pending review), NOT skipped for a missing flag.
+        Assert.NotNull(ch);
+        Assert.Equal(ChallengeType.KingOfTheHill, ch.Type);
+    }
+
+    private async Task EnableUserSubmissionsAsync(int gameId)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var game = await db.Games.FirstAsync(g => g.Id == gameId);
+        game.AllowUserSubmissions = true;
+        await db.SaveChangesAsync();
+    }
 }
 
 file static class HttpExtensions2
