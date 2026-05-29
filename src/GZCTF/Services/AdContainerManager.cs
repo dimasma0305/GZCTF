@@ -50,6 +50,7 @@ namespace GZCTF.Services;
 public sealed class AdContainerManager(
     IServiceScopeFactory scopeFactory,
     AdFlagMountService flagMount,
+    AdEgressIsolationService egressIso,
     ILogger<AdContainerManager> logger) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(15);
@@ -67,6 +68,12 @@ public sealed class AdContainerManager(
     // for a single service, so the reconcile loop, the accept-time ensure, and
     // self-reset/force-restart can't race into double-launches or orphans.
     private static readonly ConcurrentDictionary<(int, int), SemaphoreSlim> _serviceLocks = new();
+
+    // KotH challenge ids whose KOTH_CD cooldown chain we've already torn down
+    // (per process) — dedups the orphaned-chain cleanup so ended games aren't
+    // re-processed (spawning a helper) every reconcile. A (re)launch clears the
+    // mark so a re-ended game's chain is cleaned again.
+    private static readonly ConcurrentDictionary<int, byte> _kothChainsTornDown = new();
 
     private static SemaphoreSlim LockFor(int participationId, int challengeId) =>
         _serviceLocks.GetOrAdd((participationId, challengeId), _ => new SemaphoreSlim(1, 1));
@@ -304,7 +311,10 @@ public sealed class AdContainerManager(
                 // Tear down the cooldown chain — Docker-only feature, so the
                 // call is a no-op on K8s (no sidecar id → returns early).
                 if (dockerProvider is not null)
+                {
                     await DestroyKothCooldownChainAsync(dockerProvider, ended.ChallengeId, token);
+                    _kothChainsTornDown.TryAdd(ended.ChallengeId, 0);
+                }
 
                 logger.SystemLog($"KotH hill destroyed (game ended): challenge={ended.ChallengeId}",
                     TaskStatus.Success, LogLevel.Information);
@@ -319,6 +329,31 @@ public sealed class AdContainerManager(
             }
 
             _serviceLocks.TryRemove((0, ended.ChallengeId), out _);
+        }
+
+        // Orphaned cooldown chains: a hill whose container was already gone
+        // (ContainerId null) before game-end is skipped by the loop above, so its
+        // KOTH_CD_<id> chain + DOCKER-USER jump would leak in the WG sidecar.
+        // Tear those down too — once per process (the set dedups so ended games
+        // aren't re-processed every pass; idempotent teardown no-ops if absent).
+        if (dockerProvider is not null)
+        {
+            var orphanChainChallengeIds = await db.KothTargets
+                .Where(t => t.ContainerId == null && t.Game.EndTimeUtc < now)
+                .Select(t => t.ChallengeId)
+                .Distinct()
+                .ToListAsync(token);
+
+            foreach (var cid in orphanChainChallengeIds)
+            {
+                if (!_kothChainsTornDown.TryAdd(cid, 0)) continue; // already handled this run
+                try { await DestroyKothCooldownChainAsync(dockerProvider, cid, token); }
+                catch (Exception e)
+                {
+                    _kothChainsTornDown.TryRemove(cid, out _); // let it retry next pass
+                    logger.LogWarning(e, "KotH orphaned cooldown-chain teardown failed for challenge={Cid}", cid);
+                }
+            }
         }
     }
 
@@ -1418,6 +1453,12 @@ public sealed class AdContainerManager(
 
         logger.SystemLog($"KotH hill launched: challenge={challenge.Id} ip={container.IP}:{container.Port}",
             TaskStatus.Success, LogLevel.Information);
+
+        // New hill IP is live — contain it now, not up to a full pass later.
+        egressIso.RequestReapply();
+        // Hill is alive again — clear any stale "chain torn down" mark so its
+        // cooldown chain is re-cleaned if the game later ends.
+        _kothChainsTornDown.TryRemove(challenge.Id, out _);
     }
 
     /// <summary>
@@ -1541,6 +1582,7 @@ public sealed class AdContainerManager(
             logger.SystemLog(
                 $"A&D container moved {oldName} → {newName} (egress changed): team={ts.ParticipationId} challenge={challenge.Id} ip={newIp}",
                 TaskStatus.Success, LogLevel.Information);
+            egressIso.RequestReapply();
             return true;
         }
         catch (Exception e)
@@ -1714,6 +1756,9 @@ public sealed class AdContainerManager(
         logger.SystemLog(
             $"A&D container launched: team={participationId} challenge={challenge.Id} ip={container.IP}:{container.Port}",
             TaskStatus.Success, LogLevel.Information);
+
+        // New container IP is live — contain it now, not up to a full pass later.
+        egressIso.RequestReapply();
     }
 
     /// <summary>

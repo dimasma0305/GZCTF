@@ -171,7 +171,11 @@ internal static class ServicesExtension
             builder.Services.AddHostedService<Services.AdSnapshotService>();
             // Docker-only: DOCKER-USER egress isolation (no-ops on K8s, which uses
             // NetworkPolicy instead). Brings Docker to containment parity.
-            builder.Services.AddHostedService<Services.AdEgressIsolationService>();
+            // Singleton + hosted so AdContainerManager can RequestReapply() on
+            // container launch (closes the launch→isolation gap), not just on the
+            // periodic timer.
+            builder.Services.AddSingleton<Services.AdEgressIsolationService>();
+            builder.Services.AddHostedService(sp => sp.GetRequiredService<Services.AdEgressIsolationService>());
         }
 
         internal void AddWebServices()

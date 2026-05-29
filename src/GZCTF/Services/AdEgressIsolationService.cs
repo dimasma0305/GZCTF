@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Threading.Channels;
 using Docker.DotNet;
 using Docker.DotNet.Models;
 using GZCTF.Models;
@@ -59,6 +60,19 @@ public sealed class AdEgressIsolationService(
     internal const string SetKoth = "gzctf_chal_koth";
     private const string HelperImage = "alpine:3.21";
 
+    // On-demand re-apply trigger. Bounded(1)/drop-write: a launch only needs to
+    // ensure one re-apply runs after it, and bursts coalesce into a single pass.
+    private readonly Channel<byte> _trigger =
+        Channel.CreateBounded<byte>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
+
+    /// <summary>
+    /// Request an immediate egress-isolation re-apply — called after a challenge
+    /// container launches/moves so its IP is contained within ~a second instead
+    /// of waiting up to a full <see cref="Interval" />. Non-blocking; safe to
+    /// call from the container-launch path.
+    /// </summary>
+    public void RequestReapply() => _trigger.Writer.TryWrite(0);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         try { await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken); }
@@ -71,8 +85,22 @@ public sealed class AdEgressIsolationService(
             {
                 logger.LogWarning(e, "AdEgressIsolation: pass failed");
             }
-            try { await Task.Delay(Interval, stoppingToken); }
-            catch (OperationCanceledException) { break; }
+
+            // Wake on the periodic Interval OR an on-demand trigger (a container
+            // launch/move), whichever comes first — so a freshly-reachable
+            // container is contained within ~a second instead of up to Interval.
+            try
+            {
+                using var waitCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                waitCts.CancelAfter(Interval);
+                await _trigger.Reader.WaitToReadAsync(waitCts.Token);
+                while (_trigger.Reader.TryRead(out _)) { } // coalesce burst triggers
+            }
+            catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+            {
+                // Interval elapsed with no trigger — normal periodic pass.
+            }
+            catch (OperationCanceledException) { break; } // shutdown
         }
     }
 
