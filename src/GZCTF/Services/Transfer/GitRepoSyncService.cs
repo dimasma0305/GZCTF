@@ -135,7 +135,11 @@ public sealed class GitRepoSyncService(ILogger<GitRepoSyncService> logger)
             await RunGitAsync(repoDir, ["remote", "set-url", "origin", repoUrl], ct);
             await RunGitAsync(repoDir, [
                 .. authArgs,
-                "fetch", "--depth", "1", "origin", refSpec
+                // "--" so a ref beginning with '-' (e.g. "--upload-pack=…") is
+                // treated as a refspec, not a git option. Not RCE over the
+                // hardcoded https transport today, but defense-in-depth if the
+                // transport allowlist is ever loosened.
+                "fetch", "--depth", "1", "origin", "--", refSpec
             ], ct);
             // FETCH_HEAD always points to whatever we just fetched.
             await RunGitAsync(repoDir, ["reset", "--hard", "FETCH_HEAD"], ct);

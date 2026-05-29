@@ -288,7 +288,18 @@ public sealed class ChallengeImportService(
         await SyncFlagsAsync(challenge, model.Flags ?? [], token);
         await SyncAttachmentAsync(challenge, packageDir, model.Provide, token);
 
-        if (intent.Kind == BuildIntentKind.BuildNeeded)
+        // Only auto-build TRUSTED submissions. A user-submitted package
+        // (AutoApprove == false) must NOT run its attacker-controlled Dockerfile
+        // on the shared build host before an admin reviews it — it stays Pending
+        // and is built when an admin approves/rebuilds it. Every admin + repo-
+        // binding import path passes AutoApprove: true, so trusted auto-builds are
+        // unaffected; only the player-submission path is deferred.
+        if (intent.Kind == BuildIntentKind.BuildNeeded && !opts.AutoApprove)
+            logger.SystemLog(
+                $"Challenge build deferred (pending review): game={game.Id} name={model.Name}",
+                TaskStatus.Pending, LogLevel.Information);
+
+        if (intent.Kind == BuildIntentKind.BuildNeeded && opts.AutoApprove)
         {
             // Snapshot-then-enqueue-then-persist. The status flip only
             // happens AFTER the queue accepts the job. Without this
@@ -533,9 +544,19 @@ public sealed class ChallengeImportService(
     {
         Directory.CreateDirectory(dst);
         foreach (var f in Directory.EnumerateFiles(src))
+        {
+            // Skip symlinks: a link inside the (untrusted) repo build context
+            // would otherwise copy the TARGET's content — e.g. the host
+            // kubeconfig, A&D flags, or WireGuard keys — into the snapshot and
+            // bake it into the attacker's image. Mirrors the archive extractors.
+            if ((new FileInfo(f).Attributes & FileAttributes.ReparsePoint) != 0) continue;
             File.Copy(f, Path.Combine(dst, Path.GetFileName(f)));
+        }
         foreach (var d in Directory.EnumerateDirectories(src))
+        {
+            if ((new DirectoryInfo(d).Attributes & FileAttributes.ReparsePoint) != 0) continue;
             CopyDirRecursive(d, Path.Combine(dst, Path.GetFileName(d)));
+        }
     }
 
     /// <summary>
@@ -564,6 +585,15 @@ public sealed class ChallengeImportService(
     {
         var rel = declared.Replace('\\', '/').TrimStart('.').TrimStart('/');
         var combined = Path.Combine(packageDir, rel);
+        // Confine to the package dir: a declared path containing ".." (e.g.
+        // "../../etc") must not let the build context escape into arbitrary host
+        // directories. Same canonical-prefix guard used for the provide:/
+        // attachment path.
+        var packageRoot = Path.GetFullPath(packageDir);
+        var fullCombined = Path.GetFullPath(combined);
+        if (!string.Equals(fullCombined, packageRoot, StringComparison.Ordinal)
+            && !fullCombined.StartsWith(packageRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            throw new InvalidOperationException($"build context path '{declared}' escapes the challenge package");
         if (Directory.Exists(combined))
             return (Path.GetFullPath(combined), "Dockerfile");
 
