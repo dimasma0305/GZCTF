@@ -23,6 +23,9 @@ public class GameRepository(
     public Task<bool> HasGameAsync(int id, CancellationToken token = default)
         => Context.Games.AnyAsync(g => g.Id == id, token);
 
+    public Task<bool> HasGameAsync(int id, bool allowHidden, CancellationToken token = default)
+        => Context.Games.AnyAsync(g => g.Id == id && (allowHidden || !g.Hidden), token);
+
     public async Task<Game?> CreateGame(Game game, CancellationToken token = default)
     {
         game.GenerateKeyPair(_xorKey);

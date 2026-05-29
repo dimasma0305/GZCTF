@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using GZCTF.Hubs.Clients;
 using GZCTF.Repositories.Interface;
+using GZCTF.Utils;
 using Microsoft.AspNetCore.SignalR;
 
 namespace GZCTF.Hubs;
@@ -26,7 +27,10 @@ public class AttackHub : Hub<IAttackClient>
         }
 
         var gameRepository = context.RequestServices.GetRequiredService<IGameRepository>();
-        if (!await gameRepository.HasGameAsync(gId))
+        // Don't let an anonymous client subscribe to a Hidden (draft) game's live
+        // attack feed (team names, avatars, challenge titles). Monitors may.
+        var isMonitor = await ContextHelper.HasMonitor(context);
+        if (!await gameRepository.HasGameAsync(gId, allowHidden: isMonitor))
         {
             Context.Abort();
             return;

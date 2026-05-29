@@ -44,7 +44,19 @@ public class AdAdminController(
     private static int? CountChanges(string? json)
     {
         if (string.IsNullOrEmpty(json)) return null;
-        try { return System.Text.Json.JsonDocument.Parse(json).RootElement.GetArrayLength(); }
+        try
+        {
+            var root = System.Text.Json.JsonDocument.Parse(json).RootElement;
+            if (root.ValueKind == System.Text.Json.JsonValueKind.Array)
+                return root.GetArrayLength();
+            // Over-cap manifests are stored as a {"truncated":true,"count":N} placeholder
+            // (AdSnapshotService) instead of the full path array — surface that count so
+            // the most-modified (most-suspicious) teams still show a changed-file badge.
+            if (root.ValueKind == System.Text.Json.JsonValueKind.Object
+                && root.TryGetProperty("count", out var c) && c.TryGetInt32(out var n))
+                return n;
+            return null;
+        }
         catch { return null; }
     }
 

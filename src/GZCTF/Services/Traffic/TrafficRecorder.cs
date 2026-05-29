@@ -55,10 +55,20 @@ internal sealed class TrafficRecorder : IAsyncDisposable
     readonly Lock _archiveLock = new();
     Task? _archiveTask;
 
+    // Per-recorder uncompressed-pcap ceiling. Without it, a team holding a 30-min
+    // proxy socket to its OWN container and streaming attacker-controlled bytes grows
+    // this recorder's temp file unbounded (gzip only runs at archive time), filling
+    // the host /tmp / files volume — a platform-wide disk-fill DoS. Past the cap we
+    // keep draining the channel (so proxy writers never block) but stop growing the
+    // file. 256 MiB uncompressed is generous for legitimate forensic capture.
+    const long MaxCaptureBytes = 256L * 1024 * 1024;
+
     int _refCount;
     int _disposed;
     uint _connectionCounter;
     bool _hasRecords;
+    long _bytesWritten;
+    bool _capWarned;
     readonly Timer _idleTimer;
 
     readonly Action<Guid, TrafficRecorder> _onArchived;
@@ -193,6 +203,22 @@ internal sealed class TrafficRecorder : IAsyncDisposable
 
     void WritePcapPacket(TrafficPacket packet)
     {
+        // Stop growing the on-disk pcap past the cap, but let WriteLoopAsync keep
+        // draining the channel so the bounded channel's writers (the proxy) never
+        // block — only WritePcapPacket touches these fields (ctor pre-loop, then the
+        // single-reader loop), so no synchronization is needed.
+        if (_bytesWritten >= MaxCaptureBytes)
+        {
+            if (!_capWarned)
+            {
+                _capWarned = true;
+                _logger.LogWarning(
+                    "TrafficRecorder {Key} hit the {Cap}-byte capture cap; further packets are dropped from the pcap.",
+                    RegistryKey, MaxCaptureBytes);
+            }
+            return;
+        }
+
         var udp = new UdpPacket((ushort)packet.Source.Port, (ushort)packet.Dest.Port)
         {
             PayloadDataSegment = new ByteArraySegment(packet.Data)
@@ -206,7 +232,9 @@ internal sealed class TrafficRecorder : IAsyncDisposable
         udp.UpdateUdpChecksum();
 
         var timeval = new PosixTimeval(packet.Timestamp.UtcDateTime);
-        _device.Write(new RawCapture(LinkLayers.Ethernet, timeval, eth.Bytes));
+        var raw = new RawCapture(LinkLayers.Ethernet, timeval, eth.Bytes);
+        _device.Write(raw);
+        _bytesWritten += eth.Bytes.Length;
 
         _hasRecords = true;
     }

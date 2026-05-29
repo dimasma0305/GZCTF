@@ -94,9 +94,12 @@ public class ContainerAccessLoggerTest
 
         Assert.Single(db.ContainerAccessEvents);
         var call = Assert.Single(suspicion.Calls);
-        Assert.Equal(10, call.Pid);
+        // The suspicion is scored against the ACCESSOR (the cheater, pid 99), with
+        // the container owner (the victim, pid 10) recorded only as the related
+        // participation — otherwise Team B could frame Team A by proxying into it.
+        Assert.Equal(99, call.Pid);
         Assert.Equal(SuspicionType.CrossTeamContainerAccess, call.Type);
-        Assert.Equal(99, call.Related);
+        Assert.Equal(10, call.Related);
         Assert.Contains(alienId.ToString(), call.Details);
     }
 

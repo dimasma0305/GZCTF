@@ -332,6 +332,20 @@ public class AdGameController(
     {
         try
         {
+            // Gate the public attack feed: never broadcast for Hidden games, and
+            // suppress during the freeze window [FreezeTimeUtc, EndTimeUtc) so the
+            // unauth'd AttackHub can't reveal late-game A&D captures the frozen
+            // scoreboard hides. Mirrors SubmissionRepository.SendAttackEventInternal.
+            var gate = await db.Games
+                .Where(g => g.Id == gameId)
+                .Select(g => new { g.Hidden, g.FreezeTimeUtc, g.EndTimeUtc })
+                .FirstOrDefaultAsync(token);
+            if (gate is null || gate.Hidden)
+                return;
+            var nowUtc = DateTimeOffset.UtcNow;
+            if (gate.FreezeTimeUtc is { } freeze && nowUtc >= freeze && nowUtc < gate.EndTimeUtc)
+                return;
+
             var teams = await db.Participations
                 .Where(p => p.Id == attackerPartId || p.Id == victimPartId)
                 .Select(p => new { p.Id, p.Team.Name, p.Team.AvatarHash })
@@ -400,8 +414,15 @@ public class AdGameController(
         var stillAMember = row.Participation.Members.Any(m => m.UserId == row.UserId);
         if (!stillAMember) return null;
 
-        row.LastUsedAt = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync(token);
+        // Throttle the LastUsedAt write (mirrors the LastVisitedUtc throttle in
+        // RequirePrivilegeAttribute): Targets/Koth-token are polled in tight loops,
+        // and an unconditional UPDATE+SaveChanges per request hammers one hot row.
+        var nowUtc = DateTimeOffset.UtcNow;
+        if (row.LastUsedAt is null || nowUtc - row.LastUsedAt.Value > TimeSpan.FromSeconds(30))
+        {
+            row.LastUsedAt = nowUtc;
+            await db.SaveChangesAsync(token);
+        }
         return row.Participation;
     }
 

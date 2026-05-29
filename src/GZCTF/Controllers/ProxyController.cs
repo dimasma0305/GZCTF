@@ -77,12 +77,6 @@ public class ProxyController(
         if (!HttpContext.WebSockets.IsWebSocketRequest)
             return NoContent();
 
-        var key = CacheKey.ConnectionCount(id);
-
-        if (!await IncreaseConnectionCount(key))
-            return BadRequest(
-                new RequestResponse(localizer[nameof(Resources.Program.Container_ConnectionLimitExceeded)]));
-
         var container = await containerRepository.GetContainerWithInstanceById(id, token);
 
         if (container is null || !container.IsProxy)
@@ -93,6 +87,15 @@ public class ProxyController(
 
         if (ipAddress is null)
             return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Container_AddressResolveFailed)]));
+
+        // Enforce the per-container connection cap only AFTER validation succeeds:
+        // the early returns above (non-proxy / unresolvable IP) must not consume a
+        // slot, since only DoContainerProxy's finally releases it. Pairs with the
+        // atomic read-modify-write in IncreaseConnectionCount.
+        var key = CacheKey.ConnectionCount(id);
+        if (!await IncreaseConnectionCount(key))
+            return BadRequest(
+                new RequestResponse(localizer[nameof(Resources.Program.Container_ConnectionLimitExceeded)]));
 
         var clientIp = HttpContext.Connection.RemoteIpAddress ?? IPAddress.Loopback;
 
@@ -403,21 +406,44 @@ public class ProxyController(
     /// </summary>
     /// <param name="key">Cache key</param>
     /// <returns></returns>
+    // Per-container lock serializing the connection-count read-modify-write. The
+    // backing IDistributedCache has no atomic increment, so without this N concurrent
+    // WebSocket upgrades all read the same pre-increment count and blow past the cap
+    // (socket/FD/recorder exhaustion DoS). This makes the check-and-set atomic within
+    // the instance — correct for the single-instance deployment; a horizontally-scaled
+    // deployment would additionally need a Redis-atomic INCR/DECR.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> ConnCountLocks =
+        new();
+
+    private static SemaphoreSlim ConnCountLock(string key) =>
+        ConnCountLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
+
     private async Task<bool> IncreaseConnectionCount(string key)
     {
-        var bytes = await cache.GetAsync(key);
+        var gate = ConnCountLock(key);
+        await gate.WaitAsync();
+        try
+        {
+            var bytes = await cache.GetAsync(key);
 
-        if (bytes is null)
-            return false;
+            if (bytes is null)
+                return false;
 
-        var count = BitConverter.ToInt32(bytes);
+            var count = BitConverter.ToInt32(bytes);
 
-        if (count > ConnectionLimit)
-            return false;
+            // count < 0 is the invalid-container sentinel (ValidateContainer); >= cap
+            // rejects (was `>`, an off-by-one that allowed 33 concurrent for a cap of 32).
+            if (count < 0 || count >= ConnectionLimit)
+                return false;
 
-        await cache.SetAsync(key, BitConverter.GetBytes(count + 1), StoreOption);
+            await cache.SetAsync(key, BitConverter.GetBytes(count + 1), StoreOption);
 
-        return true;
+            return true;
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     /// <summary>
@@ -427,16 +453,28 @@ public class ProxyController(
     /// <returns></returns>
     private async Task DecreaseConnectionCount(string key)
     {
-        var bytes = await cache.GetAsync(key);
+        // Same per-container lock as IncreaseConnectionCount so a decrement can't
+        // race an increment and lose an update (which would otherwise drift the
+        // count and eventually lock the owner out of their own container).
+        var gate = ConnCountLock(key);
+        await gate.WaitAsync();
+        try
+        {
+            var bytes = await cache.GetAsync(key);
 
-        if (bytes is null)
-            return;
+            if (bytes is null)
+                return;
 
-        var count = BitConverter.ToInt32(bytes);
+            var count = BitConverter.ToInt32(bytes);
 
-        if (count > 1)
-            await cache.SetAsync(key, BitConverter.GetBytes(count - 1), StoreOption);
-        else
-            await cache.SetAsync(key, BitConverter.GetBytes(0), ValidOption);
+            if (count > 1)
+                await cache.SetAsync(key, BitConverter.GetBytes(count - 1), StoreOption);
+            else
+                await cache.SetAsync(key, BitConverter.GetBytes(0), ValidOption);
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 }

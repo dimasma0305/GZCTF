@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 using GZCTF.Hubs.Clients;
 using GZCTF.Repositories.Interface;
+using GZCTF.Utils;
 using Microsoft.AspNetCore.SignalR;
 
 namespace GZCTF.Hubs;
@@ -21,7 +22,10 @@ public class UserHub : Hub<IUserClient>
         }
 
         var gameRepository = context.RequestServices.GetRequiredService<IGameRepository>();
-        if (!await gameRepository.HasGameAsync(gId))
+        // Don't let an anonymous client subscribe to a Hidden (draft) game's notice
+        // feed. Monitors may (they manage the draft).
+        var isMonitor = await ContextHelper.HasMonitor(context);
+        if (!await gameRepository.HasGameAsync(gId, allowHidden: isMonitor))
         {
             Context.Abort();
             return;

@@ -76,6 +76,20 @@ public class SubmissionRepository(
 
     private async Task SendAttackEventInternal(Submission submission, SubmissionType type)
     {
+        // Gate the live attack feed: never broadcast for Hidden (draft) games, and
+        // suppress during the ICPC freeze window [FreezeTimeUtc, EndTimeUtc) so the
+        // unauth'd AttackHub can't be used to watch late-game scoring the frozen
+        // scoreboard hides. Mirrors the REST AttackFeed + scoreboard-freeze gates.
+        var gate = await Context.Games.AsNoTracking()
+            .Where(g => g.Id == submission.GameId)
+            .Select(g => new { g.Hidden, g.FreezeTimeUtc, g.EndTimeUtc })
+            .SingleOrDefaultAsync();
+        if (gate is null || gate.Hidden)
+            return;
+        var nowUtc = DateTimeOffset.UtcNow;
+        if (gate.FreezeTimeUtc is { } freeze && nowUtc >= freeze && nowUtc < gate.EndTimeUtc)
+            return;
+
         // Prefer navigation-loaded data; fall back to projection if missing.
         var teamName = submission.Team?.Name ?? submission.TeamName;
         var teamAvatar = submission.Team?.AvatarUrl;

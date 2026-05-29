@@ -421,6 +421,15 @@ public class GameController(
             return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Game_NotFound)],
                 StatusCodes.Status404NotFound));
 
+        // This endpoint is anonymous, so apply the same gates as the live AttackHub:
+        // serve nothing for Hidden (draft) games or during the freeze window
+        // [FreezeTimeUtc, EndTimeUtc) — otherwise it leaks team names + challenge
+        // titles for unpublished games, or late-game scoring the frozen board hides.
+        var nowUtc = DateTimeOffset.UtcNow;
+        if (game.Hidden ||
+            (game.FreezeTimeUtc is { } freeze && nowUtc >= freeze && nowUtc < game.EndTimeUtc))
+            return Ok(Array.Empty<AttackEvent>());
+
         var subs = await submissionRepository.GetRecentSubmissionsForAttackFeed(id, limit, token);
 
         // Seed events use a coarse SubmissionType (Normal vs. Unaccepted). The

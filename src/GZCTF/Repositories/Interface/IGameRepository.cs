@@ -81,6 +81,14 @@ public interface IGameRepository : IRepository
     public Task<bool> HasGameAsync(int id, CancellationToken token = default);
 
     /// <summary>
+    /// Check if the game exists and is reachable by the caller. When
+    /// <paramref name="allowHidden"/> is false, Hidden (draft/unpublished) games
+    /// are treated as non-existent — used by the public SignalR hubs so an
+    /// anonymous client can't subscribe to a Hidden game's live feed.
+    /// </summary>
+    public Task<bool> HasGameAsync(int id, bool allowHidden, CancellationToken token = default);
+
+    /// <summary>
     /// Create a new game
     /// </summary>
     /// <param name="game"></param>
