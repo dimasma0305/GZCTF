@@ -226,6 +226,17 @@ public class InternalAdSshController(
             // docker network with curl. Operator must set this.
             return false;
         }
+        // Fail closed on the SHIPPED placeholder. It is published verbatim in
+        // docker-compose.yml, the docs, and this repo, so accepting it would leave a
+        // fresh/forgotten deploy guarding an internet-reachable cross-team `docker exec`
+        // endpoint with a public constant. Operators MUST set a real secret.
+        if (expected == "dev-only-rotate-me-before-prod")
+        {
+            logger.LogError(
+                "Ad:Ssh:InternalSecret is the shipped placeholder — internal SSH endpoints are " +
+                "DISABLED until you set AD_SSH_INTERNAL_SECRET to a real secret.");
+            return false;
+        }
         if (string.IsNullOrEmpty(presented)) return false;
         var a = System.Text.Encoding.UTF8.GetBytes(presented);
         var b = System.Text.Encoding.UTF8.GetBytes(expected);

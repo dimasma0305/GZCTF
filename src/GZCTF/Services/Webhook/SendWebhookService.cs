@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 using System.Text.Json;
 using GZCTF.Models.Data;
 using Microsoft.Extensions.Logging;
@@ -48,10 +50,76 @@ public class SendWebhookService(ILogger<SendWebhookService> logger) : ISendWebho
     private const int EmbedFieldCountLimit = 25;
     private const int EmbedTotalCharLimit = 6000;
 
-    private static readonly HttpClient WebhookClient = new()
+    // The webhook URL is operator-set, but a lower-trust per-game EventManager can set
+    // it too — so the outbound POST must not become an SSRF into internal services or
+    // cloud metadata. We resolve the target ourselves and refuse to connect to any
+    // non-public-unicast address; validating at CONNECT time (not just up front) also
+    // defeats DNS rebinding, since we connect to the exact address we vetted. Redirects
+    // are disabled so a benign public host can't 30x us into internal space.
+    private static readonly HttpClient WebhookClient = CreateClient();
+
+    private static HttpClient CreateClient()
     {
-        Timeout = TimeSpan.FromSeconds(10)
-    };
+        var handler = new SocketsHttpHandler
+        {
+            AllowAutoRedirect = false,
+            ConnectTimeout = TimeSpan.FromSeconds(5),
+            ConnectCallback = async (ctx, ct) =>
+            {
+                var host = ctx.DnsEndPoint.Host;
+                var addrs = IPAddress.TryParse(host, out var literal)
+                    ? [literal]
+                    : await Dns.GetHostAddressesAsync(host, ct);
+                var target = Array.Find(addrs, a => !IsBlockedAddress(a))
+                    ?? throw new IOException($"Webhook host '{host}' does not resolve to a public address");
+                var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+                try
+                {
+                    await socket.ConnectAsync(target, ctx.DnsEndPoint.Port, ct);
+                    return new NetworkStream(socket, ownsSocket: true);
+                }
+                catch
+                {
+                    socket.Dispose();
+                    throw;
+                }
+            }
+        };
+        return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
+    }
+
+    /// <summary>
+    /// True for any address a webhook must NOT reach: loopback, link-local (incl. the
+    /// 169.254.169.254 cloud-metadata endpoint), RFC1918 / CGNAT / ULA private ranges,
+    /// multicast/reserved, and the unspecified address. Only public unicast passes.
+    /// </summary>
+    internal static bool IsBlockedAddress(IPAddress ip)
+    {
+        if (ip.IsIPv4MappedToIPv6)
+            ip = ip.MapToIPv4();
+
+        if (IPAddress.IsLoopback(ip) || ip.Equals(IPAddress.Any) || ip.Equals(IPAddress.IPv6Any))
+            return true;
+
+        if (ip.AddressFamily == AddressFamily.InterNetwork)
+        {
+            var b = ip.GetAddressBytes();
+            if (b[0] is 0 or 10 or 127) return true;                 // this-network, RFC1918 10/8, loopback
+            if (b[0] == 169 && b[1] == 254) return true;             // link-local incl. cloud metadata
+            if (b[0] == 172 && b[1] is >= 16 and <= 31) return true; // 172.16/12
+            if (b[0] == 192 && b[1] == 168) return true;             // 192.168/16
+            if (b[0] == 100 && b[1] is >= 64 and <= 127) return true;// 100.64/10 CGNAT
+            return b[0] >= 224;                                       // 224/4 multicast + 240/4 reserved
+        }
+
+        if (ip.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            if (ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal || ip.IsIPv6Multicast) return true;
+            return (ip.GetAddressBytes()[0] & 0xFE) == 0xFC;         // fc00::/7 unique-local
+        }
+
+        return true; // unknown address family — refuse
+    }
 
     public async Task SendGameEventAsync(GameEvent gameEvent, string webhookUrl)
     {
@@ -108,13 +176,14 @@ public class SendWebhookService(ILogger<SendWebhookService> logger) : ISendWebho
         if (response.IsSuccessStatusCode)
             return;
 
-        var responseBody = await response.Content.ReadAsStringAsync();
+        // Deliberately NOT logging the response body: with the SSRF guard the target is
+        // a public host, but echoing an arbitrary remote response into operator logs is
+        // an unnecessary read primitive. Status + reason are enough to diagnose.
         logger.LogError(
-            "Failed to send webhook {Kind}: {StatusCode}, {Reason}, Body: {Body}",
+            "Failed to send webhook {Kind}: {StatusCode} {Reason}",
             kind,
             (int)response.StatusCode,
-            response.ReasonPhrase ?? "Unknown",
-            Truncate(responseBody, 400));
+            response.ReasonPhrase ?? "Unknown");
     }
 
     private static string Truncate(string? text, int maxLength)

@@ -669,9 +669,12 @@ public class AdGameController(
         if (ts is null || ts.Participation.GameId != id)
             return NotFound();
 
-        // Caller must be a member of the team that owns this service.
+        // Caller must be an ACCEPTED member of the team that owns this service — a
+        // denied/suspended participation must not be able to reset containers.
         var isMember = await db.Participations
-            .AnyAsync(p => p.Id == ts.ParticipationId && p.Members.Any(m => m.UserId == user.Id), token);
+            .AnyAsync(p => p.Id == ts.ParticipationId
+                && p.Status == ParticipationStatus.Accepted
+                && p.Members.Any(m => m.UserId == user.Id), token);
         if (!isMember) return Forbid();
 
         if (!ts.Challenge.AdAllowSelfReset)
@@ -1251,15 +1254,22 @@ PersistentKeepalive = 25
         if (ts is null || ts.Participation.GameId != id) return NotFound();
 
         var isMember = await db.Participations
-            .AnyAsync(p => p.Id == ts.ParticipationId && p.Members.Any(m => m.UserId == user.Id), token);
+            .AnyAsync(p => p.Id == ts.ParticipationId
+                && p.Status == ParticipationStatus.Accepted
+                && p.Members.Any(m => m.UserId == user.Id), token);
         if (!isMember) return Forbid();
 
-        // Post-game only: a snapshot key may linger from a prior game-end while
-        // the game is running again (extended/restarted) — players must not pull
-        // their container image mid-game.
-        var endTime = await db.Games.Where(g => g.Id == id)
-            .Select(g => g.EndTimeUtc).FirstOrDefaultAsync(token);
-        if (DateTimeOffset.UtcNow < endTime)
+        // Post-game only AND the download policy must still be on. A snapshot key may
+        // linger from a prior game-end while the game is running again (extended/restarted),
+        // and an operator may have revoked download AFTER capture — honor the live policy,
+        // not the state at capture time, or a team could keep pulling their patched image.
+        var game = await db.Games.Where(g => g.Id == id)
+            .Select(g => new { g.EndTimeUtc, g.AdAllowSnapshotDownload })
+            .FirstOrDefaultAsync(token);
+        if (game is null) return NotFound();
+        if (!game.AdAllowSnapshotDownload)
+            return NotFound(new RequestResponse("Snapshot download is disabled for this game"));
+        if (DateTimeOffset.UtcNow < game.EndTimeUtc)
             return NotFound(new RequestResponse("Snapshot is only available after the game ends"));
 
         if (string.IsNullOrEmpty(ts.SnapshotBlobKey))
@@ -1307,6 +1317,22 @@ PersistentKeepalive = 25
         AdSshKeyUtils.ParsedKey parsed;
         try { parsed = AdSshKeyUtils.Parse(model.PublicKey); }
         catch (FormatException e) { return BadRequest(new RequestResponse(e.Message)); }
+
+        // Fingerprint must be unique within the game. The jump host resolves a login by
+        // (fingerprint, challengeId) scoped to the game and FAILS CLOSED on ambiguity, so
+        // letting a second participation register an existing key would let one team lock
+        // another out of SSH — a public key isn't secret (e.g. github.com/<user>.keys).
+        // Reject the cross-team collision (a teammate re-using a key, or the caller
+        // rotating their own slot, is fine — those share this participation id).
+        var gameParticipationIds = db.Participations.Where(p => p.GameId == id).Select(p => p.Id);
+        var collision = await db.AdTeamSshKeys.AnyAsync(k =>
+            k.Fingerprint == parsed.Fingerprint
+            && k.RevokedAt == null
+            && k.ParticipationId != participation.Id
+            && gameParticipationIds.Contains(k.ParticipationId), token);
+        if (collision)
+            return Conflict(new RequestResponse(
+                "This SSH key is already registered by another team in this game — use a different key."));
 
         var now = DateTimeOffset.UtcNow;
         var existing = await db.AdTeamSshKeys
