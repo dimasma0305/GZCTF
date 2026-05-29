@@ -233,6 +233,29 @@ public sealed class RepoBindingDiscoveryService(
             await context.SaveChangesAsync(token);
             return new(gamesCreated, gamesUpdated, challengesImported, challengesUpdated, failures, messages);
         }
+        catch (GitCommandException gce)
+        {
+            // EXPECTED class of failure: bad URL, private/missing repo,
+            // missing/expired token, stale lock. These recur every poll for a
+            // permanently-broken binding, so log ONE concise warning (no stack)
+            // instead of flooding the log with a full trace each tick. The
+            // operator-facing hint + git stderr land on the binding's status row.
+            binding.LastScanUtc = DateTimeOffset.UtcNow;
+            var raw = Sanitize(gce.Message, plaintextToken);
+            logger.LogWarning("RepoBindingDiscovery: git sync failed for binding {Id}: {Message}", bindingId, raw);
+            // FriendlyMessage on the status row tells the operator what to fix
+            // (bad URL / private repo / missing token / stale lock). We don't
+            // touch TokenStatus here — a present-but-rejected token can't be
+            // distinguished from a correct one without a probe, and the enum has
+            // no "rejected" state; the message carries the actionable hint.
+            binding.LastScanMessage = gce.FriendlyMessage;
+            messages.Add(raw);
+            await WriteScanRowAsync(bindingId, null, gamesCreated, gamesUpdated,
+                challengesImported, challengesUpdated, failures + 1, messages, plaintextToken, token);
+            await context.SaveChangesAsync(token);
+            return new(gamesCreated, gamesUpdated, challengesImported, challengesUpdated, failures + 1,
+                messages);
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "RepoBindingDiscovery: top-level error for binding {Id}", bindingId);

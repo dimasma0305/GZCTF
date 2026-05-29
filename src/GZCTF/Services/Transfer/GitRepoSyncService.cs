@@ -126,6 +126,18 @@ public sealed class GitRepoSyncService(ILogger<GitRepoSyncService> logger)
         }
         else
         {
+            // A git process killed mid-operation (the RunGitAsync timeout kill,
+            // or a container restart during a fetch) can leave a stale *.lock
+            // under .git that wedges EVERY future command ("Unable to create
+            // '.../shallow.lock': File exists. Another git process seems to be
+            // running…"). We hold the per-(kind,id) semaphore, so no live git
+            // process owns these — any lock here is stale. Clear before fetching.
+            var clearedLocks = ClearStaleGitLocks(gitDir);
+            if (clearedLocks > 0)
+                logger.LogWarning(
+                    "GitRepoSync: cleared {N} stale git lock(s) in {Dir} left by an interrupted prior sync",
+                    clearedLocks, repoDir);
+
             // Incremental: fetch the requested ref, then point the
             // worktree at it. --depth 1 again to avoid pulling history
             // that accumulates over months of poll ticks.
@@ -351,9 +363,10 @@ public sealed class GitRepoSyncService(ILogger<GitRepoSyncService> logger)
         {
             // Strip any echoed Authorization header from stderr just in
             // case git ever prints it (unlikely, but cheap insurance).
-            var sanitized = stderr.Replace("Authorization: Bearer ", "Authorization: Bearer ***");
-            throw new InvalidOperationException(
-                $"git {SafeCommandSummary(args)} exited {proc.ExitCode}: {sanitized.Trim()}");
+            var sanitized = stderr.Replace("Authorization: Bearer ", "Authorization: Bearer ***").Trim();
+            throw new GitCommandException(
+                $"git {SafeCommandSummary(args)} exited {proc.ExitCode}: {sanitized}",
+                proc.ExitCode, sanitized);
         }
 
         return stdout;
@@ -366,7 +379,39 @@ public sealed class GitRepoSyncService(ILogger<GitRepoSyncService> logger)
     /// lands in an exception message.
     /// </summary>
     internal static string SafeCommandSummary(string[] args)
-        => string.Join(' ', args.TakeWhile(a => a != "-c"));
+    {
+        // Drop every "-c <value>" pair (the http.extraHeader value carries the
+        // PAT) but KEEP the rest, so the failing operation (clone/fetch/push) is
+        // still visible. The old TakeWhile-until-first-"-c" hid the WHOLE command
+        // whenever auth args were prepended at position 0 — producing the
+        // useless "git  exited 128" messages seen on failing private-repo syncs.
+        var kept = new List<string>(args.Length);
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "-c") { i++; continue; }
+            kept.Add(args[i]);
+        }
+        return string.Join(' ', kept);
+    }
+
+    /// <summary>
+    /// Remove stale top-level git lock files (<c>shallow.lock</c>,
+    /// <c>index.lock</c>, <c>config.lock</c>, …) left behind by a git process
+    /// that was killed mid-operation. SAFE because every caller holds the
+    /// per-(kind,id) semaphore, so there is no live git process for this repo to
+    /// own them. Returns the number of locks removed.
+    /// </summary>
+    internal static int ClearStaleGitLocks(string gitDir)
+    {
+        if (!Directory.Exists(gitDir)) return 0;
+        var cleared = 0;
+        foreach (var lockFile in Directory.EnumerateFiles(gitDir, "*.lock", SearchOption.TopDirectoryOnly))
+        {
+            try { File.Delete(lockFile); cleared++; }
+            catch { /* best effort — nothing legitimately holds it under the semaphore */ }
+        }
+        return cleared;
+    }
 
     /// <summary>
     /// Compose the <c>-c http.extraHeader=...</c> args git needs to
@@ -387,4 +432,45 @@ public sealed class GitRepoSyncService(ILogger<GitRepoSyncService> logger)
             System.Text.Encoding.UTF8.GetBytes($"x-access-token:{authToken}"));
         return ["-c", $"http.extraHeader=Authorization: Basic {basic}"];
     }
+}
+
+/// <summary>
+/// A git subprocess exited non-zero. Carries the exit code + (PAT-scrubbed)
+/// stderr so callers can tell an EXPECTED sync failure (bad URL, private or
+/// missing repo, missing/expired token, stale lock) apart from an unexpected
+/// internal fault — and log the former as a one-line warning instead of a full
+/// stack trace on every poll. Derives from <see cref="InvalidOperationException"/>
+/// so existing <c>catch (InvalidOperationException)</c> sites keep working.
+/// </summary>
+public sealed class GitCommandException(string message, int exitCode, string stderr)
+    : InvalidOperationException(message)
+{
+    public int ExitCode { get; } = exitCode;
+    public string Stderr { get; } = stderr;
+
+    /// <summary>
+    /// Git could not authenticate: the repo is private/nonexistent or the token
+    /// is missing/expired, so git fell through to a credential prompt (blocked by
+    /// GIT_TERMINAL_PROMPT=0) or got an explicit auth rejection.
+    /// </summary>
+    public bool IsAuthFailure =>
+        Stderr.Contains("could not read Username", StringComparison.OrdinalIgnoreCase)
+        || Stderr.Contains("Authentication failed", StringComparison.OrdinalIgnoreCase)
+        || Stderr.Contains("Invalid username or password", StringComparison.OrdinalIgnoreCase)
+        || Stderr.Contains("terminal prompts disabled", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>True when git refused because a stale <c>*.lock</c> is present.</summary>
+    public bool IsStaleLock =>
+        Stderr.Contains(".lock", StringComparison.OrdinalIgnoreCase)
+        && Stderr.Contains("File exists", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>A concise, operator-facing hint for the binding's status line.</summary>
+    public string FriendlyMessage =>
+        IsAuthFailure
+            ? "Git authentication failed — the repository may be private or its URL/owner is wrong; check the repo URL and the GitHub token."
+        : Stderr.Contains("not found", StringComparison.OrdinalIgnoreCase)
+            ? "Repository not found — check the repo URL."
+        : IsStaleLock
+            ? "A previous sync was interrupted and left a git lock; it is cleared automatically on the next scan."
+            : $"git exited {ExitCode}.";
 }
