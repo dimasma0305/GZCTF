@@ -73,7 +73,7 @@ public class AdGameController(
         // would otherwise stay submittable forever and mutate final standings.
         var window = await db.Games
             .Where(g => g.Id == id)
-            .Select(g => new { g.StartTimeUtc, g.EndTimeUtc })
+            .Select(g => new { g.StartTimeUtc, g.EndTimeUtc, g.AdScoringPaused })
             .FirstOrDefaultAsync(token);
         if (window is null)
             return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Game_NotFound)]));
@@ -90,6 +90,20 @@ public class AdGameController(
                     : "the game has ended — submissions are closed"
             }).ToList();
             return Ok(new AdBatchSubmitResultModel { Results = closed });
+        }
+
+        // Scoring pause halts the round scheduler + checker (no new flags, no SLA
+        // accrual); captures must freeze too, or attack points keep accruing while
+        // the rest of the board is paused (e.g. during a contested ruling / outage).
+        if (window.AdScoringPaused)
+        {
+            var paused = model.Flags.Select(f => new AdSubmitResultModel
+            {
+                Flag = f,
+                Status = "paused",
+                Message = "scoring is paused — submissions are not being recorded"
+            }).ToList();
+            return Ok(new AdBatchSubmitResultModel { Results = paused });
         }
 
         var currentRound = await db.AdRounds
@@ -251,6 +265,17 @@ public class AdGameController(
             Points = 0 // assigned below from the stable capture order
         };
 
+        // Serialize capturers of the SAME flag with a per-flag advisory lock held
+        // for the insert+count. First-blood weighting counts prior captures
+        // (a.Id < this.Id); under READ COMMITTED two DIFFERENT teams submitting the
+        // same flag concurrently would each see 0 committed priors and both bank
+        // full first-blood (distinct Ids do NOT imply distinct visible counts). The
+        // lock makes the count reflect a consistent committed set; it's released on
+        // commit/rollback.
+        await using var tx = await db.Database.BeginTransactionAsync(token);
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock(hashtext('gzctf_ad_capture'), {adFlag.Id})", token);
+
         try
         {
             await db.AdAttacks.AddAsync(attack, token);
@@ -264,22 +289,22 @@ public class AdGameController(
             // row and fails too, silently dropping every later valid capture in
             // the batch (mirrors the VPN-peer detach pattern below).
             db.Entry(attack).State = EntityState.Detached;
+            await tx.RollbackAsync(token);
             result.Status = "duplicate";
             result.FlagPlantedAtRound = adFlag.PlantedAtRound;
             result.Message = "already submitted";
             return result;
         }
 
-        // First-blood weighting from a STABLE order (the Id sequence) rather than
-        // a pre-insert count: two teams capturing the same flag at the same instant
-        // get distinct Ids → distinct ranks (N and N+1), instead of both reading
-        // the same prior-count and each storing the same first-blood points (which
-        // the scoreboard then sums, inflating attack standings).
+        // First-blood weighting from the now-consistent committed capture order
+        // (the advisory lock above serializes concurrent same-flag capturers, so
+        // each gets a distinct prior-count → distinct rank).
         var priorCapturers = await db.AdAttacks.CountAsync(
             a => a.AdFlagId == adFlag.Id && a.Id < attack.Id, token);
         var points = AdScoring.AttackPoints(priorCapturers);
         attack.Points = points;
         await db.SaveChangesAsync(token);
+        await tx.CommitAsync(token);
 
         logger.SystemLog(
             $"A&D attack landed: attacker={attackerPart.Id} victim={victimPart.Id} chal={adFlag.AdTeamService.ChallengeId} round={currentRound.Number} pts={points:F2}",

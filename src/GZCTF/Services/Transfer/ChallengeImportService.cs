@@ -596,8 +596,12 @@ public sealed class ChallengeImportService(
         // 'value:' is intentionally ignored — points are admin-controlled.
         // New imports inherit the GameChallenge.OriginalScore default
         // (1000); existing rows keep whatever the admin already set.
-        c.MinScoreRate = m.MinScoreRate ?? c.MinScoreRate;
-        c.Difficulty = m.Difficulty ?? c.Difficulty;
+        // Clamp to the same bounds the API PUT enforces (ChallengeUpdateModel) —
+        // a YAML import is a parallel write path for these scoring fields, and an
+        // out-of-range minScoreRate (>1 / <0) or non-positive difficulty inverts
+        // or breaks the dynamic-score decay curve.
+        c.MinScoreRate = Math.Clamp(m.MinScoreRate ?? c.MinScoreRate, 0.0, 1.0);
+        c.Difficulty = Math.Max(0.01, m.Difficulty ?? c.Difficulty);
         c.SubmissionLimit = m.SubmissionLimit ?? c.SubmissionLimit;
         c.DisableBloodBonus = m.DisableBloodBonus ?? c.DisableBloodBonus;
         c.FlagTemplate = m.Container?.FlagTemplate ?? m.FlagTemplate ?? c.FlagTemplate;

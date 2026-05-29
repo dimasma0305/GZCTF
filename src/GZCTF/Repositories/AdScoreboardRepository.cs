@@ -240,17 +240,27 @@ public class AdScoreboardRepository(
 
         var partIds = teams.Select(p => p.Id).ToHashSet();
 
+        // Enabled A&D challenges only — match GenScoreboardAsync so disabling a
+        // challenge mid-game drops its history from the chart too (else the chart
+        // diverges from the team Total — the symmetric bug to the KotH timeline one).
+        var adChallengeIds = (await Context.GameChallenges
+            .Where(c => c.GameId == gameId && c.IsEnabled && c.Type == ChallengeType.AttackDefense)
+            .Select(c => c.Id)
+            .ToListAsync(token)).ToHashSet();
+
         // Aggregate in SQL per (team, round) instead of loading every row — avoids
         // pulling the whole (unbounded) AdCheckResults / AdAttacks tables into memory.
         var atkByTeamRound = (await Context.AdAttacks
-                .Where(a => partIds.Contains(a.AttackerParticipationId) && (cutoff == null || a.SubmittedAt <= cutoff))
+                .Where(a => partIds.Contains(a.AttackerParticipationId) && adChallengeIds.Contains(a.ChallengeId)
+                    && (cutoff == null || a.SubmittedAt <= cutoff))
                 .GroupBy(a => new { a.AttackerParticipationId, a.SubmittedAtRound })
                 .Select(g => new { g.Key.AttackerParticipationId, g.Key.SubmittedAtRound, Points = g.Sum(a => a.Points) })
                 .ToListAsync(token))
             .ToDictionary(x => (x.AttackerParticipationId, x.SubmittedAtRound), x => x.Points);
 
         var capsByTeamRound = (await Context.AdAttacks
-                .Where(a => partIds.Contains(a.VictimParticipationId) && (cutoff == null || a.SubmittedAt <= cutoff))
+                .Where(a => partIds.Contains(a.VictimParticipationId) && adChallengeIds.Contains(a.ChallengeId)
+                    && (cutoff == null || a.SubmittedAt <= cutoff))
                 .GroupBy(a => new { a.VictimParticipationId, a.ChallengeId, a.SubmittedAtRound })
                 .Select(g => new { g.Key.VictimParticipationId, g.Key.ChallengeId, g.Key.SubmittedAtRound, Count = g.Count() })
                 .ToListAsync(token))
@@ -260,8 +270,8 @@ public class AdScoreboardRepository(
         var slaByTeamRound = (await Context.AdCheckResults
                 .Where(c => cutoff == null || c.CheckedAt <= cutoff)
                 .Join(Context.AdTeamServices, c => c.AdTeamServiceId, ts => ts.Id,
-                    (c, ts) => new { c.AdRoundId, c.SlaCredit, ts.ParticipationId })
-                .Where(x => partIds.Contains(x.ParticipationId))
+                    (c, ts) => new { c.AdRoundId, c.SlaCredit, ts.ParticipationId, ts.ChallengeId })
+                .Where(x => partIds.Contains(x.ParticipationId) && adChallengeIds.Contains(x.ChallengeId))
                 .Join(Context.AdRounds, x => x.AdRoundId, r => r.Id,
                     (x, r) => new { x.ParticipationId, x.SlaCredit, r.Number, r.GameId })
                 .Where(x => x.GameId == gameId)
