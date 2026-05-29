@@ -89,6 +89,13 @@ public interface IGameRepository : IRepository
     public Task<bool> HasGameAsync(int id, bool allowHidden, CancellationToken token = default);
 
     /// <summary>
+    /// Lightweight (Hidden, StartTimeUtc) projection for SignalR hub gating, or null
+    /// if the game doesn't exist. Lets a hub apply the same Hidden + not-started gates
+    /// the REST endpoints use without loading the whole game.
+    /// </summary>
+    public Task<(bool Hidden, DateTimeOffset StartTimeUtc)?> GetGameHubInfoAsync(int id, CancellationToken token = default);
+
+    /// <summary>
     /// Create a new game
     /// </summary>
     /// <param name="game"></param>

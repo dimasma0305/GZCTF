@@ -26,6 +26,16 @@ public class GameRepository(
     public Task<bool> HasGameAsync(int id, bool allowHidden, CancellationToken token = default)
         => Context.Games.AnyAsync(g => g.Id == id && (allowHidden || !g.Hidden), token);
 
+    public async Task<(bool Hidden, DateTimeOffset StartTimeUtc)?> GetGameHubInfoAsync(
+        int id, CancellationToken token = default)
+    {
+        var row = await Context.Games
+            .Where(g => g.Id == id)
+            .Select(g => new { g.Hidden, g.StartTimeUtc })
+            .FirstOrDefaultAsync(token);
+        return row is null ? null : (row.Hidden, row.StartTimeUtc);
+    }
+
     public async Task<Game?> CreateGame(Game game, CancellationToken token = default)
     {
         game.GenerateKeyPair(_xorKey);

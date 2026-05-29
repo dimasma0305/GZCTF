@@ -22,10 +22,14 @@ public class UserHub : Hub<IUserClient>
         }
 
         var gameRepository = context.RequestServices.GetRequiredService<IGameRepository>();
-        // Don't let an anonymous client subscribe to a Hidden (draft) game's notice
-        // feed. Monitors may (they manage the draft).
         var isMonitor = await ContextHelper.HasMonitor(context);
-        if (!await gameRepository.HasGameAsync(gId, allowHidden: isMonitor))
+        var info = await gameRepository.GetGameHubInfoAsync(gId);
+        // Reject unknown games; Hidden (draft) games for non-monitors; and — mirroring
+        // the REST GameController.Notices gate — non-monitor connections before the
+        // game starts, so pre-start broadcast notices don't reach clients early.
+        if (info is null
+            || (!isMonitor && info.Value.Hidden)
+            || (!isMonitor && DateTimeOffset.UtcNow < info.Value.StartTimeUtc))
         {
             Context.Abort();
             return;

@@ -78,6 +78,31 @@ public class AdEgressIsolationTests
     }
 
     [Fact]
+    public void BuildRulesScript_EmitsKothLeaderCooldownFootholdDrops()
+    {
+        // A cooled-down KotH leader's own A&D foothold → hill must be DROPped in the
+        // host chain (the WG-sidecar cooldown can't see host-bridge traffic, and the
+        // RFC1918 baseline misses the 172.0.x hill). Specific src→dst, not ipset-keyed.
+        var script = AdEgressIsolationService.BuildRulesScript(
+            adContainerIps: ["172.0.6.10"],
+            kothHillIps: ["172.0.6.20"],
+            controlPlaneIps: null,
+            kothCooldownDrops: [("172.0.6.10", "172.0.6.20")]);
+
+        Assert.Contains("-A GZCTF_AD_ISO -s 172.0.6.10 -d 172.0.6.20 -j DROP", script);
+    }
+
+    [Fact]
+    public void BuildRulesScript_NoCooldown_OmitsFootholdDrop()
+    {
+        var script = AdEgressIsolationService.BuildRulesScript(
+            adContainerIps: ["172.0.6.10"],
+            kothHillIps: ["172.0.6.20"]);
+
+        Assert.DoesNotContain("-s 172.0.6.10 -d 172.0.6.20 -j DROP", script);
+    }
+
+    [Fact]
     public void BuildRulesScript_SkipsMalformedIps()
     {
         var script = AdEgressIsolationService.BuildRulesScript(

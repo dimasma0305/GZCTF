@@ -1289,8 +1289,24 @@ public sealed class AdContainerManager(
                 blocked++;
             }
 
+            // The sidecar chain above only covers the leaders' VPN path to the hill.
+            // In a mixed A&D+KotH game a leader can re-plant from its OWN A&D foothold
+            // (host-bridge traffic the WG sidecar never sees, and egress deliberately
+            // allows ad→koth). Register the leaders' A&D container IPs with the egress
+            // service so its host DOCKER-USER chain drops foothold→hill for the cooldown
+            // window too (lifted in LiftKothCooldownAsync). `leaders` are already
+            // game-scoped (from this game's KothControlResults).
+            var footholdIps = await db.AdTeamServices
+                .Where(s => leaders.Contains(s.ParticipationId) && s.Container != null && s.Container.IP != "")
+                .Select(s => s.Container!.IP)
+                .ToListAsync(token);
+            egressIso.SetKothFootholdCooldown(challengeId, footholdIps, hillIp);
+            if (footholdIps.Count > 0)
+                egressIso.RequestReapply();
+
             logger.SystemLog(
-                $"KotH cooldown: blocked {blocked} leader IP(s) from hill challenge={challengeId} for round {round}",
+                $"KotH cooldown: blocked {blocked} leader VPN IP(s) + {footholdIps.Count} foothold IP(s) "
+                + $"from hill challenge={challengeId} for round {round}",
                 TaskStatus.Success, LogLevel.Information);
         }
         catch (Exception e)
@@ -1303,6 +1319,10 @@ public sealed class AdContainerManager(
     private async Task LiftKothCooldownAsync(
         IContainerProvider<DockerClient, DockerMetadata> dockerProvider, int challengeId, CancellationToken token)
     {
+        // Drop the host-side foothold block first (in-memory + a reapply), so it's
+        // cleared even if the sidecar exec below fails.
+        egressIso.ClearKothFootholdCooldown(challengeId);
+        egressIso.RequestReapply();
         try
         {
             var sidecar = await ReadVpnSidecarIdAsync(token);
@@ -1328,6 +1348,8 @@ public sealed class AdContainerManager(
     private async Task DestroyKothCooldownChainAsync(
         IContainerProvider<DockerClient, DockerMetadata> dockerProvider, int challengeId, CancellationToken token)
     {
+        // Also drop any lingering host-side foothold block for this hill on game-end.
+        egressIso.ClearKothFootholdCooldown(challengeId);
         try
         {
             var sidecar = await ReadVpnSidecarIdAsync(token);

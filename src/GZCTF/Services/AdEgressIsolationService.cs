@@ -73,6 +73,36 @@ public sealed class AdEgressIsolationService(
     /// </summary>
     public void RequestReapply() => _trigger.Writer.TryWrite(0);
 
+    // Active KotH leader-cooldown foothold blocks, keyed by challenge id. A just-
+    // dethroned leader's VPN path to the hill is dropped on the WG sidecar, but its
+    // own A&D foothold reaches the hill over the host bridge (egress intentionally
+    // allows ad→koth as a legit play) — and only THIS host DOCKER-USER chain filters
+    // bridge traffic. AdContainerManager sets/clears these at the KotH refresh
+    // boundary and requests a reapply so the block tracks the (short) cooldown window.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, KothFootholdCooldown> _kothCooldowns =
+        new();
+
+    private sealed record KothFootholdCooldown(string[] FootholdIps, string HillIp);
+
+    /// <summary>
+    /// Block <paramref name="footholdIps"/> (the cooled-down leader's own A&amp;D
+    /// container IPs) → <paramref name="hillIp"/> in the host egress chain until
+    /// cleared. Idempotent; clears the entry when given nothing valid.
+    /// </summary>
+    public void SetKothFootholdCooldown(int challengeId, IEnumerable<string> footholdIps, string hillIp)
+    {
+        var ips = footholdIps.Where(IsValidIp).Distinct().ToArray();
+        if (ips.Length == 0 || !IsValidIp(hillIp))
+        {
+            _kothCooldowns.TryRemove(challengeId, out _);
+            return;
+        }
+        _kothCooldowns[challengeId] = new KothFootholdCooldown(ips, hillIp);
+    }
+
+    /// <summary>Lift a hill's foothold cooldown (call alongside the sidecar cooldown lift).</summary>
+    public void ClearKothFootholdCooldown(int challengeId) => _kothCooldowns.TryRemove(challengeId, out _);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         try { await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken); }
@@ -146,10 +176,15 @@ public sealed class AdEgressIsolationService(
         // hit the control-plane API on the shared challenge bridge.
         var controlPlaneIps = await ResolveControlPlaneIpsAsync(docker, token);
 
-        await RunHelperAsync(docker, BuildRulesScript(validAd, validKoth, controlPlaneIps), token);
+        // Active KotH leader-cooldown foothold blocks (foothold IP → hill IP).
+        var cooldownDrops = _kothCooldowns.Values
+            .SelectMany(c => c.FootholdIps.Select(f => (Src: f, Dst: c.HillIp)))
+            .ToList();
+
+        await RunHelperAsync(docker, BuildRulesScript(validAd, validKoth, controlPlaneIps, cooldownDrops), token);
         logger.SystemLog(
             $"A&D egress isolation applied: {validAd.Count} A&D container(s) + {validKoth.Count} KotH hill(s) contained"
-            + $"; {controlPlaneIps.Count} control-plane IP(s) blocked",
+            + $"; {controlPlaneIps.Count} control-plane IP(s) blocked; {cooldownDrops.Count} KotH cooldown drop(s)",
             TaskStatus.Success, LogLevel.Debug);
     }
 
@@ -217,7 +252,8 @@ public sealed class AdEgressIsolationService(
     internal static string BuildRulesScript(
         IEnumerable<string> adContainerIps,
         IEnumerable<string> kothHillIps,
-        IEnumerable<string>? controlPlaneIps = null)
+        IEnumerable<string>? controlPlaneIps = null,
+        IEnumerable<(string Src, string Dst)>? kothCooldownDrops = null)
     {
         var sb = new StringBuilder();
         AppendPreamble(sb);
@@ -258,6 +294,18 @@ public sealed class AdEgressIsolationService(
         {
             sb.AppendLine($"\"$IPT\" -A {Chain} -m set --match-set {Set} src     -d {ip} -j DROP");
             sb.AppendLine($"\"$IPT\" -A {Chain} -m set --match-set {SetKoth} src -d {ip} -j DROP");
+        }
+
+        // KotH leader-cooldown (rule 5): per-tick DROP of a just-dethroned leader's
+        // OWN A&D foothold → the freshly-reset hill. The VPN path is blocked on the WG
+        // sidecar; this closes the host-bridge path the sidecar can't see (rule 2 only
+        // covers ad→ad, and egress deliberately permits ad→koth as a legit play). The
+        // hill is reset right before the cooldown so any prior flow is broken — these
+        // catch the leader's NEW connection. Specific src→dst; removed when lifted.
+        foreach (var (src, dst) in (kothCooldownDrops ?? Enumerable.Empty<(string, string)>()))
+        {
+            if (!IsValidIp(src) || !IsValidIp(dst)) continue;
+            sb.AppendLine($"\"$IPT\" -A {Chain} -s {src} -d {dst} -j DROP");
         }
         return sb.ToString();
     }
