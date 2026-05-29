@@ -1332,8 +1332,17 @@ PersistentKeepalive = 25
         // (fingerprint, challengeId) scoped to the game and FAILS CLOSED on ambiguity, so
         // letting a second participation register an existing key would let one team lock
         // another out of SSH — a public key isn't secret (e.g. github.com/<user>.keys).
-        // Reject the cross-team collision (a teammate re-using a key, or the caller
-        // rotating their own slot, is fine — those share this participation id).
+        // Reject the cross-team collision (a teammate re-using a key, or the caller rotating
+        // their own slot, is fine — those share this participation id). Serialize concurrent
+        // registrations of the SAME fingerprint in the SAME game under a transaction-scoped
+        // advisory lock so the check+insert is race-free (two simultaneous uploads of an
+        // identical key by different teams would otherwise both pass the check and insert).
+        // Mirrors the A&D /Submit advisory lock.
+        var lockKey = $"{id}:{parsed.Fingerprint}";
+        await using var tx = await db.Database.BeginTransactionAsync(token);
+        await db.Database.ExecuteSqlAsync(
+            $"SELECT pg_advisory_xact_lock(hashtext('gzctf_ad_sshkey'), hashtext({lockKey}))", token);
+
         var gameParticipationIds = db.Participations.Where(p => p.GameId == id).Select(p => p.Id);
         var collision = await db.AdTeamSshKeys.AnyAsync(k =>
             k.Fingerprint == parsed.Fingerprint
@@ -1376,6 +1385,7 @@ PersistentKeepalive = 25
         }
 
         await db.SaveChangesAsync(token);
+        await tx.CommitAsync(token);
 
         logger.SystemLog(
             $"A&D SSH key uploaded: user={user.Id} game={id} fp={parsed.Fingerprint}",

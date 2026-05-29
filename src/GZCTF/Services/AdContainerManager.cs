@@ -1163,18 +1163,19 @@ public sealed class AdContainerManager(
                             .Include(t => t.Container)
                             .FirstOrDefaultAsync(t => t.GameId == gameId && t.ChallengeId == challenge.Id, token);
 
-                        // Apply the leader cooldown BEFORE saving LastRefreshRound,
-                        // so a crash between the launch and the LastRefreshRound save
-                        // re-fires dueRefresh on the next tick (instead of silently
-                        // skipping the cooldown — which would happen if LastRefresh
-                        // were saved first → dueRefresh=false → cooldown never
-                        // installed). The cooldown apply is itself idempotent
-                        // (creates+flushes its own chain).
-                        if (dockerProvider is not null)
-                            await ApplyKothLeaderCooldownAsync(db, dockerProvider, gameId, challenge.Id, latestRound, token);
-
-                        if (target is not null)
+                        // Only advance the refresh bookkeeping + install the cooldown if the
+                        // relaunch ACTUALLY produced a live hill container. A silently-failed
+                        // launch (e.g. a transient Docker create failure) leaves Container
+                        // null; advancing LastRefreshRound anyway would flip next tick's
+                        // dueRefresh to false and PERMANENTLY skip this window's cooldown
+                        // while leaving the hill down. Leaving it unchanged makes the next
+                        // tick retry the refresh. Cooldown is applied before the save so a
+                        // crash in between re-fires dueRefresh (the apply is idempotent).
+                        if (target?.Container is { } c && c.Status != ContainerStatus.Destroyed)
                         {
+                            if (dockerProvider is not null)
+                                await ApplyKothLeaderCooldownAsync(db, dockerProvider, gameId, challenge.Id, latestRound, token);
+
                             target.LastRefreshRound = latestRound;
                             await db.SaveChangesAsync(token);
                         }
@@ -1221,10 +1222,12 @@ public sealed class AdContainerManager(
     {
         try
         {
-            // Window = rounds since the last refresh boundary. For the default
-            // refreshTicks=5 this is the previous 5 rounds; on the very first
-            // refresh (LastRefreshRound=0) it's rounds 1..round-1, which still
-            // matches "recent" (no earlier history to dilute it).
+            // Window = rounds since the last refresh boundary, lower bound INCLUSIVE so the
+            // boundary round (the re-pwn round right after the previous refresh) is counted
+            // exactly once — in this window. With an exclusive `> lastRefresh` it was dropped
+            // every refresh, and the window was empty (cooldown never fired) for very short
+            // refresh intervals. On the first refresh (LastRefreshRound=0) it's rounds
+            // 1..round-1, unchanged (round numbers start at 1).
             var lastRefresh = await db.KothTargets
                 .Where(t => t.GameId == gameId && t.ChallengeId == challengeId)
                 .Select(t => (int?)t.LastRefreshRound)
@@ -1233,7 +1236,7 @@ public sealed class AdContainerManager(
             var scores = await db.KothControlResults
                 .Where(r => r.GameId == gameId && r.ChallengeId == challengeId
                          && r.ControllingParticipationId != null
-                         && r.AdRound.Number > lastRefresh && r.AdRound.Number < round)
+                         && r.AdRound.Number >= lastRefresh && r.AdRound.Number < round)
                 .GroupBy(r => r.ControllingParticipationId!.Value)
                 .Select(g => new { Pid = g.Key, Score = g.Sum(x => x.HoldCredit - x.Penalty) })
                 .ToListAsync(token);

@@ -222,6 +222,10 @@ public sealed class ChallengeBuildQueueService(
         var liveLock = new object();
         long lastFlushTicks = 0;
         const long FlushIntervalMs = 2000;
+        // Track the fire-and-forget live-log flushes so we can drain them before the
+        // terminal LastBuildLog write — otherwise a late flush can land after it and
+        // overwrite the final log with a stale mid-build snapshot.
+        var liveFlushes = new System.Collections.Concurrent.ConcurrentBag<Task>();
 
         Action<string> sink = line =>
         {
@@ -242,7 +246,7 @@ public sealed class ChallengeBuildQueueService(
             // Fire-and-forget DB write — losing one progress flush is
             // fine; what matters is that the operator sees something
             // change every couple of seconds.
-            _ = Task.Run(async () =>
+            liveFlushes.Add(Task.Run(async () =>
             {
                 try
                 {
@@ -253,7 +257,7 @@ public sealed class ChallengeBuildQueueService(
                         .ExecuteUpdateAsync(s => s.SetProperty(x => x.LastBuildLog, snapshot));
                 }
                 catch { /* swallow — next flush will retry */ }
-            });
+            }));
         };
 
         ChallengeBuildResult? result = null;
@@ -287,6 +291,11 @@ public sealed class ChallengeBuildQueueService(
             // and create a duplicate. MarkEnd happens after the
             // retry decision below.
         }
+
+        // Drain in-flight live-log flushes BEFORE the terminal write below, so none can
+        // land afterward and clobber the final LastBuildLog. BuildAsync has returned, so no
+        // new flushes will be queued past this point. (Each flush swallows its own errors.)
+        try { await Task.WhenAll(liveFlushes); } catch { /* best-effort */ }
 
         var finishedAt = DateTimeOffset.UtcNow;
         bool success = result is { Success: true };

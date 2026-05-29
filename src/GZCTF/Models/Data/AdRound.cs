@@ -36,8 +36,11 @@ public class AdRound
     public DateTimeOffset EndsAt { get; set; }
 
     /// <summary>
-    /// Set when scoring has been computed and persisted for this round. Idempotent —
-    /// scheduler won't double-count if it crashes mid-round and restarts.
+    /// RESERVED — currently neither written nor read. Intended as a scoring-idempotency
+    /// marker (set once a round's scoring is persisted, so a crash+restart can't
+    /// double-count), but that mechanism is not wired up anywhere. Do NOT gate scoring on
+    /// this until it is actually set, or scoring would silently never run. Kept (rather than
+    /// dropped) to avoid a column-drop migration.
     /// </summary>
     public DateTimeOffset? ScoredAt { get; set; }
 }

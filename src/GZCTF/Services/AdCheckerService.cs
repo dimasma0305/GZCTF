@@ -155,15 +155,15 @@ public sealed class AdCheckerService(
     /// SLA for the tick.</summary>
     private static async Task<AdCheckOutcome> RunWithRetryAsync(
         IAdCheckRunner runner, AdTeamService ts, AdRound round, GameChallenge challenge,
-        string? flag, CancellationToken token)
+        string? flag, CancellationToken token, int maxAttempts = MaxCheckAttempts)
     {
         AdCheckOutcome outcome = null!;
-        for (var attempt = 1; attempt <= MaxCheckAttempts; attempt++)
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
             outcome = await runner.RunAsync(ts, round, challenge, flag, token);
             if (outcome.Status == AdCheckStatus.Ok)
                 return outcome;
-            if (attempt < MaxCheckAttempts)
+            if (attempt < maxAttempts)
                 await Task.Delay(RetryDelay, token);
         }
         return outcome;
@@ -389,7 +389,12 @@ public sealed class AdCheckerService(
                     Container = target.Container
                 };
 
-                var outcome = await RunWithRetryAsync(runner, hillTs, latest, challenge, null, token);
+                // Single attempt for the shared hill: this runs INSIDE the per-challenge
+                // relaunch lock, so retrying (up to MaxCheckAttempts x Timeout) would hold
+                // the lock the reconciler needs to bring a down hill back, making recovery
+                // ~3x slower. The reconciler relaunches a down hill next tick regardless; a
+                // transient flake costs the king at most one tick of penalty.
+                var outcome = await RunWithRetryAsync(runner, hillTs, latest, challenge, null, token, maxAttempts: 1);
 
                 int? controller = null;
                 int? matchedTokenId = null;
@@ -575,23 +580,25 @@ public sealed class AdCheckerService(
             CheckedAt = DateTimeOffset.UtcNow
         }, token);
 
-        // Maintain the per-service running SLA total in the SAME transaction as
-        // the insert — so the live scoreboard reads it (O(teams)) instead of
-        // summing all check rows, and it can't drift from the row set.
-        var svc = await db.AdTeamServices.FirstOrDefaultAsync(s => s.Id == adTeamServiceId, token);
-        if (svc is not null)
-            svc.SlaCreditTotal += credit;
-
+        // Maintain the per-service running SLA total in the SAME transaction as the insert
+        // (so the live scoreboard reads it O(teams) and it can't drift from the row set),
+        // applying the delta as an ATOMIC db increment rather than an EF read-modify-write
+        // so a concurrent admin OverrideCheck (or another tick) on this service can't lose it.
         try
         {
+            await using var tx = await db.Database.BeginTransactionAsync(token);
             await db.SaveChangesAsync(token);
+            await db.AdTeamServices.Where(s => s.Id == adTeamServiceId)
+                .ExecuteUpdateAsync(s =>
+                    s.SetProperty(x => x.SlaCreditTotal, x => x.SlaCreditTotal + credit), token);
+            await tx.CommitAsync(token);
         }
         catch (DbUpdateException)
         {
-            // Unique-ish conflict from another tick winning the race —
-            // safe to ignore. (The schema doesn't have a unique index
-            // on (round, service) yet, but the re-check above + the
-            // 10s cadence makes duplicates a non-issue in practice.)
+            // Unique-ish conflict from another tick winning the race — safe to ignore.
+            // (The schema doesn't have a unique index on (round, service) yet, but the
+            // re-check above + the 10s cadence makes duplicates a non-issue in practice;
+            // the transaction auto-rolls-back on dispose without a Commit.)
         }
     }
 }

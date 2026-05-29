@@ -323,8 +323,6 @@ public class AdAdminController(
             .OrderByDescending(cr => cr.AdRoundId)
             .Select(cr => (AdCheckStatus?)cr.Status)
             .FirstOrDefaultAsync(token);
-        var svc = await db.AdTeamServices.FirstOrDefaultAsync(s => s.Id == check.AdTeamServiceId, token);
-
         // Stored SLA credit is field-scaled at earn time (AdScoring.SlaFieldFactor).
         // Replay the factor FROZEN on the row so the override scales by the
         // overridden round's field size, not today's — falling back to the current
@@ -333,7 +331,7 @@ public class AdAdminController(
             .CountAsync(p => p.GameId == id && p.Status == ParticipationStatus.Accepted, token));
 
         var newCredit = AdScoring.TickCredit(model.NewStatus, prevStatus) * (check.FieldFactor ?? fallbackFactor);
-        if (svc is not null) svc.SlaCreditTotal += newCredit - check.SlaCredit;
+        var totalDelta = newCredit - check.SlaCredit;
         check.SlaCredit = newCredit;
 
         var nextCheck = await db.AdCheckResults
@@ -343,11 +341,23 @@ public class AdAdminController(
         if (nextCheck is not null)
         {
             var newNextCredit = AdScoring.TickCredit(nextCheck.Status, model.NewStatus) * (nextCheck.FieldFactor ?? fallbackFactor);
-            if (svc is not null) svc.SlaCreditTotal += newNextCredit - nextCheck.SlaCredit;
+            totalDelta += newNextCredit - nextCheck.SlaCredit;
             nextCheck.SlaCredit = newNextCredit;
         }
 
-        await db.SaveChangesAsync(token);
+        // Apply the running-total delta as an ATOMIC db increment (not an EF
+        // read-modify-write) so a concurrent live checker tick on the same service can't
+        // lose this adjustment — and do it in one transaction with the per-row SlaCredit
+        // edits so the running total can never drift from the row sum.
+        await using (var tx = await db.Database.BeginTransactionAsync(token))
+        {
+            await db.SaveChangesAsync(token);
+            if (totalDelta != 0)
+                await db.AdTeamServices.Where(s => s.Id == check.AdTeamServiceId)
+                    .ExecuteUpdateAsync(s =>
+                        s.SetProperty(x => x.SlaCreditTotal, x => x.SlaCreditTotal + totalDelta), token);
+            await tx.CommitAsync(token);
+        }
 
         // The override moved an already-scored tick — invalidate the cached boards
         // so the correction is actually visible. Nothing else regenerates them
