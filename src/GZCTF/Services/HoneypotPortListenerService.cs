@@ -22,6 +22,12 @@ public class HoneypotPortListenerService(
     private const int MaxProbeBytes = 1024;
     private const int MaxProbeEncodedBytes = 64;
 
+    // Global cap on in-flight connection handlers across all honeypot ports. A flood must
+    // not exhaust sockets/threads/managed memory or hammer the shared DB with suspicion
+    // inserts; excess connections are dropped immediately (backpressure), not queued.
+    private const int MaxConcurrentConnections = 256;
+    private readonly SemaphoreSlim _connSlots = new(MaxConcurrentConnections, MaxConcurrentConnections);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var cfg = config.Value;
@@ -79,7 +85,14 @@ public class HoneypotPortListenerService(
                     continue;
                 }
 
-                _ = HandleConnection(client, port, stoppingToken);
+                if (!await _connSlots.WaitAsync(0, stoppingToken))
+                {
+                    // At capacity — drop immediately rather than queue.
+                    try { client.Close(); } catch { /* ignore */ }
+                    continue;
+                }
+                _ = HandleConnection(client, port, stoppingToken)
+                    .ContinueWith(_ => _connSlots.Release(), TaskScheduler.Default);
             }
         }
         finally

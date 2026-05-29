@@ -145,11 +145,17 @@ public class HoneypotService(
             .ToListAsync(token);
 
         var ipString = ip.ToString();
-        var recentUserName = candidates
-            .FirstOrDefault(c => c.RemoteIP != null && c.RemoteIP.ToString() == ipString)
-            ?.UserName;
-
-        if (string.IsNullOrEmpty(recentUserName)) return (null, null, null);
+        // Only attribute by IP when the IP maps to EXACTLY ONE recent user. A shared egress
+        // (campus/corporate NAT, VPN exit, CGNAT) shows multiple distinct users on the same
+        // IP, and a honeypot hit is a HARD signal — attributing it there would frame an
+        // innocent team for traffic an attacker on the same IP sent.
+        var ipUserNames = candidates
+            .Where(c => c.RemoteIP != null && c.RemoteIP.ToString() == ipString && c.UserName != null)
+            .Select(c => c.UserName!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (ipUserNames.Count != 1) return (null, null, null);
+        var recentUserName = ipUserNames[0];
 
         var resolved = await userManager.FindByNameAsync(recentUserName);
         if (resolved is null) return (null, recentUserName, null);

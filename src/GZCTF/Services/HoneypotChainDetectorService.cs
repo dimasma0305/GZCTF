@@ -106,6 +106,16 @@ public class HoneypotChainDetectorService(
         {
             if (!lookup.TryGetValue(group.ParticipationId, out var part)) continue;
 
+            // Fire HoneypotChain AT MOST ONCE per (participation, game). The bait set grows
+            // and the window slides between sweeps, so the per-(Participation, Type, Details)
+            // dedup in AddSuspicion never matched (Details changes every sweep) and the same
+            // scan was re-scored +150 on every tick. Gate on type + participation instead.
+            var alreadyRaised = await db.SuspicionEvents.AnyAsync(
+                e => e.ParticipationId == part.Id
+                  && e.GameId == part.GameId
+                  && e.Type == SuspicionType.HoneypotChain, token);
+            if (alreadyRaised) continue;
+
             var stub = new Participation { Id = part.Id, GameId = part.GameId };
             var details = $"baits={string.Join(',', group.Baits)} count={group.Baits.Count} window={(int)window.TotalMinutes}m";
 
