@@ -396,10 +396,10 @@ namespace GZCTF.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ParticipationId");
-
-                    b.HasIndex("GameId", "AssignedIp")
+                    b.HasIndex("AssignedIp")
                         .IsUnique();
+
+                    b.HasIndex("ParticipationId");
 
                     b.HasIndex("UserId", "ParticipationId")
                         .IsUnique();

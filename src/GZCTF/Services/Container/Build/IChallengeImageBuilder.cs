@@ -6,6 +6,7 @@ namespace GZCTF.Services.Container.Build;
 /// dockerfile path is relative to that directory.
 /// </summary>
 public sealed record ChallengeBuildRequest(
+    int ChallengeId,
     int GameId,
     string ChallengeSlug,
     string ContextDir,

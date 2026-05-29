@@ -261,7 +261,7 @@ public sealed class ChallengeBuildQueueService(
         try
         {
             result = await imageBuilder.BuildAsync(
-                new ChallengeBuildRequest(job.GameId, job.Slug, job.ContextDir, job.Dockerfile),
+                new ChallengeBuildRequest(job.ChallengeId, job.GameId, job.Slug, job.ContextDir, job.Dockerfile),
                 stoppingToken,
                 sink);
         }

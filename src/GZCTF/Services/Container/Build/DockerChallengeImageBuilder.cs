@@ -37,7 +37,13 @@ public sealed class DockerChallengeImageBuilder(
         CancellationToken token,
         Action<string>? onProgress = null)
     {
-        var slug = NormalizeSlug(req.ChallengeSlug);
+        // Disambiguate the image repo by challenge id, not just the title slug. Two
+        // challenges in one game whose titles normalize to the same slug (e.g. "Web 1" and
+        // "Web-1" both -> "web-1") would otherwise share a gzctf-auto repo, and one build's
+        // tag-cleanup would delete the sibling's image — silently breaking a live challenge.
+        // The id makes the repo unique per challenge; this slug flows to the build tag, the
+        // push repository, and the cleanup target, so all three stay consistent.
+        var slug = $"{req.ChallengeId}-{NormalizeSlug(req.ChallengeSlug)}";
         var contextTar = Path.Combine(Path.GetTempPath(), $"gzctf-build-{Guid.NewGuid():N}.tar.gz");
 
         try

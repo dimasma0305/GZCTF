@@ -166,7 +166,6 @@ public sealed class FlagEgressService : IAsyncDisposable
         {
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var suspicion = scope.ServiceProvider.GetRequiredService<ISuspicionService>();
 
             var entity = new FlagEgressEvent
             {
@@ -197,25 +196,17 @@ public sealed class FlagEgressService : IAsyncDisposable
             {
                 teamName = participation.Team.Name;
 
-                // For dynamic flags, observing the flag in this team's proxied traffic is
-                // strong evidence of a successful solve / exfil — raise SuspicionEvent.
-                // For static flags every successful team will trip the same flag, so
-                // raising suspicion would over-fire on normal play. We still record the
-                // FlagEgressEvent row + admin broadcast so operators can see who is
-                // pulling the static flag and how often (frequency anomalies still
-                // indicate automated tooling), but skip the per-team score bump.
-                if (!state.IsStaticFlag)
-                {
-                    var details = $"remoteIp={agg.RemoteIp}:{agg.RemotePort} direction={dir} container={state.ContainerId}";
-                    try
-                    {
-                        await suspicion.AddSuspicion(participation, SuspicionType.FlagEgress, details);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "FlagEgressService suspicion record failed for participation={Pid}", state.ParticipationId);
-                    }
-                }
+                // We record the FlagEgressEvent (above) + admin broadcast (below) so
+                // operators can see who pulled a flag through the proxy and how often —
+                // frequency anomalies still flag automated tooling for manual review. But we
+                // do NOT auto-raise a suspicion SCORE here, for static OR dynamic flags:
+                // each recorder watches a container for ITS OWN team's flag and attributes
+                // any hit to that container's OWNER, so a "hit" is always the team's own
+                // flag in its own traffic. That is normal play — reading your own flag is
+                // how you solve a dynamic-container challenge — and in A&D it would penalize
+                // the VICTIM of a theft (the owner) rather than the attacker. There is no
+                // direction in which this is a reliable cheat signal, so scoring it
+                // automatically only produced false positives on normal solves.
             }
 
             var challengeTitle = await db.GameChallenges

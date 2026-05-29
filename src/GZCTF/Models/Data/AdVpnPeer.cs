@@ -10,7 +10,12 @@ namespace GZCTF.Models.Data;
 /// team-member-add events for active A&amp;D games.
 /// </summary>
 [Index(nameof(UserId), nameof(ParticipationId), IsUnique = true)]
-[Index(nameof(GameId), nameof(AssignedIp), IsUnique = true)]
+// AssignedIp is unique GLOBALLY, not per game: every peer across all games renders onto
+// the single shared wg0 interface, so two games sharing a /32 would collide there. A
+// per-(GameId, AssignedIp) index let concurrent cross-game provisioning hand the same /32
+// to two teams; the global unique index makes the second insert fail instead (the caller
+// re-allocates the next free address).
+[Index(nameof(AssignedIp), IsUnique = true)]
 public class AdVpnPeer
 {
     [Key]
@@ -27,10 +32,9 @@ public class AdVpnPeer
     public Participation Participation { get; set; } = null!;
 
     /// <summary>
-    /// Denormalized game id (== Participation.GameId). Carried on the row so the
-    /// VPN client subnet — which is reused per game — can enforce a per-game
-    /// unique constraint on <see cref="AssignedIp"/>, closing the concurrent-
-    /// provisioning race where two members raced into the same IP.
+    /// Denormalized game id (== Participation.GameId). Used for per-game queries and
+    /// WireGuard rendering. NOTE: <see cref="AssignedIp"/> is unique GLOBALLY (see the
+    /// class-level index), not per game — all peers share one wg0 interface.
     /// </summary>
     [Required]
     public int GameId { get; set; }
@@ -49,8 +53,8 @@ public class AdVpnPeer
     public string PrivateKey { get; set; } = string.Empty;
 
     /// <summary>
-    /// Per-member /32 (or /30) assigned from the VPN client subnet, e.g.
-    /// "10.10.100.5". Unique within the game.
+    /// Per-member /32 assigned from the VPN client subnet, e.g. "10.13.37.5".
+    /// Unique GLOBALLY (all peers share one wg0 interface — see the class index).
     /// </summary>
     [Required]
     [MaxLength(Limits.MaxIPLength)]
