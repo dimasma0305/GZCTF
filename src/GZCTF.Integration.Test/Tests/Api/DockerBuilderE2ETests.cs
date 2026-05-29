@@ -53,9 +53,15 @@ public class DockerBuilderE2ETests(GZCTFApplicationFactory factory, ITestOutputH
     /// a yaml whose containerImage points at <c>./Dockerfile</c>, plus
     /// the Dockerfile itself.
     /// </summary>
-    private static byte[] BuildableTarball(string slug)
+    private static byte[] BuildableTarball(string slug, string? cacheBust = null)
     {
-        var dockerfile = "FROM alpine:3.20\nRUN echo \"hello from " + slug + "\"\nCMD [\"sh\", \"-c\", \"sleep 60\"]\n";
+        // The image tag is derived from a SHA over the (gzipped) build context, so a
+        // re-import with identical bytes is a cache hit that skips the build (and its
+        // cleanup pass). Pass a distinct cacheBust to perturb ONLY the Dockerfile while
+        // keeping challenge.yml byte-identical — that forces a real rebuild but still
+        // matches the same challenge row on re-import (matched by GameId + Title).
+        var bust = cacheBust is null ? "" : $"RUN echo \"cachebust {cacheBust}\"\n";
+        var dockerfile = "FROM alpine:3.20\nRUN echo \"hello from " + slug + "\"\n" + bust + "CMD [\"sh\", \"-c\", \"sleep 60\"]\n";
         var yaml = $$"""
             name: "{{slug}}"
             type: "StaticContainer"
@@ -138,27 +144,46 @@ public class DockerBuilderE2ETests(GZCTFApplicationFactory factory, ITestOutputH
             $"Cleanup {TestDataSeeder.RandomName()}");
         var slug = TestDataSeeder.RandomName().ToLowerInvariant();
 
-        // Pre-seed a "stale" sibling tag directly on the daemon — this
-        // simulates a previous edit's leftover. Use the same repository
-        // namespace so the cleanup pass scoops it.
-        var repository = $"gzctf-auto/{game.Id}/{slug}";
+        // The build tag is namespaced by challenge id — gzctf-auto/{gameId}/{challengeId}-{slug}
+        // — so two challenges whose titles normalize to the same slug can't delete each
+        // other's images during cleanup. That id isn't known until the challenge row exists,
+        // so we can't pre-seed the stale sibling under the right repository up front.
+        // Build once to materialize the challenge + its real repository, THEN seed.
+        var resp1 = await PostTarballAsync(client, game.Id, BuildableTarball(slug));
+        resp1.EnsureSuccessStatusCode();
+        Assert.Equal(ChallengeBuildStatus.Success,
+            await PollChallengeStatusAsync(game.Id, slug, TimeSpan.FromMinutes(2)));
+
+        // Derive the actual repository from the built image (everything before the
+        // final ':' digest tag) — this is exactly the namespace the cleanup pass scopes to.
+        string repository;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var ch = await db.GameChallenges.AsNoTracking()
+                .FirstAsync(c => c.GameId == game.Id && c.Title == slug);
+            Assert.NotNull(ch.ContainerImage);
+            repository = ch.ContainerImage![..ch.ContainerImage!.LastIndexOf(':')];
+        }
+
+        // Pre-seed a "stale" sibling tag in that real repository — simulates a
+        // previous edit's leftover build tag that the next build should scoop.
         var staleTag = $"{repository}:deadbeef0000";
         using (var docker = new DockerClientConfiguration().CreateClient())
         {
-            // Pull alpine first so we have a real image to tag.
-            await docker.Images.CreateImageAsync(
-                new ImagesCreateParameters { FromImage = "alpine", Tag = "3.20" },
-                authConfig: null,
-                progress: new Progress<JSONMessage>());
+            // alpine:3.20 is already on the daemon from the first build; tag it again
+            // under the challenge repository so we have a real sibling image to prune.
             await docker.Images.TagImageAsync("alpine:3.20",
                 new ImageTagParameters { RepositoryName = repository, Tag = "deadbeef0000" });
         }
 
-        // Now import + build; the cleanup pass at end of build should drop the stale sibling.
-        var resp = await PostTarballAsync(client, game.Id, BuildableTarball(slug));
-        resp.EnsureSuccessStatusCode();
-        var finalStatus = await PollChallengeStatusAsync(game.Id, slug, TimeSpan.FromMinutes(2));
-        Assert.Equal(ChallengeBuildStatus.Success, finalStatus);
+        // Re-import the SAME challenge with a perturbed build context (different content
+        // digest → a real rebuild, not a cache hit). The post-build cleanup pass should
+        // drop every sibling tag except the new digest — including the stale one we planted.
+        var resp2 = await PostTarballAsync(client, game.Id, BuildableTarball(slug, cacheBust: "rebuild"));
+        resp2.EnsureSuccessStatusCode();
+        Assert.Equal(ChallengeBuildStatus.Success,
+            await PollChallengeStatusAsync(game.Id, slug, TimeSpan.FromMinutes(2)));
 
         // Verify the stale tag is gone.
         using (var docker = new DockerClientConfiguration().CreateClient())
