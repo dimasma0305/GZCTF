@@ -312,6 +312,18 @@ public class AdAdminController(
         c.IsEnabled = !c.IsEnabled;
         await db.SaveChangesAsync(token);
 
+        // Both boards filter on IsEnabled, so a toggle changes columns + every team's
+        // total. Flush the live boards (they'd otherwise self-heal only on the next
+        // tick) AND drop the frozen variants — the frozen build also filters IsEnabled
+        // but is NEVER regenerated (7-day sliding, refreshed on each poll), so without
+        // this an admin disabling a challenge mid-freeze leaves the public frozen board
+        // showing the stale column + wrong ranks for the rest of the freeze.
+        await cacheHelper.FlushAdScoreboardCache(id, token);
+        await cacheHelper.RemoveAsync(CacheKey.AdScoreBoardFrozen(id), token);
+        await cacheHelper.RemoveAsync(CacheKey.AdTimelineFrozen(id), token);
+        await cacheHelper.RemoveAsync(CacheKey.KothScoreboardFrozen(id), token);
+        await cacheHelper.RemoveAsync(CacheKey.KothTimelineFrozen(id), token);
+
         logger.SystemLog(
             $"AD-engine challenge toggled: game={id} challenge={challengeId} type={c.Type} enabled={c.IsEnabled}",
             TaskStatus.Success, LogLevel.Information);
@@ -478,6 +490,10 @@ public class AdAdminController(
         {
             await cacheHelper.RemoveAsync(CacheKey.AdScoreBoardFrozen(id), token);
             await cacheHelper.RemoveAsync(CacheKey.AdTimelineFrozen(id), token);
+            // KotH frozen variants move on the same SLA-override (a hill's verdict
+            // gates its hold credit), so drop them too — they were previously left stale.
+            await cacheHelper.RemoveAsync(CacheKey.KothScoreboardFrozen(id), token);
+            await cacheHelper.RemoveAsync(CacheKey.KothTimelineFrozen(id), token);
         }
 
         logger.SystemLog(
@@ -704,6 +720,14 @@ public class AdAdminController(
         try
         {
             using var doc = System.Text.Json.JsonDocument.Parse(json);
+            // Over-cap manifests are stored as a {"truncated":true,"count":N} object
+            // rather than the path array (AdSnapshotService) — these are exactly the
+            // most-modified teams. CountChanges surfaces the count for the badge; here
+            // we just can't list the (uncaptured) paths, so return empty rather than
+            // throw on EnumerateArray (which would otherwise leave an empty file list
+            // next to a non-zero badge).
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array)
+                return map;
             foreach (var el in doc.RootElement.EnumerateArray())
                 map[el.GetProperty("p").GetString() ?? string.Empty] =
                     el.TryGetProperty("k", out var k) ? k.GetInt32() : 0;

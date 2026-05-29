@@ -1125,9 +1125,19 @@ public sealed class AdContainerManager(
                 // taken by AdCheckerService.WithKothChallengeLockAsync, this closes
                 // the refresh-vs-checker race where the just-launched hill was being
                 // probed (empty marker) before the boundary round was scored.
+                // Edge-triggered on CROSSING a refresh-window boundary, not on the
+                // exact boundary round. The reconcile (15s) and the round scheduler
+                // are unsynchronized, so at fast ticks a pass can observe round N then
+                // N+2 and never land on the exact `(round-1)%refreshTicks==0` value —
+                // with the old exact test that window's refresh (and its leader
+                // cooldown) was lost for the rest of the game, letting the first holder
+                // keep the hill forever. Comparing window indices fires once per window
+                // and self-heals a skipped boundary on the next pass. Window index of
+                // round R = (R-1)/refreshTicks; LastRefreshRound 0 (never refreshed) maps
+                // to window 0 via C# truncation, so rounds 1..refreshTicks never refresh.
+                var lastRefresh = target?.LastRefreshRound ?? 0;
                 var dueRefresh = latestRound > refreshTicks
-                                 && (latestRound - 1) % refreshTicks == 0
-                                 && (target?.LastRefreshRound ?? 0) < latestRound;
+                                 && (latestRound - 1) / refreshTicks > (lastRefresh - 1) / refreshTicks;
 
                 // Operator flipped AdAllowEgress on this challenge mid-game — the
                 // running hill was launched on the wrong bridge. Force a refresh
@@ -1820,6 +1830,16 @@ public sealed class AdContainerManager(
             }
 
             await LaunchOneAsync(db, containerManager, ts.ParticipationId, ts.Challenge, ts, isK8s, token);
+
+            // LaunchOneAsync is void with several silent-failure paths (image gone,
+            // create error) that leave ts.ContainerId null. Only report success + burn
+            // the self-reset cooldown when a live container actually resulted —
+            // otherwise we'd tell the player "reset done", leave the box DOWN, and lock
+            // them out for AdResetCooldownMinutes. Reconcile retries within ≤15s.
+            // Mirrors the KotH refresh guard (`target?.Container is { } ...`).
+            if (ts.ContainerId is null)
+                return false;
+
             ts.LastResetAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(token);
             return true;
