@@ -257,10 +257,101 @@ Two fields, both surfaced on the admin repo-bindings card, tell you whether a bi
 A **private or missing repo**, or a **missing/expired token**, does not crash the poller — it surfaces as a concise scan warning on the binding row (a friendly hint plus git's stderr), logged once per tick as a single warning rather than a stack-trace flood. There is no `TokenStatus` value for "present but rejected," because a rejected token can't be told apart from a correct one without a probe; the actionable hint rides in `LastScanMessage` instead.
 :::
 
-## Quick recipe — run an event from a repo
+## Worked example: the `gzctf-mix-demo` repo
 
-1. Lay out your repo: a `final/.gzevent` manifest, with `final/<category>/<slug>/challenge.yml` for each challenge (see [Templates](/guide/authoring/templates)).
-2. In the admin UI, register a repo binding with the repo URL, a ref, and — for private repos — a PAT (add `Contents:write` if you want `PushOnEdit`).
-3. Leave `IntervalSeconds` at the default 60, or raise it for a quiet repo.
-4. Wait one poll cycle (or hit **Scan now**); confirm the games appear and `LastScanMessage` shows `games +N`, `failures 0`.
-5. Push challenge changes to the repo; the next scan picks up the new SHA and re-imports the changed tree.
+A complete, public reference repo lives at **[github.com/dimasma0305/gzctf-mix-demo](https://github.com/dimasma0305/gzctf-mix-demo)** — point a binding at it to see the whole pipeline end to end. It's a **type × category coverage matrix**: one challenge for every `ChallengeType` crossed with every category (72 in total), so the scoreboard, the jeopardy/A&D/KotH kind switcher, and every category band render with real content.
+
+### Layout
+
+A single root `.gzevent` defines the game; each top-level directory is a category, and each leaf folder is one challenge:
+
+```text
+gzctf-mix-demo/
+├── .gzevent                  # → one Game: "GZCTF — Type×Category Mix Demo"
+├── AI/
+│   ├── aandd-ai/             # type: AttackDefense  (image auto-built from ./src/Dockerfile)
+│   │   ├── challenge.yaml
+│   │   └── src/{Dockerfile,service.py}
+│   ├── koth-ai-hill/         # type: KingOfTheHill
+│   │   └── challenge.yaml
+│   ├── ai-per-team-box/      # type: DynamicContainer
+│   ├── ai-per-team-drop/     # type: DynamicAttachment (ships dist/)
+│   ├── ai-sampler/           # type: StaticAttachment
+│   └── ai-service/           # type: StaticContainer
+├── Blockchain/  Crypto/  Forensics/  Hardware/  Misc/
+├── Mobile/  PPC/  Pentest/  Pwn/  Reverse/  Web/   # same six types per category
+└── ...
+```
+
+### The manifest
+
+The repo's root `.gzevent` — note the event-wide `ad:` block that every A&D/KotH challenge in this game shares:
+
+```yaml
+title: "GZCTF — Type×Category Mix Demo"
+start: "2026-05-28T00:00:00Z"
+end:   "2026-06-30T00:00:00Z"
+hidden: false
+summary: "Showcase event with one challenge per (type, category) cell — 72 total."
+acceptWithoutReview: true
+practiceMode: true
+teamMemberCountLimit: 0      # 0 = unlimited
+containerCountLimit: 5
+bloodBonus: 50
+ad:
+  tickSeconds: 60
+  flagLifetimeTicks: 5
+  warmupSeconds: 60
+  resetCooldownMinutes: 5
+```
+
+### A challenge — A&D and KotH side by side
+
+`AI/aandd-ai/challenge.yaml` — an Attack & Defense service whose image is **auto-built** from `./src/Dockerfile` (no `containerImage`):
+
+```yaml
+name: "A&D — AI"
+author: "GZCTF Mix Demo"
+description: |
+  Live A&D — patch your team's container, attack the others.
+category: "AI"
+type: "AttackDefense"
+container:
+  exposePort: 80
+  memoryLimit: 128
+  cpuCount: 1
+  storageLimit: 256
+ad:
+  allowEgress: true
+  allowSelfReset: true
+```
+
+`AI/koth-ai-hill/challenge.yaml` — a King of the Hill challenge (one shared hill), here pinned to a prebuilt registry image:
+
+```yaml
+name: "KotH — AI Hill"
+category: "AI"
+type: "KingOfTheHill"
+container:
+  containerImage: "gzctf/echo-http:test"
+  exposePort: 80
+  memoryLimit: 128
+  cpuCount: 1
+  storageLimit: 256
+```
+
+:::tip
+`challenge.yaml` and `challenge.yml` are both accepted. The A&D entry omits `containerImage`, so the platform auto-builds `./src/Dockerfile` (see [Challenge Build Pipeline](/guide/authoring/build-pipeline)); the KotH entry points at a prebuilt registry image instead.
+:::
+
+### Bind it
+
+The repo is public, so no token is needed:
+
+1. **Admin → Repo Bindings → add**, with `RepoUrl = https://github.com/dimasma0305/gzctf-mix-demo`, an empty ref (default branch), and `IntervalSeconds = 60`.
+2. Wait one poll cycle (or hit **Scan now**). The `.gzevent` becomes the *Type×Category Mix Demo* game and all 72 `challenge.yaml` files are imported; `LastScanMessage` shows `games +1`, `challenges +72`, `failures 0`.
+3. Push a change to the repo; the next scan picks up the new commit SHA and re-imports just the changed challenges (unchanged scans short-circuit on the SHA).
+
+:::info
+For a **private** repo, the only difference is adding a PAT on the binding (and `Contents:write` if you want [`PushOnEdit`](#pushonedit-write-approved-edits-back-to-the-repo)). The layout, manifest, and challenge files are identical.
+:::
