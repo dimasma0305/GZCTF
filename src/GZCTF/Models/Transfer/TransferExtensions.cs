@@ -148,7 +148,12 @@ public static class TransferExtensions
                 };
             }
 
-            // Attack & Defense per-challenge config
+            // Attack & Defense per-challenge config. NOTE: scoped to AttackDefense
+            // (not UsesAdEngine) on purpose — the whole-game JSON transfer's
+            // AdSection.CheckerImage is [Required], but KotH's checker is optional
+            // (TCP-probe fallback), so emitting an empty-checker ad block for KotH
+            // would fail re-import validation. KotH ad: knobs round-trip through
+            // the challenge.yml path (ChallengeYamlModel) instead.
             if (challenge.Type.IsAttackDefense())
             {
                 transfer.Ad = new AdSection
@@ -331,6 +336,8 @@ public static class TransferExtensions
             // Attack & Defense config — only when type is AttackDefense AND ad
             // section was provided. Validation in TransferChallenge.Validate()
             // catches the AttackDefense-without-ad case before we get here.
+            // (KotH ad: knobs travel via the challenge.yml path, not this
+            // whole-game JSON transfer — see ToTransfer above.)
             if (transfer.Type.IsAttackDefense() && transfer.Ad is { } ad)
             {
                 challenge.AdCheckerImage = ad.CheckerImage;

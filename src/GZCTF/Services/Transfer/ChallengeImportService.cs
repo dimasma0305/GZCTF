@@ -412,11 +412,12 @@ public sealed class ChallengeImportService(
             problems.Add("Missing a working solver. Add a non-empty file under solver/ "
                 + "(e.g. solver/solve.py) so admins can verify the challenge.");
 
-        // 2. Flag source declared. A&D is exempt — flags aren't authored
-        // in the package; the platform plants a fresh per-team flag into
-        // each container every tick (see AdRoundService), so neither a
-        // `flags:` list nor a `flagTemplate:` applies.
-        if (!type.IsAttackDefense())
+        // 2. Flag source declared. A&D-engine types (AttackDefense + KingOfTheHill)
+        // are exempt — flags aren't authored in the package. A&D plants a fresh
+        // per-team flag into each container every tick (see AdRoundService); KotH
+        // has no flag at all (the platform reads /koth/king). So neither a
+        // `flags:` list nor a `flagTemplate:` applies to either.
+        if (!type.UsesAdEngine())
         {
             var hasStaticFlags = model.Flags is { Count: > 0 }
                 && model.Flags.Any(f => !string.IsNullOrWhiteSpace(f));
@@ -648,12 +649,14 @@ public sealed class ChallengeImportService(
             c.EnableTrafficCapture = m.Container?.EnableTrafficCapture ?? c.EnableTrafficCapture;
         }
 
-        // A&D per-challenge knobs (the service's own properties). Event-wide
-        // policy — tick, flag lifetime, reset cooldown, snapshot — lives on
-        // the game, set via admin game settings, not here. A sparse `ad:`
-        // block only overrides the fields it names. AdAllowEgress also feeds
-        // the network mode the checker + container attach to.
-        if (type.IsAttackDefense() && m.Ad is { } ad)
+        // A&D-engine per-challenge knobs (the service's own properties), shared
+        // by AttackDefense and KingOfTheHill. Event-wide policy — tick, flag
+        // lifetime, reset cooldown, snapshot — lives on the game, set via admin
+        // game settings, not here. A sparse `ad:` block only overrides the fields
+        // it names. AdAllowEgress also feeds the network mode the checker +
+        // container attach to — for KotH the shared hill is launched Isolated when
+        // allowEgress:false, so this block must apply to KotH too.
+        if (type.UsesAdEngine() && m.Ad is { } ad)
         {
             if (!string.IsNullOrWhiteSpace(ad.CheckerImage))
                 c.AdCheckerImage = ad.CheckerImage.Trim();

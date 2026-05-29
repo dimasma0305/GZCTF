@@ -893,10 +893,12 @@ public class EditController(
         {
             case true:
                 {
-                    // A&D manages its own per-team containers via AdTeamService,
-                    // not GameInstance rows, so skip instance materialization for
-                    // it. IsEnabled itself is already applied by res.Update above.
-                    if (!res.Type.IsAttackDefense())
+                    // A&D-engine challenges manage their own containers outside
+                    // GameInstance — A&D via AdTeamService (per team), KotH via
+                    // KothTargets (one shared hill) — so skip GameInstance
+                    // materialization for both; the rows would be unused.
+                    // IsEnabled itself is already applied by res.Update above.
+                    if (!res.Type.UsesAdEngine())
                         await challengeRepository.EnsureInstances(res, game, token);
 
                     if (game.IsActive)

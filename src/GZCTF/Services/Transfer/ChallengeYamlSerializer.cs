@@ -95,12 +95,14 @@ public static class ChallengeYamlSerializer
             };
         }
 
-        // A&D block — emit only NON-default per-challenge knobs (defaults match
-        // the GameChallenge entity init: egress/self-reset true, jitter 0.4/0.5,
-        // grace 3) so a fresh import doesn't churn the file, and skip the block
-        // entirely when nothing differs. Event-wide settings live on the game
+        // A&D-engine block (AttackDefense + KingOfTheHill) — emit only NON-default
+        // per-challenge knobs (defaults match the GameChallenge entity init:
+        // egress/self-reset true, jitter 0.4/0.5, grace 3) so a fresh import
+        // doesn't churn the file, and skip the block entirely when nothing
+        // differs. Must cover KotH so a re-exported hill round-trips its
+        // allowEgress:false / checkerImage. Event-wide settings live on the game
         // (.gzevent), not here.
-        if (ch.Type.IsAttackDefense())
+        if (ch.Type.UsesAdEngine())
         {
             var ad = new ChallengeYamlModel.AdSection
             {
