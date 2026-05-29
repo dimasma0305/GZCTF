@@ -48,6 +48,36 @@ public class AdEgressIsolationTests
     }
 
     [Fact]
+    public void BuildRulesScript_DropsContainerToControlPlaneIps()
+    {
+        // gzctf shares the challenge bridge under PlatformProxy, so a popped
+        // container can hit the API same-subnet — the RFC1918 baseline misses it
+        // when the docker pool dips below 172.16/12. Both sets must be denied to
+        // gzctf's own IPs as destination (new connections); ad→hill is unaffected.
+        var script = AdEgressIsolationService.BuildRulesScript(
+            adContainerIps: ["172.0.6.10"],
+            kothHillIps: ["172.0.6.20"],
+            controlPlaneIps: ["172.0.6.2", "172.0.8.2"]);
+
+        Assert.Contains("-m set --match-set gzctf_chal src     -d 172.0.6.2 -j DROP", script);
+        Assert.Contains("-m set --match-set gzctf_chal_koth src -d 172.0.6.2 -j DROP", script);
+        Assert.Contains("-m set --match-set gzctf_chal src     -d 172.0.8.2 -j DROP", script);
+        Assert.Contains("-m set --match-set gzctf_chal_koth src -d 172.0.8.2 -j DROP", script);
+    }
+
+    [Fact]
+    public void BuildRulesScript_NoControlPlaneIps_OmitsControlPlaneRules()
+    {
+        // Backward-compatible: omitting controlPlaneIps (or passing none) yields
+        // no extra DROP rules — the baseline behavior is unchanged.
+        var script = AdEgressIsolationService.BuildRulesScript(
+            adContainerIps: ["172.0.6.10"],
+            kothHillIps: []);
+
+        Assert.DoesNotContain("-d 172.0.6.2 -j DROP", script);
+    }
+
+    [Fact]
     public void BuildRulesScript_SkipsMalformedIps()
     {
         var script = AdEgressIsolationService.BuildRulesScript(

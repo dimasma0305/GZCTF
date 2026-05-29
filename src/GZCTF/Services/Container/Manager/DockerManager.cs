@@ -27,6 +27,64 @@ public class DockerManager : IContainerManager
             TaskStatus.Success, LogLevel.Debug);
     }
 
+    // Storage drivers that enforce a per-container writable-layer size quota
+    // (HostConfig.StorageOpt["size"]) unconditionally. overlay2/overlay support it
+    // ONLY on an xfs backing fs mounted with pquota — which the API can't reliably
+    // detect, and setting it on an unsupported backing fs (e.g. the common
+    // overlay2-on-ext4) makes Docker REJECT every container create. So we enforce
+    // only on the always-capable drivers and warn (not silently no-op) otherwise.
+    private static readonly HashSet<string> QuotaCapableDrivers =
+        new(StringComparer.OrdinalIgnoreCase) { "btrfs", "zfs", "devicemapper", "windowsfilter" };
+
+    private bool? _storageQuotaSupported;
+    private int _storageQuotaWarned;
+
+    /// <summary>
+    /// Apply <see cref="GZCTF.Models.Internal.ContainerConfig.StorageLimit"/> as a
+    /// Docker writable-layer quota where the storage driver supports it. On Docker
+    /// this was previously a silent no-op (only Kubernetes honored StorageLimit),
+    /// so a root-controlled A&amp;D/KotH box could fill the shared host disk. We now
+    /// enforce it on quota-capable drivers and emit a one-time warning elsewhere so
+    /// the limit isn't silently assumed to be holding.
+    /// </summary>
+    private async Task ApplyStorageQuotaAsync(
+        CreateContainerParameters parameters, GZCTF.Models.Internal.ContainerConfig config, CancellationToken token)
+    {
+        if (config.StorageLimit <= 0) return;
+
+        _storageQuotaSupported ??= await ResolveStorageQuotaSupportAsync(token);
+        if (_storageQuotaSupported == true)
+        {
+            (parameters.HostConfig.StorageOpt ??= new Dictionary<string, string>())["size"] =
+                $"{config.StorageLimit}m";
+            return;
+        }
+
+        // Not enforceable on this driver — say so once so operators don't assume
+        // the StorageLimit knob is containing disk use when it isn't.
+        if (Interlocked.Exchange(ref _storageQuotaWarned, 1) == 0)
+            _logger.LogWarning(
+                "Docker storage driver does not support per-container disk quotas; challenge StorageLimit "
+                + "({Limit} MiB) is NOT enforced on Docker. Use an xfs-pquota/btrfs/zfs/devicemapper backing "
+                + "store to enforce it (Kubernetes enforces it via ephemeral-storage regardless).",
+                config.StorageLimit);
+    }
+
+    private async Task<bool> ResolveStorageQuotaSupportAsync(CancellationToken token)
+    {
+        try
+        {
+            var info = await _client.System.GetSystemInfoAsync(token);
+            return QuotaCapableDrivers.Contains(info.Driver ?? string.Empty);
+        }
+        catch (Exception e)
+        {
+            _logger.LogWarning(e, "DockerManager: could not query the storage driver; "
+                + "skipping per-container disk quota (StorageLimit not enforced on Docker).");
+            return false;
+        }
+    }
+
 
     public async Task DestroyContainerAsync(Models.Data.Container container, CancellationToken token = default)
     {
@@ -82,6 +140,7 @@ public class DockerManager : IContainerManager
         }
 
         var parameters = GetCreateContainerParameters(config);
+        await ApplyStorageQuotaAsync(parameters, config, token);
 
         if (_meta.ExposePort)
         {
@@ -303,7 +362,9 @@ public class DockerManager : IContainerManager
                 // A&D box could otherwise pin every host core / fork-bomb the
                 // shared host (and every other team's container with it). NanoCPUs
                 // is the Linux cgroup CPU quota; PidsLimit caps process/thread
-                // count. (Disk quota is storage-driver-dependent, so left out.)
+                // count. (Disk quota / StorageOpt is applied in ApplyStorageQuotaAsync,
+                // which is storage-driver-gated — it can't be set unconditionally
+                // here because unsupported drivers reject the create.)
                 NanoCPUs = (long)config.CPUCount * 1_000_000_000L,
                 PidsLimit = 512,
                 NetworkMode = _meta.NetworkNames[config.NetworkMode],

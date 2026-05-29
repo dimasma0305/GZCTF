@@ -142,10 +142,49 @@ public sealed class AdEgressIsolationService(
         if (validAd.Count == 0 && validKoth.Count == 0)
             return; // nothing to contain yet
 
-        await RunHelperAsync(docker, BuildRulesScript(validAd, validKoth), token);
+        // gzctf's own IPs — denied as a destination so a popped container can't
+        // hit the control-plane API on the shared challenge bridge.
+        var controlPlaneIps = await ResolveControlPlaneIpsAsync(docker, token);
+
+        await RunHelperAsync(docker, BuildRulesScript(validAd, validKoth, controlPlaneIps), token);
         logger.SystemLog(
-            $"A&D egress isolation applied: {validAd.Count} A&D container(s) + {validKoth.Count} KotH hill(s) contained",
+            $"A&D egress isolation applied: {validAd.Count} A&D container(s) + {validKoth.Count} KotH hill(s) contained"
+            + $"; {controlPlaneIps.Count} control-plane IP(s) blocked",
             TaskStatus.Success, LogLevel.Debug);
+    }
+
+    /// <summary>
+    /// Resolve the gzctf control-plane container's own IP addresses. Because
+    /// <c>PortMappingType=PlatformProxy</c> attaches gzctf to the challenge
+    /// bridge(s), a popped challenge container can reach the gzctf API same-subnet
+    /// — a path the RFC1918 deny baseline misses whenever dockerd's address pool
+    /// extends below <c>172.16.0.0/12</c> (e.g. a <c>172.0.0.0/10</c> pool). We
+    /// re-resolve each pass (so the rule tracks container re-creation) and DROP
+    /// challenge→these. Best-effort: a resolve failure means no extra rule this
+    /// pass (no worse than before), logged so the gap stays visible.
+    /// </summary>
+    private async Task<List<string>> ResolveControlPlaneIpsAsync(DockerClient docker, CancellationToken token)
+    {
+        try
+        {
+            // Inside docker the container hostname defaults to its short id, which
+            // InspectContainer accepts as an identifier.
+            var self = await docker.Containers.InspectContainerAsync(Dns.GetHostName(), token);
+            var networks = self.NetworkSettings?.Networks;
+            var ips = networks is null
+                ? new List<string>()
+                : networks.Values.Select(n => n.IPAddress).Where(IsValidIp).Cast<string>().Distinct().ToList();
+            if (ips.Count == 0)
+                logger.LogWarning("AdEgressIsolation: could not resolve gzctf's own container IPs — "
+                    + "challenge→control-plane DROP not applied this pass");
+            return ips;
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "AdEgressIsolation: control-plane IP resolution failed — "
+                + "challenge→control-plane DROP not applied this pass");
+            return [];
+        }
     }
 
     /// <summary>
@@ -165,8 +204,20 @@ public sealed class AdEgressIsolationService(
     /// Note: <c>ad src → koth dst</c> is deliberately NOT in this list, so a player
     /// attacking the hill from inside their own A&amp;D foothold reaches it (a legit
     /// play). The hill stays contained on egress because of rule (2)/(3).
+    /// <para>Rule (4): DROP <c>{ad,koth} src → controlPlaneIps</c>. The gzctf
+    /// container shares the challenge bridge under
+    /// <c>PortMappingType=PlatformProxy</c>, so a popped container can reach the
+    /// gzctf API <b>same-subnet</b> — which the RFC1918 baseline (3) misses whenever
+    /// dockerd's address pool dips below <c>172.16.0.0/12</c> (e.g. a
+    /// <c>172.0.0.0/10</c> pool puts gzctf at 172.0.x). Denying gzctf's own IPs
+    /// closes that escape. ESTABLISHED replies to gzctf's outbound proxy connections
+    /// are already RETURNed by rule (1); ad→hill and internet egress are different
+    /// dsts and unaffected.</para>
     /// </summary>
-    internal static string BuildRulesScript(IEnumerable<string> adContainerIps, IEnumerable<string> kothHillIps)
+    internal static string BuildRulesScript(
+        IEnumerable<string> adContainerIps,
+        IEnumerable<string> kothHillIps,
+        IEnumerable<string>? controlPlaneIps = null)
     {
         var sb = new StringBuilder();
         AppendPreamble(sb);
@@ -197,6 +248,16 @@ public sealed class AdEgressIsolationService(
         {
             sb.AppendLine($"\"$IPT\" -A {Chain} -m set --match-set {Set} src     -d {cidr} -j DROP");
             sb.AppendLine($"\"$IPT\" -A {Chain} -m set --match-set {SetKoth} src -d {cidr} -j DROP");
+        }
+
+        // gzctf control-plane reach (rule 4): deny new connections from any
+        // contained container to gzctf's own IPs. Catches the same-subnet API
+        // reach the RFC1918 baseline misses when the docker pool dips below
+        // 172.16/12. Per-IP (not the bridge subnet) so ad→hill stays allowed.
+        foreach (var ip in (controlPlaneIps ?? Enumerable.Empty<string>()).Where(IsValidIp).Distinct())
+        {
+            sb.AppendLine($"\"$IPT\" -A {Chain} -m set --match-set {Set} src     -d {ip} -j DROP");
+            sb.AppendLine($"\"$IPT\" -A {Chain} -m set --match-set {SetKoth} src -d {ip} -j DROP");
         }
         return sb.ToString();
     }
