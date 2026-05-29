@@ -1,0 +1,12 @@
+[
+  {
+    "text": "Guide",
+    "link": "/guide/start/introduction",
+    "activeMatch": "/guide/"
+  },
+  {
+    "text": "Config",
+    "link": "/config/appsettings",
+    "activeMatch": "/config/"
+  }
+]

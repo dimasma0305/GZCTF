@@ -1,0 +1,6 @@
+[
+  { "type": "dir", "name": "start", "label": "Getting Started" },
+  { "type": "dir", "name": "features", "label": "Features" },
+  { "type": "dir", "name": "authoring", "label": "Challenge Authoring" },
+  { "type": "dir", "name": "deployment", "label": "Deployment" }
+]

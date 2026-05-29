@@ -19,6 +19,16 @@
 
 GZ::CTF is an open source CTF platform based on ASP.NET Core.
 
+> [!NOTE]
+>
+> **This is a fork of GZ::CTF that adds an Attack & Defense and King of the Hill engine** on top of the upstream jeopardy platform. A single game can freely mix jeopardy, A&D, and KotH challenges.
+>
+> - ⚔️ **Attack & Defense** — tick-based rounds, per-team service containers + bridges, a rotating `/flag`, an enochecker3 SLA checker, and WireGuard VPN access.
+> - 👑 **King of the Hill** — one shared hill the whole game fights to control by planting a per-round token in `/koth/king`; hold a healthy hill to earn points.
+> - 📦 **Challenge authoring** — ready-to-edit templates, a `challenge.yml` schema, `.gzevent` manifests, and GitHub repo bindings that auto-import on push.
+>
+> **📖 Fork documentation: [https://dimasma0305.github.io/GZCTF/](https://dimasma0305.github.io/GZCTF/)** — setup, the A&D/KotH engine, scoring, challenge authoring, and deployment. For upstream-only features, see the upstream docs linked below.
+
 > [!IMPORTANT]
 >
 > **To save your effort, please read the documentation carefully before using: [https://gzctf.gzti.me/](https://gzctf.gzti.me/)**

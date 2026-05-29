@@ -239,8 +239,8 @@ _Pvt_Extensions
 # FAKE - F# Make
 .fake/
 
-# Docs
-docs
+# Docs site (Rspress) lives in docs/ and IS tracked. Its local build artifacts
+# (node_modules/, doc_build/) are ignored via docs/.gitignore instead.
 
 **/appsettings.json
 **/appsettings.*.json
