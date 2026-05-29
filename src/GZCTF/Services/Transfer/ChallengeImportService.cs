@@ -548,6 +548,24 @@ public sealed class ChallengeImportService(
     }
 
     /// <summary>
+    /// True if ANY path component from the package root down to <paramref name="rel"/> is a
+    /// symlink. A leaf-only check misses an intermediate directory symlink (e.g. a synced
+    /// repo ships <c>inner -&gt; /app</c> with <c>provide: ./inner/secret</c>), which would
+    /// still escape the package since the containment check is purely lexical. Mirrors the
+    /// per-component reparse philosophy of EnumerateRealFiles / CopyDirRecursive.
+    /// </summary>
+    private static bool AnyComponentIsReparsePoint(string packageDir, string rel)
+    {
+        var cur = Path.GetFullPath(packageDir);
+        foreach (var part in rel.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            cur = Path.Combine(cur, part);
+            if (PathIsReparsePoint(cur)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Recursive file walk that never descends into or yields symlinks. The BCL's
     /// <c>Directory.EnumerateFiles(.., AllDirectories)</c> FOLLOWS directory symlinks, which
     /// would let a <c>provide:</c> dir-symlink tar an arbitrary host tree (/etc, /app) into
@@ -730,8 +748,8 @@ public sealed class ChallengeImportService(
         // A git-synced repo can ship such a symlink. Reject any reparse point outright; a
         // real attachment is a plain file or dist/ directory. (The sibling build-context
         // CopyDirRecursive already enforces this.)
-        if (PathIsReparsePoint(absolute))
-            throw new InvalidOperationException("'provide' must not be a symlink.");
+        if (AnyComponentIsReparsePoint(packageDir, rel))
+            throw new InvalidOperationException("'provide' must not traverse a symlink.");
 
         Models.Data.LocalFile blob;
         if (File.Exists(absolute))

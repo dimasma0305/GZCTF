@@ -286,6 +286,8 @@ public static class TransferExtensions
                 if (ad.MinGracePeriodSeconds is { } mg) game.AdMinGracePeriodSeconds = mg;
                 if (ad.AllowSnapshotDownload is { } asd) game.AdAllowSnapshotDownload = asd;
                 if (ad.SnapshotRetentionDays is { } srd) game.AdSnapshotRetentionDays = srd;
+                // Clamp to GameInfoModel.Validate's ranges — this path bypasses that validator.
+                GZCTF.Utils.AdConfigBounds.Clamp(game);
             }
 
             return game;

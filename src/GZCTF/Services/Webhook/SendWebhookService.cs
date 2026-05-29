@@ -114,11 +114,34 @@ public class SendWebhookService(ILogger<SendWebhookService> logger) : ISendWebho
 
         if (ip.AddressFamily == AddressFamily.InterNetworkV6)
         {
+            // Normalize embedded-IPv4 IPv6 forms (6to4 / NAT64 / IPv4-compatible) to their
+            // IPv4 and re-classify, so an internal target can't be reached via those wrappers.
+            var embedded = ExtractEmbeddedIPv4(ip);
+            if (embedded is not null) return IsBlockedAddress(embedded);
+
             if (ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal || ip.IsIPv6Multicast) return true;
             return (ip.GetAddressBytes()[0] & 0xFE) == 0xFC;         // fc00::/7 unique-local
         }
 
         return true; // unknown address family — refuse
+    }
+
+    /// <summary>Extract the embedded IPv4 from 6to4 (2002::/16), NAT64 (64:ff9b::/96), or
+    /// IPv4-compatible (::a.b.c.d) IPv6 addresses; null if not one of those forms.</summary>
+    private static IPAddress? ExtractEmbeddedIPv4(IPAddress ip)
+    {
+        var b = ip.GetAddressBytes(); // 16 bytes
+        if (b[0] == 0x20 && b[1] == 0x02)                              // 6to4 2002:AABB:CCDD::
+            return new IPAddress(new[] { b[2], b[3], b[4], b[5] });
+        if (b[0] == 0x00 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b // NAT64 64:ff9b::/96
+            && b[4] == 0 && b[5] == 0 && b[6] == 0 && b[7] == 0
+            && b[8] == 0 && b[9] == 0 && b[10] == 0 && b[11] == 0)
+            return new IPAddress(new[] { b[12], b[13], b[14], b[15] });
+        var hiZero = true;
+        for (var i = 0; i < 12 && hiZero; i++) hiZero = b[i] == 0;
+        if (hiZero && b[12] != 0)                                       // IPv4-compatible ::a.b.c.d
+            return new IPAddress(new[] { b[12], b[13], b[14], b[15] });
+        return null;
     }
 
     public async Task SendGameEventAsync(GameEvent gameEvent, string webhookUrl)
@@ -191,7 +214,13 @@ public class SendWebhookService(ILogger<SendWebhookService> logger) : ISendWebho
         if (string.IsNullOrEmpty(text) || text.Length <= maxLength)
             return text ?? string.Empty;
 
-        return text[..maxLength];
+        var cut = text[..maxLength];
+        // Don't slice in the middle of a backslash-escape pair (from EscapeMd) — a dangling
+        // trailing backslash would render literally. Drop an orphaned (odd) trailing run.
+        var bs = 0;
+        for (var i = cut.Length - 1; i >= 0 && cut[i] == '\\'; i--) bs++;
+        if ((bs & 1) == 1) cut = cut[..^1];
+        return cut;
     }
 
     /// <summary>

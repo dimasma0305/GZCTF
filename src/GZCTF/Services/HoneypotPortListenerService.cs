@@ -85,7 +85,10 @@ public class HoneypotPortListenerService(
                     continue;
                 }
 
-                if (!await _connSlots.WaitAsync(0, stoppingToken))
+                // 0-timeout wait completes synchronously — pass no token so a shutdown-race
+                // can't throw here and leak the just-accepted client; the while-condition
+                // handles loop shutdown.
+                if (!await _connSlots.WaitAsync(0))
                 {
                     // At capacity — drop immediately rather than queue.
                     try { client.Close(); } catch { /* ignore */ }

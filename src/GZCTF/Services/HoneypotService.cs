@@ -19,7 +19,6 @@ public class HoneypotService(
     ILogger<HoneypotService> logger) : IHoneypotService
 {
     private static readonly TimeSpan IpAttributionWindow = TimeSpan.FromMinutes(60);
-    private const int IpAttributionCandidateCap = 500;
 
     public Task RecordHit(
         HttpContext context,

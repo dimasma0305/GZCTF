@@ -236,6 +236,8 @@ public class GameImportService(
                 if (ad.MinGracePeriodSeconds is { } mg) game.AdMinGracePeriodSeconds = mg;
                 if (ad.AllowSnapshotDownload is { } asd) game.AdAllowSnapshotDownload = asd;
                 if (ad.SnapshotRetentionDays is { } srd) game.AdSnapshotRetentionDays = srd;
+                // Clamp to GameInfoModel.Validate's ranges — import bypasses that validator.
+                GZCTF.Utils.AdConfigBounds.Clamp(game);
             }
 
             // Import blood bonus configuration

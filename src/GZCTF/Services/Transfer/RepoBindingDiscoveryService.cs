@@ -354,6 +354,10 @@ public sealed class RepoBindingDiscoveryService(
             if (ad.SnapshotRetentionDays is { } srd) g.AdSnapshotRetentionDays = srd;
             if (ad.GetflagWindowFraction is { } gw) g.AdGetflagWindowFraction = gw;
             if (ad.MinGracePeriodSeconds is { } mg) g.AdMinGracePeriodSeconds = mg;
+            // Clamp to the same ranges the admin Info page enforces — the manifest bypasses
+            // GameInfoModel.Validate, so an out-of-range tick would otherwise persist + make
+            // the game un-editable there.
+            GZCTF.Utils.AdConfigBounds.Clamp(g);
         }
 
         if (existing is null)

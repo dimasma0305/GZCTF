@@ -118,12 +118,18 @@ public sealed class PcapFlowExtractor(IBlobStorage storage, ILogger<PcapFlowExtr
 
         var flows = new Dictionary<int, FlowAccumulator>();
 
-        // Bound TOTAL retained payload so opening a large (team-controlled) capture can't
-        // OOM the server. Once the budget is spent we stop retaining payload bytes but keep
-        // accumulating packet/byte counts, so summaries stay accurate. Flag detection scans
-        // the retained head of each flow, which is what this budget preserves.
-        const long maxRetainedBytes = 128L * 1024 * 1024;
-        var retainBudget = includePayloads ? maxRetainedBytes : 0L;
+        // Bound retained payload so opening a large (team-controlled) capture can't OOM the
+        // server, while still preserving the retained head of *each* flow (what flag detection
+        // scans). We apply two budgets:
+        //   * per-flow head cap — every flow keeps its own first N bytes, so a flag in a flow
+        //     that only starts late in the (chronologically interleaved) capture is still found;
+        //   * a global ceiling — a hard backstop so a capture with a huge number of flows still
+        //     can't exhaust memory.
+        // Once a flow's head budget (or the global ceiling) is spent we stop retaining payload
+        // bytes for it but keep accumulating packet/byte counts, so summaries stay accurate.
+        const long maxRetainedBytesPerFlow = 1L * 1024 * 1024;
+        const long maxRetainedBytesTotal = 512L * 1024 * 1024;
+        var globalRetainBudget = includePayloads ? maxRetainedBytesTotal : 0L;
 
         while (true)
         {
@@ -184,9 +190,13 @@ public sealed class PcapFlowExtractor(IBlobStorage storage, ILogger<PcapFlowExtr
             if (!flows.TryGetValue(connectionPort, out var acc))
                 flows[connectionPort] = acc = new FlowAccumulator(connectionPort, peerIp);
 
-            var retain = retainBudget > 0;
+            // Retain this packet's payload only while BOTH the flow's own head budget and the
+            // global ceiling have room. The per-flow budget guarantees every flow keeps a head
+            // for flag detection regardless of where it sits in the chronologically interleaved
+            // capture; the global ceiling is the OOM backstop.
+            var retain = globalRetainBudget > 0 && acc.RetainedBytes < maxRetainedBytesPerFlow;
             acc.Add(direction, payload, ts, retainPayload: retain);
-            if (retain) retainBudget -= payload.Length;
+            if (retain) globalRetainBudget -= payload.Length;
         }
 
         return flows.Values.OrderBy(f => f.FirstSeenUtc).ToList();
@@ -276,6 +286,7 @@ public sealed class PcapFlowExtractor(IBlobStorage storage, ILogger<PcapFlowExtr
         public int PacketsOut { get; private set; }
         public long BytesIn { get; private set; }
         public long BytesOut { get; private set; }
+        public long RetainedBytes { get; private set; }
         public List<TrafficFlowChunkBuffer> Chunks { get; } = [];
 
         public void Add(TrafficFlowDirection direction, byte[] payload, DateTimeOffset timestamp, bool retainPayload)
@@ -295,7 +306,10 @@ public sealed class PcapFlowExtractor(IBlobStorage storage, ILogger<PcapFlowExtr
             }
 
             if (retainPayload && payload.Length > 0)
+            {
                 Chunks.Add(new TrafficFlowChunkBuffer(direction, timestamp, payload));
+                RetainedBytes += payload.Length;
+            }
         }
 
         public TrafficFlowSummary ToSummary(byte[][] flagBytes)

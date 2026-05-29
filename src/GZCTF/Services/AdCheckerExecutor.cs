@@ -132,9 +132,24 @@ public sealed class AdCheckerExecutor(
                 // Pass registry auth (mirrors DockerManager) so a checker image on a private
                 // registry can actually be pulled instead of silently failing forever.
                 var auth = meta.AuthConfigs.GetForImage(image) ?? new AuthConfig();
-                await client.Images.CreateImageAsync(new ImagesCreateParameters { FromImage = image }, auth,
-                    new Progress<JSONMessage>(_ => { }), pullCts.Token);
-                created = await client.Containers.CreateContainerAsync(parameters, token);
+                try
+                {
+                    await client.Images.CreateImageAsync(new ImagesCreateParameters { FromImage = image }, auth,
+                        new Progress<JSONMessage>(_ => { }), pullCts.Token);
+                    created = await client.Containers.CreateContainerAsync(parameters, token);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    throw; // genuine shutdown — propagate
+                }
+                catch (Exception ex)
+                {
+                    // Pull timed out (pullCts), or the registry was unreachable / denied auth.
+                    // Land as InternalError and recover next tick — do NOT let it escape, or
+                    // it kills the AdCheckerService loop and halts SLA scoring for every game.
+                    return new AdCheckOutcome(AdCheckStatus.InternalError,
+                        $"checker image pull failed: {ex.Message}", null);
+                }
             }
 
             containerId = created.ID;
