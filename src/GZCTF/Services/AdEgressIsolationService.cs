@@ -40,7 +40,12 @@ public sealed class AdEgressIsolationService(
     IServiceScopeFactory scopeFactory,
     ILogger<AdEgressIsolationService> logger) : BackgroundService
 {
-    private static readonly TimeSpan Interval = TimeSpan.FromSeconds(60);
+    // 30s (was 60s) to halve the worst-case window between a challenge container
+    // becoming reachable and its egress-isolation rules being (re)applied. NOTE:
+    // this only shrinks the window — the complete fix is to apply isolation at
+    // container-create time (before it's reachable) + flush conntrack for any
+    // flow that slipped through; that's an architectural follow-up, not done here.
+    private static readonly TimeSpan Interval = TimeSpan.FromSeconds(30);
     internal const string Chain = "GZCTF_AD_ISO";
     // Two ipsets so we can express the asymmetric KotH containment:
     //   gzctf_chal      — A&D per-team containers; both source AND destination of

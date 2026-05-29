@@ -84,14 +84,20 @@ public class InternalAdSshController(
             .FirstOrDefaultAsync(token);
         if (challengeRow is null) return NotFound();
 
-        var keyRow = await db.AdTeamSshKeys
+        // Take(2) to distinguish "exactly one" from "ambiguous": if two
+        // participations in this game registered the same key fingerprint we
+        // cannot safely decide which team the SSH session belongs to, so fail
+        // closed (reject) rather than authenticate the wrong team's box.
+        var keyRows = await db.AdTeamSshKeys
             .Include(k => k.Participation).ThenInclude(p => p.Members)
             .Where(k => k.Fingerprint == fingerprint
                 && k.RevokedAt == null
                 && k.Participation.GameId == challengeRow.GameId
                 && k.Participation.Status == ParticipationStatus.Accepted)
-            .FirstOrDefaultAsync(token);
-        if (keyRow is null) return NotFound();
+            .Take(2)
+            .ToListAsync(token);
+        if (keyRows.Count != 1) return NotFound(); // 0 = unknown key; >1 = ambiguous → reject
+        var keyRow = keyRows[0];
 
         // Member-kick = instant revocation (same as the API-token path):
         // the user is only valid if they're still on the team roster.

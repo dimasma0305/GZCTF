@@ -299,6 +299,13 @@ public class DockerManager : IContainerManager
             {
                 Memory = config.MemoryLimit * 1024 * 1024,
                 CPUPercent = config.CPUCount * 10,
+                // CPUPercent is a no-op on Linux, so a long-lived root-controlled
+                // A&D box could otherwise pin every host core / fork-bomb the
+                // shared host (and every other team's container with it). NanoCPUs
+                // is the Linux cgroup CPU quota; PidsLimit caps process/thread
+                // count. (Disk quota is storage-driver-dependent, so left out.)
+                NanoCPUs = (long)config.CPUCount * 1_000_000_000L,
+                PidsLimit = 512,
                 NetworkMode = _meta.NetworkNames[config.NetworkMode],
 
                 // A&D: bind the host-backed flag file in read-only. The mount

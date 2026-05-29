@@ -1157,8 +1157,11 @@ public class AdGameController(
             const int maxAttempts = 5;
             for (var attempt = 1; ; attempt++)
             {
+                // Global across ALL games: every peer renders onto ONE shared
+                // wg0 interface (single ClientCidr), so two games assigning the
+                // same IP collide in AllowedIPs and break routing for one of them.
+                // Uniqueness must be interface-wide, not per-game.
                 var usedIps = await db.AdVpnPeers
-                    .Where(p => p.GameId == participation.GameId)
                     .Select(p => p.AssignedIp)
                     .ToListAsync(token);
 
