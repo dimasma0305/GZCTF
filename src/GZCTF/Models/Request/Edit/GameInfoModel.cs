@@ -217,5 +217,32 @@ public class GameInfoModel : IValidatableObject
                 "FreezeTimeUtc must be strictly between StartTimeUtc and EndTimeUtc.",
                 [nameof(FreezeTimeUtc)]);
         }
+
+        // A&D knob bounds. A 0 tick spins the scheduler and a too-short tick leaves no room
+        // for the getflag SLA check to fire (it runs at GetflagWindowFraction*tick + grace),
+        // so SLA scoring silently never happens. Enforce sane ranges on the input path.
+        if (AdTickSeconds is { } tick && (tick < 15 || tick > 3600))
+            yield return new ValidationResult(
+                "AdTickSeconds must be between 15 and 3600.", [nameof(AdTickSeconds)]);
+
+        if (AdFlagLifetimeTicks is { } life && life < 1)
+            yield return new ValidationResult(
+                "AdFlagLifetimeTicks must be at least 1.", [nameof(AdFlagLifetimeTicks)]);
+
+        if (AdGetflagWindowFraction is { } frac && (frac <= 0 || frac >= 1))
+            yield return new ValidationResult(
+                "AdGetflagWindowFraction must be between 0 and 1 (exclusive).", [nameof(AdGetflagWindowFraction)]);
+
+        if (AdMinGracePeriodSeconds is { } grace && grace < 0)
+            yield return new ValidationResult(
+                "AdMinGracePeriodSeconds must be >= 0.", [nameof(AdMinGracePeriodSeconds)]);
+
+        if (AdResetCooldownMinutes is { } cd && cd < 0)
+            yield return new ValidationResult(
+                "AdResetCooldownMinutes must be >= 0.", [nameof(AdResetCooldownMinutes)]);
+
+        if (AdWarmupSeconds is { } warm && warm < 0)
+            yield return new ValidationResult(
+                "AdWarmupSeconds must be >= 0.", [nameof(AdWarmupSeconds)]);
     }
 }

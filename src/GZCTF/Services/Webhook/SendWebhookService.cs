@@ -194,6 +194,24 @@ public class SendWebhookService(ILogger<SendWebhookService> logger) : ISendWebho
         return text[..maxLength];
     }
 
+    /// <summary>
+    /// Backslash-escape Discord markdown control chars so a player-chosen team name (or a
+    /// challenge title set by a lower-trust per-game EventManager) can't inject bold/links/
+    /// formatting into the staff channel when interpolated into an embed.
+    /// </summary>
+    private static string EscapeMd(string? s)
+    {
+        if (string.IsNullOrEmpty(s)) return string.Empty;
+        var sb = new System.Text.StringBuilder(s.Length + 8);
+        foreach (var c in s)
+        {
+            if (c is '\\' or '*' or '_' or '~' or '`' or '|' or '[' or ']' or '(' or ')' or '>' or '#')
+                sb.Append('\\');
+            sb.Append(c);
+        }
+        return sb.ToString();
+    }
+
     private static void SanitizeMessage(Models.DiscordWebhookMessage message)
     {
         message.Content = Truncate(message.Content, ContentLimit);
@@ -258,7 +276,7 @@ public class SendWebhookService(ILogger<SendWebhookService> logger) : ISendWebho
             case EventType.CheatDetected:
                 embed.Title = "Cheat Detected! 🚨";
                 embed.Color = 0xFF0000; // Red
-                embed.Description = $"Cheat detected for team **{gameEvent.Team?.Name}**.\nDetails: {string.Join(", ", gameEvent.Values ?? [])}";
+                embed.Description = $"Cheat detected for team **{EscapeMd(gameEvent.Team?.Name)}**.\nDetails: {EscapeMd(string.Join(", ", gameEvent.Values ?? []))}";
                 embed.Footer = new Models.DiscordEmbedFooter { Text = gameEvent.Game?.Title ?? "Unknown Game" };
                 break;
             default:
@@ -297,9 +315,10 @@ public class SendWebhookService(ILogger<SendWebhookService> logger) : ISendWebho
                     break;
             }
             
-            // Values: [TeamName, ChallengeName]
-            var teamName = notice.Values?.ElementAtOrDefault(0) ?? "Unknown Team";
-            var challengeName = notice.Values?.ElementAtOrDefault(1) ?? "Unknown Challenge";
+            // Values: [TeamName, ChallengeName] — both user/author-controlled, so escape
+            // Discord markdown before interpolating into the embed.
+            var teamName = EscapeMd(notice.Values?.ElementAtOrDefault(0) ?? "Unknown Team");
+            var challengeName = EscapeMd(notice.Values?.ElementAtOrDefault(1) ?? "Unknown Challenge");
             
             string prefix = notice.Type switch
             {
@@ -325,8 +344,8 @@ public class SendWebhookService(ILogger<SendWebhookService> logger) : ISendWebho
              
              embed.Description = notice.Type switch
              {
-                 NoticeType.NewChallenge => $"New challenge released: **{notice.Values?.FirstOrDefault()}**",
-                 NoticeType.NewHint => $"New hint released for challenge **{notice.Values?.FirstOrDefault()}**",
+                 NoticeType.NewChallenge => $"New challenge released: **{EscapeMd(notice.Values?.FirstOrDefault())}**",
+                 NoticeType.NewHint => $"New hint released for challenge **{EscapeMd(notice.Values?.FirstOrDefault())}**",
                  NoticeType.Normal => notice.Values?.FirstOrDefault() ?? "New announcement",
                  _ => notice.Values?.Count > 0 ? string.Join(", ", notice.Values) : notice.Type.ToString()
              };

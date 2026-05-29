@@ -1193,9 +1193,19 @@ public class AdGameController(
                         TaskStatus.Success, LogLevel.Information);
                     break;
                 }
-                catch (DbUpdateException) when (attempt < maxAttempts)
+                catch (DbUpdateException)
                 {
                     db.Entry(peer).State = EntityState.Detached;
+                    // Don't let a unique-violation escape as a 500. This covers both an
+                    // AssignedIp collision (retry picks the next free IP) and a concurrent
+                    // (UserId, ParticipationId) double-submit (the peer already exists). On
+                    // the final attempt return a clean 409 — a client retry then hits the
+                    // existing-peer fast path above and gets its .conf.
+                    if (attempt >= maxAttempts)
+                        return StatusCode(StatusCodes.Status409Conflict,
+                            new RequestResponse(
+                                "VPN config is being provisioned concurrently; please retry.",
+                                StatusCodes.Status409Conflict));
                 }
             }
 

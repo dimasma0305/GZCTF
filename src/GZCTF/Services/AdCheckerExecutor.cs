@@ -100,7 +100,11 @@ public sealed class AdCheckerExecutor(
                 AutoRemove = false,
                 NetworkMode = networkName,
                 Memory = 256L * 1024 * 1024,
-                NanoCPUs = 500_000_000L
+                NanoCPUs = 500_000_000L,
+                // Cap PIDs so a buggy/malicious custom checker image can't fork-bomb the
+                // host (Memory + NanoCPUs alone don't bound process count). Mirrors the
+                // team-container hardening; a checker process tree is tiny.
+                PidsLimit = 256
             }
         };
 
@@ -121,8 +125,15 @@ public sealed class AdCheckerExecutor(
                 // checks in flight during the pull will land as InternalError
                 // and recover on the next tick.
                 logger.SystemLog($"AdChecker: pulling image {image}", TaskStatus.Pending, LogLevel.Information);
-                await client.Images.CreateImageAsync(new ImagesCreateParameters { FromImage = image }, null,
-                    new Progress<JSONMessage>(_ => { }), token);
+                // Bound the pull by the checker Timeout: a slow/flaky (external or private)
+                // registry must not stall the whole game tick while holding a scheduler slot.
+                using var pullCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+                pullCts.CancelAfter(Timeout);
+                // Pass registry auth (mirrors DockerManager) so a checker image on a private
+                // registry can actually be pulled instead of silently failing forever.
+                var auth = meta.AuthConfigs.GetForImage(image) ?? new AuthConfig();
+                await client.Images.CreateImageAsync(new ImagesCreateParameters { FromImage = image }, auth,
+                    new Progress<JSONMessage>(_ => { }), pullCts.Token);
                 created = await client.Containers.CreateContainerAsync(parameters, token);
             }
 

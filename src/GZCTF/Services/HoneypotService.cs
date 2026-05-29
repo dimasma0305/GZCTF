@@ -136,24 +136,20 @@ public class HoneypotService(
 
         // Fall back to recent IP→user matches from the application log.
         var since = now - IpAttributionWindow;
-        var candidates = await db.Logs
+        // Resolve recent users seen on THIS exact IP. Filter by IP IN SQL (not after a
+        // .Take cap) — otherwise on a busy platform the most-recent N rows are dominated by
+        // other IPs and the target IP's rows get truncated out, silently dropping
+        // attribution. Only attribute when the IP maps to EXACTLY ONE distinct user: a
+        // shared egress (NAT/VPN/CGNAT) shows several, and a honeypot hit is a HARD signal
+        // we must not pin on an innocent team. (Npgsql maps IPAddress -> inet, translates ==.)
+        var ipUserNames = await db.Logs
             .AsNoTracking()
-            .Where(l => l.TimeUtc >= since && l.RemoteIP != null && l.UserName != null)
-            .OrderByDescending(l => l.TimeUtc)
-            .Select(l => new { l.UserName, l.RemoteIP })
-            .Take(IpAttributionCandidateCap)
+            .Where(l => l.TimeUtc >= since && l.UserName != null && l.RemoteIP != null && l.RemoteIP == ip)
+            .Select(l => l.UserName!)
+            .Distinct()
+            .Take(2)
             .ToListAsync(token);
 
-        var ipString = ip.ToString();
-        // Only attribute by IP when the IP maps to EXACTLY ONE recent user. A shared egress
-        // (campus/corporate NAT, VPN exit, CGNAT) shows multiple distinct users on the same
-        // IP, and a honeypot hit is a HARD signal — attributing it there would frame an
-        // innocent team for traffic an attacker on the same IP sent.
-        var ipUserNames = candidates
-            .Where(c => c.RemoteIP != null && c.RemoteIP.ToString() == ipString && c.UserName != null)
-            .Select(c => c.UserName!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
         if (ipUserNames.Count != 1) return (null, null, null);
         var recentUserName = ipUserNames[0];
 
@@ -176,6 +172,9 @@ public class HoneypotService(
             .Include(p => p.Team)
             .Include(p => p.Game)
             .Where(p => p.Game.StartTimeUtc <= now && now <= p.Game.EndTimeUtc)
+            // Only ACCEPTED participations compete — don't pin honeypot suspicion on a team
+            // that's merely Pending, or one already Rejected/Suspended (e.g. kicked).
+            .Where(p => p.Status == ParticipationStatus.Accepted)
             .Where(p => p.Members.Any(m => m.UserId == userId))
             .OrderByDescending(p => p.Game.StartTimeUtc)
             .FirstOrDefaultAsync(token);
