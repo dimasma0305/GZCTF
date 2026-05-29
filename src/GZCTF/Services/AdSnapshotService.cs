@@ -144,6 +144,17 @@ public sealed class AdSnapshotService(
             changes.OrderBy(c => c.Path, StringComparer.Ordinal).ThenBy(c => c.Kind)
                 .Select(c => new { p = c.Path, k = c.Kind }));
 
+        // Bound the persisted manifest. Paths are attacker-controlled (the team
+        // owns its container filesystem) and the entry COUNT cap (3000) doesn't
+        // bound per-path length or total bytes; a team can also rotate the set
+        // every round so the dedupe below never fires. Left uncapped this writes
+        // an unbounded `text` row per round per service → DB disk-exhaustion DoS.
+        // Past the cap, store a compact placeholder (just the count) instead of
+        // the full path list — the admin can still shell in to inspect.
+        const int MaxManifestBytes = 64 * 1024;
+        if (manifest.Length > MaxManifestBytes)
+            manifest = JsonSerializer.Serialize(new { truncated = true, count = changes.Count });
+
         var db = sp.GetRequiredService<AppDbContext>();
         // Latest stored manifest for this service. Ordering by AdRoundId (then Id)
         // rides the (AdTeamServiceId, AdRoundId) index.

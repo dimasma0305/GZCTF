@@ -85,9 +85,14 @@ public sealed class ContainerAccessLogger(
 
         try
         {
+            // Score the ACCESSOR (the cheater who reached into another team's
+            // container), NOT the owner. AddSuspicion raises the score on
+            // stub.Id, so stub must be the accessing participation; the owner
+            // (victim) is recorded only as related metadata. Scoring the owner
+            // would let Team B frame Team A with a single cross-team proxy open.
             var stub = new Participation
             {
-                Id = ctx.ContainerOwnerParticipationId,
+                Id = ctx.AccessingParticipationId.Value,
                 GameId = ctx.GameId,
             };
 
@@ -106,7 +111,7 @@ public sealed class ContainerAccessLogger(
                 stub,
                 SuspicionType.CrossTeamContainerAccess,
                 details,
-                relatedParticipationId: ctx.AccessingParticipationId,
+                relatedParticipationId: ctx.ContainerOwnerParticipationId,
                 token: token);
 
             logger.LogWarning(

@@ -419,9 +419,14 @@ public sealed class GitRepoSyncService(ILogger<GitRepoSyncService> logger)
     }
 
     /// <summary>
-    /// Remove stale top-level git lock files (<c>shallow.lock</c>,
-    /// <c>index.lock</c>, <c>config.lock</c>, …) left behind by a git process
-    /// that was killed mid-operation. SAFE because every caller holds the
+    /// Remove stale git lock files left behind by a git process killed
+    /// mid-operation. Sweeps RECURSIVELY: top-level locks (<c>shallow.lock</c>,
+    /// <c>index.lock</c>, <c>config.lock</c>, …) AND nested ref locks
+    /// (<c>refs/heads/&lt;branch&gt;.lock</c>, <c>logs/…</c>). The steady-state
+    /// <c>reset --hard FETCH_HEAD</c> locks the current branch ref, so an
+    /// interrupted reset leaves a lock one level deep that a top-level-only sweep
+    /// would miss — permanently wedging the binding ("cannot lock ref … File
+    /// exists") on every later poll. SAFE because every caller holds the
     /// per-(kind,id) semaphore, so there is no live git process for this repo to
     /// own them. Returns the number of locks removed.
     /// </summary>
@@ -429,7 +434,7 @@ public sealed class GitRepoSyncService(ILogger<GitRepoSyncService> logger)
     {
         if (!Directory.Exists(gitDir)) return 0;
         var cleared = 0;
-        foreach (var lockFile in Directory.EnumerateFiles(gitDir, "*.lock", SearchOption.TopDirectoryOnly))
+        foreach (var lockFile in Directory.EnumerateFiles(gitDir, "*.lock", SearchOption.AllDirectories))
         {
             try { File.Delete(lockFile); cleared++; }
             catch { /* best effort — nothing legitimately holds it under the semaphore */ }

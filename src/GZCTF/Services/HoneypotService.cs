@@ -38,7 +38,16 @@ public class HoneypotService(
             UserAgent = string.IsNullOrEmpty(ua) ? null : ua,
             Attributed = false
         };
-        return RecordAndBroadcast(notice, ruleCode ?? SuspicionType.HoneypotHit, context.User, probe: null, token);
+        // CSRF guard: every honeypot bait is a GET route, so a cross-site
+        // top-level navigation carries the victim's (SameSite=Lax) auth cookie —
+        // which would let an attacker pin a hit (and, via the chain detector, a
+        // HardSignal) on an innocent logged-in team. Only trust the authenticated
+        // principal when the browser reports a same-origin fetch; otherwise
+        // attribute by IP only (the IP fallback in ResolveAttribution).
+        var sameOrigin = string.Equals(
+            context.Request.Headers["Sec-Fetch-Site"].ToString(), "same-origin", StringComparison.Ordinal);
+        return RecordAndBroadcast(notice, ruleCode ?? SuspicionType.HoneypotHit,
+            sameOrigin ? context.User : null, probe: null, token);
     }
 
     public Task RecordTcpHit(

@@ -53,6 +53,15 @@ public static class RateLimiter
         options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
         options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
         {
+            // East-west A&D SSH bastion endpoints (api/Internal/Ad/Ssh) are called
+            // by the jump-host sidecar from a SINGLE IP and carry no user claim, so
+            // they'd otherwise all share ONE IP-keyed bucket — letting one
+            // attacker's pubkey-probe flood 429-lock out SSH auth platform-wide
+            // (lookups run pre-signature via AuthorizedKeysCommand). They're already
+            // gated by the shared internal secret, so exempt them from the limiter.
+            if (context.Request.Path.StartsWithSegments("/api/Internal/Ad/Ssh"))
+                return RateLimitPartition.GetNoLimiter("internal-ad-ssh");
+
             var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
 
             if (userId is not null)

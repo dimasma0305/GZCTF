@@ -111,8 +111,19 @@ public class InternalAdSshController(
         if (service?.Container?.ContainerId is not { Length: > 0 } cid)
             return NotFound();
 
-        keyRow.LastUsedAt = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync(token);
+        // /Lookup runs at SSH key-OFFER time (AuthorizedKeysCommand), BEFORE sshd
+        // verifies the client actually holds the private key — and public keys are
+        // public — so an unauthenticated probe offering a victim's pubkey reaches
+        // here. Throttle the LastUsedAt write to at most once / 5 min so a probe
+        // loop can't amplify DB writes or finely forge the timestamp. (Ideally this
+        // moves to /Exec, but the sidecar's ForceCommand doesn't thread the key
+        // fingerprint through.)
+        var nowUtc = DateTimeOffset.UtcNow;
+        if (keyRow.LastUsedAt is null || nowUtc - keyRow.LastUsedAt.Value > TimeSpan.FromMinutes(5))
+        {
+            keyRow.LastUsedAt = nowUtc;
+            await db.SaveChangesAsync(token);
+        }
 
         return Ok(new InternalAdSshLookupModel
         {

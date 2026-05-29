@@ -238,6 +238,19 @@ public sealed class ChallengeImportService(
             .Include(c => c.Attachment)
             .FirstOrDefaultAsync(c => c.GameId == game.Id && c.Title == model.Name, token);
 
+        // User-submission path (AutoApprove == false): the upsert keys only on
+        // (GameId, Title), so without this guard any submitter could overwrite —
+        // and, by flipping ReviewStatus to Pending, HIDE — a live (Active)
+        // challenge just by reusing its public title, or stomp another user's
+        // pending submission. Refuse unless this is a brand-new title or the
+        // submitter's OWN still-pending submission. Trusted imports
+        // (AutoApprove == true: admin/gzcli/repo-binding) keep upsert semantics.
+        if (existing is not null && !opts.AutoApprove &&
+            (existing.ReviewStatus != ChallengeReviewStatus.Pending ||
+             (existing.SubmittedByUserId is not null && existing.SubmittedByUserId != opts.SubmitterUserId)))
+            return new(OutcomeKind.Skipped,
+                $"'{model.Name}': a challenge with this title already exists in this game — choose a unique title.");
+
         GameChallenge challenge;
         OutcomeKind kind;
         if (existing is null)

@@ -165,6 +165,14 @@ public sealed class ChallengeBuildQueueService(
                     logger.LogError(ex,
                         "ChallengeBuildQueueService: worker {W} crashed on challenge {Id} attempt {A}",
                         workerId, job.ChallengeId, job.Attempt);
+                    // Reconcile the queue on ANY unhandled exit, or the challenge
+                    // stays in the dedup set forever — every later Enqueue (Rebuild
+                    // button, re-import, bulk rebuild) returns AlreadyPending and
+                    // no-ops until an app restart. MarkEnd is idempotent; the
+                    // transient-retry path re-enqueues from inside ProcessOneAsync
+                    // and never propagates here, so this only fires on terminal
+                    // failures (e.g. a DB blip during the status-flip SaveChanges).
+                    ((ChallengeBuildQueue)queue).MarkEnd(job.ChallengeId);
                     // Best-effort cleanup so we don't leak temp dirs on
                     // a runaway exception inside ProcessOneAsync.
                     if (job.OwnsContextDir) SafeDelete(job.ContextDir);
