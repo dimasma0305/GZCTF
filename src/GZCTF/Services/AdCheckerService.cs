@@ -560,14 +560,16 @@ public sealed class AdCheckerService(
             .FirstOrDefaultAsync(token);
         var activeTeams = await db.Participations
             .CountAsync(p => p.GameId == gameId && p.Status == ParticipationStatus.Accepted, token);
+        var fieldFactor = AdScoring.SlaFieldFactor(activeTeams);
 
-        var credit = AdScoring.TickCredit(outcome.Status, prevStatus) * AdScoring.SlaFieldFactor(activeTeams);
+        var credit = AdScoring.TickCredit(outcome.Status, prevStatus) * fieldFactor;
         await db.AdCheckResults.AddAsync(new AdCheckResult
         {
             AdTeamServiceId = adTeamServiceId,
             AdRoundId = adRoundId,
             Status = outcome.Status,
             SlaCredit = credit,
+            FieldFactor = fieldFactor, // frozen so admin overrides replay it
             ErrorMessage = outcome.ErrorMessage,
             SourceIp = outcome.SourceIp,
             CheckedAt = DateTimeOffset.UtcNow

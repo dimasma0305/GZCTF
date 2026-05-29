@@ -36,6 +36,14 @@ public class AdCheckResult
     /// </summary>
     public double SlaCredit { get; set; }
 
+    /// <summary>
+    /// Field-size weight (<c>AdScoring.SlaFieldFactor</c> = <c>sqrt(teams)</c>)
+    /// folded into <see cref="SlaCredit"/> at check-land time, FROZEN here so an
+    /// admin override replays the original factor instead of re-deriving it from
+    /// the current (possibly-churned) team count. Null only for pre-column rows.
+    /// </summary>
+    public double? FieldFactor { get; set; }
+
     /// <summary>Free-form error text from the checker on Mumble / Offline / InternalError. Null on Ok.</summary>
     [MaxLength(4096)]
     public string? ErrorMessage { get; set; }
