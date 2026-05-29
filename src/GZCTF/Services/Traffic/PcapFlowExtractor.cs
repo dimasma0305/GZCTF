@@ -118,6 +118,13 @@ public sealed class PcapFlowExtractor(IBlobStorage storage, ILogger<PcapFlowExtr
 
         var flows = new Dictionary<int, FlowAccumulator>();
 
+        // Bound TOTAL retained payload so opening a large (team-controlled) capture can't
+        // OOM the server. Once the budget is spent we stop retaining payload bytes but keep
+        // accumulating packet/byte counts, so summaries stay accurate. Flag detection scans
+        // the retained head of each flow, which is what this budget preserves.
+        const long maxRetainedBytes = 128L * 1024 * 1024;
+        var retainBudget = includePayloads ? maxRetainedBytes : 0L;
+
         while (true)
         {
             token.ThrowIfCancellationRequested();
@@ -177,7 +184,9 @@ public sealed class PcapFlowExtractor(IBlobStorage storage, ILogger<PcapFlowExtr
             if (!flows.TryGetValue(connectionPort, out var acc))
                 flows[connectionPort] = acc = new FlowAccumulator(connectionPort, peerIp);
 
-            acc.Add(direction, payload, ts, retainPayload: includePayloads);
+            var retain = retainBudget > 0;
+            acc.Add(direction, payload, ts, retainPayload: retain);
+            if (retain) retainBudget -= payload.Length;
         }
 
         return flows.Values.OrderBy(f => f.FirstSeenUtc).ToList();
