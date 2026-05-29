@@ -2047,6 +2047,17 @@ public class EditController(
                 }
             }
 
+            // Containment guard: the resolved build context must stay inside the package.
+            // container_image is game-admin-set, but building with an out-of-package context
+            // (e.g. "../../etc") would bake host files into the image. The import path
+            // enforces this in ResolveBuildContext; mirror it on the manual Rebuild path.
+            var canonicalPkg = Path.GetFullPath(packageDir) + Path.DirectorySeparatorChar;
+            if (!(Path.GetFullPath(contextDir) + Path.DirectorySeparatorChar)
+                    .StartsWith(canonicalPkg, StringComparison.Ordinal))
+            {
+                return BadRequest(new RequestResponse("Rebuild context escapes the challenge package."));
+            }
+
             if (!System.IO.File.Exists(Path.Combine(contextDir, dockerfile)))
             {
                 challenge.BuildStatus = ChallengeBuildStatus.MissingDockerfile;

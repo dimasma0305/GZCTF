@@ -541,6 +541,29 @@ public sealed class ChallengeImportService(
         return dst;
     }
 
+    private static bool PathIsReparsePoint(string path)
+    {
+        try { return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0; }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// Recursive file walk that never descends into or yields symlinks. The BCL's
+    /// <c>Directory.EnumerateFiles(.., AllDirectories)</c> FOLLOWS directory symlinks, which
+    /// would let a <c>provide:</c> dir-symlink tar an arbitrary host tree (/etc, /app) into
+    /// a player-downloadable attachment. Mirrors <see cref="CopyDirRecursive"/>.
+    /// </summary>
+    private static IEnumerable<string> EnumerateRealFiles(string root)
+    {
+        foreach (var f in Directory.EnumerateFiles(root))
+            if ((new FileInfo(f).Attributes & FileAttributes.ReparsePoint) == 0)
+                yield return f;
+        foreach (var d in Directory.EnumerateDirectories(root))
+            if ((new DirectoryInfo(d).Attributes & FileAttributes.ReparsePoint) == 0)
+                foreach (var f in EnumerateRealFiles(d))
+                    yield return f;
+    }
+
     private static void CopyDirRecursive(string src, string dst)
     {
         Directory.CreateDirectory(dst);
@@ -700,6 +723,16 @@ public sealed class ChallengeImportService(
         if (!absolute.StartsWith(canonicalPkg, StringComparison.Ordinal))
             throw new InvalidOperationException("'provide' path escapes the challenge package.");
 
+        // The StartsWith guard above is PURELY LEXICAL — Path.GetFullPath does not resolve
+        // symlinks — so a `provide:` entry that is a symlink pointing OUTSIDE the package
+        // (e.g. -> /app/kube-config.k3d.yaml, WireGuard keys, the DataProtection key ring,
+        // or /etc) would slip through and be tarred into a player-downloadable attachment.
+        // A git-synced repo can ship such a symlink. Reject any reparse point outright; a
+        // real attachment is a plain file or dist/ directory. (The sibling build-context
+        // CopyDirRecursive already enforces this.)
+        if (PathIsReparsePoint(absolute))
+            throw new InvalidOperationException("'provide' must not be a symlink.");
+
         Models.Data.LocalFile blob;
         if (File.Exists(absolute))
         {
@@ -718,7 +751,7 @@ public sealed class ChallengeImportService(
             try
             {
                 long total = 0;
-                foreach (var f in Directory.EnumerateFiles(absolute, "*", SearchOption.AllDirectories))
+                foreach (var f in EnumerateRealFiles(absolute))
                 {
                     total += new FileInfo(f).Length;
                     if (total > maxBytes)
@@ -731,7 +764,7 @@ public sealed class ChallengeImportService(
                 await using (var tar = new TarWriter(gz, leaveOpen: false))
                 {
                     var dirCanonical = Path.GetFullPath(absolute) + Path.DirectorySeparatorChar;
-                    foreach (var f in Directory.EnumerateFiles(absolute, "*", SearchOption.AllDirectories))
+                    foreach (var f in EnumerateRealFiles(absolute))
                     {
                         var name = Path.GetRelativePath(absolute, f).Replace('\\', '/');
                         if (name.StartsWith("..", StringComparison.Ordinal))

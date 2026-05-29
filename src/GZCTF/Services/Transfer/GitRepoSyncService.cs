@@ -327,7 +327,31 @@ public sealed class GitRepoSyncService(ILogger<GitRepoSyncService> logger)
             UseShellExecute = false,
             CreateNoWindow = true
         };
-        foreach (var a in args) psi.ArgumentList.Add(a);
+        // Route any `-c key=value` config — notably the http.extraHeader carrying the
+        // GitHub PAT — through GIT_CONFIG_* env vars instead of argv, so the secret lands
+        // in /proc/<pid>/environ (owner/root-readable) rather than the world-readable
+        // /proc/<pid>/cmdline. git >= 2.31 reads GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n /
+        // GIT_CONFIG_VALUE_n. Non-`-c` args still go on the command line.
+        var cfgCount = 0;
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "-c" && i + 1 < args.Length)
+            {
+                var kv = args[++i];
+                var eq = kv.IndexOf('=');
+                if (eq > 0)
+                {
+                    psi.Environment[$"GIT_CONFIG_KEY_{cfgCount}"] = kv[..eq];
+                    psi.Environment[$"GIT_CONFIG_VALUE_{cfgCount}"] = kv[(eq + 1)..];
+                    cfgCount++;
+                    continue;
+                }
+            }
+            psi.ArgumentList.Add(args[i]);
+        }
+        if (cfgCount > 0)
+            psi.Environment["GIT_CONFIG_COUNT"] = cfgCount.ToString();
+
         // Block interactive credential prompts so a misconfigured
         // private repo fails fast instead of hanging the worker.
         psi.Environment["GIT_TERMINAL_PROMPT"] = "0";
