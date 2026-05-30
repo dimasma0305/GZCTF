@@ -503,7 +503,7 @@ def _dockerfile_for(t: str, cat: str) -> dict:
                     if self.path == "/koth/king":
                         body = MARKER.read_bytes() if MARKER.exists() else b""
                     else:
-                        body = b"king of the hill — PUT /koth/king\\n"
+                        body = "king of the hill — PUT /koth/king\\n".encode()
                     self.send_response(200); self.send_header("content-length", str(len(body))); self.end_headers()
                     self.wfile.write(body)
                 def do_PUT(self):
