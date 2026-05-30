@@ -60,6 +60,7 @@ public class GameController(
     IParticipationRepository participationRepository,
     IOptionsSnapshot<ContainerPolicy> containerPolicy,
     IDataProtectionProvider dataProtectionProvider,
+    AppDbContext dbContext,
     IStringLocalizer<Program> localizer) : ControllerBase
 {
     private readonly IDataProtector _protector = dataProtectionProvider.CreateProtector("GZCTF.Assets.Download");
