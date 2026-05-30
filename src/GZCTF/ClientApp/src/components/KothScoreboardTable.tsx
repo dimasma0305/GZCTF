@@ -57,7 +57,7 @@ export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => 
   const { t } = useTranslation()
   const theme = useMantineTheme()
   const { colorScheme } = useMantineColorScheme()
-  const { kothScoreboard } = useKothScoreboard(numId)
+  const { kothScoreboard, error: kothError } = useKothScoreboard(numId)
   const { game } = useGame(numId)
   const myTeamName = game?.teamName ?? null
 
@@ -100,7 +100,9 @@ export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => 
           <Icon path={mdiCrown} size={2.5} color="var(--mantine-color-dimmed)" />
           <Text fw="bold" c="dimmed">
             {!kothScoreboard
-              ? t('game.content.scoreboard.koth.loading', 'Loading King of the Hill…')
+              ? kothError
+                ? t('game.content.scoreboard.koth.error', 'Could not load the King of the Hill board.')
+                : t('game.content.scoreboard.koth.loading', 'Loading King of the Hill…')
               : t('game.content.scoreboard.koth.empty.title', 'No hills configured')}
           </Text>
           {kothScoreboard && (

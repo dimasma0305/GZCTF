@@ -1347,6 +1347,13 @@ export interface GameInfoModel {
    * @format int32
    */
   adMinGracePeriodSeconds?: number | null;
+  /**
+   * KotH — ticks a shared hill runs before it is reset to base (default 5).
+   * @format int32
+   */
+  kothRefreshTicks?: number | null;
+  /** KotH — hold points credited to the controller each Ok tick (default 1.0). */
+  kothHoldPointsPerTick?: number | null;
 }
 
 /** List response */

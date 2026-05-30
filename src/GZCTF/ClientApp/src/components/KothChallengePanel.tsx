@@ -180,8 +180,17 @@ export const KothChallengePanel: FC<KothChallengePanelProps> = ({ gameId, challe
           so the UI doesn't look broken during the gap before round 1. */}
       <Group gap={6} align="center" wrap="nowrap">
         <Text size="xs" c="dimmed">
-          {t('game.content.koth.your_token', 'Your token (round {{round}})', { round: tokenData?.round ?? 0 })}:
+          {tokenData
+            ? `${t('game.content.koth.your_token', 'Your token (round {{round}})', { round: tokenData.round })}:`
+            : `${t('game.content.koth.your_token_short', 'Your token')}:`}
         </Text>
+        {/* No data yet (initial load or a failed token fetch) — show a hint rather
+            than a bare label with a blank value, which looks broken. */}
+        {!tokenData && (
+          <Text size="xs" c="dimmed" fs="italic">
+            {t('game.content.koth.token_loading', 'loading…')}
+          </Text>
+        )}
         {tokenData?.status === 'warmup' && (
           <Text size="xs" c="dimmed" fs="italic">
             {t('game.content.koth.warmup', 'Game hasn’t started ticking yet')}

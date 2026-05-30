@@ -235,6 +235,8 @@ public partial class Game
         if (model.AdAllowSnapshotDownload is { } snap) AdAllowSnapshotDownload = snap;
         if (model.AdGetflagWindowFraction is { } getFrac) AdGetflagWindowFraction = getFrac;
         if (model.AdMinGracePeriodSeconds is { } grace) AdMinGracePeriodSeconds = grace;
+        if (model.KothRefreshTicks is { } kothRefresh) KothRefreshTicks = kothRefresh;
+        if (model.KothHoldPointsPerTick is { } kothPts) KothHoldPointsPerTick = kothPts;
 
         return this;
     }

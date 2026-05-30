@@ -501,6 +501,34 @@ const GameInfoEdit: FC = () => {
             if (!isNaN(n)) game && setGame({ ...game, adMinGracePeriodSeconds: n })
           }}
         />
+        <NumberInput
+          label={t('admin.content.games.info.koth_refresh_ticks.label', 'KotH hill refresh (ticks)')}
+          description={t('admin.content.games.info.koth_refresh_ticks.description',
+            'King of the Hill: ticks a shared hill runs before it resets to base (wiping footholds + the /koth/king marker).')}
+          disabled={disabled}
+          min={1}
+          max={50}
+          value={game?.kothRefreshTicks ?? 5}
+          onChange={(e) => {
+            const n = getInputNumber(e)
+            if (!isNaN(n)) game && setGame({ ...game, kothRefreshTicks: n })
+          }}
+        />
+        <NumberInput
+          label={t('admin.content.games.info.koth_hold_points_per_tick.label', 'KotH hold points / tick')}
+          description={t('admin.content.games.info.koth_hold_points_per_tick.description',
+            'King of the Hill: points credited to the team holding a hill each Ok tick.')}
+          disabled={disabled}
+          min={0.1}
+          max={100}
+          step={0.5}
+          decimalScale={1}
+          value={game?.kothHoldPointsPerTick ?? 1.0}
+          onChange={(e) => {
+            const n = getInputNumber(e)
+            if (!isNaN(n)) game && setGame({ ...game, kothHoldPointsPerTick: n })
+          }}
+        />
         <Switch
           mt="md"
           label={t('admin.content.games.info.ad_allow_snapshot_download.label')}

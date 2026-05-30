@@ -115,6 +115,7 @@ const GameChallengeEdit: FC = () => {
   // A&D and KotH share the same editor treatment (managed containers, no per-flag
   // scoring, the A&D config card for the checker image + egress).
   const isAdEngine = type === ChallengeType.AttackDefense || type === ChallengeType.KingOfTheHill
+  const isKoth = type === ChallengeType.KingOfTheHill
   const [currentAcceptCount, setCurrentAcceptCount] = useState(0)
   const [previewOpened, setPreviewOpened] = useState(false)
   const [execOpened, setExecOpened] = useState(false)
@@ -729,15 +730,20 @@ const GameChallengeEdit: FC = () => {
           </Grid>
         )}
 
-        {/* Attack & Defense — per-challenge config */}
+        {/* Attack & Defense / King of the Hill — per-challenge config */}
         {isAdEngine && (
           <Stack gap="sm">
             <Divider
-              label={t('admin.content.games.challenges.ad.title')}
+              label={isKoth
+                ? t('admin.content.games.challenges.koth.title', 'King of the Hill')
+                : t('admin.content.games.challenges.ad.title')}
               labelPosition="left"
             />
             <Text size="sm" c="dimmed">
-              {t('admin.content.games.challenges.ad.description')}
+              {isKoth
+                ? t('admin.content.games.challenges.koth.description',
+                    'Per-challenge config for the shared hill (checker + egress).')
+                : t('admin.content.games.challenges.ad.description')}
             </Text>
             <Grid columns={12}>
               <Grid.Col span={6}>
@@ -766,17 +772,21 @@ const GameChallengeEdit: FC = () => {
                   onChange={(e) => setChallengeInfo({ ...challengeInfo, adAllowEgress: e.target.checked })}
                 />
               </Grid.Col>
-              <Grid.Col span={6} display="flex" className={misc.alignCenter}>
-                <Switch
-                  disabled={disabled}
-                  checked={challengeInfo.adAllowSelfReset ?? true}
-                  label={SwitchLabel(
-                    t('admin.content.games.challenges.ad.allow_self_reset.label'),
-                    t('admin.content.games.challenges.ad.allow_self_reset.description')
-                  )}
-                  onChange={(e) => setChallengeInfo({ ...challengeInfo, adAllowSelfReset: e.target.checked })}
-                />
-              </Grid.Col>
+              {/* Self-reset is per-team-container only — meaningless for a KotH shared
+                  hill (no per-team box to rebuild), so don't show the no-op switch. */}
+              {!isKoth && (
+                <Grid.Col span={6} display="flex" className={misc.alignCenter}>
+                  <Switch
+                    disabled={disabled}
+                    checked={challengeInfo.adAllowSelfReset ?? true}
+                    label={SwitchLabel(
+                      t('admin.content.games.challenges.ad.allow_self_reset.label'),
+                      t('admin.content.games.challenges.ad.allow_self_reset.description')
+                    )}
+                    onChange={(e) => setChallengeInfo({ ...challengeInfo, adAllowSelfReset: e.target.checked })}
+                  />
+                </Grid.Col>
+              )}
             </Grid>
           </Stack>
         )}

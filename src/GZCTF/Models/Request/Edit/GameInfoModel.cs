@@ -174,6 +174,17 @@ public class GameInfoModel : IValidatableObject
     /// </summary>
     public int? AdMinGracePeriodSeconds { get; set; }
 
+    /// <summary>
+    /// KotH — how many ticks a shared hill runs before it is reset to its base image
+    /// (wiping footholds + the <c>/koth/king</c> marker). Default 5.
+    /// </summary>
+    public int? KothRefreshTicks { get; set; }
+
+    /// <summary>
+    /// KotH — hold points credited to the controlling team each Ok tick. Default 1.0.
+    /// </summary>
+    public double? KothHoldPointsPerTick { get; set; }
+
     internal static GameInfoModel FromGame(Data.Game game) =>
         new()
         {
@@ -205,7 +216,9 @@ public class GameInfoModel : IValidatableObject
             AdResetCooldownMinutes = game.AdResetCooldownMinutes,
             AdAllowSnapshotDownload = game.AdAllowSnapshotDownload,
             AdGetflagWindowFraction = game.AdGetflagWindowFraction,
-            AdMinGracePeriodSeconds = game.AdMinGracePeriodSeconds
+            AdMinGracePeriodSeconds = game.AdMinGracePeriodSeconds,
+            KothRefreshTicks = game.KothRefreshTicks,
+            KothHoldPointsPerTick = game.KothHoldPointsPerTick
         };
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
@@ -232,6 +245,14 @@ public class GameInfoModel : IValidatableObject
         if (AdGetflagWindowFraction is { } frac && (frac <= 0 || frac >= 1))
             yield return new ValidationResult(
                 "AdGetflagWindowFraction must be between 0 and 1 (exclusive).", [nameof(AdGetflagWindowFraction)]);
+
+        if (KothRefreshTicks is { } refresh && refresh < 1)
+            yield return new ValidationResult(
+                "KothRefreshTicks must be at least 1.", [nameof(KothRefreshTicks)]);
+
+        if (KothHoldPointsPerTick is { } pts && pts <= 0)
+            yield return new ValidationResult(
+                "KothHoldPointsPerTick must be greater than 0.", [nameof(KothHoldPointsPerTick)]);
 
         if (AdMinGracePeriodSeconds is { } grace && grace < 0)
             yield return new ValidationResult(

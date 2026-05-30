@@ -97,8 +97,11 @@ export const useChallengeTypeLabelMap = () => {
     [
       ChallengeType.KingOfTheHill,
       {
-        name: t('challenge.type.king_of_the_hill.label'),
-        desrc: t('challenge.type.king_of_the_hill.desrc'),
+        // Inline defaults so a locale lacking this key never surfaces the raw key
+        // string (matches the en-US copy; other types rely on locale entries only).
+        name: t('challenge.type.king_of_the_hill.label', 'King of the Hill'),
+        desrc: t('challenge.type.king_of_the_hill.desrc',
+          'One shared hill — race to plant your token in /koth/king and hold it.'),
       },
     ],
   ])

@@ -17,7 +17,7 @@ import { KothScoreTimeLine } from '@Components/charts/KothScoreTimeLine'
 import { ScoreTimeLine } from '@Components/charts/ScoreTimeLine'
 import { MobileScoreboardTable } from '@Components/mobile/ScoreboardTable'
 import { useIsMobile } from '@Utils/ThemeOverride'
-import { useGameScoreboard, useGameTeamInfo } from '@Hooks/useGame'
+import { useGameScoreboard, useGameTeamInfo, useKothScoreboard } from '@Hooks/useGame'
 import api from '@Api'
 
 type ScoreboardTab = 'jeopardy' | 'ad' | 'koth'
@@ -129,12 +129,17 @@ const Scoreboard: FC = () => {
   // Each live board freezes independently (separate endpoints) — read the
   // freeze state from whichever board we're currently showing.
   const { data: adScoreboard } = api.game.useGameAdScoreboard(numId, undefined, hasAdChallenges)
+  // SWR dedupes with the fetch inside KothScoreboardTable (same key), so this is
+  // free and lets the freeze banner above the board read the KotH freeze state too.
+  const { kothScoreboard } = useKothScoreboard(numId, hasKothChallenges)
   const onAdTab = effectiveTab === 'ad' && hasAdChallenges
   const onKothTab = effectiveTab === 'koth' && hasKothChallenges
   const frozenView = onAdTab ? adScoreboard?.isFrozenView
-    : onKothTab ? false  /* KotH board freeze flag is on its own response; banner handled inline */
+    : onKothTab ? kothScoreboard?.isFrozenView
     : scoreboard?.isFrozenView
-  const frozenAt = onAdTab ? adScoreboard?.freeze : scoreboard?.freeze
+  const frozenAt = onAdTab ? adScoreboard?.freeze
+    : onKothTab ? kothScoreboard?.freeze
+    : scoreboard?.freeze
 
   const freezeBanner = frozenView ? (
     <Alert color="blue" icon={<Icon path={mdiSnowflake} size={1} />}>

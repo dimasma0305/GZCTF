@@ -178,8 +178,8 @@
       "column_team": "Team",
       "no_teams": "No accepted teams yet. Once you accept teams from the participations page, their containers will spin up automatically.",
       "empty": {
-        "title": "No A&D challenges in this game",
-        "description": "Add a challenge with type Attack & Defense to use this console."
+        "title": "No A&D or KotH challenges in this game",
+        "description": "Add a challenge with type Attack & Defense or King of the Hill to use this console."
       },
       "snapshot": {
         "title": "Snapshot — {{team}} · {{challenge}}",
@@ -915,7 +915,9 @@
         "missing_dockerfile": "Dockerfile missing",
         "missing_dockerfile_help": "The challenge.yaml pointed at a local Dockerfile path that didn't exist in the archive. Open Audit for the resolved path, fix the source, and trigger a rebuild.",
         "attack_defense": "A&D",
-        "attack_defense_help": "Attack & Defense challenge — each team gets a persistent container; players attack other teams and defend their own."
+        "attack_defense_help": "Attack & Defense challenge — each team gets a persistent container; players attack other teams and defend their own.",
+        "koth": "KotH",
+        "koth_help": "King of the Hill challenge — one shared hill; teams race to plant their token in /koth/king and hold it for points."
       },
       "title": "Challenges awaiting review",
       "empty": {
@@ -1275,7 +1277,7 @@
       "review": "Teams",
       "writeups": "Writeups",
       "health": "Health",
-      "ad_ops": "A&D Ops"
+      "ad_ops": "A&D · KotH Ops"
     },
     "instances": "Instances",
     "logs": "Logs",

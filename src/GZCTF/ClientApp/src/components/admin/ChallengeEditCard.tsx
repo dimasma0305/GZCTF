@@ -67,7 +67,8 @@ export const ChallengeEditCard: FC<ChallengeEditCardProps> = ({
   // a Build button there is just noise. Same for challenges that
   // explicitly ship a registry image (NotApplicable).
   const isBuildable =
-    (challenge.type === 'StaticContainer' || challenge.type === 'DynamicContainer')
+    (challenge.type === 'StaticContainer' || challenge.type === 'DynamicContainer'
+      || challenge.type === 'AttackDefense' || challenge.type === 'KingOfTheHill')
     && challenge.buildStatus !== 'NotApplicable'
 
   const onBuildNow = async () => {

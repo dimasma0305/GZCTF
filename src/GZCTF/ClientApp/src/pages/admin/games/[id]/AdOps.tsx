@@ -894,12 +894,23 @@ const KothOpsPanel: FC<{
                     )}
                   </Table.Td>
                   <Table.Td>
-                    <Switch
-                      checked={h.isEnabled}
-                      disabled={busyHill === h.challengeId}
-                      onChange={() => onToggleHill(h)}
-                      aria-label="toggle-hill"
-                    />
+                    <Tooltip
+                      label={t('admin.tooltip.ad_ops.koth.toggle_hill', {
+                        title: h.title,
+                        defaultValue: 'Enable/disable {{title}} (non-destructive)',
+                      })}
+                      withArrow
+                    >
+                      <Switch
+                        checked={h.isEnabled}
+                        disabled={busyHill === h.challengeId}
+                        onChange={() => onToggleHill(h)}
+                        aria-label={t('admin.tooltip.ad_ops.koth.toggle_hill', {
+                          title: h.title,
+                          defaultValue: 'Enable/disable {{title}} (non-destructive)',
+                        })}
+                      />
+                    </Tooltip>
                   </Table.Td>
                 </Table.Tr>
               )
@@ -929,9 +940,7 @@ const KothOpsPanel: FC<{
             <Table verticalSpacing="xs" striped highlightOnHover withColumnBorders>
               <Table.Thead className={tableClasses.thead}>
                 <Table.Tr>
-                  <Table.Th className={tableClasses.corner} w={40}>
-                    #
-                  </Table.Th>
+                  <Table.Th w={40}>#</Table.Th>
                   <Table.Th>{t('admin.content.ad_ops.column_team', 'Team')}</Table.Th>
                   <Table.Th w={70}>{t('admin.content.ad_ops.koth.total', 'Total')}</Table.Th>
                   {enabledHills.map((h) => (
@@ -951,7 +960,7 @@ const KothOpsPanel: FC<{
                         {row.rank}
                       </Text>
                     </Table.Td>
-                    <Table.Td className={tableClasses.left}>
+                    <Table.Td>
                       <Text truncate fw="bold" size="sm" maw="12rem">
                         {row.teamName}
                       </Text>
@@ -1204,7 +1213,35 @@ const AdOps: FC = () => {
     )
   }
 
-  if (!state || (!hasAd && !hasKoth)) {
+  // A transient fetch error must not masquerade as "no challenges". The A&D /state
+  // is required for the shared header; if it failed — or both states are empty only
+  // because the KotH fetch failed — show an error + retry rather than the empty card.
+  if (!state || (!hasAd && !hasKoth && (error || kothError))) {
+    return (
+      <WithGameEditTab>
+        <Center h="40vh">
+          <Stack align="center" gap="sm">
+            <Icon path={mdiAlertCircleOutline} size={2.5} color="var(--mantine-color-red-6)" />
+            <Text fw="bold" c="dimmed">
+              {t('admin.content.ad_ops.load_error', 'Could not load the operator console.')}
+            </Text>
+            <Button
+              variant="default"
+              leftSection={<Icon path={mdiRefresh} size={0.9} />}
+              onClick={() => {
+                mutate()
+                mutateKoth()
+              }}
+            >
+              {t('admin.button.ad_ops.retry', 'Retry')}
+            </Button>
+          </Stack>
+        </Center>
+      </WithGameEditTab>
+    )
+  }
+
+  if (!hasAd && !hasKoth) {
     return (
       <WithGameEditTab>
         <Center h="40vh">
@@ -1478,7 +1515,8 @@ const AdOps: FC = () => {
                 {showKoth
                   ? t('admin.content.ad_ops.koth.hills_count', {
                       count: kothHills.length,
-                      defaultValue: '{{count}} hills',
+                      defaultValue_one: '{{count}} hill',
+                      defaultValue_other: '{{count}} hills',
                     })
                   : t('admin.content.ad_ops.teams_count', {
                       count: visibleTeams.length,
