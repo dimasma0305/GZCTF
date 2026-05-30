@@ -71,6 +71,8 @@ namespace GZCTF.Utils;
 [JsonSerializable(typeof(AttackEvent[]))]
 [JsonSerializable(typeof(KothControlEvent))]
 [JsonSerializable(typeof(KothControlEvent[]))]
+[JsonSerializable(typeof(KothHillPublicModel))]
+[JsonSerializable(typeof(KothHillPublicModel[]))]
 internal sealed partial class AppJsonSerializerContext : JsonSerializerContext;
 
 public class DateTimeOffsetJsonConverter : JsonConverter<DateTimeOffset>

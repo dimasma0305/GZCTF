@@ -582,6 +582,58 @@ public class GameController(
     }
 
     /// <summary>
+    /// Fire a synthetic KothControlEvent on the public AttackHub for testing the
+    /// King-of-the-Hill takeover animation. Admin-only. Does NOT touch the DB or
+    /// award points — purely a transient SignalR broadcast so an organizer can see
+    /// how a hill seizure looks without real gameplay.
+    /// </summary>
+    /// <remarks>
+    /// Pass a <paramref name="holderTeamName"/> that's on the scoreboard so the
+    /// takeover beam resolves to that team's node; omit it to preview a hill going
+    /// neutral. <paramref name="challengeId"/> should be a real KotH hill's id so the
+    /// recolor lands on the right node (any int still animates the feed/banner).
+    /// </remarks>
+    /// <param name="id">Game id</param>
+    /// <param name="challengeId">Hill challenge id to recolor (use a real hill id).</param>
+    /// <param name="challengeTitle">Hill title shown on the feed/banner.</param>
+    /// <param name="holderTeamName">New holder (a real scoreboard team), or null for "went neutral".</param>
+    /// <param name="previousTeamName">Previous holder, optional (informational).</param>
+    /// <param name="status">Functional verdict to show — Ok / Mumble / Offline.</param>
+    /// <param name="token"></param>
+    /// <response code="200">Broadcast dispatched</response>
+    /// <response code="404">Game not found</response>
+    [HttpPost("{id:int}/DebugKoth")]
+    [RequireAdmin]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DebugKoth(
+        [FromRoute] int id,
+        [FromQuery] int challengeId = 0,
+        [FromQuery] string challengeTitle = "debug-hill",
+        [FromQuery] string? holderTeamName = null,
+        [FromQuery] string? previousTeamName = null,
+        [FromQuery] string status = "Ok",
+        CancellationToken token = default)
+    {
+        var game = await gameRepository.GetGameById(id, token);
+        if (game is null)
+            return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Game_NotFound)],
+                StatusCodes.Status404NotFound));
+
+        var evt = new KothControlEvent(
+            challengeId,
+            challengeTitle,
+            0,
+            holderTeamName,
+            null,
+            previousTeamName,
+            status);
+
+        await attackHub.Clients.Group($"AttackGame_{id}").ReceivedKothControl(evt);
+        return Ok();
+    }
+
+    /// <summary>
     /// Get game notices
     /// </summary>
     /// <remarks>

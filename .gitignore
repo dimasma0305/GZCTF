@@ -267,3 +267,7 @@ _Pvt_Extensions
 /CHEAT_DETECTION.md
 # Local k3d kubeconfig for the Kubernetes container provider (holds a client cert)
 kube-config.k3d.yaml
+
+# editor / merge backup litter
+*.orig
+*.bak

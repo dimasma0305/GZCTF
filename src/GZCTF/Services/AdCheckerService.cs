@@ -377,8 +377,23 @@ public sealed class AdCheckerService(
 
                 if (target?.Container is null || string.IsNullOrEmpty(target.Container.IP))
                 {
-                    await PersistKothResultAsync(scopeFactory, gameId, challenge.Id, latest.Id,
+                    var persistedOffline = await PersistKothResultAsync(scopeFactory, gameId, challenge.Id, latest.Id,
                         null, AdCheckStatus.Offline, 0, 0, "hill not running", token);
+
+                    // A hill going down IS a control change (whoever held it loses it) —
+                    // broadcast so the animation greys the node out, same as the main path.
+                    if (persistedOffline)
+                    {
+                        try
+                        {
+                            await BroadcastKothControlChangeAsync(
+                                db, gameId, challenge, latest.Number, null, AdCheckStatus.Offline, token);
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogErrorMessage(ex, "KotH control broadcast failed (non-fatal)");
+                        }
+                    }
                     return;
                 }
 
