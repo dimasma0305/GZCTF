@@ -88,6 +88,24 @@ public class CacheHelper(
         await channelWriter.WriteAsync(KothTimelineCacheHandler.MakeCacheRequest(gameId), token);
     }
 
+    /// <summary>
+    /// Flush the LIVE A&amp;D/KotH boards AND drop the four FROZEN variants. Call
+    /// whenever a challenge's <c>IsEnabled</c> (or another scoring input the frozen
+    /// build filters on) changes mid-game: the live boards self-heal on the next
+    /// tick, but the frozen boards (7-day sliding, never regenerated) would otherwise
+    /// serve a stale column + wrong ranks for the rest of the freeze. Used by the
+    /// AdOps toggle, the challenge-edit save, and challenge delete so those paths
+    /// can't drift apart.
+    /// </summary>
+    public async Task FlushAdScoreboardCacheIncludingFrozen(int gameId, CancellationToken token)
+    {
+        await FlushAdScoreboardCache(gameId, token);
+        await RemoveAsync(CacheKey.AdScoreBoardFrozen(gameId), token);
+        await RemoveAsync(CacheKey.AdTimelineFrozen(gameId), token);
+        await RemoveAsync(CacheKey.KothScoreboardFrozen(gameId), token);
+        await RemoveAsync(CacheKey.KothTimelineFrozen(gameId), token);
+    }
+
     public async Task FlushRecentGamesCache(CancellationToken token) =>
         await channelWriter.WriteAsync(RecentGamesCacheHandler.MakeCacheRequest(), token);
 

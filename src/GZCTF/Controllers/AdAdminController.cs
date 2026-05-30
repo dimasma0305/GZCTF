@@ -313,16 +313,10 @@ public class AdAdminController(
         await db.SaveChangesAsync(token);
 
         // Both boards filter on IsEnabled, so a toggle changes columns + every team's
-        // total. Flush the live boards (they'd otherwise self-heal only on the next
-        // tick) AND drop the frozen variants — the frozen build also filters IsEnabled
-        // but is NEVER regenerated (7-day sliding, refreshed on each poll), so without
-        // this an admin disabling a challenge mid-freeze leaves the public frozen board
-        // showing the stale column + wrong ranks for the rest of the freeze.
-        await cacheHelper.FlushAdScoreboardCache(id, token);
-        await cacheHelper.RemoveAsync(CacheKey.AdScoreBoardFrozen(id), token);
-        await cacheHelper.RemoveAsync(CacheKey.AdTimelineFrozen(id), token);
-        await cacheHelper.RemoveAsync(CacheKey.KothScoreboardFrozen(id), token);
-        await cacheHelper.RemoveAsync(CacheKey.KothTimelineFrozen(id), token);
+        // total. Flush the live boards + drop the frozen variants (which are never
+        // regenerated) so a mid-freeze toggle doesn't leave the public frozen board
+        // stale. Shared with the EditController edit/delete paths so they can't drift.
+        await cacheHelper.FlushAdScoreboardCacheIncludingFrozen(id, token);
 
         logger.SystemLog(
             $"AD-engine challenge toggled: game={id} challenge={challengeId} type={c.Type} enabled={c.IsEnabled}",

@@ -97,11 +97,16 @@ public class ProxyController(
             return BadRequest(
                 new RequestResponse(localizer[nameof(Resources.Program.Container_ConnectionLimitExceeded)]));
 
+        TrafficWriter? writer = null;
+        IPEndPoint client;
+        IPEndPoint target;
+        int realRemotePort;
+        try
+        {
         var clientIp = HttpContext.Connection.RemoteIpAddress ?? IPAddress.Loopback;
 
         var enable = _enableTrafficCapture && container.EnableTrafficCapture;
 
-        TrafficWriter? writer = null;
         if (enable)
         {
             // For dynamic-flag challenges (DynamicContainer / DynamicAttachment) the
@@ -133,11 +138,11 @@ public class ProxyController(
             writer = trafficRegistry.AcquireWriter(descriptor);
         }
 
-        var realRemotePort = HttpContext.Connection.RemotePort;
+        realRemotePort = HttpContext.Connection.RemotePort;
         var clientPort = writer?.Sequence ?? realRemotePort;
 
-        IPEndPoint client = new(clientIp, clientPort);
-        IPEndPoint target = new(ipAddress, container.Port);
+        client = new(clientIp, clientPort);
+        target = new(ipAddress, container.Port);
 
         // Record the proxy access. This is purely additive — failure here must
         // not block the proxy, so the whole block sits inside try/catch.
@@ -183,6 +188,18 @@ public class ProxyController(
         catch (Exception ex)
         {
             logger.LogError(ex, "ContainerAccessLogger failed for container {Id}", id);
+        }
+        }
+        catch
+        {
+            // We incremented the connection count above but never reached
+            // DoContainerProxy (whose finally is the only decrement on the happy path).
+            // A throw in the traffic-writer setup (e.g. AcquireWriter under disk
+            // pressure, or the static-flag DB query) would otherwise leak the slot and
+            // eventually lock the owner out of their own container. DoContainerProxy is
+            // OUTSIDE this try, so its own decrement never double-fires.
+            await DecreaseConnectionCount(key);
+            throw;
         }
 
         return await DoContainerProxy(id, client, target, writer, realRemotePort, token);
@@ -406,17 +423,19 @@ public class ProxyController(
     /// </summary>
     /// <param name="key">Cache key</param>
     /// <returns></returns>
-    // Per-container lock serializing the connection-count read-modify-write. The
-    // backing IDistributedCache has no atomic increment, so without this N concurrent
-    // WebSocket upgrades all read the same pre-increment count and blow past the cap
-    // (socket/FD/recorder exhaustion DoS). This makes the check-and-set atomic within
-    // the instance — correct for the single-instance deployment; a horizontally-scaled
-    // deployment would additionally need a Redis-atomic INCR/DECR.
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> ConnCountLocks =
-        new();
+    // Striped locks serializing the connection-count read-modify-write. The backing
+    // IDistributedCache has no atomic increment, so without this N concurrent WebSocket
+    // upgrades all read the same pre-increment count and blow past the cap (socket/FD/
+    // recorder exhaustion DoS). A FIXED-size array (not a per-GUID dictionary) keeps the
+    // lock set bounded regardless of container churn — no per-container entry to leak
+    // over a long event. Distinct containers may share a stripe (harmless: the cap check
+    // is keyed on the cache value; the lock only serializes the RMW). Correct for the
+    // single-instance deployment; a horizontally-scaled one would also need Redis INCR.
+    private static readonly SemaphoreSlim[] ConnCountLocks =
+        Enumerable.Range(0, 256).Select(_ => new SemaphoreSlim(1, 1)).ToArray();
 
     private static SemaphoreSlim ConnCountLock(string key) =>
-        ConnCountLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
+        ConnCountLocks[(int)((uint)key.GetHashCode() % (uint)ConnCountLocks.Length)];
 
     private async Task<bool> IncreaseConnectionCount(string key)
     {

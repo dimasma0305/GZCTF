@@ -1232,6 +1232,18 @@ public sealed class AdContainerManager(
     {
         try
         {
+            // Re-evaluate the cooldown from scratch each refresh: lift any prior
+            // foothold block for THIS hill up front, before the early-returns below can
+            // short-circuit. Otherwise a refresh window that earns no new cooldown (no
+            // leader / no hill / no sidecar) never overwrites a stale _kothCooldowns
+            // entry, and at KothRefreshTicks=1 the LiftKothCooldownAsync gate
+            // (!dueRefresh) is structurally unsatisfiable — so the stale foothold→hill
+            // DROP would wrongly block a legit ad→koth play for the rest of the game
+            // (esp. once Docker re-hands the freed hill IP). SetKothFootholdCooldown at
+            // the end re-arms it only if this window actually has a leader.
+            egressIso.ClearKothFootholdCooldown(challengeId);
+            egressIso.RequestReapply();
+
             // Window = rounds since the last refresh boundary, lower bound INCLUSIVE so the
             // boundary round (the re-pwn round right after the previous refresh) is counted
             // exactly once — in this window. With an exclusive `> lastRefresh` it was dropped

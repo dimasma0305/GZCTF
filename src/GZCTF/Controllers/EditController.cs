@@ -926,6 +926,14 @@ public class EditController(
         // Always flush scoreboard
         await cacheHelper.FlushScoreboardCache(game.Id, token);
 
+        // FlushScoreboardCache only covers the jeopardy board. An A&D/KotH challenge
+        // whose IsEnabled just changed also moves the A&D/KotH boards (incl. the frozen
+        // variants the jeopardy flush never touches) — without this, disabling one via
+        // the edit page mid-freeze leaves the public frozen A&D/KotH board stale for the
+        // rest of the freeze (same defect AdAdminController.ToggleChallenge fixed).
+        if (res.Type.UsesAdEngine() && model.IsEnabled is not null)
+            await cacheHelper.FlushAdScoreboardCacheIncludingFrozen(game.Id, token);
+
         // Push-back: if this challenge came from a repo binding that
         // has PushOnEdit on, serialize the row to yaml and push it
         // upstream. Fire-and-forget so a slow git push doesn't extend
@@ -1142,10 +1150,17 @@ public class EditController(
             return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Challenge_NotFound)],
                 StatusCodes.Status404NotFound));
 
+        var wasAdEngine = res.Type.UsesAdEngine();
         await challengeRepository.RemoveChallenge(res, true, token);
 
         // Always flush scoreboard
         await cacheHelper.FlushScoreboardCache(id, token);
+
+        // Deleting an A&D/KotH challenge drops a column + changes every team's total
+        // on the A&D/KotH boards; flush the frozen variants too (jeopardy flush misses
+        // them) so a mid-freeze delete doesn't leave the public frozen board stale.
+        if (wasAdEngine)
+            await cacheHelper.FlushAdScoreboardCacheIncludingFrozen(id, token);
 
         return Ok();
     }
