@@ -33,7 +33,14 @@ public class KothToken
 
     public GameChallenge Challenge { get; set; } = null!;
 
-    /// <summary>Round number this token is valid for (matches <see cref="AdRound.Number"/>).</summary>
+    /// <summary>
+    /// Round number this token row is valid for (matches <see cref="AdRound.Number"/>).
+    /// One row per round, but the <see cref="Token"/> VALUE is stable across a refresh
+    /// window — it only rotates to a fresh value on the hill-reset boundary (every
+    /// <c>Game.KothRefreshTicks</c> ticks) and is carried forward on intervening ticks,
+    /// so a team plants once after a reset and holds the window. See
+    /// <c>AdRoundService.AdvanceAsync</c>.
+    /// </summary>
     [Required]
     public int RoundNumber { get; set; }
 

@@ -61,11 +61,14 @@ public sealed class AdRoundService(
         var nextNumber = (prev?.Number ?? 0) + 1;
 
         // Tick length is an event-wide knob on the game — a round spans the
-        // whole game, so every A&D service shares one tick window.
-        var tickSeconds = await db.Games
+        // whole game, so every A&D service shares one tick window. KothRefreshTicks
+        // is the hill reset cadence; the KotH token rotates on the same boundary.
+        var gameKnobs = await db.Games
             .Where(g => g.Id == gameId)
-            .Select(g => g.AdTickSeconds)
-            .FirstOrDefaultAsync(token) ?? 60;
+            .Select(g => new { g.AdTickSeconds, g.KothRefreshTicks })
+            .FirstOrDefaultAsync(token);
+        var tickSeconds = gameKnobs?.AdTickSeconds ?? 60;
+        var refreshTicks = Math.Max(1, gameKnobs?.KothRefreshTicks ?? 5);
 
         var now = DateTimeOffset.UtcNow;
         var round = new AdRound
@@ -119,9 +122,17 @@ public sealed class AdRoundService(
             toInject.Add((ts, flag));
         }
 
-        // KotH: mint each accepted team's rotating control token for this round.
-        // The platform does NOT plant it — the team writes it into /koth/king once
-        // they have a foothold; the king-check reads the marker and matches it back.
+        // KotH: each accepted team's control token. The platform does NOT plant it —
+        // the team writes it into /koth/king once they have a foothold; the king-check
+        // reads the marker and matches it back.
+        //
+        // The token is STABLE for a whole refresh window: it rotates to a fresh value
+        // only on the window boundary (every refreshTicks ticks, when the hill is reset
+        // to base and the marker is wiped), and is carried forward unchanged on the
+        // intervening ticks. So a team plants it once after a reset and holds the hill
+        // for the window, instead of re-planting every tick. A still-per-round row is
+        // written each tick (carrying the window value) so the king-check + token
+        // endpoint, which look up by current RoundNumber, need no change.
         if (kothChallengeIds.Count > 0)
         {
             var participationIds = await db.Participations
@@ -129,19 +140,37 @@ public sealed class AdRoundService(
                 .Select(p => p.Id)
                 .ToListAsync(token);
 
+            // (nextNumber - 1) % refreshTicks == 0 marks a window boundary (rounds
+            // 1, 1+refreshTicks, …) → mint fresh; otherwise carry the previous round's
+            // value forward (the same token the team already planted this window).
+            var atWindowBoundary = (nextNumber - 1) % refreshTicks == 0;
+            var carried = atWindowBoundary
+                ? new Dictionary<(int Pid, int Cid), string>()
+                : (await db.KothTokens
+                        .Where(k => k.RoundNumber == nextNumber - 1 && kothChallengeIds.Contains(k.ChallengeId))
+                        .Select(k => new { k.ParticipationId, k.ChallengeId, k.Token })
+                        .ToListAsync(token))
+                    .ToDictionary(k => (k.ParticipationId, k.ChallengeId), k => k.Token);
+
             foreach (var cid in kothChallengeIds)
                 foreach (var pid in participationIds)
                 {
-                    var tbytes = new byte[FlagRandomBytes];
-                    RandomNumberGenerator.Fill(tbytes);
-                    var tpayload = Convert.ToBase64String(tbytes).TrimEnd('=').Replace('+', '_').Replace('/', '-');
+                    // Carry the window's value forward; mint fresh on a boundary, or for
+                    // a team with no prior token (e.g. accepted mid-window).
+                    if (!carried.TryGetValue((pid, cid), out var tokenValue))
+                    {
+                        var tbytes = new byte[FlagRandomBytes];
+                        RandomNumberGenerator.Fill(tbytes);
+                        var tpayload = Convert.ToBase64String(tbytes).TrimEnd('=').Replace('+', '_').Replace('/', '-');
+                        tokenValue = $"koth_{tpayload}";
+                    }
                     await db.KothTokens.AddAsync(new KothToken
                     {
                         ParticipationId = pid,
                         ChallengeId = cid,
                         RoundNumber = nextNumber,
                         AdRoundId = round.Id, // FK — cascade-deletes if the round is rolled back
-                        Token = $"koth_{tpayload}",
+                        Token = tokenValue,
                         IssuedAt = now
                     }, token);
                 }
