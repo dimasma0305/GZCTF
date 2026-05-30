@@ -1,7 +1,11 @@
 using System.Text;
+using GZCTF.Hubs;
+using GZCTF.Hubs.Clients;
 using GZCTF.Models;
 using GZCTF.Models.Data;
+using GZCTF.Models.Request.Game;
 using GZCTF.Utils;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace GZCTF.Services;
@@ -465,14 +469,101 @@ public sealed class AdCheckerService(
 
                 var (hold, penalty) = AdScoring.KothTickDelta(
                     controller is not null, outcome.Status, holdPerTick, freshlyElected);
-                await PersistKothResultAsync(scopeFactory, gameId, challenge.Id, latest.Id,
+                var persisted = await PersistKothResultAsync(scopeFactory, gameId, challenge.Id, latest.Id,
                     controller, outcome.Status, hold, penalty, outcome.ErrorMessage, token);
+
+                // Broadcast a control-CHANGE to the public attack animation page so it
+                // can recolor the hill node + fire a takeover beam. Only when we
+                // actually persisted this round's result (idempotency winner) AND the
+                // holder differs from the immediately-previous round — a steady hold
+                // emits nothing, keeping the unauth'd hub quiet. Best-effort: never let
+                // a hub failure break the checker tick.
+                if (persisted)
+                {
+                    try
+                    {
+                        await BroadcastKothControlChangeAsync(
+                            db, gameId, challenge, latest.Number, controller, outcome.Status, token);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogErrorMessage(ex, "KotH control broadcast failed (non-fatal)");
+                    }
+                }
             }, token);
         }
     }
 
-    /// <summary>Insert one <see cref="KothControlResult"/> (idempotent on (challenge, round)).</summary>
-    private static async Task PersistKothResultAsync(
+    /// <summary>
+    /// Emit a <see cref="KothControlEvent"/> on the public AttackHub when a hill's
+    /// holder changes vs the previous round. Resolves team display names/avatars for
+    /// the new and previous holders, and applies the same Hidden/freeze gate as the
+    /// flag-submission attack feed so the unauthenticated hub never leaks a draft
+    /// game's hills or late-game state the frozen scoreboard hides.
+    /// </summary>
+    private async Task BroadcastKothControlChangeAsync(
+        AppDbContext db, int gameId, GameChallenge challenge, int round,
+        int? controller, AdCheckStatus status, CancellationToken token)
+    {
+        // Previous round's controller for THIS hill — the change baseline.
+        var previousController = await db.KothControlResults
+            .Where(r => r.ChallengeId == challenge.Id && r.AdRound.Number == round - 1)
+            .Select(r => r.ControllingParticipationId)
+            .FirstOrDefaultAsync(token);
+
+        // No change (incl. uncontrolled→uncontrolled) → nothing to animate.
+        if (controller == previousController)
+            return;
+
+        // Same Hidden/freeze gate as SubmissionRepository.SendAttackEventInternal.
+        var gate = await db.Games.AsNoTracking()
+            .Where(g => g.Id == gameId)
+            .Select(g => new { g.Hidden, g.FreezeTimeUtc, g.EndTimeUtc })
+            .SingleOrDefaultAsync(token);
+        if (gate is null || gate.Hidden)
+            return;
+        var nowUtc = DateTimeOffset.UtcNow;
+        if (gate.FreezeTimeUtc is { } freeze && nowUtc >= freeze && nowUtc < gate.EndTimeUtc)
+            return;
+
+        var holder = controller is { } cid ? await ResolveTeamBriefAsync(db, cid, token) : null;
+        var previous = previousController is { } pid ? await ResolveTeamBriefAsync(db, pid, token) : null;
+
+        var evt = new KothControlEvent(
+            challenge.Id,
+            challenge.Title,
+            round,
+            holder?.Name,
+            holder?.Avatar,
+            previous?.Name,
+            status.ToString());
+
+        await using var hubScope = scopeFactory.CreateAsyncScope();
+        var hub = hubScope.ServiceProvider
+            .GetRequiredService<IHubContext<AttackHub, IAttackClient>>();
+        await hub.Clients.Group($"AttackGame_{gameId}").ReceivedKothControl(evt);
+    }
+
+    /// <summary>Team display name + avatar URL for a participation, for the public feed.</summary>
+    private static async Task<(string Name, string? Avatar)?> ResolveTeamBriefAsync(
+        AppDbContext db, int participationId, CancellationToken token)
+    {
+        var t = await db.Participations.AsNoTracking()
+            .Where(p => p.Id == participationId)
+            .Select(p => new { p.Team.Name, p.Team.AvatarHash })
+            .SingleOrDefaultAsync(token);
+        if (t is null)
+            return null;
+        return (t.Name, t.AvatarHash is null ? null : $"/assets/{t.AvatarHash}/avatar");
+    }
+
+    /// <summary>
+    /// Insert one <see cref="KothControlResult"/> (idempotent on (challenge, round)).
+    /// Returns true only when THIS call wrote the row — so the caller broadcasts a
+    /// control-change at most once per (challenge, round), even though the 10s checker
+    /// cadence may re-enter, and never when a concurrent tick won the race.
+    /// </summary>
+    private static async Task<bool> PersistKothResultAsync(
         IServiceScopeFactory scopeFactory, int gameId, int challengeId, int adRoundId,
         int? controller, AdCheckStatus status, double hold, double penalty, string? error, CancellationToken token)
     {
@@ -480,7 +571,7 @@ public sealed class AdCheckerService(
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         if (await db.KothControlResults.AnyAsync(r => r.ChallengeId == challengeId && r.AdRoundId == adRoundId, token))
-            return;
+            return false;
 
         await db.KothControlResults.AddAsync(new KothControlResult
         {
@@ -495,8 +586,16 @@ public sealed class AdCheckerService(
             CheckedAt = DateTimeOffset.UtcNow
         }, token);
 
-        try { await db.SaveChangesAsync(token); }
-        catch (DbUpdateException) { /* concurrent tick won the (challenge, round) race — fine */ }
+        try
+        {
+            await db.SaveChangesAsync(token);
+            return true;
+        }
+        catch (DbUpdateException)
+        {
+            /* concurrent tick won the (challenge, round) race — fine */
+            return false;
+        }
     }
 
     /// <summary>

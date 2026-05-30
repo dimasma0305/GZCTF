@@ -11,4 +11,10 @@ public interface IAttackClient
     /// Receive an attack event (any flag submission for the game).
     /// </summary>
     public Task ReceivedAttack(AttackEvent evt);
+
+    /// <summary>
+    /// Receive a King-of-the-Hill control-change event (a hill's holder changed).
+    /// Drives the hill objective nodes on the attack animation page.
+    /// </summary>
+    public Task ReceivedKothControl(KothControlEvent evt);
 }

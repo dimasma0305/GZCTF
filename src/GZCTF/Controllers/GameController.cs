@@ -452,6 +452,83 @@ public class GameController(
     }
 
     /// <summary>
+    /// Public, IP-free King-of-the-Hill hill snapshot used to SEED the attack
+    /// animation page on load. Returns each enabled hill's title, current holder, and
+    /// functional status; live changes then arrive as KothControlEvent over the
+    /// AttackHub. No authentication required.
+    /// </summary>
+    /// <remarks>
+    /// Mirrors the anonymous <see cref="AttackFeed"/> gates: 404 for an unknown game,
+    /// and an empty list for Hidden (draft) games or during the freeze window so the
+    /// unauthenticated endpoint can't leak a draft game's hills or late-game holders
+    /// the frozen scoreboard hides. Container IP/port are intentionally NOT included —
+    /// those are only exposed to authenticated participants via the Ad/Koth/Hills
+    /// endpoint.
+    /// </remarks>
+    /// <param name="id">Game ID</param>
+    /// <param name="token"></param>
+    /// <response code="200">Hill snapshots (possibly empty)</response>
+    /// <response code="404">Game not found</response>
+    [HttpGet("{id:int}/KothHills")]
+    [ProducesResponseType(typeof(KothHillPublicModel[]), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> KothHills([FromRoute] int id, CancellationToken token = default)
+    {
+        var game = await gameRepository.GetGameById(id, token);
+
+        if (game is null)
+            return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Game_NotFound)],
+                StatusCodes.Status404NotFound));
+
+        var nowUtc = DateTimeOffset.UtcNow;
+        if (game.Hidden ||
+            (game.FreezeTimeUtc is { } freeze && nowUtc >= freeze && nowUtc < game.EndTimeUtc))
+            return Ok(Array.Empty<KothHillPublicModel>());
+
+        var hills = await dbContext.GameChallenges
+            .Where(c => c.GameId == id && c.Type == ChallengeType.KingOfTheHill && c.IsEnabled)
+            .OrderBy(c => c.Id)
+            .Select(c => new { c.Id, c.Title })
+            .ToListAsync(token);
+        if (hills.Count == 0)
+            return Ok(Array.Empty<KothHillPublicModel>());
+
+        var hillIds = hills.Select(h => h.Id).ToList();
+
+        // Latest control verdict per hill via the anti-join "no newer row exists"
+        // pattern — EF Core can't translate GroupBy().OrderByDescending().First() over
+        // a navigation (it 500s with EmptyProjectionMember; learned the hard way on
+        // Ad/Koth/Hills + Targets). In-memory GroupBy after materialize is defensive.
+        var latest = (await dbContext.KothControlResults
+            .Where(r => hillIds.Contains(r.ChallengeId)
+                        && !dbContext.KothControlResults.Any(r2 =>
+                            r2.ChallengeId == r.ChallengeId && r2.AdRound.Number > r.AdRound.Number))
+            .Select(r => new
+            {
+                r.ChallengeId,
+                HolderName = r.ControllingParticipation != null ? r.ControllingParticipation.Team.Name : null,
+                HolderAvatar = r.ControllingParticipation != null ? r.ControllingParticipation.Team.AvatarHash : null,
+                Status = (AdCheckStatus?)r.Status
+            })
+            .ToListAsync(token))
+            .GroupBy(x => x.ChallengeId)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        var result = hills.Select(h =>
+        {
+            latest.TryGetValue(h.Id, out var v);
+            return new KothHillPublicModel(
+                h.Id,
+                h.Title,
+                v?.HolderName,
+                v?.HolderAvatar is { } hash ? $"/assets/{hash}/avatar" : null,
+                v?.Status?.ToString());
+        }).ToArray();
+
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Fire a synthetic AttackEvent on the public AttackHub for testing the
     /// attack-animation page (e.g., audible first-blood cue). Admin-only.
     /// </summary>
