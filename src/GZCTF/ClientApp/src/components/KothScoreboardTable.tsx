@@ -324,7 +324,7 @@ export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => 
               <Group gap="lg">
                 <Tooltip
                   label={t('game.content.scoreboard.koth.legend.earned_tip',
-                    'Per-tick credit while your token is in /koth/king AND the hill is Ok (scaled by team count).')}
+                    'Per-tick credit while your token is in /koth/king AND the hill is Ok. Flat — does NOT scale with team count.')}
                   transitionProps={{ transition: 'pop' }}
                 >
                   <Group justify="left" gap={4}>

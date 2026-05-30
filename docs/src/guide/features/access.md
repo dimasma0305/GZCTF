@@ -279,6 +279,14 @@ For King of the Hill challenges, `teams[]` is empty (the hill is a single shared
 These IPs are only reachable once your **WireGuard VPN** is up (or from a host already on the challenge subnets). Combine the Toolkit pieces: bring up the VPN, poll `Targets` for opponents' `ip:port`, run your exploit, then `Submit` the captured flags with your `ad_` token.
 :::
 
+### The KotH hills list
+
+```text
+GET /api/Game/{id}/Ad/Koth/Hills
+```
+
+The KotH-focused counterpart to `Targets`: one call returns **every** enabled hill's name, target `ip:port`, current holder, and functional status (no challenge id needed). It's the recommended way to confirm a plant took and to feed a bot all hills at once. Returns an array of `KothHillStateModel` — each element carries `challengeId`, `title`, `holderTeamName`, `isYou`, `status`, `ip`, `port`, and `lastRefreshRound`; see [King of the Hill](/guide/features/king-of-the-hill) for the full shape. (Where `Targets` mixes A&D boxes and the hill together, `Hills` returns only KotH hills with dedicated holder/status fields.) For a single hill, `GET /api/Game/{id}/Ad/Koth/{challengeId}/State` returns the same fields.
+
 ---
 
 ## Configuration reference

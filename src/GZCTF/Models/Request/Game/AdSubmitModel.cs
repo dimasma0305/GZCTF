@@ -110,7 +110,7 @@ public class AdTeamTarget
     public string? Division { get; set; }
     public string? Ip { get; set; }
     public int? Port { get; set; }
-    /// <summary>Last check verdict — Ok / Mumble / Offline / null if not checked yet.</summary>
+    /// <summary>Last check verdict — Ok / Mumble / Offline / InternalError / null if not checked yet.</summary>
     public string? LastCheckStatus { get; set; }
 }
 
@@ -119,7 +119,7 @@ public class AdHillTarget
 {
     public string? Ip { get; set; }
     public int? Port { get; set; }
-    /// <summary>Last functional verdict on the hill (Ok / Mumble / Offline / null).</summary>
+    /// <summary>Last functional verdict on the hill (Ok / Mumble / Offline / InternalError / null).</summary>
     public string? LastCheckStatus { get; set; }
     /// <summary>Round at which the hill was last refreshed (5-tick wipe).</summary>
     public int LastRefreshRound { get; set; }
@@ -306,7 +306,7 @@ public class KothHillStateModel
     public string? HolderTeamName { get; set; }
     /// <summary>True when the caller's team is the holder this tick.</summary>
     public bool IsYou { get; set; }
-    /// <summary>Functional probe verdict — Ok / Mumble / Offline / null.</summary>
+    /// <summary>Functional probe verdict — Ok / Mumble / Offline / InternalError / null.</summary>
     public string? Status { get; set; }
     public DateTimeOffset? CheckedAt { get; set; }
     public int LastRefreshRound { get; set; }
