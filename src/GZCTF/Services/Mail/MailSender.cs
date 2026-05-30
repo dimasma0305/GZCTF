@@ -306,13 +306,41 @@ public sealed class MailSender : IMailSender, IDisposable
                     return !n.EndsWith("MD5") && !n.EndsWith("SHA") && !n.EndsWith("NULL");
                 }));
 
-        try
+        // Open a fresh authenticated SMTP session. Throws on failure.
+        async Task ConnectAsync()
         {
+            if (client.IsConnected)
+                try { await client.DisconnectAsync(true, token); } catch { /* ignore */ }
             await client.ConnectAsync(_options.Smtp.Host, _options.Smtp.Port, cancellationToken: token);
             await client.AuthenticateAsync(_options.UserName, DecryptPassword(_options.Password), token);
+        }
+
+        // Most SMTP servers cap messages-per-session (e.g. the 4.4.5 "Maximum
+        // number of messages per session exceeded" we hit at ~10 on 1pc.tf). A
+        // single connection for the whole batch therefore silently drops every
+        // message past the cap. Reconnect every MessagesPerSession messages so a
+        // large credential blast completes regardless of the server's limit.
+        const int MessagesPerSession = 8;
+
+        try
+        {
+            await ConnectAsync();
 
             foreach (var (userName, email, resetLink) in list)
             {
+                // Proactively start a new session before the server's per-session
+                // cap kicks in.
+                if (sent > 0 && sent % MessagesPerSession == 0)
+                {
+                    try { await ConnectAsync(); }
+                    catch (Exception e)
+                    {
+                        _logger.LogErrorMessage(e, StaticLocalizer[nameof(Resources.Program.MailSender_MailSendFailed)]);
+                        failed += list.Count - sent - failed;
+                        break;
+                    }
+                }
+
                 var info =
                     $"<p>An account has been created for you on <strong>{platform}</strong>.</p>" +
                     $"<p><strong>Username:</strong> <code>{userName}</code></p>" +
@@ -345,8 +373,30 @@ public sealed class MailSender : IMailSender, IDisposable
                 }
                 catch (Exception e)
                 {
-                    failed++;
-                    _logger.LogErrorMessage(e, StaticLocalizer[nameof(Resources.Program.MailSender_MailSendFailed)]);
+                    // A session-level rejection (per-session cap, idle timeout,
+                    // dropped connection) fails THIS message but the session is now
+                    // unusable — reconnect and retry once so it doesn't cascade into
+                    // every remaining message failing too.
+                    var retried = false;
+                    if (e is SmtpCommandException or SmtpProtocolException or IOException)
+                    {
+                        try
+                        {
+                            await ConnectAsync();
+                            await client.SendAsync(msg, token);
+                            sent++;
+                            retried = true;
+                            _logger.SystemLog(StaticLocalizer[nameof(Resources.Program.MailSender_SendMail), email],
+                                TaskStatus.Success, LogLevel.Information);
+                        }
+                        catch { /* fall through to failure accounting */ }
+                    }
+
+                    if (!retried)
+                    {
+                        failed++;
+                        _logger.LogErrorMessage(e, StaticLocalizer[nameof(Resources.Program.MailSender_MailSendFailed)]);
+                    }
                 }
             }
         }
