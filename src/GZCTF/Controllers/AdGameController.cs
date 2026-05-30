@@ -576,10 +576,17 @@ public class AdGameController(
         var hillIds = hills.Select(h => h.Id).ToList();
 
         // Latest control verdict per hill (holder + functional status + round).
+        // Flat "no newer row exists in this hill" anti-join rather than
+        // GroupBy().First() — EF Core cannot translate a GroupBy whose grouped
+        // element is re-projected through a navigation (it throws at runtime with
+        // 'EmptyProjectionMember'). This mirrors the single-hill KothState
+        // projection, just batched across every hill. The unique index on
+        // (ChallengeId, AdRoundId) means one max-round row per hill; the in-memory
+        // GroupBy below is purely defensive so a list view never 500s.
         var latestByChallenge = (await db.KothControlResults
-            .Where(r => hillIds.Contains(r.ChallengeId))
-            .GroupBy(r => r.ChallengeId)
-            .Select(g => g.OrderByDescending(r => r.AdRound.Number).First())
+            .Where(r => hillIds.Contains(r.ChallengeId)
+                        && !db.KothControlResults.Any(r2 =>
+                            r2.ChallengeId == r.ChallengeId && r2.AdRound.Number > r.AdRound.Number))
             .Select(r => new
             {
                 r.ChallengeId,
@@ -590,12 +597,12 @@ public class AdGameController(
                 r.CheckedAt
             })
             .ToListAsync(token))
-            .ToDictionary(x => x.ChallengeId);
+            .GroupBy(x => x.ChallengeId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.Round).First());
 
         // Current container IP:port + last refresh round per hill.
         var targetByChallenge = (await db.KothTargets
             .Where(t => t.GameId == id && hillIds.Contains(t.ChallengeId))
-            .Include(t => t.Container)
             .Select(t => new
             {
                 t.ChallengeId,
@@ -604,7 +611,8 @@ public class AdGameController(
                 t.LastRefreshRound
             })
             .ToListAsync(token))
-            .ToDictionary(x => x.ChallengeId);
+            .GroupBy(x => x.ChallengeId)
+            .ToDictionary(g => g.Key, g => g.First());
 
         var list = hills.Select(h =>
         {
