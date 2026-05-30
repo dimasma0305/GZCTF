@@ -119,10 +119,11 @@ export const KothGuideModal: FC<KothToolkitModalProps> = ({ gameId, ...modalProp
   }
 ]`
 
-  const targetsCurlExample = [
-    `curl -sS ${apiUrl}/Targets \\`,
+  // Same ID-free /Koth/Hills list, projected down to just where-to-aim.
+  const hillIpCurlExample = [
+    `curl -sS ${apiUrl}/Koth/Hills \\`,
     `  -H "Authorization: Bearer ${exampleBearer}" \\`,
-    `  | jq '.challenges[] | select(.hill) | {id: .challengeId, ip: .hill.ip, port: .hill.port}'`,
+    `  | jq '.[] | {hill: .title, ip, port}'`,
   ].join('\n')
 
   // Reference plant — players write their platform-issued control token verbatim
@@ -132,7 +133,7 @@ export const KothGuideModal: FC<KothToolkitModalProps> = ({ gameId, ...modalProp
   // players need to produce.
   const plantPseudocode = `# pseudocode — the actual write path depends on the hill's exploit
 TOKEN=$(curl -sS ${apiUrl}/Koth/Token \\
-  -H "Authorization: Bearer <your-token>" | jq -r '.token')
+  -H "Authorization: Bearer ${exampleBearer}" | jq -r '.token')
 
 # exploit the hill so that this byte string ends up in /koth/king
 write_to_hill "/koth/king" "$TOKEN"`
@@ -274,9 +275,9 @@ write_to_hill "/koth/king" "$TOKEN"`
                       {t('game.content.koth.guide.hill.step3', '3. Find the hill IP:port')}
                     </Text>
                     <Code block className={misc.ffmono} style={{ fontSize: '0.75rem' }}>
-                      {targetsCurlExample}
+                      {hillIpCurlExample}
                     </Code>
-                    <CopyCurlButton value={targetsCurlExample} />
+                    <CopyCurlButton value={hillIpCurlExample} />
                     <Text size="xs" c="dimmed">
                       {t(
                         'game.content.koth.guide.hill.targets_note',
