@@ -63,6 +63,20 @@ interface CsvImportResult {
   users: CsvImportUserResult[]
 }
 
+/** Per-recipient outcome from POST /api/admin/users/credentials/send. */
+interface CredentialSendResult {
+  email: string
+  userName: string
+  sent: boolean
+  error: string | null
+}
+
+interface EmailSendResult {
+  sent: number
+  failed: number
+  results: CredentialSendResult[]
+}
+
 // ─── Internal types ───────────────────────────────────────────────────────────
 
 const NONE = '(none)'
@@ -203,7 +217,7 @@ export const UserImportModal: FC<UserImportModalProps> = ({ onImportComplete, ..
   const [importResult, setImportResult] = useState<CsvImportResult | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
   const [sendingEmail, setSendingEmail] = useState(false)
-  const [emailSendResult, setEmailSendResult] = useState<{ sent: number; failed: number } | null>(null)
+  const [emailSendResult, setEmailSendResult] = useState<EmailSendResult | null>(null)
 
   // Step 0 → parse headers only
   const process = useCallback((text: string) => {
@@ -386,14 +400,21 @@ export const UserImportModal: FC<UserImportModalProps> = ({ onImportComplete, ..
     setStep(2)
   }
 
-  const sendCredentialsEmail = async () => {
+  // Send credential emails. With no argument, sends to every imported (non-skipped)
+  // user — the first send. Pass an explicit list to resend ONLY those recipients
+  // (used by the "Resend failed" button). On a partial failure the per-recipient
+  // results are kept so the failed subset can be retried without re-emailing the
+  // ones that already succeeded.
+  const sendCredentialsEmail = async (only?: { email: string; userName: string }[]) => {
     if (!importResult) return
-    setSendingEmail(true)
-    setEmailSendResult(null)
-    const items = importResult.users
-      .filter((u) => u.status !== 'skipped')
-      .map((u) => ({ email: u.email, userName: u.userName }))
+    const items =
+      only ??
+      importResult.users
+        .filter((u) => u.status !== 'skipped')
+        .map((u) => ({ email: u.email, userName: u.userName }))
+    if (items.length === 0) return
 
+    setSendingEmail(true)
     try {
       const resp = await fetch('/api/admin/users/credentials/send', {
         method: 'POST',
@@ -405,8 +426,20 @@ export const UserImportModal: FC<UserImportModalProps> = ({ onImportComplete, ..
         const err = await resp.json().catch(() => ({ title: 'Failed to send emails' }))
         throw new Error(err.title ?? 'Failed to send emails')
       }
-      const result: { sent: number; failed: number } = await resp.json()
-      setEmailSendResult(result)
+      const result: EmailSendResult = await resp.json()
+      setEmailSendResult((prev) => {
+        // Merge with any prior attempt so a resend updates just the retried rows
+        // (and the headline counts reflect the whole import, not only this batch).
+        const byEmail = new Map<string, CredentialSendResult>()
+        for (const r of prev?.results ?? []) byEmail.set(r.email, r)
+        for (const r of result.results ?? []) byEmail.set(r.email, r)
+        const merged = [...byEmail.values()]
+        return {
+          sent: merged.filter((r) => r.sent).length,
+          failed: merged.filter((r) => !r.sent).length,
+          results: merged,
+        }
+      })
       showNotification({
         message: result.failed === 0
           ? `Credentials sent to ${result.sent} user(s)`
@@ -420,6 +453,10 @@ export const UserImportModal: FC<UserImportModalProps> = ({ onImportComplete, ..
       setSendingEmail(false)
     }
   }
+
+  const failedRecipients = emailSendResult?.results.filter((r) => !r.sent) ?? []
+  const resendFailed = () =>
+    sendCredentialsEmail(failedRecipients.map((r) => ({ email: r.email, userName: r.userName })))
 
   return (
     <Modal
@@ -915,10 +952,42 @@ export const UserImportModal: FC<UserImportModalProps> = ({ onImportComplete, ..
                     icon={<Icon path={emailSendResult.failed === 0 ? mdiCheckCircleOutline : mdiAlertCircleOutline} size={1} />}
                     color={emailSendResult.failed === 0 ? 'teal' : 'orange'}
                   >
-                    <Text size="sm">
-                      Credentials emailed: <strong>{emailSendResult.sent}</strong> sent
-                      {emailSendResult.failed > 0 && <>, <strong>{emailSendResult.failed}</strong> failed (check SMTP config)</>}.
-                    </Text>
+                    <Stack gap="xs">
+                      <Text size="sm">
+                        Credentials emailed: <strong>{emailSendResult.sent}</strong> sent
+                        {emailSendResult.failed > 0 && <>, <strong>{emailSendResult.failed}</strong> failed</>}.
+                      </Text>
+                      {failedRecipients.length > 0 && (
+                        <>
+                          <Text size="xs" c="dimmed">
+                            Failed recipients (most recent reason shown) — resend only these:
+                          </Text>
+                          <ScrollArea.Autosize mah={140}>
+                            <Stack gap={2}>
+                              {failedRecipients.map((r) => (
+                                <Text key={r.email} size="xs" ff="monospace">
+                                  {r.email}
+                                  {r.error ? <Text span c="dimmed"> — {r.error}</Text> : null}
+                                </Text>
+                              ))}
+                            </Stack>
+                          </ScrollArea.Autosize>
+                          <Group>
+                            <Button
+                              size="xs"
+                              variant="light"
+                              color="orange"
+                              loading={sendingEmail}
+                              disabled={sendingEmail}
+                              leftSection={<Icon path={mdiEmailOutline} size={0.8} />}
+                              onClick={resendFailed}
+                            >
+                              Resend failed ({failedRecipients.length})
+                            </Button>
+                          </Group>
+                        </>
+                      )}
+                    </Stack>
                   </Alert>
                 )}
 
@@ -939,7 +1008,7 @@ export const UserImportModal: FC<UserImportModalProps> = ({ onImportComplete, ..
                           leftSection={sendingEmail ? <Loader size="xs" /> : <Icon path={mdiEmailOutline} size={0.9} />}
                           loading={sendingEmail}
                           disabled={sendingEmail || !!emailSendResult}
-                          onClick={sendCredentialsEmail}
+                          onClick={() => sendCredentialsEmail()}
                         >
                           {emailSendResult ? `Sent ${emailSendResult.sent}` : 'Send Credentials Email'}
                         </Button>

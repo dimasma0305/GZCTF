@@ -270,7 +270,7 @@ public sealed class MailSender : IMailSender, IDisposable
         IStringLocalizer<Program> localizer, IOptionsSnapshot<GlobalConfig> options) =>
         EnqueueMailTask(userName, email, resetLink, MailType.ResetPassword, localizer, options);
 
-    public async Task<(int Sent, int Failed)> SendCredentialsBatch(
+    public async Task<CredentialsBatchResult> SendCredentialsBatch(
         IEnumerable<(string UserName, string Email, string ResetLink)> items,
         string loginUrl,
         IStringLocalizer<Program> localizer,
@@ -278,12 +278,19 @@ public sealed class MailSender : IMailSender, IDisposable
         CancellationToken token = default)
     {
         var list = items.ToList();
+        var results = new List<CredentialSendResult>(list.Count);
         if (list.Count == 0)
-            return (0, 0);
+            return new CredentialsBatchResult(0, 0, results);
 
+        // SMTP not configured → every recipient "fails" with a clear reason so the
+        // UI surfaces the cause rather than a bare count.
         if (_options?.Smtp?.Host is null || !(_options.Smtp.Port > 0) ||
             string.IsNullOrWhiteSpace(_options.SenderAddress))
-            return (0, list.Count);
+        {
+            foreach (var (userName, email, _) in list)
+                results.Add(new CredentialSendResult(email, userName, false, "SMTP is not configured"));
+            return new CredentialsBatchResult(0, list.Count, results);
+        }
 
         var template = localizer[nameof(Resources.Program.MailSender_Template)].Value;
         var platform = options.Value.Platform;
@@ -336,6 +343,10 @@ public sealed class MailSender : IMailSender, IDisposable
                     catch (Exception e)
                     {
                         _logger.LogErrorMessage(e, StaticLocalizer[nameof(Resources.Program.MailSender_MailSendFailed)]);
+                        // Couldn't open a new session — fail every remaining recipient
+                        // (including this one) with the reason, so they can be resent.
+                        foreach (var (un, em, _) in list.Skip(sent + failed))
+                            results.Add(new CredentialSendResult(em, un, false, "SMTP reconnect failed: " + e.Message));
                         failed += list.Count - sent - failed;
                         break;
                     }
@@ -368,6 +379,7 @@ public sealed class MailSender : IMailSender, IDisposable
                 {
                     await client.SendAsync(msg, token);
                     sent++;
+                    results.Add(new CredentialSendResult(email, userName, true, null));
                     _logger.SystemLog(StaticLocalizer[nameof(Resources.Program.MailSender_SendMail), email],
                         TaskStatus.Success, LogLevel.Information);
                 }
@@ -386,15 +398,17 @@ public sealed class MailSender : IMailSender, IDisposable
                             await client.SendAsync(msg, token);
                             sent++;
                             retried = true;
+                            results.Add(new CredentialSendResult(email, userName, true, null));
                             _logger.SystemLog(StaticLocalizer[nameof(Resources.Program.MailSender_SendMail), email],
                                 TaskStatus.Success, LogLevel.Information);
                         }
-                        catch { /* fall through to failure accounting */ }
+                        catch (Exception retryEx) { e = retryEx; /* report the retry failure */ }
                     }
 
                     if (!retried)
                     {
                         failed++;
+                        results.Add(new CredentialSendResult(email, userName, false, e.Message));
                         _logger.LogErrorMessage(e, StaticLocalizer[nameof(Resources.Program.MailSender_MailSendFailed)]);
                     }
                 }
@@ -403,6 +417,9 @@ public sealed class MailSender : IMailSender, IDisposable
         catch (Exception e)
         {
             _logger.LogErrorMessage(e, StaticLocalizer[nameof(Resources.Program.MailSender_MailSendFailed)]);
+            // Fail every recipient not yet accounted for (input order preserved).
+            foreach (var (un, em, _) in list.Skip(sent + failed))
+                results.Add(new CredentialSendResult(em, un, false, e.Message));
             failed += list.Count - sent - failed;
         }
         finally
@@ -410,7 +427,7 @@ public sealed class MailSender : IMailSender, IDisposable
             try { await client.DisconnectAsync(true, token); } catch { }
         }
 
-        return (sent, failed);
+        return new CredentialsBatchResult(sent, failed, results);
     }
 
     private async Task<bool> SendEmailAsync(string subject, string content, MailboxAddress from, MailboxAddress to)

@@ -888,12 +888,19 @@ public class AdminController(
         var globalConfig = serviceProvider.GetRequiredService<IOptionsSnapshot<GlobalConfig>>();
         var baseUrl = $"{Request.Scheme}://{Request.Host}";
 
-        // Build (UserName, Email, ResetLink) tuples — one password-reset token per user
+        // Build (UserName, Email, ResetLink) tuples — one password-reset token per user.
+        // Recipients with no matching account are recorded up-front as failures so the
+        // response lists every requested item (the UI uses this to offer "resend failed").
         var resetItems = new List<(string UserName, string Email, string ResetLink)>(request.Items.Count);
+        var notFound = new List<CredentialSendResult>();
         foreach (var item in request.Items)
         {
             var user = await userManager.FindByEmailAsync(item.Email);
-            if (user is null) continue;
+            if (user is null)
+            {
+                notFound.Add(new CredentialSendResult(item.Email, item.UserName, false, "No user with this email"));
+                continue;
+            }
 
             var rawToken = await userManager.GeneratePasswordResetTokenAsync(user);
             var encodedToken = Codec.Base64.Encode(rawToken);
@@ -902,14 +909,21 @@ public class AdminController(
             resetItems.Add((item.UserName, item.Email, resetLink));
         }
 
-        var (sent, failed) = await mailSender.SendCredentialsBatch(resetItems, baseUrl, localizer, globalConfig, token);
-        failed += request.Items.Count - resetItems.Count; // users not found count as failed
+        var batch = await mailSender.SendCredentialsBatch(resetItems, baseUrl, localizer, globalConfig, token);
+
+        var sent = batch.Sent;
+        var failed = batch.Failed + notFound.Count;
+        // Per-recipient outcomes: SMTP results + the not-found set. The UI feeds the
+        // failed subset straight back into this endpoint to resend only those.
+        var results = batch.Results.Concat(notFound)
+            .Select(r => new { email = r.Email, userName = r.UserName, sent = r.Sent, error = r.Error })
+            .ToList();
 
         logger.Log(
             StaticLocalizer[nameof(Resources.Program.Admin_UserBatchAdded), sent],
             await userManager.GetUserAsync(User), TaskStatus.Success);
 
-        return Ok(new { sent, failed });
+        return Ok(new { sent, failed, results });
     }
 
     // ─── CSV import helpers ───────────────────────────────────────────────────

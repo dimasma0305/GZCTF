@@ -4,6 +4,19 @@ using Microsoft.Extensions.Options;
 
 namespace GZCTF.Services.Mail;
 
+/// <summary>Per-recipient outcome of one credential email in a batch send.</summary>
+/// <param name="Email">Recipient address.</param>
+/// <param name="UserName">Recipient username (echoed so the caller can re-target a resend).</param>
+/// <param name="Sent">True if the message was accepted by the SMTP server.</param>
+/// <param name="Error">Short failure reason when <paramref name="Sent"/> is false; null on success.</param>
+public record CredentialSendResult(string Email, string UserName, bool Sent, string? Error);
+
+/// <summary>Aggregate result of <see cref="IMailSender.SendCredentialsBatch"/>.</summary>
+/// <param name="Sent">Count delivered.</param>
+/// <param name="Failed">Count not delivered (including recipients with no matching user).</param>
+/// <param name="Results">Per-recipient outcomes, in input order.</param>
+public record CredentialsBatchResult(int Sent, int Failed, IReadOnlyList<CredentialSendResult> Results);
+
 public interface IMailSender
 {
     /// <summary>
@@ -46,11 +59,13 @@ public interface IMailSender
         IStringLocalizer<Program> localizer, IOptionsSnapshot<GlobalConfig> options);
 
     /// <summary>
-    /// Batch-send "set your password" emails using a single SMTP connection.
-    /// Each email contains a one-time reset link — no password is transmitted.
-    /// Returns (Sent, Failed) counts.
+    /// Batch-send "set your password" emails. Each email contains a one-time reset
+    /// link — no password is transmitted. The SMTP session is recycled periodically
+    /// (and on session-level errors) so a server's per-session message cap doesn't
+    /// silently drop the tail of a large batch. Returns a per-recipient outcome so
+    /// the caller can report — and resend — exactly the ones that failed.
     /// </summary>
-    public Task<(int Sent, int Failed)> SendCredentialsBatch(
+    public Task<CredentialsBatchResult> SendCredentialsBatch(
         IEnumerable<(string UserName, string Email, string ResetLink)> items,
         string loginUrl,
         IStringLocalizer<Program> localizer,
