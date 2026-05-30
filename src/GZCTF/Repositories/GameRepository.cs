@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using GZCTF.Models.Request.Game;
 using GZCTF.Repositories.Interface;
+using GZCTF.Services;
 using GZCTF.Services.Cache;
 using GZCTF.Services.Config;
 using Microsoft.EntityFrameworkCore;
@@ -14,6 +15,7 @@ public class GameRepository(
     IGameChallengeRepository challengeRepository,
     IParticipationRepository participationRepository,
     IConfigService configService,
+    AdContainerManager adContainerManager,
     AppDbContext context) : RepositoryBase(context), IGameRepository
 {
     private readonly byte[] _xorKey = configService.GetXorKey();
@@ -234,6 +236,21 @@ public class GameRepository(
 
     public async Task<TaskStatus> DeleteGame(Game game, CancellationToken token = default)
     {
+        // Tear down the game's live A&D/KotH containers FIRST, before any DB rows are
+        // removed — once the rows are gone the reconciler can no longer find the
+        // containers (it keys teardown off the game), so they'd run orphaned forever.
+        // Best-effort: a container-daemon hiccup must not block deleting the game (the
+        // pre-fix behaviour left them running anyway), so we log and proceed.
+        try
+        {
+            await adContainerManager.DestroyContainersForGameAsync(game.Id, token);
+        }
+        catch (Exception e)
+        {
+            logger.SystemLog($"A&D/KotH container teardown during game delete failed (continuing): {e.Message}",
+                TaskStatus.Failed, LogLevel.Warning);
+        }
+
         var trans = await BeginTransactionAsync(token);
 
         try

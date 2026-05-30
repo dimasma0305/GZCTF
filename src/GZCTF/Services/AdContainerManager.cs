@@ -971,6 +971,99 @@ public sealed class AdContainerManager(
         await EnsureContainersForGameAsync(db, containerManager, dockerProvider, k8sProvider, gameId, runningIds, token);
     }
 
+    /// <summary>
+    /// Tear down every A&amp;D service container + KotH hill container (and the
+    /// per-challenge KotH cooldown chains) for a game — called when a game is being
+    /// DELETED so its containers don't outlive the DB rows. Without this, deleting a
+    /// game (e.g. via a cascade repo-binding delete) drops the rows but leaves the
+    /// Docker/K8s containers running forever, since the reconciler keys teardown off
+    /// the game's EndTimeUtc — which no longer exists once the game is gone.
+    ///
+    /// <para>Best-effort and idempotent: each destroy is wrapped so one failure
+    /// doesn't abort the rest, and it runs BEFORE the DB rows are removed so it can
+    /// still resolve the container records. Nulls ContainerId as it goes so a
+    /// concurrent reconciler pass won't double-destroy.</para>
+    /// </summary>
+    public async Task DestroyContainersForGameAsync(int gameId, CancellationToken token = default)
+    {
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var containerManager = scope.ServiceProvider.GetRequiredService<IContainerManager>();
+        var dockerProvider = scope.ServiceProvider.GetService<IContainerProvider<DockerClient, DockerMetadata>>();
+
+        // A&D service containers for this game (TeamId=<participationId>).
+        var services = await db.AdTeamServices
+            .Where(ts => ts.ContainerId != null && ts.Participation.GameId == gameId)
+            .Include(ts => ts.Container)
+            .ToListAsync(token);
+
+        foreach (var ts in services)
+        {
+            var sem = LockFor(ts.ParticipationId, ts.ChallengeId);
+            await sem.WaitAsync(token);
+            try
+            {
+                if (ts.Container is null)
+                    continue;
+                await containerManager.DestroyContainerAsync(ts.Container, token);
+                flagMount.Delete(ts.ParticipationId, ts.ChallengeId);
+                ts.ContainerId = null;
+                await db.SaveChangesAsync(token);
+            }
+            catch (Exception e)
+            {
+                logger.LogErrorMessage(e,
+                    $"Failed to destroy A&D container (game deleted): service={ts.Id}");
+            }
+            finally
+            {
+                sem.Release();
+                _serviceLocks.TryRemove((ts.ParticipationId, ts.ChallengeId), out _);
+            }
+        }
+
+        // KotH hill containers for this game (TeamId=koth-<challengeId>) + cooldown chains.
+        var hills = await db.KothTargets
+            .Where(t => t.GameId == gameId)
+            .Include(t => t.Container)
+            .ToListAsync(token);
+
+        foreach (var target in hills)
+        {
+            var sem = LockFor(0, target.ChallengeId);
+            await sem.WaitAsync(token);
+            try
+            {
+                if (target.Container is not null)
+                {
+                    await containerManager.DestroyContainerAsync(target.Container, token);
+                    target.ContainerId = null;
+                    await db.SaveChangesAsync(token);
+                }
+                // Docker-only feature; no-op on K8s (no sidecar id → returns early).
+                if (dockerProvider is not null)
+                {
+                    await DestroyKothCooldownChainAsync(dockerProvider, target.ChallengeId, token);
+                    _kothChainsTornDown.TryAdd(target.ChallengeId, 0);
+                }
+            }
+            catch (Exception e)
+            {
+                logger.LogErrorMessage(e,
+                    $"Failed to destroy KotH hill (game deleted): challenge={target.ChallengeId}");
+            }
+            finally
+            {
+                sem.Release();
+                _serviceLocks.TryRemove((0, target.ChallengeId), out _);
+            }
+        }
+
+        logger.SystemLog(
+            $"A&D/KotH containers torn down for deleted game {gameId}: services={services.Count} hills={hills.Count}",
+            TaskStatus.Success, LogLevel.Information);
+    }
+
     private async Task EnsureContainersForGameAsync(
         AppDbContext db,
         IContainerManager containerManager,
