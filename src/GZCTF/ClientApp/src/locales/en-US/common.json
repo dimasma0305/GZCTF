@@ -7,6 +7,7 @@
   },
   "button": {
     "add": "Add",
+    "cancel": "Cancel",
     "copy": "Copy to Clipboard",
     "reset": "Reset",
     "retry": "Retry",
@@ -109,8 +110,10 @@
     "ip": "IP",
     "rating": "Rating",
     "status": "Status",
+    "success": "Success",
     "team": "Team",
     "time": "Time",
+    "title": "Title",
     "user": "User",
     "fingerprint": "Fingerprint"
   },
