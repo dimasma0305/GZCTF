@@ -1,6 +1,6 @@
-import { Accordion, Alert, Box, Button, Code, CopyButton, Group, Modal, Stack, Text } from '@mantine/core'
-import { useDisclosure } from '@mantine/hooks'
-import { mdiAlertCircleOutline, mdiCheck, mdiContentCopy, mdiDownload, mdiKeyChain, mdiVpn } from '@mdi/js'
+import { Accordion, ActionIcon, Alert, Box, Button, Code, CopyButton, Group, Modal, Stack, Text, Tooltip } from '@mantine/core'
+import { useDisclosure, useLocalStorage } from '@mantine/hooks'
+import { mdiAlertCircleOutline, mdiCheck, mdiContentCopy, mdiDownload, mdiEye, mdiEyeOff, mdiKeyChain, mdiVpn } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import dayjs from 'dayjs'
 import { FC, useState } from 'react'
@@ -19,6 +19,13 @@ import misc from '@Styles/Misc.module.css'
  * caller's curl examples can render with the real Bearer token for the rest
  * of the session; the DB only stores an HMAC hash, so it's gone on reload.
  *
+ * `storedToken` persists the plaintext to this browser's localStorage (keyed
+ * per game) so a player's bot/scripts can grab it later without re-rotating
+ * (which would invalidate the token their bot is already using). It's the same
+ * one string for both engines. This is a deliberate convenience/exposure
+ * tradeoff — surfaced in the UI with a security note + a "Forget" control, and
+ * a rotation overwrites it (the old value is invalid anyway).
+ *
  * @param onRotated optional callback fired after a successful rotation — KotH
  *   uses it to show a success notification; A&D leaves it off.
  */
@@ -28,6 +35,12 @@ export const useAdToken = (gameId: number, onRotated?: () => void) => {
 
   const [rotating, setRotating] = useState(false)
   const [freshToken, setFreshToken] = useState<string | null>(null)
+  // Per-game so switching games never surfaces the wrong token. JSON-serialized
+  // by Mantine; null when nothing has been saved (or after Forget).
+  const [storedToken, setStoredToken] = useLocalStorage<string | null>({
+    key: `ad-api-token-${gameId}`,
+    defaultValue: null,
+  })
   const [tokenModalOpen, { open: openTokenModal, close: closeTokenModal }] = useDisclosure(false)
 
   const onRotate = async () => {
@@ -35,6 +48,7 @@ export const useAdToken = (gameId: number, onRotated?: () => void) => {
     try {
       const { data } = await api.game.gameAdRotateToken(gameId)
       setFreshToken(data.token)
+      setStoredToken(data.token) // persist for bot/script reuse across reloads
       openTokenModal()
       mutateHint()
       onRotated?.()
@@ -45,7 +59,9 @@ export const useAdToken = (gameId: number, onRotated?: () => void) => {
     }
   }
 
-  return { adTokenHint, rotating, freshToken, tokenModalOpen, closeTokenModal, onRotate }
+  const forgetToken = () => setStoredToken(null)
+
+  return { adTokenHint, rotating, freshToken, storedToken, forgetToken, tokenModalOpen, closeTokenModal, onRotate }
 }
 
 interface AdTokenSectionProps {
@@ -58,11 +74,21 @@ interface AdTokenSectionProps {
   intro: string
   /** "Your current token" label — engine-specific copy. */
   currentLabel: string
+  /** Plaintext token persisted in this browser (from useAdToken.storedToken). */
+  storedToken?: string | null
+  /** Clear the persisted token (from useAdToken.forgetToken). */
+  onForget?: () => void
 }
+
+/** Mask a token to prefix + last 4 so it can be shown without fully revealing. */
+const maskToken = (tok: string) =>
+  tok.length <= 12 ? tok : `${tok.slice(0, 7)}${'•'.repeat(6)}${tok.slice(-4)}`
 
 /**
  * The "Your API token" accordion item, shared by the A&D and KotH toolkits.
- * Renders the current-token hint + rotate/generate button + last-used line.
+ * Renders the current-token hint + rotate/generate button + last-used line, and
+ * — when a token has been saved to this browser — a reveal/copy/forget block so
+ * a player's bot can reuse the same string across reloads.
  * Must be rendered inside a Mantine <Accordion> (it returns an Accordion.Item).
  */
 export const AdTokenSection: FC<AdTokenSectionProps> = ({
@@ -72,8 +98,11 @@ export const AdTokenSection: FC<AdTokenSectionProps> = ({
   title,
   intro,
   currentLabel,
+  storedToken,
+  onForget,
 }) => {
   const { t } = useTranslation()
+  const [revealed, setRevealed] = useState(false)
 
   return (
     <Accordion.Item value="token">
@@ -116,6 +145,62 @@ export const AdTokenSection: FC<AdTokenSectionProps> = ({
               {hint.lastUsedAt
                 ? dayjs(hint.lastUsedAt).fromNow()
                 : t('game.content.ad.never_used', 'never')}
+            </Text>
+          )}
+
+          {/* Saved-token block — present only after a rotation has persisted the
+              plaintext to this browser, so a bot/script can grab it later. */}
+          {storedToken ? (
+            <Stack gap={4}>
+              <Group justify="space-between" wrap="nowrap" gap="xs" align="center">
+                <Group gap="xs" wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
+                  <Text size="sm" fw={600} style={{ whiteSpace: 'nowrap' }}>
+                    {t('game.content.ad.saved_token', 'Saved token')}:
+                  </Text>
+                  <Code className={misc.ffmono} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {revealed ? storedToken : maskToken(storedToken)}
+                  </Code>
+                  <Tooltip label={revealed ? t('game.button.ad.hide_token', 'Hide') : t('game.button.ad.reveal_token', 'Reveal')} withArrow>
+                    <ActionIcon
+                      variant="subtle"
+                      size="sm"
+                      onClick={() => setRevealed((v) => !v)}
+                      aria-label={revealed ? t('game.button.ad.hide_token', 'Hide token') : t('game.button.ad.reveal_token', 'Reveal token')}
+                    >
+                      <Icon path={revealed ? mdiEyeOff : mdiEye} size={0.7} />
+                    </ActionIcon>
+                  </Tooltip>
+                </Group>
+                <Group gap={4} wrap="nowrap">
+                  <CopyButton value={storedToken}>
+                    {({ copied, copy }) => (
+                      <Button
+                        size="compact-xs"
+                        variant="light"
+                        leftSection={<Icon path={copied ? mdiCheck : mdiContentCopy} size={0.7} />}
+                        onClick={copy}
+                      >
+                        {copied ? t('game.tooltip.copy.copied', 'Copied') : t('game.button.ad.copy_token', 'Copy token')}
+                      </Button>
+                    )}
+                  </CopyButton>
+                  {onForget && (
+                    <Button size="compact-xs" variant="subtle" color="red" onClick={onForget}>
+                      {t('game.button.ad.forget_token', 'Forget')}
+                    </Button>
+                  )}
+                </Group>
+              </Group>
+              <Text size="xs" c="dimmed">
+                {t(
+                  'game.content.ad.saved_token_note',
+                  'Saved in THIS browser so your bot/scripts can reuse it — it survives reloads. Anyone with access to this browser can read it. “Rotate” issues a new token (invalidating this one); “Forget” removes it from this browser.'
+                )}
+              </Text>
+            </Stack>
+          ) : (
+            <Text size="xs" c="dimmed">
+              {t('game.content.ad.saved_token_hint', 'Generate or rotate a token and it’s saved in this browser so your bot/scripts can reuse it later.')}
             </Text>
           )}
         </Stack>

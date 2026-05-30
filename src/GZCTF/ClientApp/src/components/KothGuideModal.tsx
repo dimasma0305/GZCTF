@@ -51,7 +51,7 @@ interface KothToolkitModalProps extends ModalProps {
  */
 export const KothGuideModal: FC<KothToolkitModalProps> = ({ gameId, ...modalProps }) => {
   const { t } = useTranslation()
-  const { adTokenHint, rotating, freshToken, tokenModalOpen, closeTokenModal, onRotate } = useAdToken(gameId, () =>
+  const { adTokenHint, rotating, freshToken, storedToken, forgetToken, tokenModalOpen, closeTokenModal, onRotate } = useAdToken(gameId, () =>
     showNotification({
       color: 'teal',
       message: t('game.notification.koth.token.rotated', 'KotH token rotated'),
@@ -138,6 +138,8 @@ write_to_hill "/koth/king" "$TOKEN"`
                 hint={adTokenHint}
                 rotating={rotating}
                 onRotate={onRotate}
+                storedToken={storedToken}
+                onForget={forgetToken}
                 title={t('game.content.koth.guide.token.title', 'Your API token')}
                 intro={t(
                   'game.content.koth.guide.token.intro',
@@ -488,7 +490,7 @@ write_to_hill "/koth/king" "$TOKEN"`
         title={t('game.content.koth.token_modal.title', 'Your new API token (KotH + A&D)')}
         warning={t(
           'game.content.koth.token_modal.warning',
-          'Save this token now — it will not be shown again after this tab closes. The previous token (if any) has been invalidated. The same token authenticates both /Koth/{id}/Token and /Submit.'
+          'This token is now saved in this browser (see “Saved token” in the API-token section) so your scripts can reuse it. Copy it here too if you want it elsewhere — the platform keeps only a hash and can’t show it again. The previous token (if any) has been invalidated. The same token authenticates both /Koth/{id}/Token and /Submit.'
         )}
       />
     </>
