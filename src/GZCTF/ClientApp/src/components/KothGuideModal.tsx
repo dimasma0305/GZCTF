@@ -30,6 +30,7 @@ import { Icon } from '@mdi/react'
 import { FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAdToken, AdTokenSection, AdVpnSection, AdTokenRevealModal } from '@Components/AdToolkitSections'
+import { KothHillList } from '@Components/KothHillList'
 import misc from '@Styles/Misc.module.css'
 
 interface KothToolkitModalProps extends ModalProps {
@@ -244,7 +245,7 @@ write_to_hill "/koth/king" "$TOKEN"`
                     <Text size="xs" c="dimmed">
                       {t(
                         'game.content.koth.guide.hill.targets_note',
-                        'The hill IP changes every 5 ticks when the container is wiped + redeployed — re-read /Targets if your last-known IP stops responding.'
+                        'No need to look up ids — the “Did my plant take?” section below lists every hill’s live IP:port (just click to copy). The hill IP changes every 5 ticks when the container is wiped + redeployed, so re-check it (or re-read /Targets) if your last-known IP stops responding.'
                       )}
                     </Text>
                   </Stack>
@@ -263,9 +264,17 @@ write_to_hill "/koth/king" "$TOKEN"`
                     <Text size="sm">
                       {t(
                         'game.content.koth.guide.state.intro',
-                        'Query the hill’s current state to confirm a plant landed without waiting for the next scoreboard refresh. Returns the round being scored, who the platform currently records as the holder, and the latest functional verdict on the hill.'
+                        'Every hill in the game, live — name, target IP:port, who holds it right now, and the latest functional verdict. Confirm a plant landed without waiting for the next scoreboard refresh, and grab hill addresses without looking up challenge ids.'
                       )}
                     </Text>
+
+                    {/* Live, ID-free list of all hills — the primary "did my plant take?" view. */}
+                    <KothHillList gameId={gameId} />
+
+                    <Divider
+                      label={t('game.content.koth.guide.state.api_divider', 'Prefer the API? Query one hill by id:')}
+                      labelPosition="center"
+                    />
                     <Code block className={misc.ffmono} style={{ fontSize: '0.75rem' }}>
                       {stateCurlExample}
                     </Code>
@@ -291,7 +300,7 @@ write_to_hill "/koth/king" "$TOKEN"`
                     <Text size="xs" c="dimmed">
                       {t(
                         'game.content.koth.guide.state.fields',
-                        'isYou is true when YOUR team is the current holder. status is the functional probe verdict (Ok / Mumble / Offline / InternalError). lastRefreshRound is when the container was last wiped — round - lastRefreshRound tells you ticks remaining until the next wipe.'
+                        'isYou is true when YOUR team is the current holder. status is the functional probe verdict (Ok / Mumble / Offline / InternalError). lastRefreshRound is when the container was last wiped — round - lastRefreshRound tells you ticks remaining until the next wipe. The list above also exposes GET .../Ad/Koth/Hills for every hill at once.'
                       )}
                     </Text>
                   </Stack>

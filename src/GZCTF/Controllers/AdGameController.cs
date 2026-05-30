@@ -539,6 +539,7 @@ public class AdGameController(
 
         return Ok(new KothHillStateModel
         {
+            ChallengeId = challengeId,
             Round = latest?.Round ?? 0,
             HolderParticipationId = latest?.ControllingParticipationId,
             HolderTeamName = latest?.HolderName,
@@ -547,6 +548,85 @@ public class AdGameController(
             CheckedAt = latest?.CheckedAt,
             LastRefreshRound = lastRefresh
         });
+    }
+
+    /// <summary>
+    /// King of the Hill — current state of EVERY hill in the game in one call, so a
+    /// player can see all hills at once (name, target IP:port, who holds it, functional
+    /// status) without having to know or pass individual challenge ids. This is the
+    /// list form of <see cref="KothState"/> — the toolkit's "did my plant take?" view.
+    /// Ordered by challenge id for a stable list. Auth: same dual-auth as Submit.
+    /// </summary>
+    [HttpGet("Koth/Hills")]
+    [ProducesResponseType(typeof(List<KothHillStateModel>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> KothHills(int id, CancellationToken token)
+    {
+        var part = await ResolveTeamApiTokenAsync(id, token) ?? await ResolveUserParticipationAsync(id, token);
+        if (part is null)
+            return Unauthorized(new RequestResponse("not an accepted member of this game", StatusCodes.Status401Unauthorized));
+
+        var hills = await db.GameChallenges
+            .Where(c => c.GameId == id && c.Type == ChallengeType.KingOfTheHill && c.IsEnabled)
+            .OrderBy(c => c.Id)
+            .Select(c => new { c.Id, c.Title })
+            .ToListAsync(token);
+        if (hills.Count == 0)
+            return Ok(new List<KothHillStateModel>());
+
+        var hillIds = hills.Select(h => h.Id).ToList();
+
+        // Latest control verdict per hill (holder + functional status + round).
+        var latestByChallenge = (await db.KothControlResults
+            .Where(r => hillIds.Contains(r.ChallengeId))
+            .GroupBy(r => r.ChallengeId)
+            .Select(g => g.OrderByDescending(r => r.AdRound.Number).First())
+            .Select(r => new
+            {
+                r.ChallengeId,
+                Round = r.AdRound.Number,
+                r.ControllingParticipationId,
+                HolderName = r.ControllingParticipation != null ? r.ControllingParticipation.Team.Name : null,
+                Status = (AdCheckStatus?)r.Status,
+                r.CheckedAt
+            })
+            .ToListAsync(token))
+            .ToDictionary(x => x.ChallengeId);
+
+        // Current container IP:port + last refresh round per hill.
+        var targetByChallenge = (await db.KothTargets
+            .Where(t => t.GameId == id && hillIds.Contains(t.ChallengeId))
+            .Include(t => t.Container)
+            .Select(t => new
+            {
+                t.ChallengeId,
+                Ip = t.Container != null ? t.Container.IP : null,
+                Port = t.Container != null ? t.Container.Port : (int?)null,
+                t.LastRefreshRound
+            })
+            .ToListAsync(token))
+            .ToDictionary(x => x.ChallengeId);
+
+        var list = hills.Select(h =>
+        {
+            latestByChallenge.TryGetValue(h.Id, out var v);
+            targetByChallenge.TryGetValue(h.Id, out var tgt);
+            return new KothHillStateModel
+            {
+                ChallengeId = h.Id,
+                Title = h.Title,
+                Round = v?.Round ?? 0,
+                HolderParticipationId = v?.ControllingParticipationId,
+                HolderTeamName = v?.HolderName,
+                IsYou = v?.ControllingParticipationId == part.Id,
+                Status = v?.Status?.ToString(),
+                CheckedAt = v?.CheckedAt,
+                LastRefreshRound = tgt?.LastRefreshRound ?? 0,
+                Ip = tgt?.Ip,
+                Port = tgt?.Port
+            };
+        }).ToList();
+
+        return Ok(list);
     }
 
     /// <summary>

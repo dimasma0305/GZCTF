@@ -286,12 +286,21 @@ public class KothTokenModel
 }
 
 /// <summary>
-/// Response for GET /api/Game/{id}/Ad/Koth/{challengeId}/State — current hill
-/// holder + functional status, so the player UI can confirm a plant took effect
-/// without polling the scoreboard.
+/// Response for GET /api/Game/{id}/Ad/Koth/{challengeId}/State (one hill) and an
+/// element of GET /api/Game/{id}/Ad/Koth/Hills (every hill) — current hill holder +
+/// functional status, so the player UI can confirm a plant took effect without
+/// polling the scoreboard. The <c>Hills</c> list lets players see every hill at once
+/// (name, target, holder) without having to know challenge ids.
 /// </summary>
 public class KothHillStateModel
 {
+    /// <summary>
+    /// The hill's challenge id. Populated by the Hills LIST endpoint (so a row can be
+    /// keyed / linked); the single-hill State endpoint also stamps it for parity.
+    /// </summary>
+    public int ChallengeId { get; set; }
+    /// <summary>The hill's challenge title — list endpoint only (null from the single-hill endpoint).</summary>
+    public string? Title { get; set; }
     public int Round { get; set; }
     public int? HolderParticipationId { get; set; }
     public string? HolderTeamName { get; set; }
@@ -301,4 +310,8 @@ public class KothHillStateModel
     public string? Status { get; set; }
     public DateTimeOffset? CheckedAt { get; set; }
     public int LastRefreshRound { get; set; }
+    /// <summary>Current hill container IP — list endpoint only (where to aim). Null until a container exists.</summary>
+    public string? Ip { get; set; }
+    /// <summary>Current hill container port — list endpoint only.</summary>
+    public int? Port { get; set; }
 }
