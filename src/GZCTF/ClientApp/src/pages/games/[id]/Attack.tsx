@@ -29,7 +29,10 @@ import api, {
 import {
   disposeEffects,
   fireBullet,
+  fireKothBeam,
+  hillPulse,
   initEffects,
+  isLowFPS,
   playPew,
   setPausedState,
   spawnFirstBlood,
@@ -60,6 +63,9 @@ interface FeedLine {
   teamName: string
   challengeTitle: string
   type: SubmissionType
+  // KotH control-change line. When set, FeedPanel renders `text` verbatim
+  // with a crown prefix instead of the attack prefix + team :: challenge.
+  koth?: { text: string; lost: boolean }
 }
 
 interface FirstBloodBanner {
@@ -76,6 +82,41 @@ interface TickerEvent {
   challengeTitle: string
   category: ChallengeCategory
   type: SubmissionType
+}
+
+/* -------------------------------------------------------------------------- */
+/* King-of-the-Hill                                                            */
+/* -------------------------------------------------------------------------- */
+
+/** A KotH objective ("hill"). One per KotH challenge. The holder is the
+ *  team currently in control of the hill (null = uncontrolled / neutral). */
+interface KothHill {
+  challengeId: number
+  title: string
+  holderName: string | null
+  holderAvatar: string | null
+  status: string | null
+}
+
+/** Public seed shape from GET /api/game/{id}/KothHills. */
+interface KothHillSeed {
+  challengeId: number
+  title: string
+  holderTeamName: string | null
+  holderTeamAvatar: string | null
+  status: string | null
+}
+
+/** Live control-change event from the SignalR hub (ReceivedKothControl).
+ *  Only fired on an actual change of holder, so every event animates. */
+interface KothControlEvent {
+  challengeId: number
+  challengeTitle: string
+  round: number
+  holderTeamName: string | null
+  holderTeamAvatar: string | null
+  previousTeamName: string | null
+  status: string
 }
 
 /* -------------------------------------------------------------------------- */
@@ -119,6 +160,44 @@ const feedPrefix = (t: SubmissionType): string => {
     default:
       return '[ MISS   ] '
   }
+}
+
+// Uncontrolled / neutral hill color (matches the muted team-node grey).
+const KOTH_NEUTRAL = '#6b7183'
+
+/** Stable per-team color derived from the team name. Hashes the name to a
+ *  hue in a vivid band so two different teams almost never collide, and the
+ *  same team always gets the same crown tint across re-renders / events. */
+const colorForTeam = (name: string | null | undefined): string => {
+  if (!name) return KOTH_NEUTRAL
+  let h = 0
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
+  const hue = h % 360
+  const sat = 70 + (h % 18) // 70-87%
+  const light = 56 + (h % 10) // 56-65%
+  return hslToHex(hue, sat, light)
+}
+
+const hslToHex = (h: number, s: number, l: number): string => {
+  const sN = s / 100
+  const lN = l / 100
+  const c = (1 - Math.abs(2 * lN - 1)) * sN
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1))
+  const m = lN - c / 2
+  let r = 0,
+    g = 0,
+    b = 0
+  if (h < 60) [r, g, b] = [c, x, 0]
+  else if (h < 120) [r, g, b] = [x, c, 0]
+  else if (h < 180) [r, g, b] = [0, c, x]
+  else if (h < 240) [r, g, b] = [0, x, c]
+  else if (h < 300) [r, g, b] = [x, 0, c]
+  else [r, g, b] = [c, 0, x]
+  const to = (v: number): string =>
+    Math.round((v + m) * 255)
+      .toString(16)
+      .padStart(2, '0')
+  return `#${to(r)}${to(g)}${to(b)}`
 }
 
 /* -------------------------------------------------------------------------- */
@@ -278,6 +357,50 @@ const computeLayout = (
 }
 
 /* -------------------------------------------------------------------------- */
+/* Hill (KotH objective) layout                                                */
+/* -------------------------------------------------------------------------- */
+
+interface HillPos {
+  challengeId: number
+  x: number
+  y: number
+}
+
+/**
+ * Place KotH hill objective nodes on an INNER ring between the HQ hex and
+ * the team ring — visually distinct from both. The ring radius is derived
+ * from the HQ size so hills hug the objective core without overlapping the
+ * hex or colliding with team nodes. Hills are spread around the ring
+ * (starting at -90°) so they read as "objectives orbiting the HQ".
+ */
+const computeHillPositions = (
+  count: number,
+  cx: number,
+  cy: number,
+  hqSize: number
+): HillPos[] => {
+  const out: HillPos[] = []
+  if (count <= 0) return out
+  // Ring sits just outside the hex (hqSize*0.6 ≈ hex vertical half) with a
+  // comfortable margin; never larger than the hex footprint by much so it
+  // stays clearly "inner".
+  const r = hqSize * 0.6 + 64
+  // Single hill: park it directly above the HQ. Multiple: even arc.
+  for (let i = 0; i < count; i++) {
+    const a =
+      count === 1
+        ? -Math.PI / 2
+        : (i / count) * Math.PI * 2 - Math.PI / 2
+    out.push({
+      challengeId: i,
+      x: cx + Math.cos(a) * r,
+      y: cy + Math.sin(a) * r * 0.92,
+    })
+  }
+  return out
+}
+
+/* -------------------------------------------------------------------------- */
 /* Component                                                                  */
 /* -------------------------------------------------------------------------- */
 
@@ -317,6 +440,14 @@ const CHALLS: Array<[ChallengeCategory, string]> = [
   [ChallengeCategory.Reverse, 'LATENT-KINGDOM'],
 ]
 
+// Mock KotH hills for ?preview mode so the crown nodes + takeover beam are
+// demoable without a backend. Holders point at the first mock teams.
+const makeMockHills = (): KothHill[] => [
+  { challengeId: 9001, title: 'KING-HILL', holderName: 'ROOT-SKSD', holderAvatar: null, status: 'held' },
+  { challengeId: 9002, title: 'CROWN-CTRL', holderName: 'SEGFAULT', holderAvatar: null, status: 'held' },
+  { challengeId: 9003, title: 'THRONE-RM', holderName: null, holderAvatar: null, status: null },
+]
+
 const Attack: FC = () => {
   const { t } = useTranslation()
   const { id } = useParams()
@@ -346,6 +477,15 @@ const Attack: FC = () => {
   const [audioMuted, setAudioMuted] = useState(false)
   const [paused, setPaused] = useState(false)
   const [showDevPanel, setShowDevPanel] = useState(true)
+
+  // KotH hills. Empty => game has no hills (or is hidden/frozen) and the
+  // page behaves exactly as before. Seeded with mocks in preview mode.
+  const [hills, setHills] = useState<KothHill[]>(isPreview ? makeMockHills() : [])
+  const [seizeCount, setSeizeCount] = useState(0)
+  // Set once we observe any A&D-style victim event; combined with hills>0
+  // this distinguishes "mixed" from pure-KotH for header framing.
+  const sawAdVictimRef = useRef(false)
+  const [sawAdVictim, setSawAdVictim] = useState(isPreview)
 
   const [eventCount, setEventCount] = useState(0)
   const [fbCount, setFbCount] = useState(0)
@@ -418,6 +558,28 @@ const Attack: FC = () => {
       } catch (e) {
         // eslint-disable-next-line no-console
         console.warn('[attack] attack-feed failed', e)
+      }
+      // KotH hill seed — graceful: an empty array (or any failure) renders
+      // no hill nodes and the page works exactly as a jeopardy/A&D board.
+      try {
+        const hillsRes = await fetch(`/api/game/${numId}/KothHills`)
+        if (hillsRes.ok) {
+          const seed = (await hillsRes.json()) as KothHillSeed[]
+          if (Array.isArray(seed)) {
+            setHills(
+              seed.map((s) => ({
+                challengeId: s.challengeId,
+                title: s.title,
+                holderName: s.holderTeamName,
+                holderAvatar: s.holderTeamAvatar,
+                status: s.status,
+              }))
+            )
+          }
+        }
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('[attack] koth-hills failed', e)
       }
     })()
   }, [numId])
@@ -495,6 +657,22 @@ const Attack: FC = () => {
     positions.forEach((p) => m.set(p.name, p))
     return m
   }, [positions])
+
+  /* ---- KotH hills: positions + engine framing ----
+   * Engine detection (per spec): hills.length > 0 turns KotH features on.
+   * If we ALSO see A&D-style victim events the game is "mixed"; pure hills
+   * with no victim attacks reads as "KotH"; no hills = A&D/jeopardy today. */
+  const hasHills = hills.length > 0
+  const engine: 'koth' | 'mixed' | 'classic' = !hasHills
+    ? 'classic'
+    : sawAdVictim
+      ? 'mixed'
+      : 'koth'
+
+  const hillPositions = useMemo(
+    () => computeHillPositions(hills.length, cx, cy, hqSize),
+    [hills.length, cx, cy, hqSize]
+  )
 
   const top5 = useMemo(
     () => (scoreboard?.items ?? []).slice().sort((a, b) => a.rank - b.rank).slice(0, 5),
@@ -579,6 +757,14 @@ const Attack: FC = () => {
           tickerQueueRef.current = [...tickerQueueRef.current, tEvt].slice(-5)
         }
         setTicker((cur) => cur ?? tickerQueueRef.current.shift() ?? null)
+      }
+
+      // Engine framing signal: an A&D capture carries a victim team. Once
+      // seen, a game that ALSO has hills is "mixed". Ref-gated so we only
+      // bump the (cheap) state flag once instead of on every event.
+      if (evt.victimTeamName && !sawAdVictimRef.current) {
+        sawAdVictimRef.current = true
+        setSawAdVictim(true)
       }
 
       const src = resolveSource(evt)
@@ -672,6 +858,96 @@ const Attack: FC = () => {
     [audioEnabled, hqCenter, teamIndex, refreshScoreboard, resolveSource, isPreview]
   )
 
+  /* ---- Handle KotH control change ----
+   * Fired only on an actual takeover/loss, so every event animates. We:
+   *   1. update the hill's holder in state (cheap — keyed by challengeId),
+   *   2. recolor + pulse the hill node (new holder color, or grey on loss),
+   *   3. on a seize, beam from the new holder's team node → the hill node.
+   * Resolving the holder position reuses teamIndex; an unknown holder still
+   * recolors the node and beams from the HQ center as a sensible fallback. */
+  const hillPosByIdRef = useRef<Map<number, HillPos>>(new Map())
+  const handleKothControl = useCallback(
+    (evt: KothControlEvent) => {
+      const time = new Date().toTimeString().slice(0, 8)
+      const lost = !evt.holderTeamName
+      const color = lost ? KOTH_NEUTRAL : colorForTeam(evt.holderTeamName)
+
+      // 1. Update holder in state (keyed by challengeId; no-op if unknown id).
+      setHills((prev) =>
+        prev.map((h) =>
+          h.challengeId === evt.challengeId
+            ? {
+                ...h,
+                holderName: evt.holderTeamName,
+                holderAvatar: evt.holderTeamAvatar,
+                status: evt.status,
+              }
+            : h
+        )
+      )
+
+      // Feed line — distinct from flag captures so the stream stays readable.
+      const feedText = lost
+        ? t('game.attack.koth.feedNeutral', '{{title}} went NEUTRAL').replace(
+            '{{title}}',
+            evt.challengeTitle
+          )
+        : t('game.attack.koth.feedSeized', '!! HILL SEIZED !! {{title}} -> {{team}}')
+            .replace('{{title}}', evt.challengeTitle)
+            .replace('{{team}}', evt.holderTeamName ?? '')
+      setFeedLines((prev) => {
+        const line: FeedLine = {
+          key: `k-${nextFeedKeyRef.current++}`,
+          time,
+          teamName: evt.holderTeamName ?? '—',
+          challengeTitle: evt.challengeTitle,
+          type: SubmissionType.Normal,
+          koth: { text: feedText, lost },
+        }
+        return [line, ...prev].slice(0, FEED_MAX)
+      })
+
+      if (!lost) setSeizeCount((c) => c + 1)
+
+      // 2/3. Visual effects only once Pixi is ready.
+      if (!pixiReadyRef.current) return
+
+      const hp = hillPosByIdRef.current.get(evt.challengeId)
+      // Hill node position (fallback to HQ center if not yet laid out).
+      const hx = hp ? hp.x : cx
+      const hy = hp ? hp.y : cy
+
+      if (lost) {
+        // Loss: just a soft grey pulse on the node, no beam.
+        hillPulse(hx, hy, KOTH_NEUTRAL, true)
+        return
+      }
+
+      hillPulse(hx, hy, color, false)
+
+      // Beam from the new holder's team node → hill node. Unknown holder
+      // (not on the board) beams from the HQ center instead. Respect the
+      // low-FPS guard so takeover storms don't pile up beams.
+      if (isLowFPS()) return
+      const holder = evt.holderTeamName ? teamIndex.get(evt.holderTeamName) : undefined
+      const sx = holder ? holder.x : cx
+      const sy = holder ? holder.y : cy
+      fireKothBeam(sx, sy, hx, hy, color)
+    },
+    [t, teamIndex, cx, cy]
+  )
+
+  // Keep a challengeId -> position map so the SignalR handler can resolve a
+  // hill node without re-subscribing whenever the layout shifts.
+  useEffect(() => {
+    const m = new Map<number, HillPos>()
+    hills.forEach((h, i) => {
+      const p = hillPositions[i]
+      if (p) m.set(h.challengeId, { challengeId: h.challengeId, x: p.x, y: p.y })
+    })
+    hillPosByIdRef.current = m
+  }, [hills, hillPositions])
+
   /* ---- Cleanup burst timers on unmount ---- */
   useEffect(() => {
     const timers = burstTimersRef.current
@@ -745,6 +1021,11 @@ const Attack: FC = () => {
       handleAttack(msg)
     })
 
+    // New KotH client method on the SAME hub — no extra connection.
+    connection.on('ReceivedKothControl', (evt: KothControlEvent) => {
+      handleKothControl(evt)
+    })
+
     // Imperative live-status indicator: paint the header LIVE dot + label
     // directly via refs so connection-state churn never re-renders the
     // whole Attack component.
@@ -779,7 +1060,7 @@ const Attack: FC = () => {
     return () => {
       connection.stop().catch(() => undefined)
     }
-  }, [numId, handleAttack, isPreview])
+  }, [numId, handleAttack, handleKothControl, isPreview, t])
 
   /* ---- Preview triggers ---- */
   const fireMockEvent = useCallback(
@@ -808,9 +1089,39 @@ const Attack: FC = () => {
     [handleAttack, scoreboard]
   )
 
+  /* ---- Preview: simulate a KotH takeover on a random hill ---- */
+  const fireMockKoth = useCallback(() => {
+    if (hills.length === 0) return
+    const teams = scoreboard?.items ?? []
+    const hill = hills[Math.floor(Math.random() * hills.length)]
+    // 1-in-4 events send the hill neutral; otherwise a (different) team seizes.
+    const goNeutral = Math.random() < 0.25
+    const candidates = teams.filter((tm) => tm.name !== hill.holderName)
+    const next = candidates.length
+      ? candidates[Math.floor(Math.random() * candidates.length)]
+      : teams[0]
+    handleKothControl({
+      challengeId: hill.challengeId,
+      challengeTitle: hill.title,
+      round: 1,
+      holderTeamName: goNeutral ? null : next?.name ?? null,
+      holderTeamAvatar: null,
+      previousTeamName: hill.holderName,
+      status: goNeutral ? 'neutral' : 'held',
+    })
+  }, [hills, scoreboard, handleKothControl])
+
   /* ---- Render ---- */
   const eventTitle = game?.title ?? 'ATTACK'
   const sortedTop = positions.slice(0, 20)
+  // Engine-aware framing so a KotH / mixed game isn't mislabeled as pure
+  // "attacks". Kept tasteful — the existing A&D aesthetic stays intact.
+  const engineTag =
+    engine === 'koth'
+      ? t('game.attack.engine.koth', 'KING-OF-THE-HILL')
+      : engine === 'mixed'
+        ? t('game.attack.engine.mixed', 'A&D · KOTH')
+        : t('game.attack.engine.classic', 'TACTICAL-OPS')
 
   return (
     <div
@@ -928,7 +1239,7 @@ const Attack: FC = () => {
       >
         <span>
           <span style={{ color: '#ff2a2a' }}>▙</span>
-          &nbsp;{eventTitle} //// TACTICAL-OPS
+          &nbsp;{eventTitle} //// {engineTag}
         </span>
         <span>
           <span
@@ -976,6 +1287,13 @@ const Attack: FC = () => {
       >
         <span>
           SIGNAL NOMINAL &nbsp;//&nbsp; {positions.length} TEAMS &nbsp;//&nbsp; {eventCount} EVENTS
+          {hasHills && (
+            <>
+              &nbsp;//&nbsp; {hills.length}{' '}
+              {t('game.attack.koth.hillsLabel', 'HILLS')} &nbsp;//&nbsp; {seizeCount}{' '}
+              {t('game.attack.koth.seizesLabel', 'SEIZES')}
+            </>
+          )}
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {audioMuted && (
@@ -1154,6 +1472,9 @@ const Attack: FC = () => {
         eventCount={eventCount}
         fbCount={fbCount}
         atkRateRef={atkRateRef}
+        hasHills={hasHills}
+        hillCount={hills.length}
+        seizeCount={seizeCount}
       />
 
       {/* Single shake container — hex + canvas + title all inside so they
@@ -1267,6 +1588,73 @@ const Attack: FC = () => {
                 }}
               />
               {t.labelled && <span>{nameShort}</span>}
+            </div>
+          )
+        })}
+
+        {/* KotH hill objective nodes — crown glyphs on an inner ring around
+            the HQ, tinted to the current holder's color (grey = neutral).
+            DOM overlays, matching how team nodes / HQ labels are rendered;
+            the takeover beam + capture pulse are drawn on the pixi canvas. */}
+        {hills.map((h, i) => {
+          const p = hillPositions[i]
+          if (!p) return null
+          const tint = colorForTeam(h.holderName)
+          const neutral = !h.holderName
+          const titleShort = h.title.length > 14 ? `${h.title.slice(0, 13)}…` : h.title
+          return (
+            <div
+              key={h.challengeId}
+              title={
+                h.holderName
+                  ? `${h.title} · ${h.holderName}`
+                  : `${h.title} · ${t('game.attack.koth.neutral', 'UNCONTROLLED')}`
+              }
+              style={{
+                position: 'absolute',
+                left: p.x,
+                top: p.y,
+                transform: 'translate(-50%,-50%)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 4,
+                pointerEvents: 'auto',
+                zIndex: 16,
+              }}
+            >
+              <div
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 16,
+                  lineHeight: 1,
+                  color: neutral ? KOTH_NEUTRAL : '#0b0b11',
+                  background: neutral ? 'rgba(12,13,18,.9)' : tint,
+                  border: `2px solid ${tint}`,
+                  boxShadow: neutral ? 'none' : `0 0 14px ${tint}, 0 0 28px ${tint}66`,
+                  transition: 'background .25s ease, box-shadow .25s ease, border-color .25s ease',
+                }}
+              >
+                ♛
+              </div>
+              <span
+                style={{
+                  fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+                  fontSize: 9.5,
+                  letterSpacing: '.08em',
+                  textTransform: 'uppercase',
+                  color: neutral ? KOTH_NEUTRAL : tint,
+                  whiteSpace: 'nowrap',
+                  textShadow: '0 1px 3px #000',
+                }}
+              >
+                {titleShort}
+              </span>
             </div>
           )
         })}
@@ -1587,6 +1975,12 @@ const Attack: FC = () => {
             >
               WRONG
             </button>
+            <button
+              onClick={() => fireMockKoth()}
+              style={previewBtn('#9b6bff', '#ffffff')}
+            >
+              HILL
+            </button>
           </div>
         </div>
       )}
@@ -1666,16 +2060,27 @@ const FeedPanel: FC<FeedPanelProps> = ({ left, top, bottom, width, lines }) => {
           }}
         >
           <span style={{ color: '#6b7183' }}>{line.time}</span>{' '}
-          <span
-            style={{
-              color: lineColorFor(line.type),
-              fontWeight: line.type === SubmissionType.FirstBlood ? 700 : 400,
-              opacity: line.type === SubmissionType.Unaccepted ? 0.55 : 1,
-            }}
-          >
-            {feedPrefix(line.type)}
-            {line.teamName} :: {line.challengeTitle}
-          </span>
+          {line.koth ? (
+            <span
+              style={{
+                color: line.koth.lost ? '#6b7183' : '#9b6bff',
+                fontWeight: line.koth.lost ? 400 : 700,
+              }}
+            >
+              ♛ {line.koth.text}
+            </span>
+          ) : (
+            <span
+              style={{
+                color: lineColorFor(line.type),
+                fontWeight: line.type === SubmissionType.FirstBlood ? 700 : 400,
+                opacity: line.type === SubmissionType.Unaccepted ? 0.55 : 1,
+              }}
+            >
+              {feedPrefix(line.type)}
+              {line.teamName} :: {line.challengeTitle}
+            </span>
+          )}
         </div>
       ))}
       <div
@@ -1751,6 +2156,9 @@ interface ScoreboardPanelProps {
   eventCount: number
   fbCount: number
   atkRateRef: React.RefObject<HTMLSpanElement | null>
+  hasHills: boolean
+  hillCount: number
+  seizeCount: number
 }
 
 const ScoreboardPanel: FC<ScoreboardPanelProps> = ({
@@ -1761,6 +2169,9 @@ const ScoreboardPanel: FC<ScoreboardPanelProps> = ({
   eventCount,
   fbCount,
   atkRateRef,
+  hasHills,
+  hillCount,
+  seizeCount,
 }) => {
   const { t } = useTranslation()
   const rowCount = Math.max(top5.length, 1)
@@ -1884,6 +2295,32 @@ const ScoreboardPanel: FC<ScoreboardPanelProps> = ({
         <StatsRow label="ATK_RATE" value="0/min" valueRef={atkRateRef} />
         <StatsRow label="1ST_BLOOD" value={String(fbCount)} />
         <StatsRow label="EVENTS" value={String(eventCount)} />
+        {hasHills && (
+          <>
+            <StatsRow label={t('game.attack.koth.hillsStat', 'HILLS')} value={String(hillCount)} />
+            <StatsRow
+              label={t('game.attack.koth.seizesStat', 'HILL_SEIZES')}
+              value={String(seizeCount)}
+            />
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                marginTop: 8,
+                paddingTop: 8,
+                borderTop: '1px dashed #20232d',
+                fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+                fontSize: 10,
+                color: '#6b7183',
+                letterSpacing: '.06em',
+              }}
+            >
+              <span style={{ color: '#ffd34a', fontSize: 14, lineHeight: 1 }}>♛</span>
+              <span>{t('game.attack.koth.legend', 'HILL = OBJECTIVE · tint = holder')}</span>
+            </div>
+          </>
+        )}
       </div>
     </>
   )

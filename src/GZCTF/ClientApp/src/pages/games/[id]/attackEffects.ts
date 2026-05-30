@@ -1929,3 +1929,160 @@ export function debrisChunks(x: number, y: number, color: string): void {
     })
   }
 }
+
+/* ---------------------------------------------------------------- */
+/* King-of-the-Hill: takeover beam + hill capture pulse             */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Fire a "capture beam" from a capturing team's node (x0,y0) to a hill
+ * objective node (x1,y1). Lighter weight than the first-blood laser: a
+ * quick reveal → sustain → fade core beam with a glow pass, a muzzle
+ * flash at the source and an impact burst at the hill. Used on KotH
+ * takeovers, which can fire frequently, so it allocates only a handful of
+ * entities and respects the global entity cap via addEnt().
+ */
+export function fireKothBeam(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  color: string
+): void {
+  const colorNum = hexToNum(color)
+  muzzleFlash(x0, y0, color, false)
+
+  const REVEAL = 150
+  const SUSTAIN = 160
+  const FADE = 320
+  const TOTAL = REVEAL + SUSTAIN + FADE
+  const start = performance.now()
+  let fired = false
+  let gGlow: PIXI.Graphics | null = null
+  let gCore: PIXI.Graphics | null = null
+  addEnt({
+    update(now) {
+      if (!gCore && stage) {
+        gGlow = mkGraphics('add')
+        gCore = mkGraphics('add')
+      }
+      const el = now - start
+      if (el >= TOTAL) {
+        if (!fired) {
+          fired = true
+          impactBurst(x1, y1, color, SubmissionType.Normal)
+        }
+        return false
+      }
+      let revealFrac = 1,
+        thick = 5,
+        glowThick = 16,
+        glowAlpha = 0.6,
+        beamAlpha = 1
+      if (el < REVEAL) {
+        revealFrac = 1 - Math.pow(1 - el / REVEAL, 2.5)
+      } else if (el < REVEAL + SUSTAIN) {
+        const t = (el - REVEAL) / SUSTAIN
+        thick = 5 + 4 * Math.sin(t * Math.PI)
+        glowThick = 16 + 14 * Math.sin(t * Math.PI)
+        glowAlpha = 0.6 + 0.3 * Math.sin(t * Math.PI)
+      } else {
+        const t = (el - REVEAL - SUSTAIN) / FADE
+        thick = 5 + (1 - 5) * t
+        beamAlpha = 1 - t
+        glowAlpha = 0.6 * (1 - t)
+        glowThick = 30
+      }
+      const ex = x0 + (x1 - x0) * revealFrac
+      const ey = y0 + (y1 - y0) * revealFrac
+      if (gGlow) {
+        gGlow.clear()
+        gGlow
+          .moveTo(x0, y0)
+          .lineTo(ex, ey)
+          .stroke({ width: glowThick, color: colorNum, alpha: glowAlpha * 0.5, cap: 'round' })
+      }
+      if (gCore) {
+        gCore.clear()
+        gCore
+          .moveTo(x0, y0)
+          .lineTo(ex, ey)
+          .stroke({ width: thick, color: 0xffffff, alpha: beamAlpha, cap: 'round' })
+      }
+      return true
+    },
+    destroy() {
+      if (gGlow) {
+        stage?.removeChild(gGlow)
+        gGlow.destroy()
+      }
+      if (gCore) {
+        stage?.removeChild(gCore)
+        gCore.destroy()
+      }
+    },
+  })
+}
+
+/**
+ * Pulse a hill objective node when its control changes. `lost` (holder
+ * went neutral) fires a softer, slower grey-ish ring; a normal seize
+ * fires a brighter expanding ring + glow flare in the new holder's color.
+ * Cheap: 1 glow sprite + 1 ring graphics, both capped by addEnt().
+ */
+export function hillPulse(x: number, y: number, color: string, lost: boolean): void {
+  const colorNum = hexToNum(color)
+  const start = performance.now()
+  const dur = lost ? 720 : 560
+  const maxR = lost ? 38 : 58
+
+  let glow: PIXI.Sprite | null = null
+  addEnt({
+    update(now) {
+      const t = (now - start) / dur
+      if (!glow && stage) {
+        glow = mkGlowSprite(color, 2, 'add')
+        glow.x = x
+        glow.y = y
+      }
+      if (t >= 1) return false
+      if (glow) {
+        glow.alpha = (lost ? 0.5 : 0.9) * (1 - t)
+        const d = (lost ? 30 : 44) + t * (lost ? 18 : 36)
+        glow.width = glow.height = d
+      }
+      return true
+    },
+    destroy() {
+      if (glow) {
+        stage?.removeChild(glow)
+        glow.destroy()
+      }
+    },
+  })
+
+  let ringG: PIXI.Graphics | null = null
+  addEnt({
+    update(now) {
+      const t = (now - start) / dur
+      if (!ringG && stage) ringG = mkGraphics('add')
+      if (t >= 1) return false
+      if (ringG) {
+        const e = 1 - (1 - t) * (1 - t)
+        ringG.clear()
+        ringG.circle(x, y, 4 + e * maxR).stroke({
+          width: (lost ? 1.8 : 2.6) * (1 - t * 0.85),
+          color: colorNum,
+          alpha: 1 - t,
+        })
+      }
+      return true
+    },
+    destroy() {
+      if (ringG) {
+        stage?.removeChild(ringG)
+        ringG.destroy()
+      }
+    },
+  })
+}
