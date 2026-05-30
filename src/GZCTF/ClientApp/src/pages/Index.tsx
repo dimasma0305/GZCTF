@@ -4,6 +4,7 @@ import { mdiFlagCheckered } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import { FC } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Empty } from '@Components/Empty'
 import { PostCard } from '@Components/PostCard'
 import { RecentGame } from '@Components/RecentGame'
 import { WithNavBar } from '@Components/WithNavbar'
@@ -101,9 +102,13 @@ const Home: FC = () => {
                       <Icon path={mdiFlagCheckered} size={1.5} color={theme.colors[theme.primaryColor][4]} />
                       <Title order={3}>{t('common.content.home.recent_games')}</Title>
                     </Group>
-                    {showGames?.map((game) => (
-                      <RecentGame key={game.id} game={game} />
-                    ))}
+                    {showGames && showGames.length === 0 ? (
+                      <Empty
+                        description={t('common.content.home.no_recent_games', 'No recent games')}
+                      />
+                    ) : (
+                      showGames?.map((game) => <RecentGame key={game.id} game={game} />)
+                    )}
                   </Stack>
                 </div>
               </nav>

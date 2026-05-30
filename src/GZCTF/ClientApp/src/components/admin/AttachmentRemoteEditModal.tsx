@@ -43,6 +43,7 @@ export const AttachmentRemoteEditModal: FC<ModalProps> = (props) => {
   const onUpload = async () => {
     if (flags.length <= 0) return
 
+    setDisabled(true)
     try {
       await api.edit.editAddFlags(numId, numCId, flags)
       showNotification({
@@ -85,7 +86,7 @@ export const AttachmentRemoteEditModal: FC<ModalProps> = (props) => {
           onChange={(e) => setText(e.target.value)}
           placeholder={'flag{hello_world} http://example.com/1.zip\nflag{he11o_world} http://example.com/2.zip'}
         />
-        <Button fullWidth disabled={disabled} onClick={onUpload}>
+        <Button fullWidth loading={disabled} disabled={disabled} onClick={onUpload}>
           {t('admin.button.games.challenges.attachment.batch_add')}
         </Button>
       </Stack>

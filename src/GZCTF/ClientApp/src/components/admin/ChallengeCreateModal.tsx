@@ -22,7 +22,7 @@ interface ChallengeCreateModalProps extends ModalProps {
 
 export const ChallengeCreateModal: FC<ChallengeCreateModalProps> = (props) => {
   const { id } = useParams()
-  const { onAddChallenge, ...modalProps } = props
+  const { onAddChallenge, onClose, ...modalProps } = props
   const [disabled, setDisabled] = useState(false)
   const navigate = useNavigate()
   const challengeCategoryLabelMap = useChallengeCategoryLabelMap()
@@ -60,8 +60,15 @@ export const ChallengeCreateModal: FC<ChallengeCreateModalProps> = (props) => {
     }
   }
 
+  const handleClose = () => {
+    setTitle('')
+    setCategory(null)
+    setType(null)
+    onClose()
+  }
+
   return (
-    <Modal {...modalProps}>
+    <Modal {...modalProps} onClose={handleClose}>
       <Stack>
         <TextInput
           label={t('admin.content.games.challenges.title')}
@@ -96,7 +103,7 @@ export const ChallengeCreateModal: FC<ChallengeCreateModalProps> = (props) => {
             return { value: type[1], label: data?.name, ...data } as ComboboxItem
           })}
         />
-        <Button fullWidth disabled={disabled} onClick={onCreate}>
+        <Button fullWidth disabled={disabled || !title || !category || !type} onClick={onCreate}>
           {t('admin.button.challenges.new')}
         </Button>
       </Stack>

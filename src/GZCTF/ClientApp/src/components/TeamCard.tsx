@@ -25,7 +25,16 @@ export const TeamCard: FC<TeamCardProps> = (props) => {
     <Card
       shadow="md"
       radius="lg"
+      role="button"
+      tabIndex={0}
+      aria-label={t('team.button.edit', 'Edit team')}
       onClick={onEdit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onEdit()
+        }
+      }}
       className={isMobile ? teamCardClasses.cardMobile : teamCardClasses.card}
       classNames={{ root: misc.hoverCard }}
     >
@@ -61,9 +70,15 @@ export const TeamCard: FC<TeamCardProps> = (props) => {
         </Stack>
       </Group>
       {team.locked && (
-        <Center className={teamCardClasses.lockBadge}>
-          <Icon path={mdiLockOutline} size={0.8} color="white" />
-        </Center>
+        <Tooltip label={t('team.label.locked', 'Locked')} withArrow>
+          <Center
+            className={teamCardClasses.lockBadge}
+            role="img"
+            aria-label={t('team.label.locked', 'Locked')}
+          >
+            <Icon path={mdiLockOutline} size={0.8} color="white" />
+          </Center>
+        </Tooltip>
       )}
     </Card>
   )

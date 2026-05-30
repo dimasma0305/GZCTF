@@ -32,6 +32,7 @@ const Tab: FC<TabProps & { active: boolean; onClick?: () => void; disabled?: boo
       component="button"
       type="button"
       role="tab"
+      aria-selected={active}
       disabled={disabled}
       __vars={{
         '--tab-active-color': color,
@@ -78,7 +79,7 @@ export const IconTabs: FC<IconTabsProps> = (props) => {
     <Group gap={0} justify="space-between" w="100%" wrap="nowrap">
       {aside}
       {withIcon && <LogoHeader className={classes.hidable} />}
-      <Group className={classes.panes} {...others}>
+      <Group role="tablist" className={classes.panes} {...others}>
         {panes}
       </Group>
     </Group>

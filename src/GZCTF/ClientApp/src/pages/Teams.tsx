@@ -30,13 +30,14 @@ import { useTeams, useUser } from '@Hooks/useUser'
 import api, { Role, TeamInfoModel } from '@Api'
 
 const Teams: FC = () => {
-  const { user, error: userError } = useUser()
+  const { user, error: userError, mutate: mutateUser } = useUser()
   const { teams, mutate: mutateTeams, error: teamsError } = useTeams()
 
   const theme = useMantineTheme()
 
   const [joinOpened, setJoinOpened] = useState(false)
   const [joinTeamCode, setJoinTeamCode] = useState('')
+  const [joining, setJoining] = useState(false)
   const [searchParams, setSearchParams] = useSearchParams()
 
   // Auto-open join modal when arriving via invite link (?join=code)
@@ -81,6 +82,7 @@ const Teams: FC = () => {
       return
     }
 
+    setJoining(true)
     try {
       await api.team.teamAccept(joinTeamCode)
       showNotification({
@@ -93,6 +95,7 @@ const Teams: FC = () => {
     } catch (e) {
       showErrorMsg(e, t)
     } finally {
+      setJoining(false)
       setJoinTeamCode('')
       setJoinOpened(false)
     }
@@ -131,7 +134,28 @@ const Teams: FC = () => {
               </>
             )}
           </Group>
-          {teams && !teamsError && user && !userError ? (
+          {teamsError || userError ? (
+            <Center w="100%" h="80vh">
+              <Stack align="center" gap="md" maw={isMobile ? '90%' : '100%'}>
+                <Icon path={mdiClose} size={4} color={theme.colors.red[5]} />
+                <Title order={2} ta="center" style={{ wordBreak: 'break-word', hyphens: 'auto' }}>
+                  {t('team.content.load_failed.title', 'Failed to load teams')}
+                </Title>
+                <Text size="sm" c="dimmed" ta="center" style={{ wordBreak: 'break-word', hyphens: 'auto' }}>
+                  {t('team.content.load_failed.hint', 'Something went wrong while loading your teams. Please try again.')}
+                </Text>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    mutateTeams()
+                    mutateUser()
+                  }}
+                >
+                  {t('common.button.retry', 'Retry')}
+                </Button>
+              </Stack>
+            </Center>
+          ) : teams && user ? (
             teams.length > 0 ? (
               <SimpleGrid cols={isMobile ? 1 : 2} spacing="xl" p={isMobile ? 'sm' : '2rem'} w="100%">
                 {(teams || []).map((t, i) => (
@@ -174,7 +198,7 @@ const Teams: FC = () => {
               value={joinTeamCode}
               onChange={(event) => setJoinTeamCode(event.currentTarget.value)}
             />
-            <Button fullWidth variant="outline" onClick={onJoinTeam}>
+            <Button fullWidth variant="outline" loading={joining} disabled={joining} onClick={onJoinTeam}>
               {t('team.button.join')}
             </Button>
           </Stack>

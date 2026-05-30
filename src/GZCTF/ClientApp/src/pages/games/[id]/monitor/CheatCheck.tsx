@@ -5,6 +5,7 @@ import { Loader, Stack, Title, Alert, Tabs, Text, Group, ThemeIcon, Box } from '
 import { FC, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router'
 import { WithGameMonitor } from '@Components/WithGameMonitor'
+import { tryGetErrorMsg } from '@Utils/Shared'
 import api from '@Api'
 import { useTranslation } from 'react-i18next'
 import { Icon } from '@mdi/react'
@@ -40,7 +41,7 @@ const CheatCheck: FC = () => {
                 <Stack align="center" justify="center" h="60vh" gap="md">
                     <Loader size="lg" />
                     <Text c="dimmed" size="sm">
-                        Loading cheat analysis…
+                        {t('game.content.cheat.loading', 'Loading cheat analysis…')}
                     </Text>
                 </Stack>
             </WithGameMonitor>
@@ -51,10 +52,10 @@ const CheatCheck: FC = () => {
             <WithGameMonitor>
                 <Alert
                     color="red"
-                    title="Failed to load report"
+                    title={t('game.content.cheat.load_failed', 'Failed to load report')}
                     icon={<Icon path={mdiAlertCircle} size={1} />}
                 >
-                    {error.message}
+                    {tryGetErrorMsg(error, t)}
                 </Alert>
             </WithGameMonitor>
         )
@@ -75,7 +76,10 @@ const CheatCheck: FC = () => {
                     <Box>
                         <Title order={3}>{t('game.title.cheat_check', 'Cheat Analysis')}</Title>
                         <Text size="xs" c="dimmed">
-                            Behavioral analysis, IP anomalies, and flag-sharing detection
+                            {t(
+                                'game.content.cheat.subtitle',
+                                'Behavioral analysis, IP anomalies, and flag-sharing detection'
+                            )}
                         </Text>
                     </Box>
                 </Group>
@@ -98,13 +102,13 @@ const CheatCheck: FC = () => {
                             value="analysis"
                             leftSection={<Icon path={mdiChartBox} size={0.85} />}
                         >
-                            Anomaly Analysis
+                            {t('game.tab.cheat.analysis', 'Anomaly Analysis')}
                         </Tabs.Tab>
                         <Tabs.Tab
                             value="submissions"
                             leftSection={<Icon path={mdiFlagVariant} size={0.85} />}
                         >
-                            Submissions &amp; Flags
+                            {t('game.tab.cheat.submissions', 'Submissions & Flags')}
                         </Tabs.Tab>
                     </Tabs.List>
 

@@ -202,7 +202,7 @@ const Logs: FC = () => {
             </Text>
             <ActionIcon
               size="lg"
-              disabled={logs && logs.length < ITEM_COUNT_PER_PAGE}
+              disabled={!logs || logs.length < ITEM_COUNT_PER_PAGE}
               onClick={() => setPage(activePage + 1)}
             >
               <Icon path={mdiArrowRightBold} size={1} />

@@ -3,6 +3,7 @@ import { DatesProvider } from '@mantine/dates'
 import { emotionTransform, MantineEmotionProvider } from '@mantine/emotion'
 import { ModalsProvider } from '@mantine/modals'
 import { Notifications } from '@mantine/notifications'
+import i18next from 'i18next'
 import { FC, Suspense } from 'react'
 import { ErrorBoundary } from 'react-error-boundary'
 import { useTranslation } from 'react-i18next'
@@ -50,8 +51,8 @@ const authAwareFetcher = async (args: Parameters<typeof rawFetcher>[0]) => {
         showNotification({
           id: 'session-expired',
           color: 'red',
-          title: 'Session expired',
-          message: 'Please log in again.',
+          title: i18next.t('common.error.session_expired', 'Session expired'),
+          message: i18next.t('common.content.relogin', 'Please log in again.'),
         })
       } catch {
         // notifications unavailable — skip toast, still redirect

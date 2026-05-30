@@ -1,38 +1,36 @@
 import {
-  ActionIcon,
+  Alert,
   Badge,
+  Button,
   Center,
   Code,
   Container,
-  Group,
   Paper,
   ScrollArea,
   Stack,
   Table,
   Text,
   Title,
-  Tooltip,
 } from '@mantine/core'
 import { showNotification } from '@mantine/notifications'
-import { mdiCheck, mdiDeleteOutline } from '@mdi/js'
+import { mdiAlertCircle, mdiCheck, mdiDeleteOutline } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
-import { FC, useState } from 'react'
+import { FC } from 'react'
 
 dayjs.extend(relativeTime)
 import { useTranslation } from 'react-i18next'
+import { ActionIconWithConfirm } from '@Components/ActionIconWithConfirm'
 import { AdminPage } from '@Components/admin/AdminPage'
 import { showErrorMsg } from '@Utils/Shared'
 import api, { AntiCheatBlockModel } from '@Api'
 
 const AntiCheat: FC = () => {
   const { t } = useTranslation()
-  const { data: blocks, mutate } = api.admin.useAdminListAntiCheatBlocks({ count: 200 })
-  const [busy, setBusy] = useState(false)
+  const { data: blocks, error, mutate } = api.admin.useAdminListAntiCheatBlocks({ count: 200 })
 
   const onClear = async (b: AntiCheatBlockModel) => {
-    setBusy(true)
     try {
       await api.admin.adminClearAntiCheatBlock(b.id)
       showNotification({
@@ -43,13 +41,11 @@ const AntiCheat: FC = () => {
       mutate()
     } catch (e) {
       showErrorMsg(e, t)
-    } finally {
-      setBusy(false)
     }
   }
 
   return (
-    <AdminPage isLoading={!blocks}>
+    <AdminPage isLoading={!blocks && !error}>
       <Container size="xl" mt="md">
         <Stack gap="lg">
           <Stack gap={0}>
@@ -57,7 +53,24 @@ const AntiCheat: FC = () => {
             <Text c="dimmed">{t('admin.content.anti_cheat.subtitle')}</Text>
           </Stack>
 
-          {!blocks || blocks.length === 0 ? (
+          {error ? (
+            <Alert
+              color="red"
+              variant="light"
+              icon={<Icon path={mdiAlertCircle} size={1} />}
+              title={t('admin.content.anti_cheat.load_failed_title', 'Failed to load anti-cheat blocks')}
+            >
+              <Stack gap="sm" align="flex-start">
+                <Text size="sm">
+                  {error.title ??
+                    t('admin.content.anti_cheat.load_failed', 'The anti-cheat blocks could not be loaded.')}
+                </Text>
+                <Button size="xs" variant="outline" color="red" onClick={() => mutate()}>
+                  {t('admin.button.anti_cheat.retry', 'Retry')}
+                </Button>
+              </Stack>
+            </Alert>
+          ) : !blocks || blocks.length === 0 ? (
             <Center h="30vh">
               <Stack gap={0} align="center">
                 <Title order={4}>{t('admin.content.anti_cheat.empty_title')}</Title>
@@ -112,16 +125,15 @@ const AntiCheat: FC = () => {
                           ) : '—'}
                         </Table.Td>
                         <Table.Td align="right">
-                          <Tooltip label={t('admin.button.anti_cheat.clear')}>
-                            <ActionIcon
-                              variant="subtle"
-                              color="red"
-                              disabled={busy}
-                              onClick={() => onClear(b)}
-                            >
-                              <Icon path={mdiDeleteOutline} size={1} />
-                            </ActionIcon>
-                          </Tooltip>
+                          <ActionIconWithConfirm
+                            iconPath={mdiDeleteOutline}
+                            color="red"
+                            message={t(
+                              'admin.content.anti_cheat.clear_confirm',
+                              'Clear this anti-cheat block? This cannot be undone.',
+                            )}
+                            onClick={() => onClear(b)}
+                          />
                         </Table.Td>
                       </Table.Tr>
                     ))}

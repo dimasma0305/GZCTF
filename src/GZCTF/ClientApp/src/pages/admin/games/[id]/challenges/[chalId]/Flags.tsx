@@ -141,7 +141,16 @@ const OneAttachmentWithFlags: FC<FlagEditProps> = ({ onDelete }) => {
   }
 
   const onRemote = async () => {
-    if (!remoteUrl.startsWith('http')) return
+    if (!/^https?:\/\//i.test(remoteUrl.trim())) {
+      showNotification({
+        color: 'orange',
+        message: t(
+          'admin.notification.games.challenges.attachment.invalid_url',
+          'Please enter a valid URL starting with http:// or https://'
+        ),
+      })
+      return
+    }
     setDisabled(true)
 
     try {
@@ -220,7 +229,11 @@ const OneAttachmentWithFlags: FC<FlagEditProps> = ({ onDelete }) => {
             )}
           </FileButton>
         ) : (
-          <Button disabled={disabled} w="122px" onClick={onRemote}>
+          <Button
+            disabled={disabled || !/^https?:\/\//i.test(remoteUrl.trim())}
+            w="122px"
+            onClick={onRemote}
+          >
             {t('admin.button.challenges.attachment.save_url')}
           </Button>
         )}
@@ -506,7 +519,26 @@ const GameChallengeEdit: FC = () => {
         </>
       }
     >
-      {challenge && challenge.type === ChallengeType.DynamicAttachment ? (
+      {challenge &&
+      (challenge.type === ChallengeType.AttackDefense ||
+        challenge.type === ChallengeType.KingOfTheHill) ? (
+        <Center h="calc(100vh - 25rem)">
+          <Stack gap={0} maw="32rem" ta="center">
+            <Title order={2}>
+              {t(
+                'admin.content.games.challenges.flag.ad_engine.title',
+                'Flags are managed automatically'
+              )}
+            </Title>
+            <Text c="dimmed">
+              {t(
+                'admin.content.games.challenges.flag.ad_engine.description',
+                'Attack & Defense and King of the Hill challenges generate per-team flags through the A&D engine. The static flag and attachment editor does not apply to this challenge type.'
+              )}
+            </Text>
+          </Stack>
+        </Center>
+      ) : challenge && challenge.type === ChallengeType.DynamicAttachment ? (
         <FlagsWithAttachments onDelete={onDeleteFlag} />
       ) : (
         <OneAttachmentWithFlags onDelete={onDeleteFlag} />

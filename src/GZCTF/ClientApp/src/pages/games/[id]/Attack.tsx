@@ -16,6 +16,7 @@
 import { mdiWater } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import * as signalR from '@microsoft/signalr'
 import { useParams } from 'react-router'
 import api, {
@@ -317,6 +318,7 @@ const CHALLS: Array<[ChallengeCategory, string]> = [
 ]
 
 const Attack: FC = () => {
+  const { t } = useTranslation()
   const { id } = useParams()
   const numId = parseInt(id ?? '-1')
 
@@ -759,15 +761,17 @@ const Attack: FC = () => {
         }
       }
     }
-    connection.onreconnecting(() => setStatus('RECONNECTING', '#f4b619', true))
-    connection.onreconnected(() => setStatus('LIVE', '#3ae85c', true))
-    connection.onclose(() => setStatus('OFFLINE', '#ff2a2a', false))
+    connection.onreconnecting(() =>
+      setStatus(t('game.attack.status.reconnecting', 'RECONNECTING'), '#f4b619', true)
+    )
+    connection.onreconnected(() => setStatus(t('game.attack.status.live', 'LIVE'), '#3ae85c', true))
+    connection.onclose(() => setStatus(t('game.attack.status.offline', 'OFFLINE'), '#ff2a2a', false))
 
     connection
       .start()
-      .then(() => setStatus('LIVE', '#3ae85c', true))
+      .then(() => setStatus(t('game.attack.status.live', 'LIVE'), '#3ae85c', true))
       .catch((err) => {
-        setStatus('OFFLINE', '#ff2a2a', false)
+        setStatus(t('game.attack.status.offline', 'OFFLINE'), '#ff2a2a', false)
         // eslint-disable-next-line no-console
         console.warn('[attack] signalR connect failed', err)
       })
@@ -942,7 +946,7 @@ const Attack: FC = () => {
                 flexShrink: 0,
               }}
             />
-            <span ref={liveLabelRef}>LIVE</span>
+            <span ref={liveLabelRef}>{t('game.attack.status.live', 'LIVE')}</span>
           </span>
           &nbsp;//&nbsp; <span ref={clockRef}>{new Date().toISOString().slice(11, 19)}</span> UTC
         </span>
@@ -1015,12 +1019,18 @@ const Attack: FC = () => {
               textTransform: 'uppercase',
             }}
           >
-            LANDSCAPE DISPLAY REQUIRED
+            {t('game.attack.gate.title', 'LANDSCAPE DISPLAY REQUIRED')}
           </div>
           <div style={{ fontSize: 12, letterSpacing: '.1em', color: '#6b7183', maxWidth: 420 }}>
             {isUnsupported
-              ? 'The attack feed needs at least 700px of horizontal space. Open it on a laptop, projector, or cast to a larger screen.'
-              : 'Rotate your device to landscape, or open on a larger screen for the full visualization.'}
+              ? t(
+                  'game.attack.gate.unsupported',
+                  'The attack feed needs at least 700px of horizontal space. Open it on a laptop, projector, or cast to a larger screen.'
+                )
+              : t(
+                  'game.attack.gate.rotate',
+                  'Rotate your device to landscape, or open on a larger screen for the full visualization.'
+                )}
           </div>
         </div>
       )}
@@ -1094,7 +1104,7 @@ const Attack: FC = () => {
               marginTop: 20,
             }}
           >
-            LIVE ATTACK FEED · PUBLIC
+            {t('game.attack.overlay.subtitle', 'LIVE ATTACK FEED · PUBLIC')}
           </div>
           <div
             style={{
@@ -1109,7 +1119,7 @@ const Attack: FC = () => {
               animation: 'attackPulse 1.4s infinite',
             }}
           >
-            ▶ CLICK ANYWHERE TO BEGIN
+            ▶ {t('game.attack.overlay.begin', 'CLICK ANYWHERE TO BEGIN')}
           </div>
         </div>
       )}
@@ -1752,6 +1762,7 @@ const ScoreboardPanel: FC<ScoreboardPanelProps> = ({
   fbCount,
   atkRateRef,
 }) => {
+  const { t } = useTranslation()
   const rowCount = Math.max(top5.length, 1)
   // Board height: 36px header + rowCount * 32px row + 30px padding.
   // Using the actual row count instead of a hardcoded 6 avoids the
@@ -1842,7 +1853,9 @@ const ScoreboardPanel: FC<ScoreboardPanelProps> = ({
           </div>
         ))}
         {top5.length === 0 && (
-          <div style={{ color: '#475569', fontSize: 12 }}>No scoreboard yet</div>
+          <div style={{ color: '#475569', fontSize: 12 }}>
+            {t('game.attack.scoreboard.empty', 'No scoreboard yet')}
+          </div>
         )}
       </div>
       <div

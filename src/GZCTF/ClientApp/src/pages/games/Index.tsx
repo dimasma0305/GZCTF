@@ -3,6 +3,7 @@ import {
   Group,
   Pagination,
   SimpleGrid,
+  Skeleton,
   Stack,
   Text,
   UnstyledButton,
@@ -12,6 +13,7 @@ import {
 import { FC, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
+import { Empty } from '@Components/Empty'
 import { GameCard, GameColorMap } from '@Components/GameCard'
 import { WithNavBar } from '@Components/WithNavbar'
 import { GanttTimeLine } from '@Components/charts/GanttTimeline'
@@ -73,9 +75,19 @@ const Games: FC = () => {
     <WithNavBar withFooter withHeader stickyHeader>
       <GanttTimeLine items={recents} />
       <Stack pt="md" mih="calc(100vh - 78px)" justify="space-between">
-        <SimpleGrid cols={{ base: 1, sm: 1, md: 2, lg: 3, xl: 3, w18: 4, w24: 5 }} spacing="lg" verticalSpacing="lg">
-          {games && games.data.map((g) => <GameCard key={g.id} game={g} />)}
-        </SimpleGrid>
+        {games === undefined ? (
+          <SimpleGrid cols={{ base: 1, sm: 1, md: 2, lg: 3, xl: 3, w18: 4, w24: 5 }} spacing="lg" verticalSpacing="lg">
+            {Array.from({ length: ITEM_PER_PAGE }).map((_, i) => (
+              <Skeleton key={i} h="22rem" radius="md" />
+            ))}
+          </SimpleGrid>
+        ) : games.data.length === 0 ? (
+          <Empty description={t('game.content.no_game', 'No games available')} />
+        ) : (
+          <SimpleGrid cols={{ base: 1, sm: 1, md: 2, lg: 3, xl: 3, w18: 4, w24: 5 }} spacing="lg" verticalSpacing="lg">
+            {games.data.map((g) => <GameCard key={g.id} game={g} />)}
+          </SimpleGrid>
+        )}
         <Pagination.Root total={pageCount} siblings={3} value={activePage} onChange={setPage} mb="xl">
           <Group gap={5} justify="flex-end">
             <Pagination.First />

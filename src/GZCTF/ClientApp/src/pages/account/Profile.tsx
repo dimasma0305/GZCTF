@@ -20,7 +20,7 @@ import { Dropzone } from '@mantine/dropzone'
 import { notifications, showNotification, updateNotification } from '@mantine/notifications'
 import { mdiChartBar, mdiCheck, mdiClose } from '@mdi/js'
 import { Icon } from '@mdi/react'
-import { FC, useEffect, useState } from 'react'
+import { FC, useEffect, useMemo, useState } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { PasswordChangeModal } from '@Components/PasswordChangeModal'
@@ -45,6 +45,13 @@ const Profile: FC = () => {
     realName: user?.realName,
   })
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
+
+  const avatarPreview = useMemo(() => (avatarFile ? URL.createObjectURL(avatarFile) : null), [avatarFile])
+
+  useEffect(() => {
+    if (!avatarPreview) return
+    return () => URL.revokeObjectURL(avatarPreview)
+  }, [avatarPreview])
 
   const [disabled, setDisabled] = useState(false)
 
@@ -134,6 +141,7 @@ const Profile: FC = () => {
     if (!email) return
 
     try {
+      setDisabled(true)
       const res = await api.account.accountChangeEmail({ newMail: email })
       if (res.data.data) {
         showNotification({
@@ -144,7 +152,15 @@ const Profile: FC = () => {
         })
       } else {
         mutate({ ...user, email: email })
+        showNotification({
+          color: 'teal',
+          title: t('account.notification.profile.email_updated.title', 'Email updated'),
+          message: t('account.notification.profile.email_updated.message', 'Your email address has been changed.'),
+          icon: <Icon path={mdiCheck} size={1} />,
+        })
       }
+      setEmail('')
+      setMailEditOpened(false)
     } catch (e) {
       showErrorMsg(e, t)
     } finally {
@@ -167,7 +183,23 @@ const Profile: FC = () => {
             onChange={(event) => setProfile({ ...profile, userName: event.target.value })}
           />
           <Center>
-            <Avatar alt="avatar" radius={40} size={80} src={user?.avatar} onClick={() => setDropzoneOpened(true)}>
+            <Avatar
+              alt="avatar"
+              radius={40}
+              size={80}
+              src={user?.avatar}
+              role="button"
+              tabIndex={0}
+              aria-label={t('account.button.change_avatar', 'Change avatar')}
+              style={{ cursor: 'pointer' }}
+              onClick={() => setDropzoneOpened(true)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  setDropzoneOpened(true)
+                }
+              }}
+            >
               {user?.userName?.slice(0, 1) ?? 'U'}
             </Avatar>
           </Center>
@@ -319,8 +351,8 @@ const Profile: FC = () => {
           accept={IMAGE_MIME_TYPES}
         >
           <Group justify="center" gap="xl" mih={240} className={misc.noPointerEvents}>
-            {avatarFile ? (
-              <Image fit="contain" src={URL.createObjectURL(avatarFile)} alt="avatar" />
+            {avatarPreview ? (
+              <Image fit="contain" src={avatarPreview} alt="avatar" />
             ) : (
               <Box>
                 <Text size="xl" inline>

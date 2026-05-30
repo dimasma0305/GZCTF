@@ -198,7 +198,7 @@ const Register: FC = () => {
         onChange={(event) => setRetypedPwd(event.currentTarget.value)}
         disabled={disabled}
         w="100%"
-        error={pwd !== retypedPwd}
+        error={retypedPwd.length > 0 && pwd !== retypedPwd && t('account.password.not_match')}
       />
       <Captcha action="register" ref={captchaRef} />
       <TermsOfService

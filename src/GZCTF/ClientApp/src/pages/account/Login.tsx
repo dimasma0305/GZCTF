@@ -23,6 +23,8 @@ const Login: FC = () => {
 
   const [pwd, setPwd] = useInputState('')
   const [uname, setUname] = useInputState('')
+  const [unameError, setUnameError] = useState<string | null>(null)
+  const [pwdError, setPwdError] = useState<string | null>(null)
   const [disabled, setDisabled] = useState(false)
   const [needRedirect, setNeedRedirect] = useState(false)
   const [accepted, setAccepted] = useState(false)
@@ -46,16 +48,27 @@ const Login: FC = () => {
   }, [user, needRedirect])
 
   const executeLogin = async () => {
-    if (uname.length === 0 || pwd.length < 6) {
+    const unameInvalid = uname.length === 0
+    const pwdInvalid = pwd.length < 6
+    if (unameInvalid || pwdInvalid) {
+      setUnameError(
+        unameInvalid ? t('account.validation.username_required', 'Please enter your username or email') : null,
+      )
+      setPwdError(
+        pwdInvalid ? t('account.validation.password_min_length', 'Password must be at least 6 characters') : null,
+      )
       showNotification({
         color: 'red',
-        title: t('account.notification.login.invalid'),
+        title: t('account.notification.login.check_input', 'Please check your input'),
         message: t('common.error.check_input'),
         icon: <Icon path={mdiClose} size={1} />,
       })
       setDisabled(false)
       return
     }
+
+    setUnameError(null)
+    setPwdError(null)
 
     if (config.enableBrowserFingerprint && !accepted) {
       openTos()
@@ -159,7 +172,11 @@ const Login: FC = () => {
         w="100%"
         value={uname}
         disabled={disabled}
-        onChange={(event) => setUname(event.currentTarget.value)}
+        error={unameError}
+        onChange={(event) => {
+          setUname(event.currentTarget.value)
+          setUnameError(null)
+        }}
       />
       <PasswordInput
         required
@@ -169,7 +186,11 @@ const Login: FC = () => {
         w="100%"
         value={pwd}
         disabled={disabled}
-        onChange={(event) => setPwd(event.currentTarget.value)}
+        error={pwdError}
+        onChange={(event) => {
+          setPwd(event.currentTarget.value)
+          setPwdError(null)
+        }}
       />
       <Captcha action="login" ref={captchaRef} />
       <TermsOfService

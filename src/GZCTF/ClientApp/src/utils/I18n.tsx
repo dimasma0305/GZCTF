@@ -84,7 +84,7 @@ interface LanguageContextValue {
 const LanguageContext = createContext<LanguageContextValue | undefined>(undefined)
 
 export const LanguageProvider = ({ children }: PropsWithChildren) => {
-  const { i18n } = useTranslation()
+  const { t, i18n } = useTranslation()
 
   const [language, setLanguageInner] = useLocalStorage<SupportedLanguages>({
     key: 'language',
@@ -114,33 +114,45 @@ export const LanguageProvider = ({ children }: PropsWithChildren) => {
         modals.openConfirmModal({
           w: '30vw',
           maw: '30rem',
-          title: <Text fw="bold">{isMT ? '🤖 Machine Translation' : '🚀 Incompleted Translation'}</Text>,
+          title: (
+            <Text fw="bold">
+              {isMT
+                ? t('common.content.language.mt.title', '🤖 Machine Translation')
+                : t('common.content.language.wip.title', '🚀 Incomplete Translation')}
+            </Text>
+          ),
           children: (
             <>
               <Text>
                 {isMT
-                  ? 'This translation is done by machine and AIs, it may not be accurate.'
-                  : 'This language is still in progress, some parts may not be translated.'}
+                  ? t(
+                      'common.content.language.mt.description',
+                      'This translation is done by machine and AIs, it may not be accurate.'
+                    )
+                  : t(
+                      'common.content.language.wip.description',
+                      'This language is still in progress, some parts may not be translated.'
+                    )}
               </Text>
               <Divider my={10} />
-              <Text>If you want to help with the translation:</Text>
+              <Text>{t('common.content.language.help', 'If you want to help with the translation:')}</Text>
               <List>
                 <List.Item>
                   <Text>
-                    Current Language: <Code>{lang}</Code>{' '}
+                    {t('common.content.language.current', 'Current Language:')} <Code>{lang}</Code>{' '}
                     <Text span size="sm">
                       {LanguageMap[lang]}
                     </Text>
                   </Text>
                 </List.Item>
                 <List.Item>
-                  Contact us on{' '}
+                  {t('common.content.language.contact', 'Contact us on')}{' '}
                   <Anchor href="https://github.com/GZTimeWalker/GZCTF" target="_blank" rel="noreferrer">
                     GitHub
                   </Anchor>
                 </List.Item>
                 <List.Item>
-                  Track the progress on{' '}
+                  {t('common.content.language.track', 'Track the progress on')}{' '}
                   <Anchor href="https://crowdin.com/project/gzctf" target="_blank" rel="noreferrer">
                     Crowdin
                   </Anchor>
@@ -149,7 +161,10 @@ export const LanguageProvider = ({ children }: PropsWithChildren) => {
             </>
           ),
           confirmProps: { color: undefined },
-          labels: { confirm: 'Confirm', cancel: 'Switch to English' },
+          labels: {
+            confirm: t('common.button.confirm', 'Confirm'),
+            cancel: t('common.content.language.switch_to_english', 'Switch to English'),
+          },
           onCancel: () => setLanguage('en-US'),
         })
       } else {
@@ -157,7 +172,7 @@ export const LanguageProvider = ({ children }: PropsWithChildren) => {
         setLanguageInner(defaultLanguage)
       }
     },
-    [setLanguageInner]
+    [setLanguageInner, t]
   )
 
   const contextValue = useMemo(

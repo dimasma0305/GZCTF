@@ -204,6 +204,25 @@ const Instances: FC = () => {
     }
   }
 
+  const copyContainerUrl = (containerGuid?: string | null) => () => {
+    clipBoard.copy(containerGuid ? getProxyUrl(containerGuid) : '')
+    showNotification({
+      color: 'teal',
+      title: t('admin.notification.instances.url_copied.title'),
+      message: t('admin.notification.instances.url_copied.message'),
+      icon: <Icon path={mdiCheck} size={1} />,
+    })
+  }
+
+  const copyEntry = (ip?: string | null, port?: number | null) => () => {
+    clipBoard.copy(`${ip ?? ''}:${port ?? ''}`)
+    showNotification({
+      color: 'teal',
+      message: t('admin.notification.instances.entry_copied'),
+      icon: <Icon path={mdiCheck} size={1} />,
+    })
+  }
+
   return (
     <AdminPage
       isLoading={!instances || !teams || !challenge}
@@ -317,15 +336,16 @@ const Instances: FC = () => {
                               ff="monospace"
                               bg="transparent"
                               fz="sm"
+                              role="button"
+                              tabIndex={0}
+                              aria-label={t('admin.notification.instances.url_copied.title')}
                               className={tableClasses.clickable}
-                              onClick={() => {
-                                clipBoard.copy(inst.containerGuid && getProxyUrl(inst.containerGuid))
-                                showNotification({
-                                  color: 'teal',
-                                  title: t('admin.notification.instances.url_copied.title'),
-                                  message: t('admin.notification.instances.url_copied.message'),
-                                  icon: <Icon path={mdiCheck} size={1} />,
-                                })
+                              onClick={copyContainerUrl(inst.containerGuid)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault()
+                                  copyContainerUrl(inst.containerGuid)()
+                                }
                               }}
                             >
                               {inst.containerGuid}
@@ -341,14 +361,16 @@ const Instances: FC = () => {
                             ff="monospace"
                             bg="transparent"
                             fz="sm"
+                            role="button"
+                            tabIndex={0}
+                            aria-label={t('admin.notification.instances.entry_copied')}
                             className={tableClasses.clickable}
-                            onClick={() => {
-                              clipBoard.copy(`${inst.ip ?? ''}:${inst.port ?? ''}`)
-                              showNotification({
-                                color: 'teal',
-                                message: t('admin.notification.instances.entry_copied'),
-                                icon: <Icon path={mdiCheck} size={1} />,
-                              })
+                            onClick={copyEntry(inst.ip, inst.port)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                copyEntry(inst.ip, inst.port)()
+                              }
                             }}
                           >
                             {`${inst.ip}:`}

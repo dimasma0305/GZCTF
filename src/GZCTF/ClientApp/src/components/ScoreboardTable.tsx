@@ -139,6 +139,7 @@ const TableRow: FC<{
   divisionMap: Map<number, string>
   highlighted?: boolean
 }> = React.memo(({ item, challenges, onOpenDetail, iconMap, tableRank, allRank, divisionMap, highlighted }) => {
+  const { t } = useTranslation()
   const challengeCategoryLabelMap = useChallengeCategoryLabelMap()
   const solved = item.solvedChallenges
   const theme = useMantineTheme()
@@ -188,6 +189,18 @@ const TableRow: FC<{
           gap={5}
           wrap="nowrap"
           onClick={onOpenDetail}
+          role="button"
+          tabIndex={0}
+          aria-label={t('game.label.score_table.open_team_detail', {
+            defaultValue: 'Open details for {{team}}',
+            team: item.name || '',
+          })}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              onOpenDetail()
+            }
+          }}
           maw={Widths[2] - 10}
           className={classes.pointer}
         >
@@ -426,6 +439,13 @@ export const ScoreboardTable: FC<ScoreboardProps> = ({ divisionId, setDivisionId
               </Table.Tbody>
             </Table>
           </Table.ScrollContainer>
+          {scoreboard && filteredList.length === 0 && (
+            <Center mih="6rem">
+              <Text size="sm" c="dimmed">
+                {t('game.content.scoreboard.no_teams', 'No teams ranked yet.')}
+              </Text>
+            </Center>
+          )}
           <Box className={classes.legend}>
             <Stack gap="xs">
               <Tooltip.Group>

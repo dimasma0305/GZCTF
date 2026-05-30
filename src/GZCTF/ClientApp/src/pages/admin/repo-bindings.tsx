@@ -242,12 +242,35 @@ const RepoBindings: FC = () => {
             <Paper p="sm" withBorder>
               <Stack gap="xs">
                 <Group gap="md">
-                  <Badge color="teal" variant="light">games +{lastResult.gamesCreated}</Badge>
-                  <Badge color="blue" variant="light">games ~{lastResult.gamesUpdated}</Badge>
-                  <Badge color="teal" variant="light">challenges +{lastResult.challengesImported}</Badge>
-                  <Badge color="blue" variant="light">challenges ~{lastResult.challengesUpdated}</Badge>
+                  <Badge color="teal" variant="light">
+                    {t('admin.content.repo_binding.summary.games_created', {
+                      count: lastResult.gamesCreated,
+                      defaultValue: 'games +{{count}}',
+                    })}
+                  </Badge>
+                  <Badge color="blue" variant="light">
+                    {t('admin.content.repo_binding.summary.games_updated', {
+                      count: lastResult.gamesUpdated,
+                      defaultValue: 'games ~{{count}}',
+                    })}
+                  </Badge>
+                  <Badge color="teal" variant="light">
+                    {t('admin.content.repo_binding.summary.challenges_created', {
+                      count: lastResult.challengesImported,
+                      defaultValue: 'challenges +{{count}}',
+                    })}
+                  </Badge>
+                  <Badge color="blue" variant="light">
+                    {t('admin.content.repo_binding.summary.challenges_updated', {
+                      count: lastResult.challengesUpdated,
+                      defaultValue: 'challenges ~{{count}}',
+                    })}
+                  </Badge>
                   <Badge color={lastResult.failures > 0 ? 'red' : 'gray'} variant="light">
-                    failures {lastResult.failures}
+                    {t('admin.content.repo_binding.summary.failures', {
+                      count: lastResult.failures,
+                      defaultValue: 'failures {{count}}',
+                    })}
                   </Badge>
                 </Group>
                 {lastResult.messages.length > 0 && (
@@ -259,7 +282,10 @@ const RepoBindings: FC = () => {
                     ))}
                     {lastResult.messages.length > 12 && (
                       <Text size="xs" c="dimmed">
-                        …and {lastResult.messages.length - 12} more
+                        {t('admin.content.repo_binding.summary.more_messages', {
+                          count: lastResult.messages.length - 12,
+                          defaultValue: '…and {{count}} more',
+                        })}
                       </Text>
                     )}
                   </Stack>
@@ -292,11 +318,15 @@ const RepoBindings: FC = () => {
                         {b.hasGitHubToken && (
                           b.tokenStatus === 'DecryptFailed' ? (
                             <Tooltip label={t('admin.content.repo_binding.token_decrypt_failed')}>
-                              <Badge size="xs" color="red" variant="filled">PAT ✗</Badge>
+                              <Badge size="xs" color="red" variant="filled">
+                                {t('admin.content.repo_binding.summary.pat_failed', 'PAT ✗')}
+                              </Badge>
                             </Tooltip>
                           ) : (
                             <Tooltip label={t('admin.content.repo_binding.has_token')}>
-                              <Badge size="xs" color="gray" variant="light">PAT</Badge>
+                              <Badge size="xs" color="gray" variant="light">
+                                {t('admin.content.repo_binding.summary.pat', 'PAT')}
+                              </Badge>
                             </Tooltip>
                           )
                         )}
@@ -461,12 +491,35 @@ const RepoBindings: FC = () => {
                     {row.commitSha && <Code>{row.commitSha.substring(0, 7)}</Code>}
                   </Group>
                   <Group gap="md">
-                    <Badge size="xs" color="teal" variant="light">games +{row.gamesCreated}</Badge>
-                    <Badge size="xs" color="blue" variant="light">games ~{row.gamesUpdated}</Badge>
-                    <Badge size="xs" color="teal" variant="light">chal +{row.challengesImported}</Badge>
-                    <Badge size="xs" color="blue" variant="light">chal ~{row.challengesUpdated}</Badge>
+                    <Badge size="xs" color="teal" variant="light">
+                      {t('admin.content.repo_binding.summary.games_created', {
+                        count: row.gamesCreated,
+                        defaultValue: 'games +{{count}}',
+                      })}
+                    </Badge>
+                    <Badge size="xs" color="blue" variant="light">
+                      {t('admin.content.repo_binding.summary.games_updated', {
+                        count: row.gamesUpdated,
+                        defaultValue: 'games ~{{count}}',
+                      })}
+                    </Badge>
+                    <Badge size="xs" color="teal" variant="light">
+                      {t('admin.content.repo_binding.summary.challenges_created_short', {
+                        count: row.challengesImported,
+                        defaultValue: 'chal +{{count}}',
+                      })}
+                    </Badge>
+                    <Badge size="xs" color="blue" variant="light">
+                      {t('admin.content.repo_binding.summary.challenges_updated_short', {
+                        count: row.challengesUpdated,
+                        defaultValue: 'chal ~{{count}}',
+                      })}
+                    </Badge>
                     <Badge size="xs" color={row.failures > 0 ? 'red' : 'gray'} variant="light">
-                      failures {row.failures}
+                      {t('admin.content.repo_binding.summary.failures', {
+                        count: row.failures,
+                        defaultValue: 'failures {{count}}',
+                      })}
                     </Badge>
                   </Group>
                   {row.messages && (

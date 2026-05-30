@@ -110,19 +110,28 @@ export const InstanceEntry: FC<InstanceEntryProps> = (props) => {
     setCanExtend(countdown.asMinutes() < (config.renewalWindow ?? 10))
   }, [context, config.renewalWindow])
 
-  const onExtend = () => {
+  const onExtend = async () => {
     if (!canExtend || !props.onExtend) return
 
-    props.onExtend()
+    try {
+      await Promise.resolve(props.onExtend())
 
-    showNotification({
-      color: 'teal',
-      title: t('challenge.notification.instance.extend.success.title'),
-      message: t('challenge.notification.instance.extend.success.message'),
-      icon: <Icon path={mdiCheck} size={1} />,
-    })
+      showNotification({
+        color: 'teal',
+        title: t('challenge.notification.instance.extend.success.title'),
+        message: t('challenge.notification.instance.extend.success.message'),
+        icon: <Icon path={mdiCheck} size={1} />,
+      })
 
-    setCanExtend(false)
+      setCanExtend(false)
+    } catch (err) {
+      showNotification({
+        color: 'red',
+        title: t('challenge.notification.instance.extend.note.title'),
+        message: (err as Error)?.message ?? t('common.error.unknown', 'An unknown error occurred'),
+        icon: <Icon path={mdiExclamation} size={1} />,
+      })
+    }
   }
 
   const localTraffic = wsrx.list().find((traffic) => traffic.remote === originalEntry)
@@ -239,18 +248,26 @@ export const InstanceEntry: FC<InstanceEntryProps> = (props) => {
                 }
                 withArrow
               >
-                <ActionIcon onClick={() => setForceShowOriginal((prev) => !prev)}>
+                <ActionIcon
+                  aria-label={
+                    forceShowOriginal
+                      ? t('challenge.button.instance.show.proxied')
+                      : t('challenge.button.instance.show.original')
+                  }
+                  onClick={() => setForceShowOriginal((prev) => !prev)}
+                >
                   <Icon path={mdiTransitConnectionVariant} size={1} />
                 </ActionIcon>
               </Tooltip>
             )}
             <Tooltip label={t('common.button.copy')} withArrow>
-              <ActionIcon onClick={onCopyEntry}>
+              <ActionIcon aria-label={t('common.button.copy')} onClick={onCopyEntry}>
                 <Icon path={mdiContentCopy} size={1} />
               </ActionIcon>
             </Tooltip>
             <Tooltip label={t('challenge.content.instance.open.web')} withArrow>
               <ActionIcon
+                aria-label={t('challenge.content.instance.open.web')}
                 disabled={entryIsWss}
                 component="a"
                 href={
@@ -285,10 +302,10 @@ export const InstanceEntry: FC<InstanceEntryProps> = (props) => {
             </Text>
           </Stack>
           <Group justify="right" wrap="nowrap" gap="xs">
-            <Button color="orange" onClick={onExtend} disabled={!canExtend || disabled}>
+            <Button color="orange" onClick={onExtend} disabled={!canExtend || disabled} loading={disabled}>
               {t('challenge.button.instance.extend')}
             </Button>
-            <Button color="red" onClick={onDestroy} disabled={disabled}>
+            <Button color="red" onClick={onDestroy} disabled={disabled} loading={disabled}>
               {t('challenge.button.instance.destroy')}
             </Button>
           </Group>

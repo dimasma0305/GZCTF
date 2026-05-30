@@ -160,7 +160,7 @@ export const ScoreboardItemModal: FC<ScoreboardItemModalProps> = (props) => {
               />
               {item?.divisionId && (
                 <Badge size="sm" variant="outline" className={modalClasses.divisionBadge}>
-                  {divisionMap.get(item.divisionId) ?? 'Unknown'}
+                  {divisionMap.get(item.divisionId) ?? t('common.placeholder.unknown_division', 'Unknown')}
                 </Badge>
               )}
             </Group>
@@ -209,7 +209,7 @@ export const ScoreboardItemModal: FC<ScoreboardItemModalProps> = (props) => {
                 <Icon path={mdiAccountOutline} size={0.85} color={theme.colors.blue[5]} />
                 <Text size="sm" fw={700} c="blue">{selectedUser}</Text>
               </Group>
-              <Tooltip label="Back to team view">
+              <Tooltip label={t('common.button.back', 'Back to team view')}>
                 <ActionIcon size="sm" variant="subtle" color="blue" onClick={() => setSelectedUser(null)}>
                   <Icon path={mdiClose} size={0.75} />
                 </ActionIcon>
@@ -251,14 +251,14 @@ export const ScoreboardItemModal: FC<ScoreboardItemModalProps> = (props) => {
                 {userFirstBloods > 0 && (
                   <Stack gap={2}>
                     <Text fw="bold" size="sm" ff="monospace" c="orange">{userFirstBloods}</Text>
-                    <Text size="xs" fw={500}>Bloods</Text>
+                    <Text size="xs" fw={500}>{t('game.label.score_table.bloods', 'Bloods')}</Text>
                   </Stack>
                 )}
                 <Stack gap={2}>
                   <Text fw="bold" size="sm" ff="monospace">
                     {item?.score ? `${Math.round(userScore / item.score * 100)}%` : '-'}
                   </Text>
-                  <Text size="xs" fw={500}>Contribution</Text>
+                  <Text size="xs" fw={500}>{t('game.label.score_table.contribution', 'Contribution')}</Text>
                 </Stack>
               </>
             ) : (

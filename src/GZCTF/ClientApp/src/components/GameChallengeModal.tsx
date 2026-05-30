@@ -1,7 +1,7 @@
 import { ModalProps } from '@mantine/core'
 import { useInputState } from '@mantine/hooks'
 import { notifications, showNotification, updateNotification } from '@mantine/notifications'
-import { mdiCheck, mdiClose, mdiLoading } from '@mdi/js'
+import { mdiCheck, mdiClose } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import React, { FC, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -284,6 +284,32 @@ export const GameChallengeModal: FC<GameChallengeModalProps> = (props) => {
         autoClose: 8000,
         loading: false,
       })
+    } else if (data === AnswerResult.CheatDetected) {
+      updateNotification({
+        id: 'flag-submitted',
+        color: 'red',
+        title: t('challenge.notification.flag.cheat.title', 'Cheating detected'),
+        message: t(
+          'challenge.notification.flag.cheat.message',
+          'This submission has been flagged as cheating. Please contact an administrator if you believe this is a mistake.'
+        ),
+        icon: <Icon path={mdiClose} size={1} />,
+        autoClose: false,
+        withCloseButton: true,
+      })
+    } else if (data === AnswerResult.NotFound) {
+      updateNotification({
+        id: 'flag-submitted',
+        color: 'red',
+        title: t('challenge.notification.flag.not_found.title', 'Submission not found'),
+        message: t(
+          'challenge.notification.flag.not_found.message',
+          'The submission could not be found. Please try submitting again.'
+        ),
+        icon: <Icon path={mdiClose} size={1} />,
+        autoClose: 8000,
+        withCloseButton: true,
+      })
     } else {
       updateNotification({
         id: 'flag-submitted',
@@ -292,7 +318,7 @@ export const GameChallengeModal: FC<GameChallengeModalProps> = (props) => {
         message: t('challenge.notification.flag.unknown.message', {
           id,
         }),
-        icon: <Icon path={mdiLoading} size={1} />,
+        icon: <Icon path={mdiClose} size={1} />,
         autoClose: false,
         withCloseButton: true,
       })

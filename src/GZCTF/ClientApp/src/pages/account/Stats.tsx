@@ -1,5 +1,6 @@
 import {
   Badge,
+  Button,
   Center,
   Group,
   Loader,
@@ -12,7 +13,7 @@ import {
   ThemeIcon,
   Title,
 } from '@mantine/core'
-import { mdiStar, mdiTrophy, mdiPuzzle, mdiFire } from '@mdi/js'
+import { mdiStar, mdiTrophy, mdiPuzzle, mdiFire, mdiAlertCircleOutline, mdiRefresh } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import type { EChartsOption } from 'echarts'
 import dayjs from 'dayjs'
@@ -42,7 +43,10 @@ const CATEGORY_COLORS: Record<string, string> = {
 }
 
 const fetcher = (url: string) =>
-  fetch(url, { credentials: 'include' }).then((r) => r.json())
+  fetch(url, { credentials: 'include' }).then((r) => {
+    if (!r.ok) throw new Error(`Request failed with status ${r.status}`)
+    return r.json()
+  })
 
 const Stats: FC = () => {
   const { t } = useTranslation()
@@ -52,7 +56,7 @@ const Stats: FC = () => {
 
   usePageTitle(t('account.title.stats', 'My Stats'))
 
-  const { data: stats, isLoading } = useSWR<UserStatsModel>('/api/account/stats', fetcher)
+  const { data: stats, error, isLoading, mutate } = useSWR<UserStatsModel>('/api/account/stats', fetcher)
 
   const categoryChartOption = useMemo((): EChartsOption => {
     if (!stats) return {}
@@ -85,7 +89,23 @@ const Stats: FC = () => {
     )
   }
 
-  if (!stats) return null
+  if (error || !stats) {
+    return (
+      <WithNavBar minWidth={0}>
+        <Center h="80vh">
+          <Stack align="center" gap="md">
+            <Icon path={mdiAlertCircleOutline} size={3} color={theme.colors.red[5]} />
+            <Text c="dimmed">
+              {t('account.stats.error', 'Failed to load your stats. Please try again.')}
+            </Text>
+            <Button variant="light" leftSection={<Icon path={mdiRefresh} size={0.9} />} onClick={() => mutate()}>
+              {t('common.button.retry', 'Retry')}
+            </Button>
+          </Stack>
+        </Center>
+      </WithNavBar>
+    )
+  }
 
   return (
     <WithNavBar minWidth={0}>

@@ -95,7 +95,7 @@ export const PostCard: FC<PostCardProps> = ({ post, onTogglePinned }) => {
               <Tooltip label={post.authorName}>
                 <Text size="sm" fw="bold" c="dimmed" truncate>
                   {t('post.content.metadata', {
-                    author: post.authorName ?? 'Anonym',
+                    author: post.authorName ?? t('common.content.anonymous', 'Anonymous'),
                     date: dayjs(post.time).locale(locale).format('LLL'),
                   })}
                 </Text>

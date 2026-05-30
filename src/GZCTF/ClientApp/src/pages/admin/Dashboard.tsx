@@ -235,7 +235,7 @@ const Dashboard: FC = () => {
                                     </Table.Tr>
                                 </Table.Thead>
                                 <Table.Tbody>
-                                    {dashboard?.topGames.map((game) => (
+                                    {dashboard?.topGames?.map((game) => (
                                         <Table.Tr key={game.id}>
                                             <Table.Td>
                                                 <Group gap="sm" wrap="nowrap">
@@ -266,13 +266,14 @@ const Dashboard: FC = () => {
                                                 </Group>
                                             </Table.Td>
                                         </Table.Tr>
-                                    )) ?? (
-                                            <Table.Tr>
-                                                <Table.Td colSpan={2} align="center" c="dimmed">
-                                                    {t('common.content.no_data', 'No Data')}
-                                                </Table.Td>
-                                            </Table.Tr>
-                                        )}
+                                    ))}
+                                    {(dashboard?.topGames?.length ?? 0) === 0 && (
+                                        <Table.Tr>
+                                            <Table.Td colSpan={3} align="center" c="dimmed">
+                                                {t('common.content.no_data', 'No Data')}
+                                            </Table.Td>
+                                        </Table.Tr>
+                                    )}
                                 </Table.Tbody>
                             </Table>
                         </Card>
@@ -329,6 +330,13 @@ const Dashboard: FC = () => {
                                                 <Table.Td>{new Date(r.submitTimeUtc!).toLocaleString()}</Table.Td>
                                             </Table.Tr>
                                         ))}
+                                        {(reviewsData?.length ?? 0) === 0 && (
+                                            <Table.Tr>
+                                                <Table.Td colSpan={6} align="center" c="dimmed">
+                                                    {t('common.content.no_data', 'No Data')}
+                                                </Table.Td>
+                                            </Table.Tr>
+                                        )}
                                     </Table.Tbody>
                                 </Table>
                                 <SimplePagination page={reviewPage} setPage={setReviewPage} currentLength={reviewsData?.length ?? 0} />
@@ -357,12 +365,19 @@ const Dashboard: FC = () => {
                                                 <Table.Td>
                                                     {w.url && (
                                                         <Badge color="blue" component="a" href={w.url} target="_blank">
-                                                            Download
+                                                            {t('common.label.download', 'Download')}
                                                         </Badge>
                                                     )}
                                                 </Table.Td>
                                             </Table.Tr>
                                         ))}
+                                        {(writeupsData?.length ?? 0) === 0 && (
+                                            <Table.Tr>
+                                                <Table.Td colSpan={3} align="center" c="dimmed">
+                                                    {t('common.content.no_data', 'No Data')}
+                                                </Table.Td>
+                                            </Table.Tr>
+                                        )}
                                     </Table.Tbody>
                                 </Table>
                                 <SimplePagination page={writeupPage} setPage={setWriteupPage} currentLength={writeupsData?.length ?? 0} />
@@ -393,6 +408,13 @@ const Dashboard: FC = () => {
                                                 </Table.Td>
                                             </Table.Tr>
                                         ))}
+                                        {(cheatsData?.length ?? 0) === 0 && (
+                                            <Table.Tr>
+                                                <Table.Td colSpan={3} align="center" c="dimmed">
+                                                    {t('common.content.no_data', 'No Data')}
+                                                </Table.Td>
+                                            </Table.Tr>
+                                        )}
                                     </Table.Tbody>
                                 </Table>
                                 <SimplePagination page={cheatPage} setPage={setCheatPage} currentLength={cheatsData?.length ?? 0} />

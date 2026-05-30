@@ -49,8 +49,9 @@ export const CloneGameModal: FC<CloneGameModalProps> = ({ game, ...props }) => {
         }),
       })
       if (!resp.ok) {
-        const err = await resp.json().catch(() => ({ title: 'Clone failed' }))
-        throw new Error(err.title ?? 'Clone failed')
+        const cloneFailed = t('admin.error.games.clone_failed', 'Clone failed')
+        const err = await resp.json().catch(() => ({ title: cloneFailed }))
+        throw new Error(err.title ?? cloneFailed)
       }
       const newId: number = await resp.json()
       showNotification({
@@ -84,7 +85,7 @@ export const CloneGameModal: FC<CloneGameModalProps> = ({ game, ...props }) => {
         </Text>
         <TextInput
           label={t('common.label.title')}
-          placeholder={game ? `Copy of ${game.title}` : ''}
+          placeholder={game ? t('admin.placeholder.games.clone_title', 'Copy of {{title}}', { title: game.title }) : ''}
           value={title}
           onChange={(e) => setTitle(e.currentTarget.value)}
           error={title.length > 0 && title.trim().length < 3 ? t('admin.error.games.title_too_short', 'At least 3 characters') : undefined}

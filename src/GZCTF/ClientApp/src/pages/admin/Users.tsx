@@ -306,6 +306,7 @@ const Users: FC = () => {
                       <Group wrap="nowrap" gap="sm" justify="right">
                         <ActionIcon
                           color="blue"
+                          aria-label={t('admin.button.users.edit')}
                           onClick={() => {
                             setActiveUser(user)
                             setEditModalOpened(true)

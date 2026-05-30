@@ -137,7 +137,10 @@ export const AppNavbar: FC<AppControlProps> = ({ openColorModal }) => {
           {config.portMapping === ContainerPortMappingType.PlatformProxy && (
             <Popover position="right" offset={24} width={320}>
               <Popover.Target>
-                <ActionIcon className={classes.link}>
+                <ActionIcon
+                  className={classes.link}
+                  aria-label={t('common.tab.wsrx', 'WebSocket Reflector X')}
+                >
                   <Icon path={mdiTransitConnectionVariant} size={1} />
                 </ActionIcon>
               </Popover.Target>
@@ -150,7 +153,7 @@ export const AppNavbar: FC<AppControlProps> = ({ openColorModal }) => {
           {/* Language */}
           <Menu position="right" offset={24} width={160}>
             <Menu.Target>
-              <ActionIcon className={classes.link}>
+              <ActionIcon className={classes.link} aria-label={t('common.tab.language', 'Language')}>
                 <Icon path={mdiTranslate} size={1} />
               </ActionIcon>
             </Menu.Target>
@@ -184,7 +187,7 @@ export const AppNavbar: FC<AppControlProps> = ({ openColorModal }) => {
           {/* User Info */}
           <Menu position="right-end" offset={24}>
             <Menu.Target>
-              <ActionIcon className={classes.link}>
+              <ActionIcon className={classes.link} aria-label={t('common.tab.account.title', 'Account')}>
                 {user?.avatar ? (
                   <Avatar alt="avatar" src={user?.avatar} radius="md" size="md">
                     {user.userName?.slice(0, 1) ?? 'U'}

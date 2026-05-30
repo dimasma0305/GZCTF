@@ -107,7 +107,8 @@ const About: FC = () => {
               <Group gap="sm" justify="center" align="center">
                 <Icon path={mdiScaleBalance} size={0.8} />
                 <Text size="sm" fw={400} c="dimmed" ta="center" className={classes.licenseText}>
-                  Licensed&nbsp;under&nbsp;
+                  {t('common.content.about.licensed_under', 'Licensed under')}
+                  &nbsp;
                   <Anchor
                     href="https://www.gnu.org/licenses/agpl-3.0.html"
                     target="_blank"
@@ -124,7 +125,8 @@ const About: FC = () => {
               <Group gap="sm" justify="center" align="center">
                 <Icon path={mdiScaleBalance} size={0.8} />
                 <Text size="sm" fw={400} c="dimmed" ta="center" className={classes.licenseText}>
-                  Licensed&nbsp;under&nbsp;
+                  {t('common.content.about.licensed_under', 'Licensed under')}
+                  &nbsp;
                   <Anchor
                     href="https://github.com/GZTimeWalker/GZCTF/blob/develop/license/LicenseRef-GZCTF-Restricted.txt"
                     target="_blank"
@@ -190,10 +192,14 @@ const About: FC = () => {
           </Group>
           <Flex direction="column" align="center" gap="sm">
             <Badge size="lg" variant="dot" color={valid ? 'green' : 'red'} className={classes.versionBadge}>
-              {valid ? `${tag}${shortSha}` : 'UNOFFICIAL'}
+              {valid ? `${tag}${shortSha}` : t('common.content.about.unofficial', 'UNOFFICIAL')}
             </Badge>
             <Text size="xs" fw={400} c="gray" ta="center" ff="monospace">
-              {valid ? `Built at ${buildTime.format('YYYY-MM-DDTHH:mm:ssZ')}` : 'This release is not officially built'}
+              {valid
+                ? t('common.content.about.built_at', 'Built at {{time}}', {
+                    time: buildTime.format('YYYY-MM-DDTHH:mm:ssZ'),
+                  })
+                : t('common.content.about.unofficial_build', 'This release is not officially built')}
             </Text>
           </Flex>
         </Stack>

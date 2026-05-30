@@ -63,6 +63,16 @@ const GameInfoEdit: FC = () => {
 
   const { t } = useTranslation()
 
+  const endError =
+    end < start
+      ? t('admin.error.games.end_before_start', 'End time must be after the start time.')
+      : undefined
+  const freezeError =
+    freeze && (freeze.isBefore(start) || freeze.isAfter(end))
+      ? t('admin.error.games.freeze_out_of_range', 'Freeze time must be between the start and end times.')
+      : undefined
+  const timeRangeInvalid = !!endError || !!freezeError
+
   useEffect(() => {
     if (numId < 0) {
       showNotification({
@@ -129,6 +139,14 @@ const GameInfoEdit: FC = () => {
       showNotification({
         color: 'orange',
         message: t('admin.notification.games.title_required', 'A game title is required.'),
+        icon: <Icon path={mdiClose} size={1} />,
+      })
+      return
+    }
+    if (timeRangeInvalid) {
+      showNotification({
+        color: 'orange',
+        message: endError ?? freezeError,
         icon: <Icon path={mdiClose} size={1} />,
       })
       return
@@ -225,7 +243,7 @@ const GameInfoEdit: FC = () => {
           </Button>
           <Button
             leftSection={<Icon path={mdiContentSaveOutline} size={1} />}
-            disabled={disabled}
+            disabled={disabled || timeRangeInvalid}
             onClick={onUpdateInfo}
           >
             {t('admin.button.save')}
@@ -233,7 +251,7 @@ const GameInfoEdit: FC = () => {
         </>
       }
     >
-      <SimpleGrid cols={4}>
+      <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
         <TextInput
           label={t('admin.content.games.info.title.label')}
           description={t('admin.content.games.info.title.description')}
@@ -319,7 +337,7 @@ const GameInfoEdit: FC = () => {
           onChange={(e) => {
             setEnd(dayjs(e))
           }}
-          error={end < start}
+          error={endError}
           required
         />
         <DateTimePicker
@@ -332,7 +350,7 @@ const GameInfoEdit: FC = () => {
           valueFormat="L LT"
           clearable
           onChange={(e) => setFreeze(e ? dayjs(e) : null)}
-          error={!!freeze && (freeze.isBefore(start) || freeze.isAfter(end))}
+          error={freezeError}
         />
         <Switch
           disabled={disabled}
@@ -412,10 +430,13 @@ const GameInfoEdit: FC = () => {
           />
         </Stack>
       </Group>
-      <Group grow gap="md">
+      <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
         <NumberInput
-          label={t('admin.content.games.info.ad_warmup_seconds.label')}
-          description={t('admin.content.games.info.ad_warmup_seconds.description')}
+          label={t('admin.content.games.info.ad_warmup_seconds.label', 'A&D warmup (seconds)')}
+          description={t(
+            'admin.content.games.info.ad_warmup_seconds.description',
+            'Seconds between game start and round 1. Teams use this gap to SSH in + write initial patches (default 1800 = 30 min). Only applies to games with A&D challenges.'
+          )}
           disabled={disabled}
           min={0}
           max={86400}
@@ -426,9 +447,12 @@ const GameInfoEdit: FC = () => {
           }}
         />
         <NumberInput
-          label={t('admin.content.games.info.ad_snapshot_retention_days.label')}
-          description={t('admin.content.games.info.ad_snapshot_retention_days.description')}
-          placeholder={t('admin.content.games.info.ad_snapshot_retention_days.placeholder')}
+          label={t('admin.content.games.info.ad_snapshot_retention_days.label', 'A&D snapshot retention (days)')}
+          description={t(
+            'admin.content.games.info.ad_snapshot_retention_days.description',
+            'How long the per-team container snapshots stay available for download after game end. Leave empty to keep forever (the default).'
+          )}
+          placeholder={t('admin.content.games.info.ad_snapshot_retention_days.placeholder', '∞ (keep forever)')}
           disabled={disabled}
           min={1}
           max={3650}
@@ -444,11 +468,14 @@ const GameInfoEdit: FC = () => {
             if (!isNaN(n)) setGame({ ...game, adSnapshotRetentionDays: n })
           }}
         />
-      </Group>
-      <Group grow gap="md" align="flex-start">
+      </SimpleGrid>
+      <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md" verticalSpacing="md">
         <NumberInput
-          label={t('admin.content.games.info.ad_tick_seconds.label')}
-          description={t('admin.content.games.info.ad_tick_seconds.description')}
+          label={t('admin.content.games.info.ad_tick_seconds.label', 'A&D tick (seconds)')}
+          description={t(
+            'admin.content.games.info.ad_tick_seconds.description',
+            'Length of one scoring tick. Every A&D service in the game shares this — flags rotate and the checker runs once per tick (default 60).'
+          )}
           disabled={disabled}
           min={30}
           max={600}
@@ -459,8 +486,11 @@ const GameInfoEdit: FC = () => {
           }}
         />
         <NumberInput
-          label={t('admin.content.games.info.ad_flag_lifetime_ticks.label')}
-          description={t('admin.content.games.info.ad_flag_lifetime_ticks.description')}
+          label={t('admin.content.games.info.ad_flag_lifetime_ticks.label', 'A&D flag lifetime (ticks)')}
+          description={t(
+            'admin.content.games.info.ad_flag_lifetime_ticks.description',
+            'How many ticks a planted flag stays submittable — the attack window (default 5).'
+          )}
           disabled={disabled}
           min={1}
           max={50}
@@ -471,8 +501,11 @@ const GameInfoEdit: FC = () => {
           }}
         />
         <NumberInput
-          label={t('admin.content.games.info.ad_reset_cooldown_minutes.label')}
-          description={t('admin.content.games.info.ad_reset_cooldown_minutes.description')}
+          label={t('admin.content.games.info.ad_reset_cooldown_minutes.label', 'A&D reset cooldown (minutes)')}
+          description={t(
+            'admin.content.games.info.ad_reset_cooldown_minutes.description',
+            "Minimum minutes between a team's container self-resets (default 5). Whether a service can be reset at all is per-challenge."
+          )}
           disabled={disabled}
           min={0}
           max={60}
@@ -483,8 +516,11 @@ const GameInfoEdit: FC = () => {
           }}
         />
         <NumberInput
-          label={t('admin.content.games.info.ad_getflag_window_fraction.label')}
-          description={t('admin.content.games.info.ad_getflag_window_fraction.description')}
+          label={t('admin.content.games.info.ad_getflag_window_fraction.label', 'A&D getflag jitter window')}
+          description={t(
+            'admin.content.games.info.ad_getflag_window_fraction.description',
+            "Fraction of the tick within which the SLA check (getflag) may fire, after the grace period (default 0.5). Event-wide; each team's check still gets an independent random offset, so the check time can't be predicted."
+          )}
           disabled={disabled}
           min={0.05}
           max={0.9}
@@ -497,8 +533,11 @@ const GameInfoEdit: FC = () => {
           }}
         />
         <NumberInput
-          label={t('admin.content.games.info.ad_min_grace_period_seconds.label')}
-          description={t('admin.content.games.info.ad_min_grace_period_seconds.description')}
+          label={t('admin.content.games.info.ad_min_grace_period_seconds.label', 'A&D min grace period (s)')}
+          description={t(
+            'admin.content.games.info.ad_min_grace_period_seconds.description',
+            'Seconds after a round starts (flags planted) before getflag may fire — lets services commit the flag first (default 3).'
+          )}
           disabled={disabled}
           min={1}
           max={60}
@@ -538,13 +577,16 @@ const GameInfoEdit: FC = () => {
         />
         <Switch
           mt="md"
-          label={t('admin.content.games.info.ad_allow_snapshot_download.label')}
-          description={t('admin.content.games.info.ad_allow_snapshot_download.description')}
+          label={t('admin.content.games.info.ad_allow_snapshot_download.label', 'A&D snapshot download')}
+          description={t(
+            'admin.content.games.info.ad_allow_snapshot_download.description',
+            'Snapshot each team container at game end and offer the tarball for download.'
+          )}
           disabled={disabled}
           checked={game?.adAllowSnapshotDownload ?? true}
           onChange={(e) => game && setGame({ ...game, adAllowSnapshotDownload: e.currentTarget.checked })}
         />
-      </Group>
+      </SimpleGrid>
       <Grid grow>
         <Grid.Col span={8}>
           <Textarea

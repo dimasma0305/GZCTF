@@ -23,7 +23,7 @@ import { useClipboard } from '@mantine/hooks'
 import { useModals } from '@mantine/modals'
 import { notifications, showNotification, updateNotification } from '@mantine/notifications'
 import { ScrollingText } from '@Components/ScrollingText'
-import { mdiCheck, mdiClose, mdiLinkVariant, mdiRefresh, mdiStar } from '@mdi/js'
+import { mdiCheck, mdiClose, mdiContentCopy, mdiLinkVariant, mdiLockOutline, mdiRefresh, mdiStar } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import { FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -73,6 +73,7 @@ const TeamMemberInfo: FC<TeamMemberInfoProps> = (props) => {
             <ActionIcon
               variant="light"
               color="yellow"
+              aria-label={t('team.label.transfer')}
               onClick={(e) => {
                 e.stopPropagation()
                 onTransferCaptain(user)
@@ -85,6 +86,7 @@ const TeamMemberInfo: FC<TeamMemberInfoProps> = (props) => {
             <ActionIcon
               variant="light"
               color="red"
+              aria-label={t('team.label.kick')}
               onClick={(e) => {
                 e.stopPropagation()
                 onKick(user)
@@ -112,6 +114,7 @@ export const TeamEditModal: FC<TeamEditModalProps> = (props) => {
   const { data: teams, mutate: mutateTeams } = api.team.useTeamGetTeamsInfo()
 
   const clipboard = useClipboard()
+  const locked = teamInfo?.locked ?? false
   const captain = teamInfo?.members?.filter((x) => x.captain)[0]
   const crew = teamInfo?.members?.filter((x) => !x.captain)
 
@@ -224,6 +227,16 @@ export const TeamEditModal: FC<TeamEditModalProps> = (props) => {
     } catch (e) {
       showErrorMsg(e, t)
     }
+  }
+
+  const copyInviteCode = () => {
+    if (!inviteCode) return
+    clipboard.copy(inviteCode)
+    showNotification({
+      color: 'teal',
+      message: t('team.notification.invite_code.copied'),
+      icon: <Icon path={mdiCheck} size={1} />,
+    })
   }
 
   const onRefreshInviteCode = async () => {
@@ -343,7 +356,7 @@ export const TeamEditModal: FC<TeamEditModalProps> = (props) => {
                 placeholder={team?.name ?? 'ctfteam'}
                 w="100%"
                 value={teamInfo?.name ?? 'team'}
-                disabled={!isCaptain}
+                disabled={!isCaptain || locked}
                 onChange={(event) => setTeamInfo({ ...teamInfo, name: event.target.value })}
               />
             )}
@@ -355,13 +368,21 @@ export const TeamEditModal: FC<TeamEditModalProps> = (props) => {
                 radius="xl"
                 size={70}
                 src={teamInfo?.avatar}
-                onClick={() => isCaptain && setDropzoneOpened(true)}
+                onClick={() => isCaptain && !locked && setDropzoneOpened(true)}
               >
                 {teamInfo?.name?.slice(0, 1) ?? 'T'}
               </Avatar>
             </Center>
           </Grid.Col>
         </Grid>
+        {locked && (
+          <Group gap={6} c="orange">
+            <Icon path={mdiLockOutline} size={0.8} />
+            <Text size="sm" fw={500}>
+              {t('team.content.locked.note', 'Your team is locked during an active game. Member and team changes are disabled.')}
+            </Text>
+          </Group>
+        )}
         {isCaptain && (
           <>
             <PasswordInput
@@ -370,20 +391,38 @@ export const TeamEditModal: FC<TeamEditModalProps> = (props) => {
                   <Text fw={500} size="sm">
                     {t('team.label.invite_code')}
                   </Text>
-                  <ActionIcon size="sm" onClick={onRefreshInviteCode}>
-                    <Icon path={mdiRefresh} size={1} />
-                  </ActionIcon>
+                  <Tooltip label={t('team.label.refresh_code', 'Refresh invitation code')}>
+                    <ActionIcon
+                      size="sm"
+                      aria-label={t('team.label.refresh_code', 'Refresh invitation code')}
+                      disabled={locked}
+                      onClick={onRefreshInviteCode}
+                    >
+                      <Icon path={mdiRefresh} size={1} />
+                    </ActionIcon>
+                  </Tooltip>
+                  <Tooltip label={t('team.label.copy_code', 'Copy invitation code')}>
+                    <ActionIcon
+                      size="sm"
+                      aria-label={t('team.label.copy_code', 'Copy invitation code')}
+                      disabled={!inviteCode}
+                      onClick={copyInviteCode}
+                    >
+                      <Icon path={mdiContentCopy} size={0.8} />
+                    </ActionIcon>
+                  </Tooltip>
                 </Group>
               }
               value={inviteCode}
               placeholder="loading..."
-              onClick={() => {
-                clipboard.copy(inviteCode)
-                showNotification({
-                  color: 'teal',
-                  message: t('team.notification.invite_code.copied'),
-                  icon: <Icon path={mdiCheck} size={1} />,
-                })
+              role="button"
+              tabIndex={0}
+              onClick={copyInviteCode}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  copyInviteCode()
+                }
               }}
               readOnly
             />
@@ -411,7 +450,7 @@ export const TeamEditModal: FC<TeamEditModalProps> = (props) => {
           placeholder={teamInfo?.bio ?? t('team.placeholder.bio')}
           value={teamInfo?.bio ?? ''}
           w="100%"
-          disabled={!isCaptain}
+          disabled={!isCaptain || locked}
           autosize
           minRows={2}
           maxRows={4}
@@ -439,7 +478,7 @@ export const TeamEditModal: FC<TeamEditModalProps> = (props) => {
               crew.map((user) => (
                 <TeamMemberInfo
                   key={user.id}
-                  isCaptain={isCaptain}
+                  isCaptain={isCaptain && !locked}
                   user={user}
                   onTransferCaptain={(user: TeamUserInfoModel) => {
                     modals.openConfirmModal({
@@ -482,6 +521,7 @@ export const TeamEditModal: FC<TeamEditModalProps> = (props) => {
             fullWidth
             color="red"
             variant="outline"
+            disabled={isCaptain && locked}
             onClick={() => {
               modals.openConfirmModal({
                 title: isCaptain ? t('team.content.disband.confirm.title') : t('team.content.leave.confirm.title'),
@@ -504,7 +544,7 @@ export const TeamEditModal: FC<TeamEditModalProps> = (props) => {
           >
             {isCaptain ? t('team.button.disband') : t('team.button.leave')}
           </Button>
-          <Button fullWidth disabled={!isCaptain} onClick={onSaveChange}>
+          <Button fullWidth disabled={!isCaptain || locked} onClick={onSaveChange}>
             {t('team.button.save')}
           </Button>
         </Group>

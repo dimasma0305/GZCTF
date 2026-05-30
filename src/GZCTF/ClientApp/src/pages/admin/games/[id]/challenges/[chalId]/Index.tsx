@@ -736,20 +736,22 @@ const GameChallengeEdit: FC = () => {
             <Divider
               label={isKoth
                 ? t('admin.content.games.challenges.koth.title', 'King of the Hill')
-                : t('admin.content.games.challenges.ad.title')}
+                : t('admin.content.games.challenges.ad.title', 'Attack & Defense')}
               labelPosition="left"
             />
             <Text size="sm" c="dimmed">
               {isKoth
                 ? t('admin.content.games.challenges.koth.description',
                     'Per-challenge config for the shared hill (checker + egress).')
-                : t('admin.content.games.challenges.ad.description')}
+                : t('admin.content.games.challenges.ad.description',
+                    'Per-challenge config for Attack & Defense (checker image, egress, and self-reset).')}
             </Text>
             <Grid columns={12}>
               <Grid.Col span={6}>
                 <TextInput
-                  label={t('admin.content.games.challenges.ad.checker_image.label')}
-                  description={t('admin.content.games.challenges.ad.checker_image.description')}
+                  label={t('admin.content.games.challenges.ad.checker_image.label', 'Checker image')}
+                  description={t('admin.content.games.challenges.ad.checker_image.description',
+                    'Image that probes the team service each tick to plant and retrieve flags.')}
                   placeholder="ghcr.io/myorg/vuln-flask-checker:1.0"
                   disabled={disabled}
                   value={challengeInfo.adCheckerImage ?? ''}
@@ -766,8 +768,9 @@ const GameChallengeEdit: FC = () => {
                   disabled={disabled}
                   checked={challengeInfo.adAllowEgress ?? true}
                   label={SwitchLabel(
-                    t('admin.content.games.challenges.ad.allow_egress.label'),
-                    t('admin.content.games.challenges.ad.allow_egress.description')
+                    t('admin.content.games.challenges.ad.allow_egress.label', 'Allow egress'),
+                    t('admin.content.games.challenges.ad.allow_egress.description',
+                      'Permit the challenge container to make outbound network connections.')
                   )}
                   onChange={(e) => setChallengeInfo({ ...challengeInfo, adAllowEgress: e.target.checked })}
                 />
@@ -780,8 +783,9 @@ const GameChallengeEdit: FC = () => {
                     disabled={disabled}
                     checked={challengeInfo.adAllowSelfReset ?? true}
                     label={SwitchLabel(
-                      t('admin.content.games.challenges.ad.allow_self_reset.label'),
-                      t('admin.content.games.challenges.ad.allow_self_reset.description')
+                      t('admin.content.games.challenges.ad.allow_self_reset.label', 'Allow self-reset'),
+                      t('admin.content.games.challenges.ad.allow_self_reset.description',
+                        'Let teams rebuild their own challenge container to clear a botched patch.')
                     )}
                     onChange={(e) => setChallengeInfo({ ...challengeInfo, adAllowSelfReset: e.target.checked })}
                   />

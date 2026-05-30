@@ -1,4 +1,4 @@
-import { Avatar, Box, Group, Pagination, Paper, Select, Stack, Table, useMantineTheme } from '@mantine/core'
+import { Avatar, Box, Group, Pagination, Paper, Select, Stack, Table, Text, useMantineTheme } from '@mantine/core'
 import cx from 'clsx'
 import React, { FC, useEffect, useState, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -161,7 +161,16 @@ export const MobileScoreboardTable: FC<ScoreboardProps> = ({ divisionId, setDivi
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {scoreboard &&
+              {scoreboard && currentItems?.length === 0 ? (
+                <Table.Tr>
+                  <Table.Td colSpan={3}>
+                    <Text c="dimmed" ta="center" py="md">
+                      {t('game.label.score_table.empty', 'No teams on the scoreboard yet')}
+                    </Text>
+                  </Table.Td>
+                </Table.Tr>
+              ) : (
+                scoreboard &&
                 currentItems?.map((item, idx) => (
                   <TableRow
                     key={base + idx}
@@ -171,7 +180,8 @@ export const MobileScoreboardTable: FC<ScoreboardProps> = ({ divisionId, setDivi
                       setItemDetailOpened(true)
                     }}
                   />
-                ))}
+                ))
+              )}
             </Table.Tbody>
           </Table>
         </Box>

@@ -325,13 +325,21 @@ export const ContainerExecModal: FC<ContainerExecModalProps> = (props) => {
     >
       <Stack gap="sm">
         <Group justify="space-between" align="center" wrap="nowrap">
-          <SegmentedControl
-            size="xs"
-            data={['sh', 'bash']}
-            value={shell}
-            onChange={(v) => setShell(v as 'sh' | 'bash')}
-            disabled={status === 'connecting' || status === 'connected'}
-          />
+          <Group gap="xs" align="center" wrap="nowrap">
+            <SegmentedControl
+              size="xs"
+              data={['sh', 'bash']}
+              value={shell}
+              onChange={(v) => setShell(v as 'sh' | 'bash')}
+              disabled={status === 'connecting' || status === 'connected'}
+              aria-label={t('admin.content.exec.shell_label', 'Shell to launch')}
+            />
+            {(status === 'connecting' || status === 'connected') && (
+              <Text size="xs" c="dimmed">
+                {t('admin.content.exec.shell_locked', 'Shell is locked while connected — close and reopen to switch')}
+              </Text>
+            )}
+          </Group>
           <Text size="xs" c="dimmed" ff="monospace">
             {secureCtx
               ? t(
@@ -351,6 +359,8 @@ export const ContainerExecModal: FC<ContainerExecModalProps> = (props) => {
         )}
         <div
           ref={setTerminalEl}
+          role="group"
+          aria-label={t('admin.content.exec.terminal_label', 'Container shell terminal')}
           style={{
             height: '50vh',
             background: '#0c0c14',
