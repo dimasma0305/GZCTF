@@ -20,10 +20,12 @@ import { ScrollingText } from '@Components/ScrollingText'
 import {
   mdiAccountMultiplePlus,
   mdiAccountOutline,
+  mdiAlertCircle,
   mdiArrowLeftBold,
   mdiArrowRightBold,
   mdiCheck,
   mdiDeleteOutline,
+  mdiEmailArrowRightOutline,
   mdiLockReset,
   mdiMagnify,
   mdiPencilOutline,
@@ -160,6 +162,51 @@ const Users: FC = () => {
           </Stack>
         ),
       })
+    } catch (err: any) {
+      showErrorMsg(err, t)
+    } finally {
+      setDisabled(false)
+    }
+  }
+
+  // Send (or re-send) a "set your password" email to a single user — the
+  // per-user counterpart of the bulk credential send in the import modal.
+  // Works any time (e.g. after an admin changes a user's email), reusing the
+  // same endpoint with a one-item list; the server returns a per-recipient
+  // result so we can show the exact failure reason if SMTP rejects it.
+  const onSendCredentials = async (user: UserInfoModel) => {
+    if (!user.email) return
+    setDisabled(true)
+    try {
+      const resp = await fetch('/api/admin/users/credentials/send', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: [{ email: user.email, userName: user.userName ?? '' }] }),
+      })
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ title: undefined }))
+        throw new Error(err.title ?? t('admin.notification.users.credentials_failed', 'Failed to send email'))
+      }
+      const result: { sent: number; failed: number; results?: { error: string | null }[] } = await resp.json()
+      if (result.sent > 0) {
+        showNotification({
+          message: t('admin.notification.users.credentials_sent', 'Password-setup email sent to {{email}}', {
+            email: user.email,
+          }),
+          color: 'teal',
+          icon: <Icon path={mdiCheck} size={1} />,
+        })
+      } else {
+        const reason = result.results?.[0]?.error
+        showNotification({
+          message: reason
+            ? t('admin.notification.users.credentials_failed_reason', 'Failed to send: {{reason}}', { reason })
+            : t('admin.notification.users.credentials_failed', 'Failed to send email'),
+          color: 'red',
+          icon: <Icon path={mdiAlertCircle} size={1} />,
+        })
+      }
     } catch (err: any) {
       showErrorMsg(err, t)
     } finally {
@@ -314,6 +361,16 @@ const Users: FC = () => {
                         >
                           <Icon path={mdiPencilOutline} size={1} />
                         </ActionIcon>
+                        <ActionIconWithConfirm
+                          iconPath={mdiEmailArrowRightOutline}
+                          color="teal"
+                          message={t('admin.content.users.send_credentials', {
+                            name: user.userName,
+                            defaultValue: 'Send a "set your password" email to {{name}}?',
+                          })}
+                          disabled={disabled || !user.email}
+                          onClick={() => onSendCredentials(user)}
+                        />
                         <ActionIconWithConfirm
                           iconPath={mdiLockReset}
                           color="orange"
