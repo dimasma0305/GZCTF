@@ -93,10 +93,11 @@ export const KothGuideModal: FC<KothToolkitModalProps> = ({ gameId, ...modalProp
     `  | jq '.challenges[] | select(.hill) | {id: .challengeId, ip: .hill.ip, port: .hill.port}'`,
   ].join('\n')
 
-  // Reference plant — players write the platform-issued round token verbatim
-  // into /koth/king on the hill. The exact HOW depends on the challenge
-  // (HTTP PUT, file write via exploit, raw socket, etc) — this is just the
-  // shape players need to produce.
+  // Reference plant — players write their platform-issued control token verbatim
+  // into /koth/king on the hill. The token is game-wide (works on every hill), so
+  // <challenge-id> below is just any hill in this game. The exact write path depends
+  // on the challenge (HTTP PUT, file write via exploit, raw socket, etc) — this is
+  // just the shape players need to produce.
   const plantPseudocode = `# pseudocode — the actual write path depends on the hill's exploit
 TOKEN=$(curl -sS ${apiUrl}/Koth/<challenge-id>/Token \\
   -H "Authorization: Bearer <your-token>" | jq -r '.token')
@@ -126,7 +127,7 @@ write_to_hill "/koth/king" "$TOKEN"`
             <Text size="sm" c="dimmed">
               {t(
                 'game.content.koth.guide.intro',
-                'Everything you need to play King of the Hill: your API token, the VPN config, the per-round control token endpoint, and the rules. KotH shares the API token + VPN with A&D — one token, one tunnel, both engines.'
+                'Everything you need to play King of the Hill: your API token, the VPN config, the control-token endpoint, and the rules. KotH shares the API token + VPN with A&D — one token, one tunnel, both engines.'
               )}
             </Text>
 
@@ -170,11 +171,11 @@ write_to_hill "/koth/king" "$TOKEN"`
                     <Text size="sm">
                       {t(
                         'game.content.koth.guide.hill.intro',
-                        'A KotH challenge is a SINGLE shared container — the hill. Every team races to write their per-round control token into the marker file /koth/king. Whichever token is in the marker when the checker reads it = the holder for that tick.'
+                        'A KotH challenge is a SINGLE shared container — the hill. Every team races to write their control token into the marker file /koth/king. Whichever token is in the marker when the checker reads it = the holder for that tick. Your token is GAME-WIDE — the same value works on every hill in this game.'
                       )}
                     </Text>
                     <Text size="sm" fw={600}>
-                      {t('game.content.koth.guide.hill.step1', '1. Get this round’s token')}
+                      {t('game.content.koth.guide.hill.step1', '1. Get your control token')}
                     </Text>
                     <Code block className={misc.ffmono} style={{ fontSize: '0.75rem' }}>
                       {tokenCurlExample}
@@ -183,7 +184,7 @@ write_to_hill "/koth/king" "$TOKEN"`
                       <Text size="xs" c="dimmed">
                         {t(
                           'game.content.koth.guide.hill.token_note',
-                          'Token rotates every tick — re-fetch each round (or poll your scoreboard until the round number changes). Re-planting yesterday’s token does nothing; it won’t match the current round’s issued tokens.'
+                          'Your token is GAME-WIDE (the same value works on every hill) and only rotates when the hills reset, every few ticks — fetch it once after a reset and plant it on whichever hills you take. A token from a previous window stops counting once the hills reset.'
                         )}
                       </Text>
                       <CopyButton value={tokenCurlExample}>

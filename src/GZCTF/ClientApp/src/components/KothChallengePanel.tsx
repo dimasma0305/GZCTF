@@ -71,8 +71,8 @@ interface KothChallengePanelProps {
  * <see cref="AdChallengePanel"/> but for the shared hill model:
  *   - the hill IP:port (one shared container per challenge — copy-button so the
  *     player can drop it straight into curl);
- *   - the team's CURRENT-ROUND token (rotates every tick — copy-button to
- *     plant into /koth/king);
+ *   - the team's control token (GAME-WIDE — one per refresh window, the same
+ *     value works on every hill — copy-button to plant into /koth/king);
  *   - who's holding it right now (highlights when it's YOU);
  *   - the latest functional verdict on the hill.
  *
@@ -82,9 +82,10 @@ interface KothChallengePanelProps {
 export const KothChallengePanel: FC<KothChallengePanelProps> = ({ gameId, challengeId }) => {
   const { t } = useTranslation()
 
-  // The Token endpoint requires player auth (cookie session) and rotates
-  // per tick, so refresh on the tick boundary (15s is conservative; the
-  // default tick is 60s).
+  // The Token endpoint requires player auth (cookie session). The token is
+  // game-wide and only rotates on the refresh-window boundary, but we still
+  // poll at 15s so the value reappears promptly after a reset (15s is
+  // conservative; the default tick is 60s).
   const { data: tokenData } = useSWR<KothTokenModel>(
     `/api/game/${gameId}/ad/koth/${challengeId}/token`,
     { refreshInterval: 15_000 }
@@ -208,7 +209,7 @@ export const KothChallengePanel: FC<KothChallengePanelProps> = ({ gameId, challe
                 label={
                   copied
                     ? t('game.tooltip.copy.copied', 'Copied')
-                    : t('game.tooltip.copy.koth_token', 'Copy token — write into /koth/king on the hill')
+                    : t('game.tooltip.copy.koth_token', 'Copy token — write into /koth/king on any hill (same token works on all of them)')
                 }
               >
                 <Text

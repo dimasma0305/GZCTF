@@ -404,16 +404,23 @@ public sealed class AdCheckerService(
                     var marker = Encoding.UTF8.GetString(b.Data).Trim();
                     if (marker.Length > 0)
                     {
-                        // The control token is minted once per refresh window (at the
-                        // window anchor round), not per tick — resolve the marker against
-                        // that anchor so a once-planted token stays valid for the window.
+                        // The control token is GAME-WIDE (one per team per window, valid
+                        // on every hill) and minted once per refresh window at the window
+                        // anchor round, not per tick — resolve the marker against that
+                        // anchor so a once-planted token stays valid for the window. We do
+                        // NOT filter on this challenge's id: any of the team's hills accepts
+                        // the team's single token. The GameId scope (via Participation) keeps
+                        // a token value from a *different* game from ever arbitrating a hill
+                        // here, even though the random 144-bit values make that collision
+                        // astronomically unlikely.
                         var refreshTicks = Math.Max(1, await db.Games
                             .Where(g => g.Id == challenge.GameId)
                             .Select(g => g.KothRefreshTicks)
                             .FirstOrDefaultAsync(token) ?? 5);
                         var anchorRound = (latest.Number - 1) / refreshTicks * refreshTicks + 1;
                         var match = await db.KothTokens
-                            .Where(k => k.ChallengeId == challenge.Id && k.RoundNumber == anchorRound && k.Token == marker)
+                            .Where(k => k.RoundNumber == anchorRound && k.Token == marker
+                                        && k.Participation.GameId == challenge.GameId)
                             .Select(k => new { k.Id, k.ParticipationId })
                             .FirstOrDefaultAsync(token);
                         if (match is not null)

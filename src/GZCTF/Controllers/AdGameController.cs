@@ -438,12 +438,15 @@ public class AdGameController(
     }
 
     /// <summary>
-    /// King of the Hill — the caller's control token for a hill. Write this exact value
-    /// into the hill's <c>/koth/king</c> marker to claim control. The token is stable
-    /// for a whole refresh window (it rotates only when the hill resets, every
-    /// <c>KothRefreshTicks</c> ticks), so plant it once after a reset and it holds for
-    /// the window — no per-tick re-plant needed. Accepts the same auth as Submit
-    /// (<c>Bearer ad_...</c> for scripted play, or the session cookie).
+    /// King of the Hill — the caller's control token. Write this exact value into a
+    /// hill's <c>/koth/king</c> marker to claim control. The token is GAME-WIDE — the
+    /// SAME value works on EVERY hill in this game — and stable for a whole refresh
+    /// window (it rotates only when the hills reset, every <c>KothRefreshTicks</c>
+    /// ticks), so fetch it once after a reset and plant it on whichever hills you
+    /// capture; no per-hill or per-tick re-fetch needed. The <c>{challengeId}</c> route
+    /// segment only scopes/validates the game and is otherwise ignored for the value.
+    /// Accepts the same auth as Submit (<c>Bearer ad_...</c> for scripted play, or the
+    /// session cookie).
     /// </summary>
     [HttpGet("Koth/{challengeId:int}/Token")]
     [ProducesResponseType(typeof(KothTokenModel), StatusCodes.Status200OK)]
@@ -468,8 +471,10 @@ public class AdGameController(
         if (latestRound == 0)
             return Ok(new KothTokenModel { Round = 0, Token = null, Status = "warmup" });
 
-        // The token is minted once per refresh window (at the window anchor round) and
-        // is stable across the window — resolve it by the anchor, not the current round.
+        // The token is GAME-WIDE (one per team per window, valid on every hill) and
+        // minted once per refresh window at the window anchor round — resolve it by the
+        // anchor, not the current round, and NOT by challengeId (the same row serves
+        // every hill in this game).
         var refreshTicks = Math.Max(1, await db.Games
             .Where(g => g.Id == id)
             .Select(g => g.KothRefreshTicks)
@@ -477,7 +482,7 @@ public class AdGameController(
         var anchorRound = (latestRound - 1) / refreshTicks * refreshTicks + 1;
 
         var tok = await db.KothTokens
-            .Where(k => k.ParticipationId == part.Id && k.ChallengeId == challengeId && k.RoundNumber == anchorRound)
+            .Where(k => k.ParticipationId == part.Id && k.RoundNumber == anchorRound)
             .Select(k => k.Token)
             .FirstOrDefaultAsync(token);
 

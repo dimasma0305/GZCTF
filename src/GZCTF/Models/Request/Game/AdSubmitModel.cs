@@ -260,14 +260,16 @@ public class AdSshKeyGeneratedModel
 
 /// <summary>
 /// Response from GET /api/Game/{id}/Ad/Koth/{challengeId}/Token — the caller's
-/// current-tick King of the Hill control token. Write <see cref="Token"/> verbatim
-/// into the hill's <c>/koth/king</c> marker to claim control for the round; it
-/// rotates every tick, so re-fetch + re-plant each round to keep the hill. Null
-/// before round 1 (warmup).
+/// King of the Hill control token. Write <see cref="Token"/> verbatim into a hill's
+/// <c>/koth/king</c> marker to claim control. The value is GAME-WIDE (the same token
+/// works on every hill in the game) and stable for a whole refresh window — it only
+/// rotates when the hills reset (every <c>Game.KothRefreshTicks</c> ticks), so fetch
+/// once after a reset and plant on whichever hills you take. Null before round 1
+/// (warmup).
 /// </summary>
 public class KothTokenModel
 {
-    /// <summary>Round this token is valid for (0 = no round has started yet).</summary>
+    /// <summary>Window-anchor round this token is valid for (0 = no round has started yet).</summary>
     public int Round { get; set; }
 
     /// <summary>The token to plant; null when no token has been minted yet (see <see cref="Status"/>).</summary>

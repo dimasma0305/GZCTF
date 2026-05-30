@@ -4,18 +4,24 @@ using Microsoft.EntityFrameworkCore;
 namespace GZCTF.Models.Data;
 
 /// <summary>
-/// The rotating control token issued to ONE team for ONE King of the Hill challenge
-/// at ONE round. The team writes this value into the hill's marker (<c>/koth/king</c>)
-/// to claim control for the tick; the king-check reads the marker and matches it back
-/// to the issuing team. It rotates every tick, so write-once camping (e.g. a
-/// <c>chattr +i</c>'d stale token) no longer counts as control.
+/// The rotating control token issued to ONE team for ONE refresh window — it is
+/// GAME-WIDE, valid on EVERY King of the Hill hill in the game (not per-challenge).
+/// The team writes this value into a hill's marker (<c>/koth/king</c>) to claim
+/// control; the king-check reads the marker and matches it back to the issuing team,
+/// regardless of which hill it was planted in. It rotates to a fresh value only on
+/// the hill-reset boundary (every <c>Game.KothRefreshTicks</c> ticks), so write-once
+/// camping (e.g. a <c>chattr +i</c>'d stale token) stops counting as control once the
+/// window turns over. One token per team per window means a team plants the same
+/// string on whichever hills it captures.
 /// </summary>
-[Index(nameof(ParticipationId), nameof(ChallengeId), nameof(RoundNumber), IsUnique = true)]
+[Index(nameof(ParticipationId), nameof(RoundNumber), IsUnique = true)]
 // Unique on Token: 24 random bytes → 144 bits, collisions are astronomically
 // unlikely but the marker-lookup uses FirstOrDefault, so a collision would
 // otherwise silently arbitrate to whichever row sorted first. The unique
 // constraint makes the lookup deterministic and lets the DB catch the
 // (impossible-but-non-zero) collision instead of mis-attributing a controller.
+// It also means a marker value pins exactly one team game-wide — which is what
+// lets one token authenticate control on every hill.
 [Index(nameof(Token), IsUnique = true)]
 [Index(nameof(AdRoundId))]
 public class KothToken
@@ -28,18 +34,13 @@ public class KothToken
 
     public Participation Participation { get; set; } = null!;
 
-    [Required]
-    public int ChallengeId { get; set; }
-
-    public GameChallenge Challenge { get; set; } = null!;
-
     /// <summary>
     /// Round number this token row is valid for (matches <see cref="AdRound.Number"/>).
-    /// One row per round, but the <see cref="Token"/> VALUE is stable across a refresh
-    /// window — it only rotates to a fresh value on the hill-reset boundary (every
-    /// <c>Game.KothRefreshTicks</c> ticks) and is carried forward on intervening ticks,
-    /// so a team plants once after a reset and holds the window. See
-    /// <c>AdRoundService.AdvanceAsync</c>.
+    /// Exactly one row per (team, refresh window): it is minted at the window's ANCHOR
+    /// round (every <c>Game.KothRefreshTicks</c> ticks, when the hill resets) and the
+    /// king-check + token endpoint resolve a marker against that anchor, so the value
+    /// stays stable for the whole window — a team plants once after a reset and holds.
+    /// See <c>AdRoundService.AdvanceAsync</c>.
     /// </summary>
     [Required]
     public int RoundNumber { get; set; }

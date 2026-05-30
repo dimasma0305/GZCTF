@@ -126,20 +126,20 @@ public sealed class AdRoundService(
         // the team writes it into /koth/king once they have a foothold; the king-check
         // reads the marker and matches it back.
         //
-        // The token is STABLE for a whole refresh window: it rotates to a fresh value
-        // only on the window boundary (every refreshTicks ticks, when the hill is reset
-        // to base and the marker is wiped), and is carried forward unchanged on the
-        // intervening ticks. So a team plants it once after a reset and holds the hill
-        // for the window, instead of re-planting every tick. A still-per-round row is
-        // written each tick (carrying the window value) so the king-check + token
-        // endpoint, which look up by current RoundNumber, need no change.
-        // Mint a fresh token per (team, hill) ONLY on a refresh-window boundary
-        // (rounds 1, 1+refreshTicks, 1+2·refreshTicks, …) — the same boundary the hill
-        // resets on. The token then stays the window's stable value: the king-check and
+        // The token is GAME-WIDE and STABLE for a whole refresh window: ONE token per
+        // team covers EVERY hill in the game, and it rotates to a fresh value only on
+        // the window boundary (every refreshTicks ticks, when the hills reset to base
+        // and the markers are wiped). So a team plants the same string on whichever
+        // hills it captures, once per window, instead of juggling a different token per
+        // hill or re-planting every tick.
+        //
+        // Mint exactly one token per (team) ONLY on a refresh-window boundary
+        // (rounds 1, 1+refreshTicks, 1+2·refreshTicks, …) — the same boundary the hills
+        // reset on. The token then stays the window's stable value: the king-check and
         // the token endpoint resolve it by the window's ANCHOR round, so the intervening
-        // ticks reuse it without re-minting. So a team plants once after a reset and
-        // holds the hill for the window. (A per-tick mint that reused a value would also
-        // violate the unique Token index.)
+        // ticks reuse it without re-minting. (A per-tick mint that reused a value would
+        // also violate the unique Token index.)
+        var kothTokensMinted = 0;
         if (kothChallengeIds.Count > 0 && (nextNumber - 1) % refreshTicks == 0)
         {
             var participationIds = await db.Participations
@@ -147,22 +147,22 @@ public sealed class AdRoundService(
                 .Select(p => p.Id)
                 .ToListAsync(token);
 
-            foreach (var cid in kothChallengeIds)
-                foreach (var pid in participationIds)
+            foreach (var pid in participationIds)
+            {
+                var tbytes = new byte[FlagRandomBytes];
+                RandomNumberGenerator.Fill(tbytes);
+                var tpayload = Convert.ToBase64String(tbytes).TrimEnd('=').Replace('+', '_').Replace('/', '-');
+                await db.KothTokens.AddAsync(new KothToken
                 {
-                    var tbytes = new byte[FlagRandomBytes];
-                    RandomNumberGenerator.Fill(tbytes);
-                    var tpayload = Convert.ToBase64String(tbytes).TrimEnd('=').Replace('+', '_').Replace('/', '-');
-                    await db.KothTokens.AddAsync(new KothToken
-                    {
-                        ParticipationId = pid,
-                        ChallengeId = cid,
-                        RoundNumber = nextNumber,
-                        AdRoundId = round.Id, // FK — cascade-deletes if the round is rolled back
-                        Token = $"koth_{tpayload}",
-                        IssuedAt = now
-                    }, token);
-                }
+                    ParticipationId = pid,
+                    RoundNumber = nextNumber,
+                    AdRoundId = round.Id, // FK — cascade-deletes if the round is rolled back
+                    Token = $"koth_{tpayload}",
+                    IssuedAt = now
+                }, token);
+            }
+
+            kothTokensMinted = participationIds.Count;
         }
 
         // Commit flags + KotH tokens together with the round. After this point the
@@ -232,7 +232,7 @@ public sealed class AdRoundService(
         }
 
         logger.SystemLog(
-            $"A&D round advanced: game={gameId} round={nextNumber} flags_planted={toInject.Count} flags_injected={injected} koth_tokens={kothChallengeIds.Count}",
+            $"A&D round advanced: game={gameId} round={nextNumber} flags_planted={toInject.Count} flags_injected={injected} koth_tokens={kothTokensMinted}",
             TaskStatus.Success, LogLevel.Information);
 
         // New round → flags rotated, a tick of SLA settled. Refresh the cached
