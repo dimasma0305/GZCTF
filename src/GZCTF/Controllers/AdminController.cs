@@ -665,13 +665,21 @@ public class AdminController(
                 users.Add((userInfo, user.TeamName));
             }
 
+            var dbContext = serviceProvider.GetRequiredService<AppDbContext>();
             var teams = new List<Team>();
             foreach (var (user, teamName) in users)
             {
                 if (teamName is null)
                     continue;
 
-                var team = teams.Find(team => team.Name == teamName);
+                // Reuse an existing team with this name — first from this import's
+                // local list, then from the DB. Without the DB check a re-import of
+                // the same roster created a SECOND "Team 01" etc. (team Name has no
+                // unique index), duplicating every team. Idempotent now: existing
+                // teams are joined, not recreated.
+                var team = teams.Find(t => t.Name == teamName)
+                           ?? await dbContext.Teams.Include(t => t.Members)
+                               .FirstOrDefaultAsync(t => t.Name == teamName, token);
                 if (team is null)
                 {
                     team = await teamRepository.CreateTeam(new() { Name = teamName }, user, token);
@@ -679,7 +687,10 @@ public class AdminController(
                 }
                 else
                 {
-                    team.Members.Add(user);
+                    if (team.Members.All(m => m.Id != user.Id))
+                        team.Members.Add(user);
+                    if (!teams.Contains(team))
+                        teams.Add(team);
                 }
             }
 
@@ -822,11 +833,18 @@ public class AdminController(
                 });
             }
 
+            var dbContext = serviceProvider.GetRequiredService<AppDbContext>();
             var teams = new List<Team>();
             foreach (var (user, teamName) in created)
             {
                 if (teamName is null) continue;
-                var team = teams.Find(t => t.Name == teamName);
+
+                // Reuse an existing team (local list, then DB) instead of always
+                // creating — a re-import otherwise duplicates every team since team
+                // Name isn't unique-indexed. Idempotent: join existing, create new.
+                var team = teams.Find(t => t.Name == teamName)
+                           ?? await dbContext.Teams.Include(t => t.Members)
+                               .FirstOrDefaultAsync(t => t.Name == teamName, token);
                 if (team is null)
                 {
                     team = await teamRepository.CreateTeam(new() { Name = teamName }, user, token);
@@ -834,7 +852,10 @@ public class AdminController(
                 }
                 else
                 {
-                    team.Members.Add(user);
+                    if (team.Members.All(m => m.Id != user.Id))
+                        team.Members.Add(user);
+                    if (!teams.Contains(team))
+                        teams.Add(team);
                 }
             }
 
