@@ -51,6 +51,7 @@ export function setPausedState(p: boolean): void {
 let audioCtx: AudioContext | null = null
 let masterOut: AudioNode | null = null
 let lastPewAt = 0
+let lastHillSoundAt = 0
 let lastBloodSoundAt = 0
 
 const TEX_GLOW = new Map<string, PIXI.Texture>()
@@ -826,6 +827,105 @@ function playAftershock(vol: number): void {
   } catch {
     // noise allocation failed
   }
+}
+
+// KotH hill seize: a charged laser sweep that glides UP (weightier + more
+// triumphant than the quick A&D pew, lighter than the first-blood mega-laser),
+// layered with a short noise whoosh and a confirming higher tone. Throttled via
+// lastHillSoundAt so rapid back-to-back seizes don't stack into clipping.
+function playHillSeize(): void {
+  if (!audioCtx) return
+  if (audioCtx.state === 'suspended') void audioCtx.resume().catch(() => undefined)
+  const now = performance.now()
+  if (now - lastHillSoundAt < 80) return
+  lastHillSoundAt = now
+  const out = audioOut()
+  if (!out) return
+  const t0 = audioCtx.currentTime
+  const sr = audioCtx.sampleRate
+
+  // Rising charged sweep: detuned saw + square glide up over ~260ms.
+  const sweeps: Array<[number, number, number, OscillatorType]> = [
+    [220, 1100, 0.16, 'sawtooth'],
+    [110, 550, 0.1, 'square'],
+  ]
+  const sweepDur = 0.26
+  for (const [f0, f1, vol, type] of sweeps) {
+    const o = audioCtx.createOscillator()
+    const g = audioCtx.createGain()
+    o.type = type
+    o.frequency.setValueAtTime(f0, t0)
+    o.frequency.exponentialRampToValueAtTime(f1, t0 + sweepDur)
+    g.gain.setValueAtTime(0, t0)
+    g.gain.linearRampToValueAtTime(vol, t0 + 0.012)
+    g.gain.linearRampToValueAtTime(vol * 0.85, t0 + sweepDur * 0.7)
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + sweepDur + 0.05)
+    o.connect(g)
+    g.connect(out)
+    o.start(t0)
+    o.stop(t0 + sweepDur + 0.07)
+  }
+
+  // Confirming higher tone right as the sweep peaks.
+  const beep = audioCtx.createOscillator()
+  const bg = audioCtx.createGain()
+  beep.type = 'triangle'
+  beep.frequency.setValueAtTime(1320, t0 + sweepDur * 0.85)
+  bg.gain.setValueAtTime(0, t0 + sweepDur * 0.85)
+  bg.gain.linearRampToValueAtTime(0.12, t0 + sweepDur * 0.85 + 0.008)
+  bg.gain.exponentialRampToValueAtTime(0.0001, t0 + sweepDur + 0.18)
+  beep.connect(bg)
+  bg.connect(out)
+  beep.start(t0 + sweepDur * 0.85)
+  beep.stop(t0 + sweepDur + 0.2)
+
+  // Short filtered-noise whoosh/impact at the end of the sweep.
+  try {
+    const whooshAt = t0 + sweepDur * 0.7
+    const blen = Math.floor(sr * 0.18)
+    const buf = audioCtx.createBuffer(1, blen, sr)
+    const data = buf.getChannelData(0)
+    for (let i = 0; i < blen; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / blen, 1.6)
+    const src = audioCtx.createBufferSource()
+    src.buffer = buf
+    const hp = audioCtx.createBiquadFilter()
+    hp.type = 'highpass'
+    hp.frequency.value = 1600
+    const ng = audioCtx.createGain()
+    ng.gain.setValueAtTime(0.1, whooshAt)
+    ng.gain.exponentialRampToValueAtTime(0.0001, whooshAt + 0.18)
+    src.connect(hp)
+    hp.connect(ng)
+    ng.connect(out)
+    src.start(whooshAt)
+  } catch {
+    // noise allocation failed
+  }
+}
+
+// KotH hill lost: a soft, quiet downward tone for a hill going neutral/offline.
+// Quieter and lower than the seize so a loss reads as a deflating cue.
+function playHillLost(): void {
+  if (!audioCtx) return
+  if (audioCtx.state === 'suspended') void audioCtx.resume().catch(() => undefined)
+  const now = performance.now()
+  if (now - lastHillSoundAt < 80) return
+  lastHillSoundAt = now
+  const out = audioOut()
+  if (!out) return
+  const t0 = audioCtx.currentTime
+  const o = audioCtx.createOscillator()
+  const g = audioCtx.createGain()
+  o.type = 'sine'
+  o.frequency.setValueAtTime(440, t0)
+  o.frequency.exponentialRampToValueAtTime(150, t0 + 0.28)
+  g.gain.setValueAtTime(0, t0)
+  g.gain.linearRampToValueAtTime(0.08, t0 + 0.01)
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.3)
+  o.connect(g)
+  g.connect(out)
+  o.start(t0)
+  o.stop(t0 + 0.32)
 }
 
 /* ---------------------------------------------------------------- */
@@ -1950,6 +2050,7 @@ export function fireKothBeam(
   color: string
 ): void {
   const colorNum = hexToNum(color)
+  playHillSeize()
   muzzleFlash(x0, y0, color, false)
 
   const REVEAL = 150
@@ -2031,6 +2132,7 @@ export function fireKothBeam(
  * Cheap: 1 glow sprite + 1 ring graphics, both capped by addEnt().
  */
 export function hillPulse(x: number, y: number, color: string, lost: boolean): void {
+  if (lost) playHillLost()
   const colorNum = hexToNum(color)
   const start = performance.now()
   const dur = lost ? 720 : 560
