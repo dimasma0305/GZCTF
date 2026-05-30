@@ -1013,14 +1013,23 @@ public class AdGameController(
                 })
                 .ToListAsync(token))
                 .ToDictionary(t => t.ChallengeId, t => (t.Ip, t.Port, t.LastRefreshRound));
+        // Latest functional verdict per hill. Flat "no newer row exists for this
+        // hill" anti-join, NOT GroupBy().OrderByDescending().First() — EF Core
+        // cannot translate a grouped element re-projected through a navigation
+        // (r.AdRound.Number) and throws 'EmptyProjectionMember' at runtime,
+        // which would 500 the whole /Targets view whenever the game has any KotH
+        // challenge. Same fix already applied to Koth/Hills (commit 37164f50);
+        // the in-memory GroupBy is defensive against an unexpected duplicate.
         var hillStatusByChallenge = kothChallengeIds.Count == 0
             ? new Dictionary<int, AdCheckStatus?>()
             : (await db.KothControlResults
-                .Where(r => kothChallengeIds.Contains(r.ChallengeId))
-                .GroupBy(r => r.ChallengeId)
-                .Select(g => new { ChallengeId = g.Key, Status = (AdCheckStatus?)g.OrderByDescending(r => r.AdRound.Number).First().Status })
+                .Where(r => kothChallengeIds.Contains(r.ChallengeId)
+                            && !db.KothControlResults.Any(r2 =>
+                                r2.ChallengeId == r.ChallengeId && r2.AdRound.Number > r.AdRound.Number))
+                .Select(r => new { r.ChallengeId, Status = (AdCheckStatus?)r.Status })
                 .ToListAsync(token))
-                .ToDictionary(x => x.ChallengeId, x => x.Status);
+                .GroupBy(x => x.ChallengeId)
+                .ToDictionary(g => g.Key, g => g.First().Status);
 
         var services = await db.AdTeamServices
             .Where(ts => ts.Participation.GameId == id

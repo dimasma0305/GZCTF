@@ -217,8 +217,17 @@ export const KothChallengePanel: FC<KothChallengePanelProps> = ({ gameId, challe
                   size="xs"
                   fw="bold"
                   truncate
+                  role="button"
+                  tabIndex={0}
+                  aria-label={t('game.tooltip.copy.koth_token', 'Copy token — write into /koth/king on any hill (same token works on all of them)')}
                   style={{ cursor: 'pointer', maxWidth: 320 }}
                   onClick={copy}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      copy()
+                    }
+                  }}
                 >
                   {tokenData.token}
                 </Text>

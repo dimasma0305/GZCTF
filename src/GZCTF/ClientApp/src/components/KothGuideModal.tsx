@@ -368,7 +368,7 @@ write_to_hill "/koth/king" "$TOKEN"`
                         <Code className={misc.ffmono}>−KothBrokenHillPenalty</Code>{' '}
                         {t(
                           'game.content.koth.guide.scoring.penalty',
-                          '(default 1.0) per tick you hold a broken hill (Mumble / Offline / Corrupt / InternalError). You broke the box you’re holding — fix it.'
+                          '(default 1.0) per tick you hold a broken hill (Mumble / Offline). You broke the box you’re holding — fix it. InternalError (a checker/infra fault) is never charged to you.'
                         )}
                       </List.Item>
                       <List.Item icon={<Icon path={mdiCheck} size={0.8} color="var(--mantine-color-gray-6)" />}>

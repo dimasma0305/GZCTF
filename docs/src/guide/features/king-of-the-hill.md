@@ -1,6 +1,6 @@
 # King of the Hill
 
-King of the Hill (KotH) is a game mode built on the same Attack & Defense engine. Instead of every team defending its own copy of a service, **all teams fight over a single shared container per challenge** — the *hill* — and the platform awards points to whichever team currently controls it. Control is proven by planting a per-round token into a marker file, not by capturing a platform-planted flag.
+King of the Hill (KotH) is a game mode built on the same Attack & Defense engine. Instead of every team defending its own copy of a service, **all teams fight over a single shared container per challenge** — the *hill* — and the platform awards points to whichever team currently controls it. Control is proven by planting a control token into a marker file, not by capturing a platform-planted flag. Each team's token is **game-wide** (one value works on every hill) and rotates only when the hills reset, so a team fetches it once per refresh window and plants it on whichever hills it captures.
 
 If you have read the [A&D engine](/guide/features/attack-defense) and [scoring](/guide/features/scoring) pages, most of the round/tick machinery here will be familiar: KotH reuses the same rounds, the same functional checker, and the same scoreboard cadence.
 
@@ -9,7 +9,7 @@ If you have read the [A&D engine](/guide/features/attack-defense) and [scoring](
 | Aspect | Attack & Defense | King of the Hill |
 | --- | --- | --- |
 | Containers | One per team per challenge | **One shared hill per challenge, for the whole game** |
-| Flag | Platform plants a fresh flag in `/flag` each tick | **No platform flag.** Teams plant their own rotating token in `/koth/king` |
+| Flag | Platform plants a fresh flag in `/flag` each tick | **No platform flag.** Teams plant their own game-wide control token in `/koth/king` |
 | Scoring unit | Per-team attack + SLA | Per-tick *hold credit* for the one controlling team |
 | Checker role | Validates flag + functional SLA | **Flag-free** — functional health only; gates hold vs. penalty |
 | Who scores | Many teams per tick | At most one team per tick (zero-sum race) |
@@ -18,12 +18,12 @@ The shared hill is launched once per `(game, challenge)` as a `KothTarget`, reac
 
 ## The control marker: `/koth/king`
 
-The platform decides the king by reading one file from the hill container each tick: **`/koth/king`**. It does not write this file — your team does, through an exploit. The flow each round is:
+The platform decides the king by reading one file from the hill container each tick: **`/koth/king`**. It does not write this file — your team does, through an exploit. The flow is:
 
-1. The round advances. The platform mints a fresh, secret control token for **your team** for that round.
-2. You fetch your token from the API.
-3. You exploit the hill and write your exact token bytes into `/koth/king`.
-4. At the per-tick check, the platform reads `/koth/king`, trims whitespace, and matches it against the tokens issued for that round. Whoever's token matches is recorded as the controller.
+1. At each refresh-window boundary (every `KothRefreshTicks` rounds, when the hills reset), the platform mints one fresh, secret control token for **your team**. It is game-wide — the same value works on every hill — and stays stable for the whole window.
+2. You fetch your token from the API (once per window is enough).
+3. You exploit each hill you want and write your exact token bytes into `/koth/king`.
+4. At the per-tick check, the platform reads `/koth/king`, trims whitespace, and matches it against the token issued for the current refresh window. Whoever's token matches is recorded as the controller.
 
 ### How the platform reads and matches
 
@@ -31,14 +31,15 @@ Each tick the checker reads the raw bytes of `/koth/king` straight from the cont
 
 ```text
 marker = UTF8(bytes(/koth/king)).Trim()
+anchorRound = ((currentRound - 1) / KothRefreshTicks) * KothRefreshTicks + 1
 if marker is non-empty:
-    match = KothToken where ChallengeId == this hill
-                        and RoundNumber == current round
-                        and Token == marker
+    match = KothToken where RoundNumber == anchorRound          # the window's anchor, not the current round
+                        and Token        == marker
+                        and Participation.GameId == this game   # game-wide token; NOT filtered by hill
     if match: controller = match.ParticipationId
 ```
 
-So the match is **exact** (after trimming surrounding whitespace) against the token minted for *this* round. A token from a previous round will not match — it has rotated. An empty or absent file means "no controller this tick".
+So the match is **exact** (after trimming surrounding whitespace) against the token minted for the current refresh window. The lookup is **not** scoped to this hill — the token is game-wide, so the same value controls whichever hill it is planted in. A token from a previous window will not match (it has rotated at the reset); an empty or absent file means "no controller this tick".
 
 :::info
 Under the **Docker** provider the read is exact-byte and shell-free — your hill image needs no `cat`, `sh`, or coreutils to be read. Under **Kubernetes** the platform reads the marker with `sh -c 'head -c N /koth/king | base64 | tr ...'` exec'd inside the hill container, so on K8s the image **must** contain `sh`, `head`, `base64`, and `tr`; otherwise the read fails and no controller is recorded that tick. Either way, just make `/koth/king` writable through whatever vulnerability the challenge exposes.
@@ -46,11 +47,15 @@ Under the **Docker** provider the read is exact-byte and shell-free — your hil
 
 ## Getting your control token
 
+The token is game-wide, so the preferred endpoint needs **no challenge id**:
+
 ```text
-GET /api/Game/{id}/Ad/Koth/{challengeId}/Token
+GET /api/Game/{id}/Ad/Koth/Token
 ```
 
-Auth is the same dual scheme as A&D submit: a `Bearer ad_...` team API token (for scripted play) **or** the logged-in session cookie. The caller must be an accepted member of the game, and `{challengeId}` must be an enabled `KingOfTheHill` challenge in that game.
+Auth is the same dual scheme as A&D submit: a `Bearer ad_...` team API token (for scripted play) **or** the logged-in session cookie. The caller must be an accepted member of the game, and the game must have at least one enabled `KingOfTheHill` challenge.
+
+> A per-challenge form `GET /api/Game/{id}/Ad/Koth/{challengeId}/Token` still exists for backward compatibility and returns the **same** game-wide token (the `{challengeId}` only validates that the hill exists). Prefer the id-free form above.
 
 Response (`KothTokenModel`):
 
@@ -64,36 +69,61 @@ Response (`KothTokenModel`):
 
 | Field | Meaning |
 | --- | --- |
-| `round` | The round this token is valid for (`0` = no round started yet) |
+| `round` | The window-anchor round this token belongs to (`0` = no round started yet) |
 | `token` | The exact bytes to plant into `/koth/king`; `null` if none was minted for you |
-| `status` | `ready` (plant it), `warmup` (no round yet), or `no-token-this-round` (round exists but your team wasn't accepted in time to be issued one — resolves next round) |
+| `status` | `ready` (plant it), `warmup` (no round yet), or `no-token-this-round` (a round exists but your team wasn't accepted in time to be issued one — resolves at the next refresh) |
 
-The token **rotates every round**. Tokens are minted at round-advance for every accepted team and every KotH challenge, inside the same DB transaction that makes the round visible — so the token is always available the moment the round is live. To keep holding the hill you must **re-fetch and re-plant each round**; last round's token is dead.
+The token **rotates only at the refresh-window boundary** (every `KothRefreshTicks` rounds, default 5 — the same moment the hills reset), not every round. One token is minted per accepted team per window and stays stable across the intervening ticks, so you fetch it once after a reset and plant it on whichever hills you take; re-fetch only when the hills reset.
 
-A scripted loop looks like:
+A basic plant sequence looks like:
 
 ```bash
-GID=1; CID=42; TOKEN="ad_yourteamtoken"
-BASE="https://gzctf.gzti.me/api/Game/$GID/Ad/Koth/$CID"
+GID=1; TOKEN="ad_yourteamtoken"
+BASE="https://gzctf.gzti.me/api/Game/$GID/Ad"
 
-# 1. fetch this round's control token
-KING=$(curl -s -H "Authorization: Bearer $TOKEN" "$BASE/Token" | jq -r .token)
+# 1. fetch your control token (game-wide — no challenge id needed)
+KING=$(curl -s -H "Authorization: Bearer $TOKEN" "$BASE/Koth/Token" | jq -r .token)
 
 # 2. plant it via your exploit (challenge-specific) — the goal is:
-#    write "$KING" into /koth/king on the hill
+#    write "$KING" into /koth/king on each hill you want to hold
 ./exploit.sh "$HILL_HOST" "$KING"
 
-# 3. confirm the plant took effect without waiting for the scoreboard tick
-curl -s -H "Authorization: Bearer $TOKEN" "$BASE/State" | jq
+# 3. confirm the plant took effect without waiting for the scoreboard tick (see /Koth/Hills below)
+curl -s -H "Authorization: Bearer $TOKEN" "$BASE/Koth/Hills" | jq '.[] | {hill: .title, isYou, status}'
 ```
 
-### Confirming control: `/State`
+### See every hill at once: `/Koth/Hills`
+
+```text
+GET /api/Game/{id}/Ad/Koth/Hills
+```
+
+One call returns every enabled hill's holder, target, and status — the list form of per-challenge `/State`, and the recommended way to confirm plants and feed a bot all targets (no challenge id). Response is a JSON array of `KothHillStateModel`:
+
+```jsonc
+[
+  {
+    "challengeId": 220,
+    "title": "Blockchain Hill",
+    "round": 42,
+    "holderParticipationId": 7,
+    "holderTeamName": "team-name",
+    "isYou": true,            // your team currently holds this hill
+    "status": "Ok",           // Ok / Mumble / Offline / InternalError / null
+    "ip": "10.0.1.5",         // where to aim (null until a container exists)
+    "port": 31000,
+    "lastRefreshRound": 40    // round the hill was last wiped
+  }
+]
+```
+
+### Confirming a single hill: `/State`
 
 ```text
 GET /api/Game/{id}/Ad/Koth/{challengeId}/State
 ```
 
-Returns the last persisted verdict so you can confirm a plant without polling the scoreboard (which only updates once per tick). Response (`KothHillStateModel`):
+Returns the same fields as one `/Koth/Hills` element, for a single hill (`KothHillStateModel`):
 
 | Field | Meaning |
 | --- | --- |
@@ -102,6 +132,7 @@ Returns the last persisted verdict so you can confirm a plant without polling th
 | `isYou` | True when your team is the recorded holder |
 | `status` | Last functional verdict on the hill: `Ok` / `Mumble` / `Offline` / `InternalError` (or `null` until the first check is scored) |
 | `checkedAt` | When that verdict was taken |
+| `ip` / `port` | The hill's current container address (populated by `/Koth/Hills`) |
 | `lastRefreshRound` | The round the hill was last wiped (see refresh below) |
 
 ## Scoring: the checker gates hold vs. penalty
@@ -197,7 +228,7 @@ FROM alpine:3.21
 RUN apk add --no-cache socat
 # The hill the platform reads each tick. Make this writable through the
 # challenge's intended bug; the platform never writes it — teams plant
-# their per-round token here.
+# their control token here.
 RUN mkdir -p /koth && touch /koth/king
 COPY serve.sh /serve.sh
 RUN chmod +x /serve.sh
