@@ -36,6 +36,27 @@ interface KothToolkitModalProps extends ModalProps {
   gameId: number
 }
 
+/** A right-aligned "Copy curl" button — so every command snippet is copyable. */
+const CopyCurlButton: FC<{ value: string }> = ({ value }) => {
+  const { t } = useTranslation()
+  return (
+    <Group justify="flex-end">
+      <CopyButton value={value}>
+        {({ copied, copy }) => (
+          <Button
+            size="compact-xs"
+            variant="subtle"
+            leftSection={<Icon path={mdiContentCopy} size={0.7} />}
+            onClick={copy}
+          >
+            {copied ? t('game.tooltip.copy.copied', 'Copied') : t('game.button.ad.copy_curl', 'Copy curl')}
+          </Button>
+        )}
+      </CopyButton>
+    </Group>
+  )
+}
+
 /**
  * Player-facing toolkit for King of the Hill. Same shape as
  * <see cref="AdGuideModal"/> — actionable sections (token, VPN) on top,
@@ -59,10 +80,13 @@ export const KothGuideModal: FC<KothToolkitModalProps> = ({ gameId, ...modalProp
   )
 
   const apiUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/api/Game/${gameId}/Ad`
-  const exampleBearer = freshToken ?? '<your-token>'
+  // Prefer this session's freshly-rotated token, else the one saved in this
+  // browser (localStorage) so the curl examples are copy-paste-ready on reload,
+  // else the placeholder.
+  const exampleBearer = freshToken ?? storedToken ?? '<your-token>'
 
   const tokenCurlExample = [
-    `curl -sS ${apiUrl}/Koth/<challenge-id>/Token \\`,
+    `curl -sS ${apiUrl}/Koth/Token \\`,
     `  -H "Authorization: Bearer ${exampleBearer}"`,
   ].join('\n')
 
@@ -102,12 +126,12 @@ export const KothGuideModal: FC<KothToolkitModalProps> = ({ gameId, ...modalProp
   ].join('\n')
 
   // Reference plant — players write their platform-issued control token verbatim
-  // into /koth/king on the hill. The token is game-wide (works on every hill), so
-  // <challenge-id> below is just any hill in this game. The exact write path depends
-  // on the challenge (HTTP PUT, file write via exploit, raw socket, etc) — this is
-  // just the shape players need to produce.
+  // into /koth/king on the hill. The token is game-wide (works on every hill) and
+  // fetched without a challenge id. The exact write path depends on the challenge
+  // (HTTP PUT, file write via exploit, raw socket, etc) — this is just the shape
+  // players need to produce.
   const plantPseudocode = `# pseudocode — the actual write path depends on the hill's exploit
-TOKEN=$(curl -sS ${apiUrl}/Koth/<challenge-id>/Token \\
+TOKEN=$(curl -sS ${apiUrl}/Koth/Token \\
   -H "Authorization: Bearer <your-token>" | jq -r '.token')
 
 # exploit the hill so that this byte string ends up in /koth/king
@@ -236,6 +260,7 @@ write_to_hill "/koth/king" "$TOKEN"`
                     <Code block className={misc.ffmono} style={{ fontSize: '0.75rem' }}>
                       {plantPseudocode}
                     </Code>
+                    <CopyCurlButton value={plantPseudocode} />
                     <Text size="xs" c="dimmed">
                       {t(
                         'game.content.koth.guide.hill.last_write_wins',
@@ -251,6 +276,7 @@ write_to_hill "/koth/king" "$TOKEN"`
                     <Code block className={misc.ffmono} style={{ fontSize: '0.75rem' }}>
                       {targetsCurlExample}
                     </Code>
+                    <CopyCurlButton value={targetsCurlExample} />
                     <Text size="xs" c="dimmed">
                       {t(
                         'game.content.koth.guide.hill.targets_note',

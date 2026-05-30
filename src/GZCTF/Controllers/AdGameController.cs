@@ -438,15 +438,36 @@ public class AdGameController(
     }
 
     /// <summary>
-    /// King of the Hill — the caller's control token. Write this exact value into a
-    /// hill's <c>/koth/king</c> marker to claim control. The token is GAME-WIDE — the
-    /// SAME value works on EVERY hill in this game — and stable for a whole refresh
-    /// window (it rotates only when the hills reset, every <c>KothRefreshTicks</c>
-    /// ticks), so fetch it once after a reset and plant it on whichever hills you
-    /// capture; no per-hill or per-tick re-fetch needed. The <c>{challengeId}</c> route
-    /// segment only scopes/validates the game and is otherwise ignored for the value.
-    /// Accepts the same auth as Submit (<c>Bearer ad_...</c> for scripted play, or the
-    /// session cookie).
+    /// King of the Hill — the caller's control token, the ID-FREE form. Write this exact
+    /// value into a hill's <c>/koth/king</c> marker to claim control. The token is
+    /// GAME-WIDE — the SAME value works on EVERY hill in this game — and stable for a
+    /// whole refresh window (it rotates only when the hills reset, every
+    /// <c>KothRefreshTicks</c> ticks), so fetch it once after a reset and plant it on
+    /// whichever hills you capture. Prefer this over the per-challenge variant — you
+    /// never need a challenge id. Accepts the same auth as Submit (<c>Bearer ad_...</c>
+    /// for scripted play, or the session cookie).
+    /// </summary>
+    [HttpGet("Koth/Token")]
+    [ProducesResponseType(typeof(KothTokenModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> KothTokenAny(int id, CancellationToken token)
+    {
+        var part = await ResolveTeamApiTokenAsync(id, token) ?? await ResolveUserParticipationAsync(id, token);
+        if (part is null)
+            return Unauthorized(new RequestResponse("not an accepted member of this game", StatusCodes.Status401Unauthorized));
+
+        var hasKoth = await db.GameChallenges.AnyAsync(
+            c => c.GameId == id && c.Type == ChallengeType.KingOfTheHill && c.IsEnabled, token);
+        if (!hasKoth)
+            return NotFound(new RequestResponse("no King of the Hill challenge in this game"));
+
+        return Ok(await ResolveKothTokenAsync(id, part.Id, token));
+    }
+
+    /// <summary>
+    /// King of the Hill — the caller's control token, scoped via a specific hill's id.
+    /// Identical value to the ID-free <see cref="KothTokenAny"/> (the token is GAME-WIDE);
+    /// the <c>{challengeId}</c> segment only validates the hill exists and is otherwise
+    /// ignored. Kept for callers that already have a challenge id. Same auth as Submit.
     /// </summary>
     [HttpGet("Koth/{challengeId:int}/Token")]
     [ProducesResponseType(typeof(KothTokenModel), StatusCodes.Status200OK)]
@@ -462,40 +483,46 @@ public class AdGameController(
         if (!isKoth)
             return NotFound(new RequestResponse("not a King of the Hill challenge in this game"));
 
+        return Ok(await ResolveKothTokenAsync(id, part.Id, token));
+    }
+
+    /// <summary>
+    /// Resolve a team's current game-wide KotH control token. The token is minted once
+    /// per refresh window at the window anchor round and is stable across the window —
+    /// resolve it by the anchor (not the current round) and by participation only (NOT
+    /// by challenge; one row serves every hill in the game). Shared by the ID-free and
+    /// per-challenge token endpoints.
+    /// </summary>
+    private async Task<KothTokenModel> ResolveKothTokenAsync(int gameId, int participationId, CancellationToken token)
+    {
         var latestRound = await db.AdRounds
-            .Where(r => r.GameId == id)
+            .Where(r => r.GameId == gameId)
             .OrderByDescending(r => r.Number)
             .Select(r => r.Number)
             .FirstOrDefaultAsync(token);
 
         if (latestRound == 0)
-            return Ok(new KothTokenModel { Round = 0, Token = null, Status = "warmup" });
+            return new KothTokenModel { Round = 0, Token = null, Status = "warmup" };
 
-        // The token is GAME-WIDE (one per team per window, valid on every hill) and
-        // minted once per refresh window at the window anchor round — resolve it by the
-        // anchor, not the current round, and NOT by challengeId (the same row serves
-        // every hill in this game).
         var refreshTicks = Math.Max(1, await db.Games
-            .Where(g => g.Id == id)
+            .Where(g => g.Id == gameId)
             .Select(g => g.KothRefreshTicks)
             .FirstOrDefaultAsync(token) ?? 5);
         var anchorRound = (latestRound - 1) / refreshTicks * refreshTicks + 1;
 
         var tok = await db.KothTokens
-            .Where(k => k.ParticipationId == part.Id && k.RoundNumber == anchorRound)
+            .Where(k => k.ParticipationId == participationId && k.RoundNumber == anchorRound)
             .Select(k => k.Token)
             .FirstOrDefaultAsync(token);
 
-        return Ok(new KothTokenModel
+        return new KothTokenModel
         {
-            // Report the window-anchor round (the token's round) — stable across the
-            // window, matching the stable token value.
+            // Window-anchor round (the token's round) — stable across the window.
             Round = anchorRound,
             Token = tok,
-            // Distinguish "we missed the mint this window" from "token here, plant it"
-            // so the UI can stop showing a generic spinner indefinitely.
+            // Distinguish "missed the mint this window" from "token here, plant it".
             Status = tok is null ? "no-token-this-round" : "ready"
-        });
+        };
     }
 
     /// <summary>

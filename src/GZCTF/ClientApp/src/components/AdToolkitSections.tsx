@@ -37,9 +37,13 @@ export const useAdToken = (gameId: number, onRotated?: () => void) => {
   const [freshToken, setFreshToken] = useState<string | null>(null)
   // Per-game so switching games never surfaces the wrong token. JSON-serialized
   // by Mantine; null when nothing has been saved (or after Forget).
+  // getInitialValueInEffect:false → read synchronously on first render (SPA, no
+  // SSR) so the curl examples render with the saved token immediately instead of
+  // flashing the <your-token> placeholder for a frame.
   const [storedToken, setStoredToken] = useLocalStorage<string | null>({
     key: `ad-api-token-${gameId}`,
     defaultValue: null,
+    getInitialValueInEffect: false,
   })
   const [tokenModalOpen, { open: openTokenModal, close: closeTokenModal }] = useDisclosure(false)
 

@@ -141,7 +141,7 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
   // session-fresh plaintext if we still have it; otherwise emit a
   // placeholder + a note so it's obvious they need to drop their saved
   // token in.
-  const exampleBearer = freshToken ?? '<your-token>'
+  const exampleBearer = freshToken ?? storedToken ?? '<your-token>'
 
   const curlExample = [
     `curl -X POST ${apiUrl}/Submit \\`,
@@ -376,6 +376,20 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
                     <Code block className={misc.ffmono} style={{ fontSize: '0.75rem' }}>
                       {sshExample}
                     </Code>
+                    <Group justify="flex-end">
+                      <CopyButton value={sshExample}>
+                        {({ copied, copy }) => (
+                          <Button
+                            size="compact-xs"
+                            variant="subtle"
+                            leftSection={<Icon path={mdiContentCopy} size={0.7} />}
+                            onClick={copy}
+                          >
+                            {copied ? t('game.tooltip.copy.copied', 'Copied') : t('common.button.copy', 'Copy')}
+                          </Button>
+                        )}
+                      </CopyButton>
+                    </Group>
                     <Text size="xs" c="dimmed">
                       {t(
                         'game.content.ad.guide.ssh.connect_hint',
