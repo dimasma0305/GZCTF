@@ -417,7 +417,7 @@ public sealed class AdCheckerService(
                             .Where(g => g.Id == challenge.GameId)
                             .Select(g => g.KothRefreshTicks)
                             .FirstOrDefaultAsync(token) ?? 5);
-                        var anchorRound = (latest.Number - 1) / refreshTicks * refreshTicks + 1;
+                        var anchorRound = KothWindow.AnchorRound(latest.Number, refreshTicks);
                         var match = await db.KothTokens
                             .Where(k => k.RoundNumber == anchorRound && k.Token == marker
                                         && k.Participation.GameId == challenge.GameId)

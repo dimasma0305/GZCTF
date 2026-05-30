@@ -140,7 +140,7 @@ public sealed class AdRoundService(
         // ticks reuse it without re-minting. (A per-tick mint that reused a value would
         // also violate the unique Token index.)
         var kothTokensMinted = 0;
-        if (kothChallengeIds.Count > 0 && (nextNumber - 1) % refreshTicks == 0)
+        if (kothChallengeIds.Count > 0 && KothWindow.IsMintBoundary(nextNumber, refreshTicks))
         {
             var participationIds = await db.Participations
                 .Where(p => p.GameId == gameId && p.Status == ParticipationStatus.Accepted)

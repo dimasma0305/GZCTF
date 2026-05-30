@@ -508,7 +508,7 @@ public class AdGameController(
             .Where(g => g.Id == gameId)
             .Select(g => g.KothRefreshTicks)
             .FirstOrDefaultAsync(token) ?? 5);
-        var anchorRound = (latestRound - 1) / refreshTicks * refreshTicks + 1;
+        var anchorRound = KothWindow.AnchorRound(latestRound, refreshTicks);
 
         var tok = await db.KothTokens
             .Where(k => k.ParticipationId == participationId && k.RoundNumber == anchorRound)
