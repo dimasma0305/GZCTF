@@ -336,7 +336,7 @@ export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => 
                 </Tooltip>
                 <Tooltip
                   label={t('game.content.scoreboard.koth.legend.penalty_tip',
-                    'Flat −1 per tick when you hold a broken hill (Mumble / Offline / Corrupt). One-tick grace on takeover so previous-holder damage isn\'t your fault.')}
+                    'Flat −1 per tick when you hold a broken hill (Mumble / Offline). InternalError (a checker/infra fault) is never charged. One-tick grace on takeover so previous-holder damage isn\'t your fault.')}
                   transitionProps={{ transition: 'pop' }}
                 >
                   <Group justify="left" gap={4}>
