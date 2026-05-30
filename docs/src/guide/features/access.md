@@ -214,6 +214,7 @@ Inside a game, the **Toolkit** sidebar collects everything a team needs to play 
 | **VPN config** | `GET /api/Game/{id}/Ad/Vpn/Config` | Download your `.conf` (see above). |
 | **SSH key** | `GET` / `POST` / `POST .../Generate` / `DELETE` on `/api/Game/{id}/Ad/Ssh/Key` | Upload, generate, inspect, or revoke your jump-host key; shows the `JumpHost` to connect to. |
 | **Targets** | `GET /api/Game/{id}/Ad/Targets` | The `ip:port` list of opponents' boxes (and the KotH hill). |
+| **KotH control** | `GET /api/Game/{id}/Ad/Koth/Token` (your game-wide token), `GET /api/Game/{id}/Ad/Koth/Hills` (every hill's holder/status/target) | Fetch the control token and see every hill in one call — no challenge id. Per-challenge `.../Koth/{challengeId}/Token` and `.../Koth/{challengeId}/State` still work for one hill. See [King of the Hill](/guide/features/king-of-the-hill). |
 
 ### The team API Bearer token
 
