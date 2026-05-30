@@ -14,7 +14,7 @@ import {
   useMantineTheme,
 } from '@mantine/core'
 import { showNotification } from '@mantine/notifications'
-import { mdiCheck, mdiDatabaseEditOutline, mdiHammerWrench, mdiPuzzleEditOutline } from '@mdi/js'
+import { mdiCheck, mdiDatabaseEditOutline, mdiFlagOutline, mdiHammerWrench, mdiPuzzleEditOutline } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import { Dispatch, FC, SetStateAction, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -50,7 +50,13 @@ export const ChallengeEditCard: FC<ChallengeEditCardProps> = ({
   onSelectChange,
 }) => {
   const challengeCategoryLabelMap = useChallengeCategoryLabelMap()
-  const data = challengeCategoryLabelMap.get(challenge.category as ChallengeCategory)
+  // Fall back to Misc when the challenge's category isn't in the map (e.g. an
+  // imported game carrying an unknown/legacy category): without this the
+  // `data!.icon` below threw "Cannot read properties of undefined (reading 'icon')"
+  // and crashed the whole admin challenges page.
+  const data =
+    challengeCategoryLabelMap.get(challenge.category as ChallengeCategory) ??
+    challengeCategoryLabelMap.get(ChallengeCategory.Misc)
   const theme = useMantineTheme()
   const { id } = useParams()
 
@@ -132,7 +138,7 @@ export const ChallengeEditCard: FC<ChallengeEditCardProps> = ({
           onChange={() => onToggle(challenge, setDisabled)}
         />
 
-        <Icon path={data!.icon} color={theme.colors[data?.color ?? theme.primaryColor][5]} size={1.2} />
+        <Icon path={data?.icon ?? mdiFlagOutline} color={theme.colors[data?.color ?? theme.primaryColor][5]} size={1.2} />
 
         <Stack gap={0} maw={contentWidth} miw={contentWidth}>
           <Group gap={6} wrap="nowrap">
