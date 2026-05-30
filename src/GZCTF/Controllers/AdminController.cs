@@ -2484,12 +2484,20 @@ public class AdminController(
 
         if (cascade)
         {
-            // Operator explicitly wants the imported games gone too —
-            // EF cascade delete on Games will sweep up GameChallenges,
-            // and the GameChallenges → FlagContexts / Attachments
-            // cascades take care of the rest. ChallengeBuildAudits FK
-            // is also cascade so audit rows disappear cleanly.
-            dbContext.Games.RemoveRange(children);
+            // Operator explicitly wants the imported games gone too. Delete each via
+            // the full game-deletion path (GameRepository.DeleteGame → RemoveChallenge),
+            // NOT a raw Games.RemoveRange. FlagContexts FK to GameChallenges with
+            // ON DELETE NO ACTION (not cascade), so relying on the DB cascade alone
+            // throws FK_FlagContexts_GameChallenges_ChallengeId (23503) — the
+            // "Request failed with status code 500" seen on cascade delete.
+            // DeleteGame clears FlagContexts (and the A&D/KotH rows) in order first.
+            foreach (var g in children)
+            {
+                var status = await gameRepository.DeleteGame(g, token);
+                if (status != TaskStatus.Success)
+                    return StatusCode(StatusCodes.Status500InternalServerError,
+                        new RequestResponse($"Failed to delete imported game '{g.Title}'."));
+            }
         }
         else
         {
