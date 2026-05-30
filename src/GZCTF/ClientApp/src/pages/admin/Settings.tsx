@@ -603,6 +603,40 @@ const Configs: FC = () => {
                 })
               }
             />
+            <Switch
+              checked={accountPolicy?.requireUniqueIpGlobal ?? false}
+              disabled={disabled}
+              label={SwitchLabel(
+                t('admin.content.settings.account.unique_ip_global.label', 'Globally unique login IP'),
+                t(
+                  'admin.content.settings.account.unique_ip_global.description',
+                  'Block login if ANY other user (not just a teammate) logged in from the same IP in the last 24h. Warning: locks out unrelated users behind a shared NAT/campus IP.'
+                )
+              )}
+              onChange={(e) =>
+                setAccountPolicy({
+                  ...accountPolicy,
+                  requireUniqueIpGlobal: e.currentTarget.checked,
+                })
+              }
+            />
+            <Switch
+              checked={accountPolicy?.requireUniqueFingerprintGlobal ?? false}
+              disabled={disabled}
+              label={SwitchLabel(
+                t('admin.content.settings.account.unique_fingerprint_global.label', 'Globally unique fingerprint'),
+                t(
+                  'admin.content.settings.account.unique_fingerprint_global.description',
+                  'Block login if ANY other user (not just a teammate) used the same browser fingerprint in the last 24h. Requires browser fingerprinting to be enabled.'
+                )
+              )}
+              onChange={(e) =>
+                setAccountPolicy({
+                  ...accountPolicy,
+                  requireUniqueFingerprintGlobal: e.currentTarget.checked,
+                })
+              }
+            />
           </SimpleGrid>
           {accountPolicy?.enableBrowserFingerprint && (
             <Alert color="yellow" icon={<Icon path={mdiAlert} size={1} />}>

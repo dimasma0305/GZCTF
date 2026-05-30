@@ -75,6 +75,23 @@ public class AccountPolicy
     /// Require each user on a team to have a browser fingerprint not used by another teammate within the last 24 hours
     /// </summary>
     public bool RequireUniqueFingerprintPerTeamUser { get; set; }
+
+    /// <summary>
+    /// Require each login IP to be globally unique: block login if ANY other user (not
+    /// just a teammate) signed in from the same IP within the last 24 hours. Stronger
+    /// than <see cref="RequireUniqueIpPerTeamUser"/>; when on, the per-team flag is
+    /// redundant. Note: blocks unrelated users behind a shared NAT/campus IP — intended
+    /// for events where each player must connect from a distinct address.
+    /// </summary>
+    public bool RequireUniqueIpGlobal { get; set; }
+
+    /// <summary>
+    /// Require each browser fingerprint to be globally unique: block login if ANY other
+    /// user (not just a teammate) signed in with the same fingerprint within the last 24
+    /// hours. Stronger than <see cref="RequireUniqueFingerprintPerTeamUser"/>; when on,
+    /// the per-team flag is redundant.
+    /// </summary>
+    public bool RequireUniqueFingerprintGlobal { get; set; }
 }
 
 /// <summary>

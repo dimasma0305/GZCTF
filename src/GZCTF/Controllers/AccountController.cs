@@ -579,20 +579,37 @@ public partial class AccountController(
                 StatusCodes.Status401Unauthorized));
 
         var policy = accountPolicy.Value;
-        if (policy.RequireUniqueIpPerTeamUser || policy.RequireUniqueFingerprintPerTeamUser)
+        // IP and fingerprint uniqueness each have a per-team flag (conflict only with a
+        // teammate) and a global flag (conflict with ANY other user in the last 24h).
+        // The "global" variants block a login if a *different* account already used the
+        // same IP / fingerprint, regardless of team — for events where every player must
+        // connect from a distinct machine/address. The candidate set below is widened to
+        // all recent users whenever either global flag is on; each individual check then
+        // matches against teammates-only or everyone per its own flags.
+        var ipCheck = policy.RequireUniqueIpPerTeamUser || policy.RequireUniqueIpGlobal;
+        var fpCheck = policy.RequireUniqueFingerprintPerTeamUser || policy.RequireUniqueFingerprintGlobal;
+        if (ipCheck || fpCheck)
         {
             var currentIp = HttpContext.Connection.RemoteIpAddress;
             var since = DateTimeOffset.UtcNow.AddHours(-24);
-            var teammates = await userManager.Users
+            var anyGlobal = policy.RequireUniqueIpGlobal || policy.RequireUniqueFingerprintGlobal;
+            var candidates = await userManager.Users
                 .Where(u => u.Id != user.Id
                     && u.LastVisitedUtc > since
-                    && u.Teams.Any(t => t.Members.Any(m => m.Id == user.Id)))
-                .Select(u => new { u.Id, u.UserName, u.IP, u.BrowserFingerprint })
+                    && (anyGlobal || u.Teams.Any(t => t.Members.Any(m => m.Id == user.Id))))
+                .Select(u => new
+                {
+                    u.Id, u.UserName, u.IP, u.BrowserFingerprint,
+                    IsTeammate = u.Teams.Any(t => t.Members.Any(m => m.Id == user.Id))
+                })
                 .ToListAsync(token);
 
-            if (policy.RequireUniqueIpPerTeamUser && currentIp is not null)
+            if (ipCheck && currentIp is not null)
             {
-                var conflict = teammates.FirstOrDefault(t => t.IP is not null && t.IP.Equals(currentIp));
+                // Global → any user with this IP; per-team only → restrict to teammates.
+                var conflict = candidates.FirstOrDefault(t =>
+                    t.IP is not null && t.IP.Equals(currentIp)
+                    && (policy.RequireUniqueIpGlobal || t.IsTeammate));
                 if (conflict is not null)
                 {
                     logger.Log(
@@ -617,9 +634,11 @@ public partial class AccountController(
                 }
             }
 
-            if (policy.RequireUniqueFingerprintPerTeamUser && !string.IsNullOrEmpty(fingerprint))
+            if (fpCheck && !string.IsNullOrEmpty(fingerprint))
             {
-                var conflict = teammates.FirstOrDefault(t => t.BrowserFingerprint == fingerprint);
+                var conflict = candidates.FirstOrDefault(t =>
+                    t.BrowserFingerprint == fingerprint
+                    && (policy.RequireUniqueFingerprintGlobal || t.IsTeammate));
                 if (conflict is not null)
                 {
                     logger.Log(

@@ -596,6 +596,10 @@ export interface AccountPolicy {
   requireUniqueIpPerTeamUser?: boolean;
   /** Require each user on a team to have a browser fingerprint not used by another teammate within the last 24 hours */
   requireUniqueFingerprintPerTeamUser?: boolean;
+  /** Require each login IP to be globally unique: block login if ANY other user logged in from the same IP within the last 24 hours */
+  requireUniqueIpGlobal?: boolean;
+  /** Require each browser fingerprint to be globally unique: block login if ANY other user used the same fingerprint within the last 24 hours */
+  requireUniqueFingerprintGlobal?: boolean;
 }
 
 /** Global settings */
