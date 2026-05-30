@@ -133,44 +133,33 @@ public sealed class AdRoundService(
         // for the window, instead of re-planting every tick. A still-per-round row is
         // written each tick (carrying the window value) so the king-check + token
         // endpoint, which look up by current RoundNumber, need no change.
-        if (kothChallengeIds.Count > 0)
+        // Mint a fresh token per (team, hill) ONLY on a refresh-window boundary
+        // (rounds 1, 1+refreshTicks, 1+2·refreshTicks, …) — the same boundary the hill
+        // resets on. The token then stays the window's stable value: the king-check and
+        // the token endpoint resolve it by the window's ANCHOR round, so the intervening
+        // ticks reuse it without re-minting. So a team plants once after a reset and
+        // holds the hill for the window. (A per-tick mint that reused a value would also
+        // violate the unique Token index.)
+        if (kothChallengeIds.Count > 0 && (nextNumber - 1) % refreshTicks == 0)
         {
             var participationIds = await db.Participations
                 .Where(p => p.GameId == gameId && p.Status == ParticipationStatus.Accepted)
                 .Select(p => p.Id)
                 .ToListAsync(token);
 
-            // (nextNumber - 1) % refreshTicks == 0 marks a window boundary (rounds
-            // 1, 1+refreshTicks, …) → mint fresh; otherwise carry the previous round's
-            // value forward (the same token the team already planted this window).
-            var atWindowBoundary = (nextNumber - 1) % refreshTicks == 0;
-            var carried = atWindowBoundary
-                ? new Dictionary<(int Pid, int Cid), string>()
-                : (await db.KothTokens
-                        .Where(k => k.RoundNumber == nextNumber - 1 && kothChallengeIds.Contains(k.ChallengeId))
-                        .Select(k => new { k.ParticipationId, k.ChallengeId, k.Token })
-                        .ToListAsync(token))
-                    .ToDictionary(k => (k.ParticipationId, k.ChallengeId), k => k.Token);
-
             foreach (var cid in kothChallengeIds)
                 foreach (var pid in participationIds)
                 {
-                    // Carry the window's value forward; mint fresh on a boundary, or for
-                    // a team with no prior token (e.g. accepted mid-window).
-                    if (!carried.TryGetValue((pid, cid), out var tokenValue))
-                    {
-                        var tbytes = new byte[FlagRandomBytes];
-                        RandomNumberGenerator.Fill(tbytes);
-                        var tpayload = Convert.ToBase64String(tbytes).TrimEnd('=').Replace('+', '_').Replace('/', '-');
-                        tokenValue = $"koth_{tpayload}";
-                    }
+                    var tbytes = new byte[FlagRandomBytes];
+                    RandomNumberGenerator.Fill(tbytes);
+                    var tpayload = Convert.ToBase64String(tbytes).TrimEnd('=').Replace('+', '_').Replace('/', '-');
                     await db.KothTokens.AddAsync(new KothToken
                     {
                         ParticipationId = pid,
                         ChallengeId = cid,
                         RoundNumber = nextNumber,
                         AdRoundId = round.Id, // FK — cascade-deletes if the round is rolled back
-                        Token = tokenValue,
+                        Token = $"koth_{tpayload}",
                         IssuedAt = now
                     }, token);
                 }

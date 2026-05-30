@@ -438,11 +438,12 @@ public class AdGameController(
     }
 
     /// <summary>
-    /// King of the Hill — the caller's current-tick control token for a hill. Write
-    /// this exact value into the hill's <c>/koth/king</c> marker to claim control for
-    /// the round; it rotates every tick, so re-fetch + re-plant each round to hold
-    /// the hill. Accepts the same auth as Submit (<c>Bearer ad_...</c> for scripted
-    /// play, or the session cookie).
+    /// King of the Hill — the caller's control token for a hill. Write this exact value
+    /// into the hill's <c>/koth/king</c> marker to claim control. The token is stable
+    /// for a whole refresh window (it rotates only when the hill resets, every
+    /// <c>KothRefreshTicks</c> ticks), so plant it once after a reset and it holds for
+    /// the window — no per-tick re-plant needed. Accepts the same auth as Submit
+    /// (<c>Bearer ad_...</c> for scripted play, or the session cookie).
     /// </summary>
     [HttpGet("Koth/{challengeId:int}/Token")]
     [ProducesResponseType(typeof(KothTokenModel), StatusCodes.Status200OK)]
@@ -467,16 +468,26 @@ public class AdGameController(
         if (latestRound == 0)
             return Ok(new KothTokenModel { Round = 0, Token = null, Status = "warmup" });
 
+        // The token is minted once per refresh window (at the window anchor round) and
+        // is stable across the window — resolve it by the anchor, not the current round.
+        var refreshTicks = Math.Max(1, await db.Games
+            .Where(g => g.Id == id)
+            .Select(g => g.KothRefreshTicks)
+            .FirstOrDefaultAsync(token) ?? 5);
+        var anchorRound = (latestRound - 1) / refreshTicks * refreshTicks + 1;
+
         var tok = await db.KothTokens
-            .Where(k => k.ParticipationId == part.Id && k.ChallengeId == challengeId && k.RoundNumber == latestRound)
+            .Where(k => k.ParticipationId == part.Id && k.ChallengeId == challengeId && k.RoundNumber == anchorRound)
             .Select(k => k.Token)
             .FirstOrDefaultAsync(token);
 
         return Ok(new KothTokenModel
         {
-            Round = latestRound,
+            // Report the window-anchor round (the token's round) — stable across the
+            // window, matching the stable token value.
+            Round = anchorRound,
             Token = tok,
-            // Distinguish "we missed the mint this round" from "token here, plant it"
+            // Distinguish "we missed the mint this window" from "token here, plant it"
             // so the UI can stop showing a generic spinner indefinitely.
             Status = tok is null ? "no-token-this-round" : "ready"
         });

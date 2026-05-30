@@ -404,8 +404,16 @@ public sealed class AdCheckerService(
                     var marker = Encoding.UTF8.GetString(b.Data).Trim();
                     if (marker.Length > 0)
                     {
+                        // The control token is minted once per refresh window (at the
+                        // window anchor round), not per tick — resolve the marker against
+                        // that anchor so a once-planted token stays valid for the window.
+                        var refreshTicks = Math.Max(1, await db.Games
+                            .Where(g => g.Id == challenge.GameId)
+                            .Select(g => g.KothRefreshTicks)
+                            .FirstOrDefaultAsync(token) ?? 5);
+                        var anchorRound = (latest.Number - 1) / refreshTicks * refreshTicks + 1;
                         var match = await db.KothTokens
-                            .Where(k => k.ChallengeId == challenge.Id && k.RoundNumber == latest.Number && k.Token == marker)
+                            .Where(k => k.ChallengeId == challenge.Id && k.RoundNumber == anchorRound && k.Token == marker)
                             .Select(k => new { k.Id, k.ParticipationId })
                             .FirstOrDefaultAsync(token);
                         if (match is not null)
