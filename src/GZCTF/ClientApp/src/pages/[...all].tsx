@@ -1,25 +1,18 @@
 import { Stack, Text, Title } from '@mantine/core'
-import { FC, useEffect } from 'react'
+import { FC } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useLocation, useNavigate } from 'react-router'
 import { WithNavBar } from '@Components/WithNavbar'
 import { Icon404 } from '@Components/icon/404Icon'
 import { usePageTitle } from '@Hooks/usePageTitle'
 import classes from '@Styles/Placeholder.module.css'
 
+// Render the 404 in place — deliberately NOT rewriting the URL to /404. The old
+// navigate('/404') destroyed the address the user actually hit (so they couldn't
+// see/share what 404'd) and broke the back button (it would land back on /404).
 const Error404: FC = () => {
-  const navigate = useNavigate()
-  const location = useLocation()
-
   const { t } = useTranslation()
 
   usePageTitle(t('common.title.404'))
-
-  useEffect(() => {
-    if (location.pathname !== '/404') {
-      navigate('/404')
-    }
-  }, [location])
 
   return (
     <WithNavBar minWidth={0}>

@@ -125,13 +125,20 @@ const GameInfoEdit: FC = () => {
   }
 
   const onUpdateInfo = async () => {
-    if (!game?.title) return
+    if (!game?.title) {
+      showNotification({
+        color: 'orange',
+        message: t('admin.notification.games.title_required', 'A game title is required.'),
+        icon: <Icon path={mdiClose} size={1} />,
+      })
+      return
+    }
     setDisabled(true)
 
     try {
       await api.edit.editUpdateGame(game.id!, {
         ...game,
-        inviteCode: (game.inviteCode?.length ?? 0 > 6) ? game.inviteCode : null,
+        inviteCode: (game.inviteCode?.length ?? 0) > 6 ? game.inviteCode : null,
         start: start.valueOf(),
         end: end.valueOf(),
         freeze: freeze ? freeze.valueOf() : null,

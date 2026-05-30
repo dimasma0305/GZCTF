@@ -17,7 +17,15 @@ const Confirm: FC = () => {
   const email = sp.get('email')
   const [disabled, setDisabled] = useState(false)
   const { t } = useTranslation()
-  const decodeEmail = window.atob(email ?? '')
+  // A corrupted/truncated link can carry a non-base64 email param; window.atob then
+  // throws synchronously during render and white-screens the page. Decode safely and
+  // let the !token/!email branch surface the "invalid link" message instead.
+  let decodeEmail = ''
+  try {
+    decodeEmail = email ? window.atob(email) : ''
+  } catch {
+    decodeEmail = ''
+  }
 
   usePageTitle(t('account.title.confirm'))
 

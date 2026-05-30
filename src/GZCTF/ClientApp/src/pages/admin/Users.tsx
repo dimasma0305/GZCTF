@@ -144,9 +144,6 @@ const Users: FC = () => {
             <Text>
               <Trans i18nKey="admin.content.users.reset.content" />
             </Text>
-            <Text>
-              <Trans i18nKey="admin.content.users.reset.content" />
-            </Text>
             <ScrollingText text={res.data} fw="bold" maw="25rem" />
             <Button
               onClick={() => {

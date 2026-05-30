@@ -196,9 +196,12 @@ export const GameChallengeModal: FC<GameChallengeModalProps> = (props) => {
       const nxt = (challenge?.attempts ?? 0) + 1
       const attempts = challenge?.limit && challenge.limit > 0 ? Math.min(nxt, challenge.limit) : nxt
 
+      // Spread the existing challenge FIRST, then override attempts — otherwise the
+      // stale attempts value clobbers the increment and the "N remaining" counter
+      // never decrements after a submit on limited-attempt challenges.
       mutate({
-        attempts,
         ...challenge,
+        attempts,
       })
       return
     } catch (e) {

@@ -123,6 +123,10 @@ const Profile: FC = () => {
       mutate({ ...user })
     } catch (e) {
       showErrorMsg(e, t)
+    } finally {
+      // Without this the whole account form (every input + button) stays greyed out
+      // after a successful save — the user would have to reload to edit again.
+      setDisabled(false)
     }
   }
 

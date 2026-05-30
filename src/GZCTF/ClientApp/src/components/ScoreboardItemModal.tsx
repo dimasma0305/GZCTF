@@ -54,7 +54,9 @@ function calculateScoreRadar(
       (chal) => challengeIdMap?.get(chal.id!)?.category === ind.name
     )
     const cateScore = solvedChallenges?.reduce((sum, chal) => sum + chal.score!, 0) ?? 0
-    return Math.min(cateScore / ind.scoreSum, 1)
+    // Guard the division: a category whose challenges total 0 points gives 0/0 = NaN,
+    // which breaks the radar axis. Treat a zero-sum category as 0.
+    return ind.scoreSum > 0 ? Math.min(cateScore / ind.scoreSum, 1) : 0
   })
 
   return { indicator, value, name: item?.name ?? '' }

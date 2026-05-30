@@ -28,7 +28,10 @@ i18n
     })
   )
   .init({
-    fallbackLng: convertLanguage,
+    // Fall back to en-US (the source-of-truth locale) for any key missing in the
+    // active language — NOT to convertLanguage, which returns the same active code
+    // and so leaves missing keys rendering as raw dotted key strings.
+    fallbackLng: 'en-US',
     interpolation: {
       escapeValue: false,
     },
