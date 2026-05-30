@@ -95,8 +95,17 @@ export const AdChallengePanel: FC<AdChallengePanelProps> = ({ gameId, challengeI
                 size="xs"
                 c={sshKey.exists ? undefined : 'dimmed'}
                 truncate
+                role="button"
+                tabIndex={0}
+                aria-label={t('game.tooltip.copy.ssh_cmd', 'Copy ssh command')}
                 style={{ cursor: 'pointer' }}
                 onClick={copy}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    copy()
+                  }
+                }}
               >
                 {cmd}
               </Text>
@@ -206,8 +215,17 @@ export const AdChallengePanel: FC<AdChallengePanelProps> = ({ gameId, challengeI
                 <Text
                   className={misc.ffmono}
                   size="sm"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={t('game.tooltip.copy.ip_port', 'Copy IP:port')}
                   style={{ cursor: 'pointer' }}
                   onClick={copy}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      copy()
+                    }
+                  }}
                 >
                   {service.containerIp}:{service.containerPort}
                 </Text>
@@ -236,8 +254,17 @@ export const AdChallengePanel: FC<AdChallengePanelProps> = ({ gameId, challengeI
                   size="xs"
                   c="dimmed"
                   truncate
+                  role="button"
+                  tabIndex={0}
+                  aria-label={t('game.tooltip.copy.flag', 'Copy flag')}
                   style={{ cursor: 'pointer' }}
                   onClick={copy}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      copy()
+                    }
+                  }}
                 >
                   {service.currentFlag}
                 </Text>

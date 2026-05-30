@@ -230,10 +230,10 @@ curl -X POST https://gzctf.gzti.me/api/Game/1/Ad/Submit \
 The same token authenticates the **KotH control token** endpoint:
 
 ```text
-GET /api/Game/{id}/Ad/Koth/{challengeId}/Token
+GET /api/Game/{id}/Ad/Koth/Token
 ```
 
-It returns the current tick's control token; write that exact value into the hill's `/koth/king` marker to claim the round. It rotates every tick, so re-fetch and re-plant each round to hold the hill. See [/guide/features/king-of-the-hill](/guide/features/king-of-the-hill).
+It returns your team's game-wide control token; write that exact value into a hill's `/koth/king` marker to claim it. The token is the **same for every hill** and rotates only when the hills reset (every `KothRefreshTicks` rounds, default 5), so fetch it once per refresh window and plant it on whichever hills you take. A per-challenge form `GET /api/Game/{id}/Ad/Koth/{challengeId}/Token` still works and returns the same token. See [/guide/features/king-of-the-hill](/guide/features/king-of-the-hill).
 
 :::tip
 Anywhere the token is accepted, a logged-in session cookie works too. The bearer token exists so exploit and KotH-holder scripts can run headless. Endpoints accepting both call `ResolveTeamApiTokenAsync` (the `Bearer ad_...` path) first, then fall back to the cookie session.

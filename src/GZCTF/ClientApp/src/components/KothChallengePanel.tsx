@@ -160,8 +160,17 @@ export const KothChallengePanel: FC<KothChallengePanelProps> = ({ gameId, challe
                   className={misc.ffmono}
                   size="xs"
                   truncate
+                  role="button"
+                  tabIndex={0}
+                  aria-label={t('game.tooltip.copy.target', 'Copy hill address')}
                   style={{ cursor: 'pointer' }}
                   onClick={copy}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      copy()
+                    }
+                  }}
                 >
                   {hill.ip}{hill.port ? `:${hill.port}` : ''}
                 </Text>

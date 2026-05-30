@@ -21,7 +21,7 @@ features:
     details: Tick-based rounds, per-team service containers, rotating /flag, an enochecker3 SLA checker and WireGuard VPN access — all on the AdEngine.
     icon: ⚔️
   - title: King of the Hill
-    details: One shared hill the whole game fights to control. Plant your per-round token in /koth/king; hold a healthy hill to earn points.
+    details: One shared hill the whole game fights to control. Plant your game-wide control token in /koth/king; hold a healthy hill to earn points.
     icon: 👑
   - title: Jeopardy too
     details: Everything upstream GZ::CTF does — dynamic scoring, dynamic containers, scoreboards, cheat detection — still works alongside the A&D engine.
