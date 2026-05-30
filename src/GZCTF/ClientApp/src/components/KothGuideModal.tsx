@@ -30,7 +30,6 @@ import { Icon } from '@mdi/react'
 import { FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAdToken, AdTokenSection, AdVpnSection, AdTokenRevealModal } from '@Components/AdToolkitSections'
-import { KothHillList } from '@Components/KothHillList'
 import misc from '@Styles/Misc.module.css'
 
 interface KothToolkitModalProps extends ModalProps {
@@ -73,20 +72,28 @@ export const KothGuideModal: FC<KothToolkitModalProps> = ({ gameId, ...modalProp
   "status": "ready"
 }`
 
-  const stateCurlExample = [
-    `curl -sS ${apiUrl}/Koth/<challenge-id>/State \\`,
-    `  -H "Authorization: Bearer ${exampleBearer}"`,
+  // List form — every hill in one call, no challenge id needed. The jq line
+  // shows the shape a bot wants: title, where to aim, and who holds it.
+  const hillsCurlExample = [
+    `curl -sS ${apiUrl}/Koth/Hills \\`,
+    `  -H "Authorization: Bearer ${exampleBearer}" \\`,
+    `  | jq '.[] | {title, ip, port, holder: .holderTeamName, isYou, status}'`,
   ].join('\n')
 
-  const stateResponseExample = `{
-  "round": 42,
-  "holderParticipationId": 1,
-  "holderTeamName": "Team Alpha",
-  "isYou": true,
-  "status": "Ok",
-  "checkedAt": "2026-05-28T11:25:42.123Z",
-  "lastRefreshRound": 40
-}`
+  const hillsResponseExample = `[
+  {
+    "challengeId": 220,
+    "title": "KotH — Blockchain Hill",
+    "round": 42,
+    "holderParticipationId": 1,
+    "holderTeamName": "Team Alpha",
+    "isYou": true,
+    "status": "Ok",
+    "ip": "172.0.6.65",
+    "port": 80,
+    "lastRefreshRound": 40
+  }
+]`
 
   const targetsCurlExample = [
     `curl -sS ${apiUrl}/Targets \\`,
@@ -247,7 +254,7 @@ write_to_hill "/koth/king" "$TOKEN"`
                     <Text size="xs" c="dimmed">
                       {t(
                         'game.content.koth.guide.hill.targets_note',
-                        'No need to look up ids — the “Did my plant take?” section below lists every hill’s live IP:port (just click to copy). The hill IP changes every 5 ticks when the container is wiped + redeployed, so re-check it (or re-read /Targets) if your last-known IP stops responding.'
+                        'No need to look up ids per hill — GET /Koth/Hills (see “Did my plant take?” below) returns every hill’s live IP:port in one call. The hill IP changes every 5 ticks when the container is wiped + redeployed, so re-check it if your last-known IP stops responding.'
                       )}
                     </Text>
                   </Stack>
@@ -266,22 +273,14 @@ write_to_hill "/koth/king" "$TOKEN"`
                     <Text size="sm">
                       {t(
                         'game.content.koth.guide.state.intro',
-                        'Every hill in the game, live — name, target IP:port, who holds it right now, and the latest functional verdict. Confirm a plant landed without waiting for the next scoreboard refresh, and grab hill addresses without looking up challenge ids.'
+                        'GET /Koth/Hills returns EVERY hill in the game in one call — no challenge id needed. Each entry has the hill name, target IP:port, who holds it right now (isYou = your team), and the latest functional verdict. Use it to confirm a plant landed and to feed your bot every hill at once.'
                       )}
                     </Text>
-
-                    {/* Live, ID-free list of all hills — the primary "did my plant take?" view. */}
-                    <KothHillList gameId={gameId} />
-
-                    <Divider
-                      label={t('game.content.koth.guide.state.api_divider', 'Prefer the API? Query one hill by id:')}
-                      labelPosition="center"
-                    />
                     <Code block className={misc.ffmono} style={{ fontSize: '0.75rem' }}>
-                      {stateCurlExample}
+                      {hillsCurlExample}
                     </Code>
                     <Group justify="flex-end">
-                      <CopyButton value={stateCurlExample}>
+                      <CopyButton value={hillsCurlExample}>
                         {({ copied, copy }) => (
                           <Button
                             size="compact-xs"
@@ -297,12 +296,12 @@ write_to_hill "/koth/king" "$TOKEN"`
                       </CopyButton>
                     </Group>
                     <Code block className={misc.ffmono} style={{ fontSize: '0.75rem' }}>
-                      {stateResponseExample}
+                      {hillsResponseExample}
                     </Code>
                     <Text size="xs" c="dimmed">
                       {t(
                         'game.content.koth.guide.state.fields',
-                        'isYou is true when YOUR team is the current holder. status is the functional probe verdict (Ok / Mumble / Offline / InternalError). lastRefreshRound is when the container was last wiped — round - lastRefreshRound tells you ticks remaining until the next wipe. The list above also exposes GET .../Ad/Koth/Hills for every hill at once.'
+                        'Returns a JSON array, one element per hill. isYou is true when YOUR team holds that hill; status is the functional probe verdict (Ok / Mumble / Offline / InternalError); ip:port is where to aim; lastRefreshRound is when that hill was last wiped (round − lastRefreshRound = ticks until the next wipe). For a single hill you can still GET /Koth/{challenge-id}/State.'
                       )}
                     </Text>
                   </Stack>
