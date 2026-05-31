@@ -1335,6 +1335,19 @@ public class GameController(
         // the detail model for either rather than going through the instance path.
         if (rawChallenge.Type.UsesAdEngine())
         {
+            // A&D / KotH challenges aren't backed by a GameInstance, but they can
+            // still ship a downloadable attachment (e.g. the service source so
+            // players can find vulns to attack + patch). It's stored straight on
+            // the challenge, so load it here and expose its URL exactly like the
+            // jeopardy path — the secure-download token rewrite below then applies
+            // uniformly (local /assets/ links get a per-user download token).
+            var adAttachment = rawChallenge.AttachmentId is { } adAttachmentId
+                ? await dbContext.Attachments
+                    .Include(a => a.LocalFile)
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(a => a.Id == adAttachmentId, token)
+                : null;
+
             model = new ChallengeDetailModel
             {
                 Id = rawChallenge.Id,
@@ -1346,7 +1359,16 @@ public class GameController(
                 Score = 0,
                 Limit = 0,
                 Deadline = rawChallenge.DeadlineUtc,
-                Context = new ClientFlagContext()
+                Context = new ClientFlagContext
+                {
+                    // Local → /assets/{hash}/{name}; Remote → /assets/remote/{id}/{name}
+                    // (the redirect endpoint, so token checks + download logs apply,
+                    // matching the jeopardy path) — both handled by the rewrite below.
+                    Url = adAttachment is { Type: FileType.Remote, Id: > 0 }
+                        ? $"/assets/remote/{adAttachment.Id}/{Uri.EscapeDataString(string.IsNullOrWhiteSpace(rawChallenge.FileName) ? "attachment" : rawChallenge.FileName!)}"
+                        : adAttachment?.UrlWithName(),
+                    FileSize = adAttachment?.FileSize
+                }
             };
         }
         else

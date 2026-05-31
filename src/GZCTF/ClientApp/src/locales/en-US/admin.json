@@ -269,7 +269,11 @@
             "will_generate": "will generate"
           },
           "template": "Flag Template",
-          "title": "Flag Management"
+          "title": "Flag Management",
+          "ad_engine": {
+            "title": "Flags are managed automatically",
+            "attachment_note": "Attack & Defense and King of the Hill generate per-team flags through the engine, so there is no static flag editor. You can still attach a file below (e.g. the service source) for players to download."
+          }
         },
         "hints": "Hints",
         "memory_limit": {

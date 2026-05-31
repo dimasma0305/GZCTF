@@ -482,6 +482,9 @@ export const ChallengeModal: FC<ChallengeModalProps> = (props) => {
   const footer = isAd && gameId ? (
     <Stack gap="xs" className={classes.footer}>
       <Divider />
+      {/* A&D/KotH challenges can ship a downloadable attachment (e.g. the
+          service source to attack + patch) just like jeopardy challenges. */}
+      {withAttachment && attachment}
       {/* KotH has a shared hill, no per-team service — AdChallengePanel's
           adState.services.find would return undefined and render the
           misleading "no service for your team yet" alert. Route to the

@@ -42,6 +42,228 @@ interface FlagEditProps {
   onDelete: (flag: FlagInfoModel) => void
 }
 
+// Single-attachment editor (upload local / set remote / clear), shared by the
+// standard one-attachment challenges and the A&D/KotH path (which has no flag
+// editor of its own — flags are engine-managed — but can still ship a file).
+const AttachmentEditor: FC = () => {
+  const { id, chalId } = useParams()
+  const [numId, numCId] = [parseInt(id ?? '-1'), parseInt(chalId ?? '-1')]
+
+  const { challenge, mutate } = useEditChallenge(numId, numCId)
+
+  const [disabled, setDisabled] = useState(false)
+  const [type, setType] = useState<FileType>(challenge?.attachment?.type ?? FileType.None)
+  const [remoteUrl, setRemoteUrl] = useState(challenge?.attachment?.url ?? '')
+  const [progress, setProgress] = useState(0)
+
+  const modals = useModals()
+  const theme = useMantineTheme()
+  const { t } = useTranslation()
+
+  useEffect(() => {
+    if (challenge) {
+      setType(challenge.attachment?.type ?? FileType.None)
+      setRemoteUrl(challenge.attachment?.url ?? '')
+    }
+  }, [challenge])
+
+  const FileTypeDesrcMap = new Map<FileType, string>([
+    [FileType.None, t('challenge.file_type.none')],
+    [FileType.Remote, t('challenge.file_type.remote')],
+    [FileType.Local, t('challenge.file_type.local')],
+  ])
+
+  const onConfirmClear = async () => {
+    setDisabled(true)
+    try {
+      await api.edit.editUpdateAttachment(numId, numCId, { attachmentType: FileType.None })
+      showNotification({
+        color: 'teal',
+        message: t('admin.notification.games.challenges.attachment.updated'),
+        icon: <Icon path={mdiCheck} size={1} />,
+      })
+      setType(FileType.None)
+      if (challenge) mutate({ ...challenge, attachment: null })
+    } catch (e) {
+      showErrorMsg(e, t)
+    } finally {
+      setDisabled(false)
+    }
+  }
+
+  const onUpload = async (file: File | null) => {
+    if (!file) return
+    setProgress(0)
+    setDisabled(true)
+    try {
+      const res = await api.assets.assetsUpload({ files: [file] }, undefined, {
+        onUploadProgress: (e) => setProgress((e.loaded / (e.total ?? 1)) * 90),
+      })
+      const remoteFile = res.data[0]
+      setProgress(95)
+      if (remoteFile) {
+        await api.edit.editUpdateAttachment(numId, numCId, {
+          attachmentType: FileType.Local,
+          fileHash: remoteFile.hash,
+        })
+        setProgress(0)
+        setDisabled(false)
+        mutate()
+        showNotification({
+          color: 'teal',
+          message: t('admin.notification.games.challenges.attachment.updated'),
+          icon: <Icon path={mdiCheck} size={1} />,
+        })
+      }
+    } catch (err) {
+      showErrorMsg(err, t)
+    } finally {
+      setDisabled(false)
+    }
+  }
+
+  const onRemote = async () => {
+    if (!/^https?:\/\//i.test(remoteUrl.trim())) {
+      showNotification({
+        color: 'orange',
+        message: t(
+          'admin.notification.games.challenges.attachment.invalid_url',
+          'Please enter a valid URL starting with http:// or https://'
+        ),
+      })
+      return
+    }
+    setDisabled(true)
+    try {
+      await api.edit.editUpdateAttachment(numId, numCId, {
+        attachmentType: FileType.Remote,
+        remoteUrl: remoteUrl,
+      })
+      showNotification({
+        color: 'teal',
+        message: t('admin.notification.games.challenges.attachment.updated'),
+        icon: <Icon path={mdiCheck} size={1} />,
+      })
+    } catch (e) {
+      showErrorMsg(e, t)
+    } finally {
+      setDisabled(false)
+    }
+  }
+
+  return (
+    <Stack>
+      <Group justify="space-between" wrap="nowrap" mt="md">
+        <Title order={2}>{t('admin.content.games.challenges.attachment.title')}</Title>
+        {type !== FileType.Remote ? (
+          <FileButton onChange={onUpload}>
+            {(props) => (
+              <Button
+                {...props}
+                fullWidth
+                className={uploadClasses.button}
+                disabled={type !== FileType.Local}
+                w="122px"
+                color={progress !== 0 ? 'cyan' : theme.primaryColor}
+              >
+                <div className={uploadClasses.label}>
+                  {progress !== 0
+                    ? t('admin.button.challenges.attachment.uploading')
+                    : t('admin.button.challenges.attachment.upload')}
+                </div>
+                {progress !== 0 && (
+                  <Progress
+                    value={progress}
+                    className={uploadClasses.progress}
+                    color={alpha(theme.colors[theme.primaryColor][2], 0.35)}
+                    radius="sm"
+                  />
+                )}
+              </Button>
+            )}
+          </FileButton>
+        ) : (
+          <Button disabled={disabled || !/^https?:\/\//i.test(remoteUrl.trim())} w="122px" onClick={onRemote}>
+            {t('admin.button.challenges.attachment.save_url')}
+          </Button>
+        )}
+      </Group>
+      <Divider />
+      <Group justify="space-between" wrap="nowrap">
+        <Input.Wrapper label={t('admin.content.games.challenges.attachment.type')} required>
+          <Chip.Group
+            value={type}
+            onChange={(e) => {
+              if (e === FileType.None) {
+                modals.openConfirmModal({
+                  title: t('admin.content.games.challenges.attachment.clear.title'),
+                  children: <Text size="sm">{t('admin.content.games.challenges.attachment.clear.description')}</Text>,
+                  onConfirm: onConfirmClear,
+                  confirmProps: { color: 'orange' },
+                })
+              } else {
+                setType(e as FileType)
+              }
+            }}
+          >
+            <Group justify="left" gap="sm" h="2.25rem" wrap="nowrap">
+              {Object.entries(FileType).map((ft) => (
+                <Chip key={ft[0]} value={ft[1]} size="sm">
+                  {FileTypeDesrcMap.get(ft[1])}
+                </Chip>
+              ))}
+            </Group>
+          </Chip.Group>
+        </Input.Wrapper>
+        {type !== FileType.Remote ? (
+          <TextInput
+            label={t('admin.content.games.challenges.attachment.link')}
+            readOnly
+            disabled={disabled || type === FileType.None}
+            value={challenge?.attachment?.url ?? ''}
+            w="calc(100% - 400px)"
+            classNames={{ input: uploadClasses.hover }}
+            onClick={() => challenge?.attachment?.url && window.open(challenge?.attachment?.url, '_blank')}
+          />
+        ) : (
+          <TextInput
+            label={t('admin.content.games.challenges.attachment.link')}
+            disabled={disabled}
+            value={remoteUrl}
+            w="calc(100% - 400px)"
+            classNames={{ input: uploadClasses.hover }}
+            onChange={(e) => setRemoteUrl(e.target.value)}
+          />
+        )}
+      </Group>
+    </Stack>
+  )
+}
+
+// A&D / KotH: flags are engine-managed, but the challenge can still ship a
+// downloadable attachment (e.g. the service source to attack + patch).
+const AdEngineAttachment: FC = () => {
+  const { t } = useTranslation()
+
+  return (
+    <Stack>
+      <Stack gap={2} mt="md">
+        <Title order={3}>
+          {t('admin.content.games.challenges.flag.ad_engine.title', 'Flags are managed automatically')}
+        </Title>
+        <Text c="dimmed" size="sm">
+          {t(
+            'admin.content.games.challenges.flag.ad_engine.attachment_note',
+            'Attack & Defense and King of the Hill generate per-team flags through the engine, so there is no static flag editor. You can still attach a file below (e.g. the service source) for players to download.'
+          )}
+        </Text>
+      </Stack>
+      <Divider />
+      <AttachmentEditor />
+    </Stack>
+  )
+}
+
 // with only one attachment
 const OneAttachmentWithFlags: FC<FlagEditProps> = ({ onDelete }) => {
   const { id, chalId } = useParams()
@@ -522,22 +744,7 @@ const GameChallengeEdit: FC = () => {
       {challenge &&
       (challenge.type === ChallengeType.AttackDefense ||
         challenge.type === ChallengeType.KingOfTheHill) ? (
-        <Center h="calc(100vh - 25rem)">
-          <Stack gap={0} maw="32rem" ta="center">
-            <Title order={2}>
-              {t(
-                'admin.content.games.challenges.flag.ad_engine.title',
-                'Flags are managed automatically'
-              )}
-            </Title>
-            <Text c="dimmed">
-              {t(
-                'admin.content.games.challenges.flag.ad_engine.description',
-                'Attack & Defense and King of the Hill challenges generate per-team flags through the A&D engine. The static flag and attachment editor does not apply to this challenge type.'
-              )}
-            </Text>
-          </Stack>
-        </Center>
+        <AdEngineAttachment />
       ) : challenge && challenge.type === ChallengeType.DynamicAttachment ? (
         <FlagsWithAttachments onDelete={onDeleteFlag} />
       ) : (
