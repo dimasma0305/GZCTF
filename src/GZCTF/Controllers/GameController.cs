@@ -54,6 +54,7 @@ public class GameController(
     IContainerRepository containerRepository,
     IGameEventRepository gameEventRepository,
     IHubContext<Hubs.AttackHub, Hubs.Clients.IAttackClient> attackHub,
+    Services.AttackStreamService attackStream,
     ISubmissionRepository submissionRepository,
     IGameChallengeRepository challengeRepository,
     IGameInstanceRepository gameInstanceRepository,
@@ -578,6 +579,7 @@ public class GameController(
             victimTeamName);
 
         await attackHub.Clients.Group($"AttackGame_{id}").ReceivedAttack(evt);
+        attackStream.PublishAttack(id, evt);
         return Ok();
     }
 
@@ -630,6 +632,7 @@ public class GameController(
             status);
 
         await attackHub.Clients.Group($"AttackGame_{id}").ReceivedKothControl(evt);
+        attackStream.PublishKoth(id, evt);
         return Ok();
     }
 

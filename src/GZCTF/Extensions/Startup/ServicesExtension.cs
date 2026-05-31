@@ -171,6 +171,9 @@ internal static class ServicesExtension
             // Self-heal: rebuild local-only autobuilt checker images that get pruned
             // out from under a running game (else every check → InternalError).
             builder.Services.AddHostedService<Services.AdCheckerImageHealService>();
+            // Plain-WebSocket mirror of the AttackHub feed (GET /hub/attack/ws?game=) so
+            // participants can tap live attack/KotH events without a SignalR client.
+            builder.Services.AddSingleton<Services.AttackStreamService>();
             builder.Services.AddHostedService<Services.AdSnapshotService>();
             // Docker-only: DOCKER-USER egress isolation (no-ops on K8s, which uses
             // NetworkPolicy instead). Brings Docker to containment parity.

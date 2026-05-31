@@ -11,6 +11,7 @@ namespace GZCTF.Repositories;
 public class SubmissionRepository(
     IHubContext<MonitorHub, IMonitorClient> hub,
     IHubContext<AttackHub, IAttackClient> attackHub,
+    Services.AttackStreamService attackStream,
     AppDbContext context) : RepositoryBase(context), ISubmissionRepository
 {
     public async Task<Submission> AddSubmission(Submission submission, CancellationToken token = default)
@@ -130,6 +131,7 @@ public class SubmissionRepository(
             submission.SubmitTimeUtc);
 
         await attackHub.Clients.Group($"AttackGame_{submission.GameId}").ReceivedAttack(evt);
+        attackStream.PublishAttack(submission.GameId, evt);
     }
 
     public Task<Submission[]> GetRecentSubmissionsForAttackFeed(int gameId, int limit,

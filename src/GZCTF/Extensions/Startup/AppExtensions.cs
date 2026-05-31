@@ -115,6 +115,10 @@ internal static class AppExtensions
             app.MapHub<MonitorHub>("/hub/monitor");
             app.MapHub<AdminHub>("/hub/admin");
             app.MapHub<AttackHub>("/hub/attack");
+            // Plain-WebSocket mirror of the attack feed for participant bots/overlays —
+            // one JSON object per frame, no SignalR protocol. See AttackStreamService.
+            app.MapGet("/hub/attack/ws",
+                (HttpContext ctx, Services.AttackStreamService feed) => feed.HandleWebSocketAsync(ctx));
             app.MapHub<ContainerExecHub>("/hub/containerExec");
 
             app.UseIndexAsync();

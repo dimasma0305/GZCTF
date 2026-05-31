@@ -42,6 +42,7 @@ public sealed class AdCheckerService(
     IServiceScopeFactory scopeFactory,
     IConfiguration configuration,
     Cache.CacheHelper cacheHelper,
+    AttackStreamService attackStream,
     ILogger<AdCheckerService> logger) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(10);
@@ -557,6 +558,7 @@ public sealed class AdCheckerService(
         var hub = hubScope.ServiceProvider
             .GetRequiredService<IHubContext<AttackHub, IAttackClient>>();
         await hub.Clients.Group($"AttackGame_{gameId}").ReceivedKothControl(evt);
+        attackStream.PublishKoth(gameId, evt);
     }
 
     /// <summary>Team display name + avatar URL for a participation, for the public feed.</summary>

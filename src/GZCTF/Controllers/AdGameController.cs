@@ -42,6 +42,7 @@ public class AdGameController(
     IBlobStorage blobStorage,
     IConfigService configService,
     IHubContext<AttackHub, IAttackClient> attackHub,
+    Services.AttackStreamService attackStream,
     CacheHelper cacheHelper,
     IAdScoreboardRepository adScoreboard,
     IStringLocalizer<Program> localizer,
@@ -384,6 +385,7 @@ public class AdGameController(
                 victim?.Name);
 
             await attackHub.Clients.Group($"AttackGame_{gameId}").ReceivedAttack(evt);
+            attackStream.PublishAttack(gameId, evt);
         }
         catch (Exception e)
         {
