@@ -204,8 +204,14 @@ public sealed class ChallengeBuildQueueService(
             // GameChallenge.BuildStatus / LastBuildLog. A checker build records its
             // outcome solely on its audit row so it can't flip the challenge card to
             // "Building"/"Failed" for the wrong image.
+            // Flip the card to Building via a token-free update (like the live-log
+            // flush + terminal write) so a concurrent re-import editing this
+            // GameChallenge row can't raise a DbUpdateConcurrencyException that
+            // crashes the worker before the build even starts.
             if (job.Kind == ChallengeBuildKind.Challenge)
-                ch.BuildStatus = ChallengeBuildStatus.Building;
+                await db.GameChallenges.Where(c => c.Id == ch.Id)
+                    .ExecuteUpdateAsync(s => s.SetProperty(x => x.BuildStatus, ChallengeBuildStatus.Building),
+                        stoppingToken);
             audit = new ChallengeBuildAudit
             {
                 ChallengeId = ch.Id,
@@ -341,35 +347,55 @@ public sealed class ChallengeBuildQueueService(
                 auditRow.Status = success
                     ? ChallengeBuildStatus.Success
                     : (transient ? ChallengeBuildStatus.Building : ChallengeBuildStatus.Failed);
+                // The audit row is written only by this worker (no concurrent editor),
+                // so a tracked save is safe.
+                await db.SaveChangesAsync(stoppingToken);
             }
 
+            // The GameChallenge row is ALSO edited by the importer / admin, so write
+            // its build-owned columns through a token-free ExecuteUpdate (same as the
+            // live-log flush above). A tracked SaveChanges here would carry the xmin
+            // concurrency token, and a re-import that bumps the row mid-build makes it
+            // affect 0 rows → DbUpdateConcurrencyException → the worker crashes and
+            // STRANDS the build: audit stuck Building, AdCheckerImage/ContainerImage
+            // never updated, so the challenge points at an image that may since have
+            // been pruned and every check InternalErrors. ExecuteUpdate touches only
+            // build columns, so the importer's content edits are preserved.
+            var finalLog = Truncate(logTail, 32 * 1024);
             if (ch is not null && job.Kind == ChallengeBuildKind.Checker)
             {
                 // Checker build: on success point the challenge's checker at the freshly
                 // built image. Failure is recorded only on the audit row (above) — it
                 // must not flip the challenge's own service-image BuildStatus.
                 if (success && !string.IsNullOrEmpty(result?.ImageTag))
-                    ch.AdCheckerImage = result.ImageTag;
+                    await db.GameChallenges.Where(c => c.Id == job.ChallengeId)
+                        .ExecuteUpdateAsync(s => s.SetProperty(x => x.AdCheckerImage, result!.ImageTag),
+                            stoppingToken);
             }
             else if (ch is not null)
             {
-                ch.LastBuildLog = Truncate(logTail, 32 * 1024);
                 if (success)
-                {
-                    ch.BuildStatus = ChallengeBuildStatus.Success;
-                    ch.BuildImageDigest = result?.Digest;
-                    if (!string.IsNullOrEmpty(result?.ImageTag))
-                        ch.ContainerImage = result.ImageTag;
-                }
+                    await db.GameChallenges.Where(c => c.Id == job.ChallengeId)
+                        .ExecuteUpdateAsync(s => s
+                            .SetProperty(x => x.BuildStatus, ChallengeBuildStatus.Success)
+                            .SetProperty(x => x.BuildImageDigest, result != null ? result.Digest : null)
+                            .SetProperty(x => x.ContainerImage,
+                                x => string.IsNullOrEmpty(result!.ImageTag) ? x.ContainerImage : result.ImageTag)
+                            .SetProperty(x => x.LastBuildLog, finalLog),
+                            stoppingToken);
                 else if (!transient)
-                {
-                    ch.BuildStatus = ChallengeBuildStatus.Failed;
-                }
-                // transient: leave BuildStatus = Building so the UI
-                // doesn't flicker to red before the retry lands.
+                    await db.GameChallenges.Where(c => c.Id == job.ChallengeId)
+                        .ExecuteUpdateAsync(s => s
+                            .SetProperty(x => x.BuildStatus, ChallengeBuildStatus.Failed)
+                            .SetProperty(x => x.LastBuildLog, finalLog),
+                            stoppingToken);
+                else
+                    // transient: leave BuildStatus = Building so the UI doesn't flicker
+                    // to red before the retry lands; still surface the partial log.
+                    await db.GameChallenges.Where(c => c.Id == job.ChallengeId)
+                        .ExecuteUpdateAsync(s => s.SetProperty(x => x.LastBuildLog, finalLog),
+                            stoppingToken);
             }
-
-            await db.SaveChangesAsync(stoppingToken);
         }
 
         var q = (ChallengeBuildQueue)queue;
