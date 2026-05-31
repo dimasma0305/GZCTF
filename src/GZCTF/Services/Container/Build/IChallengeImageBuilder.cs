@@ -52,4 +52,21 @@ public interface IChallengeImageBuilder
         ChallengeBuildRequest req,
         CancellationToken token,
         Action<string>? onProgress = null);
+
+    /// <summary>
+    /// Self-heal: ensure a previously-built local image still exists, rebuilding
+    /// it from a persisted build context if it has gone missing (e.g. an ad-hoc
+    /// <c>docker image prune -a</c> deleted the local-only checker image — these
+    /// have no long-running container holding them, so they vanish and every
+    /// A&amp;D/KotH check then reports InternalError on the failed pull).
+    /// </summary>
+    /// <param name="imageTag">The expected local image tag, i.e. a
+    /// <c>gzctf-auto/{game}/{slug}:{digest}</c> reference.</param>
+    /// <param name="token">Cancellation token.</param>
+    /// <returns><c>true</c> if the image is present (already, or after a
+    /// successful rebuild); <c>false</c> if it could not be restored (not a
+    /// local autobuilt tag, no persisted context, or the rebuild failed).
+    /// Never throws for the missing-context case — callers treat false as
+    /// "leave it to the operator / re-import".</returns>
+    Task<bool> TryRestoreImageAsync(string imageTag, CancellationToken token);
 }

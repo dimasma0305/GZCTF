@@ -92,7 +92,10 @@ public sealed class DockerChallengeImageBuilder(
 
             // Cache hit + no push needed → return immediately.
             if (cachedImageId is not null && !registryConfig.CurrentValue.IsConfigured)
+            {
+                PersistBuildContext(req.GameId, slug, digest[..12], contextTar, req.Dockerfile);
                 return new ChallengeBuildResult(true, tag, cachedImageId, "(cached)", null);
+            }
 
             using var timeout = new CancellationTokenSource(BuildTimeout);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, timeout.Token);
@@ -200,6 +203,10 @@ public sealed class DockerChallengeImageBuilder(
             // never flip a successful build to Failed.
             await CleanupAfterBuildAsync(req.GameId, slug, digest[..12], logTail, token);
 
+            // Stash the context so this image can be rebuilt byte-for-byte if it
+            // later gets pruned out from under a running game (self-heal).
+            PersistBuildContext(req.GameId, slug, digest[..12], contextTar, req.Dockerfile);
+
             return new ChallengeBuildResult(true, returnedTag, imageId, logTail.ToString(), null);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -215,6 +222,148 @@ public sealed class DockerChallengeImageBuilder(
         {
             try { File.Delete(contextTar); } catch { /* best effort */ }
         }
+    }
+
+    // ── Self-heal: persisted build contexts ──────────────────────────────────
+    // Local-only autobuilt images (gzctf-auto/...) have no long-running container
+    // holding them, so an ad-hoc `docker image prune -a` that doesn't honour the
+    // org.gzctf.keep label (the daily cron does) can delete a checker image
+    // mid-game → every check InternalErrors on the failed pull. We stash the exact
+    // context tarball + dockerfile under the data dir so the image can be rebuilt
+    // byte-for-byte (same content → same deterministic tag) on demand, with no
+    // re-import. AdCheckerImageHealService drives the restore.
+
+    private static string StoreRoot => Path.Combine(PathHelper.Base, "build-contexts");
+
+    private static bool IsSafeSegment(string s) =>
+        s.Length is > 0 and <= 128
+        && s != "." && s != ".."
+        && s.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.');
+
+    /// <summary>Map a <c>gzctf-auto/{game}/{slug}:{digest}</c> tag to its persisted
+    /// context paths. Returns false for anything not a well-formed local tag.</summary>
+    private static bool TryResolveStorePaths(string tag, out string tarPath, out string dfPath)
+    {
+        tarPath = dfPath = string.Empty;
+        if (string.IsNullOrEmpty(tag)) return false;
+        var colon = tag.LastIndexOf(':');
+        if (colon <= 0 || colon == tag.Length - 1) return false;
+        var digest = tag[(colon + 1)..];
+        var parts = tag[..colon].Split('/');           // gzctf-auto / {gameId} / {slug}
+        if (parts.Length != 3 || parts[0] != "gzctf-auto") return false;
+        var (gameId, slug) = (parts[1], parts[2]);
+        if (!IsSafeSegment(gameId) || !IsSafeSegment(slug) || !IsSafeSegment(digest)) return false;
+        var dir = Path.Combine(StoreRoot, gameId, slug);
+        tarPath = Path.Combine(dir, digest + ".tar.gz");
+        dfPath = Path.Combine(dir, digest + ".df");
+        return true;
+    }
+
+    /// <summary>Best-effort: stash the context tar + dockerfile so the image can be
+    /// rebuilt later if pruned. Keeps only the current digest per slug.</summary>
+    private void PersistBuildContext(int gameId, string slug, string digest, string contextTar, string dockerfile)
+    {
+        try
+        {
+            if (!IsSafeSegment(gameId.ToString()) || !IsSafeSegment(slug) || !IsSafeSegment(digest)) return;
+            var dir = Path.Combine(StoreRoot, gameId.ToString(), slug);
+            Directory.CreateDirectory(dir);
+            File.Copy(contextTar, Path.Combine(dir, digest + ".tar.gz"), overwrite: true);
+            File.WriteAllText(Path.Combine(dir, digest + ".df"),
+                string.IsNullOrWhiteSpace(dockerfile) ? "Dockerfile" : dockerfile);
+            // Only the current digest is useful — drop older stashes for this slug.
+            foreach (var f in Directory.EnumerateFiles(dir))
+            {
+                if (!Path.GetFileName(f).StartsWith(digest, StringComparison.Ordinal))
+                    try { File.Delete(f); } catch { /* best effort */ }
+            }
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "PersistBuildContext: failed to stash context for {Slug}", slug);
+        }
+    }
+
+    public async Task<bool> TryRestoreImageAsync(string imageTag, CancellationToken token)
+    {
+        // Only our local autobuilt images are restorable; registry refs are pulled.
+        if (string.IsNullOrWhiteSpace(imageTag) ||
+            !imageTag.StartsWith("gzctf-auto/", StringComparison.Ordinal))
+            return false;
+
+        // Already present? The common case every reconcile tick — cheap no-op.
+        try
+        {
+            await _client.Images.InspectImageAsync(imageTag, token);
+            return true;
+        }
+        catch (DockerImageNotFoundException) { /* missing → rebuild below */ }
+        catch (DockerApiException e) when (e.StatusCode == System.Net.HttpStatusCode.NotFound) { /* missing */ }
+
+        if (!TryResolveStorePaths(imageTag, out var tarPath, out var dfPath)
+            || !File.Exists(tarPath) || !File.Exists(dfPath))
+        {
+            logger.LogWarning(
+                "Self-heal: image {Tag} is missing and no persisted build context exists — re-import the challenge to rebuild it",
+                imageTag);
+            return false;
+        }
+
+        var dockerfile = (await File.ReadAllTextAsync(dfPath, token)).Trim();
+        if (dockerfile.Length == 0) dockerfile = "Dockerfile";
+
+        logger.SystemLog($"Self-heal: rebuilding missing image {imageTag} from persisted context",
+            TaskStatus.Pending, LogLevel.Information);
+
+        var logTail = new StringBuilder();
+        var ok = await BuildImageFromTarAsync(tarPath, dockerfile, imageTag, logTail, token);
+        if (ok)
+            logger.SystemLog($"Self-heal: restored image {imageTag}", TaskStatus.Success, LogLevel.Information);
+        else
+            logger.LogWarning("Self-heal: rebuild of {Tag} failed: {Log}", imageTag,
+                logTail.Length > 0 ? logTail.ToString() : "(no output)");
+        return ok;
+    }
+
+    /// <summary>Build a fixed tag from an already-tar'd context, skipping the
+    /// content-hash step (the persisted tar IS the content and its tag is known).
+    /// Mirrors the docker build call in <see cref="BuildAsync"/>.</summary>
+    private async Task<bool> BuildImageFromTarAsync(
+        string contextTarPath, string dockerfile, string tag, StringBuilder logTail, CancellationToken token)
+    {
+        string? lastError = null;
+        var progress = new Progress<JSONMessage>(msg =>
+        {
+            if (!string.IsNullOrEmpty(msg.Stream)) AppendTail(logTail, msg.Stream);
+            if (!string.IsNullOrEmpty(msg.Status)) AppendTail(logTail, msg.Status + "\n");
+            if (msg.Error is { Message: { Length: > 0 } em }) lastError = em;
+        });
+
+        using var timeout = new CancellationTokenSource(BuildTimeout);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, timeout.Token);
+
+        await using (var contextStream = File.OpenRead(contextTarPath))
+        {
+            await _client.Images.BuildImageFromDockerfileAsync(
+                new ImageBuildParameters
+                {
+                    Dockerfile = dockerfile,
+                    Tags = [tag],
+                    Remove = true,
+                    ForceRemove = true,
+                    NoCache = false,
+                    Labels = new Dictionary<string, string> { ["org.gzctf.keep"] = "true" },
+                },
+                contextStream, authConfigs: null, headers: null, progress: progress, linked.Token);
+        }
+
+        if (lastError is not null)
+        {
+            AppendTail(logTail, $"[restore] build error: {lastError}\n");
+            return false;
+        }
+        try { await _client.Images.InspectImageAsync(tag, token); return true; }
+        catch { return false; }
     }
 
     /// <summary>

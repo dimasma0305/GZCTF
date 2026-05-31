@@ -168,6 +168,9 @@ internal static class ServicesExtension
             // IAdCheckRunner (AdCheckerExecutor for Docker, K8sAdCheckRunner for
             // Kubernetes) is registered per provider in ContainerServiceExtension.
             builder.Services.AddHostedService<Services.AdCheckerService>();
+            // Self-heal: rebuild local-only autobuilt checker images that get pruned
+            // out from under a running game (else every check → InternalError).
+            builder.Services.AddHostedService<Services.AdCheckerImageHealService>();
             builder.Services.AddHostedService<Services.AdSnapshotService>();
             // Docker-only: DOCKER-USER egress isolation (no-ops on K8s, which uses
             // NetworkPolicy instead). Brings Docker to containment parity.

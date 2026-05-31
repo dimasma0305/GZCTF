@@ -22,4 +22,9 @@ public sealed class K8sChallengeImageBuilder : IChallengeImageBuilder
                 "Auto-build is not supported in kubernetes runtime in v1. " +
                 "Publish the image to a registry the cluster can pull from, " +
                 "then point container_image at that registry reference."));
+
+    // K8s runs from a registry the cluster pulls from (no local-only images to
+    // lose to a host prune), so there is nothing to self-heal here.
+    public Task<bool> TryRestoreImageAsync(string imageTag, CancellationToken token) =>
+        Task.FromResult(false);
 }
