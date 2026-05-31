@@ -232,7 +232,7 @@ Content-Type: application/json
 }
 ```
 
-Per-flag result statuses: `accepted`, `wrong` (unrecognized / empty), `self_attack` (your own flag), `expired` (older than `AdFlagLifetimeTicks`), `duplicate` (you already submitted it), `not_started`, `ended`, `paused`. Submissions are only accepted inside the game window and while scoring isn't paused. First-blood weighting on a given flag is decided by a per-flag advisory lock so two teams submitting the same stolen flag concurrently get a consistent capture order. See [/guide/features/scoring](/guide/features/scoring) for attack point values.
+Per-flag result statuses: `accepted`, `wrong` (unrecognized / empty), `self_attack` (your own flag), `expired` (older than `AdFlagLifetimeTicks`), `duplicate` (you already submitted it), `not_started`, `ended`, `paused`. Submissions are only accepted inside the game window and while scoring isn't paused. A per-flag advisory lock serializes two teams submitting the same stolen flag concurrently so the capture order stays consistent. Attack is **rarity-weighted**, though: a flag is worth a fixed pool split among everyone who steals it (`AttackPool / k`), so capture order only affects the provisional points shown at submit time — the final score depends on how many teams stole the flag, not who was first. See [/guide/features/scoring](/guide/features/scoring) for the full model.
 
 ### The team API token (Toolkit)
 

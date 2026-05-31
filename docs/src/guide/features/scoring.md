@@ -22,80 +22,73 @@ Total = tAttack + tSla - tDefense
 
 So **Attack** and **SLA** add to your score, and **DefenseLoss** subtracts from it. Each is defined below.
 
-### Attack points (capture, first-blood weighted)
+### Attack points (capture, rarity-weighted pool)
 
-When you successfully submit another team's flag, you score `AttackPoints`, which decays with **capture order on that specific flag**. The 1st team to steal a given flag gets full points; later capturers of the same flag get progressively less.
+Each flag (one per victim · service · round) is worth a fixed **pool** of points, **split equally among every team that steals it**. If `k` teams capture a given flag, each of them scores `AttackPool / k`. Stealing a flag only *you* found is worth the whole pool; a flag everyone steals is worth a sliver each. This rewards **exclusive exploitation** over brute-force volume, and caps inflation — a single flag injects at most one pool into the game no matter how many teams pile on.
 
 From `AdScoring.cs`:
 
 ```csharp
-public const double AttackBasePoints = 10.0;
+public const double AttackPool = 1.0;
 
-// priorCapturers is 0-indexed: 0 for the first capturer of this flag.
-public static double AttackPoints(int priorCapturers) =>
-    AttackBasePoints / Math.Sqrt(priorCapturers + 1);
+// One capturer's share of a flag that `capturers` teams stole in total.
+public static double AttackShare(int capturers) =>
+    capturers <= 0 ? 0.0 : AttackPool / capturers;
 ```
 
 The formula in plain text:
 
 ```text
-AttackPoints = 10.0 / sqrt(priorCapturers + 1)
+your share of a flag = AttackPool / k       (k = number of teams that stole that flag)
+attack(team, challenge) = Σ over flags you stole of (AttackPool / k)
 ```
 
-`priorCapturers` is computed at submit time in `AdGameController` as the count of already-committed captures of the **same flag** (`AdFlagId`) with a lower row id — i.e. your 0-indexed rank in the capture order for that flag. An advisory lock serializes concurrent submitters so each gets a distinct rank:
+Because `k` depends on **later** captures (another team may steal the same flag after you), attack is **computed at scoreboard render** in `AdScoreboardRepository` — it loads the captures, counts the distinct capturers per flag (`k`), and sums `AttackPool / k` per (attacker, challenge). It is **not** frozen at capture time. The capture response (`AdGameController`) returns a *provisional* share, `AttackPool / (priorCapturers + 1)` — the upper bound on your final share, which shrinks as more teams capture the same flag. An advisory lock still serializes concurrent submitters so the capture order (used for that provisional value) is consistent.
 
-```csharp
-var priorCapturers = await db.AdAttacks.CountAsync(
-    a => a.AdFlagId == adFlag.Id && a.Id < attack.Id, token);
-var points = AdScoring.AttackPoints(priorCapturers);
-```
+Per-flag share table (with `AttackPool = 1.0`):
 
-The points are frozen onto the `AdAttack` row at capture time (`attack.Points = points`), and the scoreboard simply sums them per (attacker, challenge). Decay table:
-
-| Capture order (1-indexed) | `priorCapturers` | Points awarded |
+| Teams that stole the flag (`k`) | Each stealer's share | Flag's total payout |
 | --- | --- | --- |
-| 1st to steal this flag | 0 | 10.00 |
-| 2nd | 1 | 7.07 |
-| 3rd | 2 | 5.77 |
-| 4th | 3 | 5.00 |
-| 5th | 4 | 4.47 |
-| 10th | 9 | 3.16 |
+| 1 (only you) | 1.000 | 1.000 |
+| 2 | 0.500 | 1.000 |
+| 3 | 0.333 | 1.000 |
+| 5 | 0.200 | 1.000 |
+| 10 | 0.100 | 1.000 |
 
 :::tip
-Because the weight is **per flag**, every new flag (every tick that plants a fresh flag) resets the race. Being first to a flag is worth ~41% more than being second, so quick exploitation across the whole field is rewarded over slowly farming one box.
+The total payout column is flat — that's the cap. A flag is worth one pool, period. Finding a flag *others can't* (a unique exploit, better recon) is worth far more than farming a flag everyone already has.
 :::
 
 ### Defense loss (penalty when your box is captured)
 
-Every time another team captures one of your flags, you accumulate a `timesCaptured` count for that challenge. Your defense penalty grows **sub-linearly** in that count, using FAUST CTF's exponent of `0.75`:
+Defense is the **mirror of attack**: you lose `DefensePool` for each of your flags that leaked, counted **once per flag** regardless of how many teams stole it (matching the single pool those stealers split). At equal pools, the points attackers gained from your flags exactly equal the points you lost — field-level zero-sum between offense and defense.
 
 ```csharp
-public const double DefensePenaltyScale = 2.0;
-public const double DefenseExponent    = 0.75;
+public const double DefensePool = 1.0;
 
-public static double DefenseLoss(int timesCaptured) =>
-    Math.Pow(timesCaptured, DefenseExponent) * DefensePenaltyScale;
+// compromisedFlags = count of your DISTINCT flags that were stolen at least once.
+public static double DefenseLoss(int compromisedFlags) =>
+    DefensePool * compromisedFlags;
 ```
 
 In plain text:
 
 ```text
-DefenseLoss = 2.0 * timesCaptured^0.75
+DefenseLoss = DefensePool * (number of your distinct flags that leaked)
 ```
 
-`timesCaptured` is the number of capture rows where you are the victim (`VictimParticipationId`) for that challenge. The scoreboard subtracts this from your per-challenge net. Penalty table:
+`compromisedFlags` counts your **distinct** leaked flags (`AdFlagId`) for that challenge, not raw capture rows — a flag stolen by five teams still cost you one flag's worth. The scoreboard subtracts this from your per-challenge net. Penalty table (with `DefensePool = 1.0`):
 
-| Times captured | DefenseLoss |
+| Distinct flags leaked | DefenseLoss |
 | --- | --- |
-| 0 | 0.00 |
-| 1 | 2.00 |
-| 2 | 3.36 |
-| 5 | 6.69 |
-| 10 | 11.25 |
-| 20 | 18.91 |
+| 0 | 0 |
+| 1 | 1 |
+| 5 | 5 |
+| 10 | 10 |
+| 20 | 20 |
 
-:::warning
-The penalty is **sub-linear**, so the first time your box is owned hurts the most per-incident, and the marginal cost of each additional capture shrinks. The exponent (`0.75`) and scale (`2.0`) are fixed constants in `AdScoring.cs` — they are not per-game or per-challenge tunable.
+:::tip
+**Pools and balance.** The three pillars are weighted by fixed per-event *pools* — `AttackPool`, `DefensePool`, and the per-tick SLA scale — which act as an exchange rate, not a ceiling. The default is **1·1·1** (equal). Because the rarity model makes a strong attacker's total attack land naturally on the same scale as a perfect-uptime team's SLA, the board self-balances with no per-game tuning. Raise `AttackPool` for an offense-led board; raise `DefensePool` to make getting popped bite harder (it can push a heavily-farmed team's total negative). They are fixed constants in `AdScoring.cs`, not per-game tunable.
 :::
 
 ### SLA (service availability)
@@ -168,17 +161,19 @@ The live scoreboard reads a precomputed running total (`AdTeamServices.SlaCredit
 
 ### Worked A&D example
 
-One challenge, 9 accepted teams (`sqrt(9) = 3`). Team A over the game:
+One challenge, 9 accepted teams (`sqrt(9) = 3`), pools `1·1·1`. Team A over the game:
 
-- Captured 6 flags, all as the first capturer → `6 * 10.0 = 60.0` attack.
-- Their own box was captured 3 times → `2.0 * 3^0.75 = 4.56` defense loss.
+- Stole 6 flags: 4 that only they found (`k=1` → 1.0 each) and 2 that one other team also got (`k=2` → 0.5 each) → `4 * 1.0 + 2 * 0.5 = 5.0` attack.
+- 3 of their own flags leaked → `1.0 * 3 = 3.0` defense loss.
 - Service `Ok` for 80 of 100 ticks (and never recovering) → `80 * 1.0 * 3 = 240.0` SLA.
 
 ```text
 Net = Attack + SLA - DefenseLoss
-    = 60.0   + 240.0 - 4.56
-    = 295.44
+    = 5.0    + 240.0 - 3.0
+    = 242.0
 ```
+
+(SLA dominates here only because this team is on the board every tick but stole few flags. A heavy attacker's `Σ AttackPool/k` climbs into the same range as SLA — that scale-match is exactly what the rarity pool buys you.)
 
 ## KotH: hold points per tick
 
