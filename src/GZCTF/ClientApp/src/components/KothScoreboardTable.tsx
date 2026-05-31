@@ -16,7 +16,7 @@ import {
 import { mdiCrown, mdiHeartPulse, mdiTimerSandComplete } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import cx from 'clsx'
-import { FC, useMemo } from 'react'
+import { FC, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   AdLikeCategoryHeaderRow,
@@ -31,7 +31,8 @@ import {
   statusBg,
   useAdLikeScoreboardState,
 } from '@Components/AdLikeScoreboard'
-import { useGame, useKothScoreboard, type KothScoreboardHill } from '@Hooks/useGame'
+import { AdTeamDetailModal } from '@Components/AdTeamDetailModal'
+import { useGame, useKothScoreboard, type KothScoreboardHill, type KothTeamScoreRow } from '@Hooks/useGame'
 import misc from '@Styles/Misc.module.css'
 import classes from '@Styles/ScoreboardTable.module.css'
 
@@ -92,6 +93,9 @@ export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => 
     currentItems,
     findMyTeam,
   } = useAdLikeScoreboardState(kothScoreboard?.teams, myTeamName)
+
+  const [detailRow, setDetailRow] = useState<KothTeamScoreRow | null>(null)
+  const [detailOpened, setDetailOpened] = useState(false)
 
   if (!kothScoreboard || kothScoreboard.hills.length === 0) {
     return (
@@ -233,6 +237,10 @@ export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => 
                         allRank={allRank}
                         tableRank={tableRank}
                         countValue={totalTicks}
+                        onOpenDetail={() => {
+                          setDetailRow(row)
+                          setDetailOpened(true)
+                        }}
                       />
 
                       {/* Per-hill cell — points (broken into +earned / −penalty
@@ -397,6 +405,32 @@ export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => 
           />
         </Group>
       </Stack>
+
+      <AdTeamDetailModal
+        opened={detailOpened}
+        onClose={() => setDetailOpened(false)}
+        withCloseButton={false}
+        size="34rem"
+        teamId={detailRow?.teamId}
+        teamName={detailRow?.teamName}
+        division={detailRow?.division}
+        stats={
+          detailRow
+            ? [
+                { label: t('game.label.score_table.rank_total', 'Rank'), value: detailRow.rank || '-' },
+                {
+                  label: t('game.content.scoreboard.koth.column.total', 'Total'),
+                  value: fmtPts(detailRow.total),
+                  color: 'violet',
+                },
+                {
+                  label: t('game.content.scoreboard.koth.column.ticks', 'Ticks'),
+                  value: detailRow.hills.reduce((s, h) => s + (h.ticksHeld ?? 0), 0),
+                },
+              ]
+            : []
+        }
+      />
     </Paper>
   )
 }

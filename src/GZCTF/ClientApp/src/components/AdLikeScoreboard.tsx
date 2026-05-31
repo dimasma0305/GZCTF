@@ -359,6 +359,8 @@ interface AdLikePinnedRowCellsProps {
   tableRank: number
   /** 4th pinned cell value — engine-specific (captures / ticks held). */
   countValue: ReactNode
+  /** When set, the team avatar+name becomes a button that opens team detail. */
+  onOpenDetail?: () => void
 }
 
 /** Pinned-left body cells: rank, division rank, team avatar+name, count, total. */
@@ -370,8 +372,10 @@ export const AdLikePinnedRowCells: FC<AdLikePinnedRowCellsProps> = ({
   allRank,
   tableRank,
   countValue,
+  onOpenDetail,
 }) => {
   const theme = useMantineTheme()
+  const { t } = useTranslation()
 
   return (
     <>
@@ -382,7 +386,34 @@ export const AdLikePinnedRowCells: FC<AdLikePinnedRowCellsProps> = ({
         {allRank ? rank : tableRank}
       </Table.Td>
       <Table.Td className={classes.left} style={{ left: adLikeLefts[2] }}>
-        <Group justify="left" gap={5} wrap="nowrap" maw={AD_LIKE_WIDTHS[2] - 10}>
+        <Group
+          justify="left"
+          gap={5}
+          wrap="nowrap"
+          maw={AD_LIKE_WIDTHS[2] - 10}
+          className={onOpenDetail ? classes.pointer : undefined}
+          onClick={onOpenDetail}
+          role={onOpenDetail ? 'button' : undefined}
+          tabIndex={onOpenDetail ? 0 : undefined}
+          aria-label={
+            onOpenDetail
+              ? t('game.label.score_table.open_team_detail', {
+                  defaultValue: 'Open details for {{team}}',
+                  team: teamName || '',
+                })
+              : undefined
+          }
+          onKeyDown={
+            onOpenDetail
+              ? (e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    onOpenDetail()
+                  }
+                }
+              : undefined
+          }
+        >
           <Avatar imageProps={{ loading: 'lazy' }} alt="avatar" radius="xl" size={30} color={theme.primaryColor}>
             {teamName?.slice(0, 1) ?? 'T'}
           </Avatar>

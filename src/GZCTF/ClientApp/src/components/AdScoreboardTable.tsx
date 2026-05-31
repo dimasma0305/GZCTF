@@ -14,7 +14,7 @@ import {
 import { mdiShieldHalfFull, mdiSwordCross, mdiTimerSandComplete } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import cx from 'clsx'
-import { FC, useMemo } from 'react'
+import { FC, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   AdLikeCategoryHeaderRow,
@@ -29,8 +29,9 @@ import {
   statusBg,
   useAdLikeScoreboardState,
 } from '@Components/AdLikeScoreboard'
+import { AdTeamDetailModal } from '@Components/AdTeamDetailModal'
 import { useAdScoreboard, useGame } from '@Hooks/useGame'
-import { AdScoreboardChallenge } from '@Api'
+import { AdScoreboardChallenge, AdTeamScoreRow } from '@Api'
 import misc from '@Styles/Misc.module.css'
 import classes from '@Styles/ScoreboardTable.module.css'
 
@@ -87,6 +88,9 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
     currentItems,
     findMyTeam,
   } = useAdLikeScoreboardState(adScoreboard?.teams, myTeamName)
+
+  const [detailRow, setDetailRow] = useState<AdTeamScoreRow | null>(null)
+  const [detailOpened, setDetailOpened] = useState(false)
 
   if (!adScoreboard || adScoreboard.teams.length === 0 || adScoreboard.latestRound === 0) {
     return (
@@ -190,6 +194,10 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
                         allRank={allRank}
                         tableRank={tableRank}
                         countValue={row.flagsCaptured}
+                        onOpenDetail={() => {
+                          setDetailRow(row)
+                          setDetailOpened(true)
+                        }}
                       />
 
                       {/* Per-service cells — three sub-columns (attack / SLA /
@@ -317,6 +325,43 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
           />
         </Group>
       </Stack>
+
+      <AdTeamDetailModal
+        opened={detailOpened}
+        onClose={() => setDetailOpened(false)}
+        withCloseButton={false}
+        size="34rem"
+        teamId={detailRow?.teamId}
+        teamName={detailRow?.teamName}
+        division={detailRow?.division}
+        stats={
+          detailRow
+            ? [
+                { label: t('game.label.score_table.rank_total', 'Rank'), value: detailRow.rank || '-' },
+                { label: t('game.content.scoreboard.ad.column.total', 'Total'), value: fmtPts(detailRow.total) },
+                {
+                  label: t('game.content.scoreboard.ad.legend.attack', 'Attack'),
+                  value: fmtPts(detailRow.attackPoints),
+                  color: 'teal',
+                },
+                {
+                  label: t('game.content.scoreboard.ad.legend.sla', 'SLA'),
+                  value: fmtPts(detailRow.slaPoints),
+                  color: 'blue',
+                },
+                {
+                  label: t('game.content.scoreboard.ad.legend.defense', 'Defense loss'),
+                  value: detailRow.defenseLoss > 0 ? `−${fmtPts(detailRow.defenseLoss)}` : '0',
+                  color: detailRow.defenseLoss > 0 ? 'red' : undefined,
+                },
+                {
+                  label: t('game.content.scoreboard.ad.column.captures', 'Captures'),
+                  value: detailRow.flagsCaptured,
+                },
+              ]
+            : []
+        }
+      />
     </Paper>
   )
 }

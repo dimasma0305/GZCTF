@@ -78,7 +78,9 @@
         "no_service_cell": "no service",
         "cell": {
           "no_check": "n/a"
-        }
+        },
+        "team_detail_error": "Could not load team members.",
+        "team_detail_empty": "No members to show."
       }
     },
     "ad": {
