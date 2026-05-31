@@ -3,40 +3,50 @@ namespace GZCTF.Utils;
 /// <summary>
 /// Single source of truth for A&amp;D scoring so the live scoreboard, the
 /// timeline, and the checker (which precomputes per-tick SLA credit) can't
-/// drift. The model is synthesized from the two most-used open A&amp;D
-/// platforms — FAUST CTF and ENOWARS/EnoEngine:
+/// drift. The model uses fixed per-event <b>pools</b> — an exchange rate between
+/// the three pillars — so the balance is scale-invariant: it holds at any game
+/// length, field size, or aggression level, with NO max/ceiling calibration
+/// (the FAUST/ENOWARS approach).
 ///
 /// <list type="bullet">
-///   <item><b>Attack</b> — first-blood weighted:
-///         <c>AttackBasePoints / sqrt(capture_order)</c>. The 1st team to
-///         steal a given flag gets full points, later capturers get less.
-///         (Rarity/speed weighting, same spirit as FAUST's
-///         <c>1/captures</c> and Eno's decreasing jeopardy.)</item>
-///   <item><b>Defense</b> — penalty
-///         <c>DefensePenaltyScale × timesCaptured^0.75</c>. The 0.75
-///         exponent is FAUST's exact value: early losses hurt more than
-///         later ones, sub-linearly.</item>
+///   <item><b>Attack</b> — rarity pool. Each flag (one per victim·service·round)
+///         is worth <see cref="AttackPool"/> points TOTAL, split equally among the
+///         teams that stole it: a capturer of a flag taken by <c>k</c> teams gets
+///         <c>AttackPool / k</c> (see <see cref="AttackShare"/>). Stealing a flag
+///         only you found is worth the whole pool; a flag everyone steals is worth
+///         a sliver each. Rewards exclusivity over brute-force volume and bounds
+///         inflation (one flag injects at most one pool no matter how many pile on).
+///         Because <c>k</c> depends on LATER captures, attack is computed at
+///         scoreboard render, not at capture time — the capture response carries
+///         only a provisional share.</item>
+///   <item><b>Defense</b> — the mirror of attack: a team loses
+///         <see cref="DefensePool"/> for each of its flags that leaked, counted once
+///         per flag regardless of how many stole it (matching the one-pool-per-flag
+///         attack payout). At equal pools the points attackers gained from you
+///         exactly equal the points you lost — field-level zero-sum between offense
+///         and defense.</item>
 ///   <item><b>SLA</b> — a per-tick <i>sum</i> (NOT a ratio):
-///         <c>Σ tickCredit × SlaPerTickScale × sqrt(activeTeams)</c>, where
-///         a tick scores 1.0 (Ok), 0.5 (Recovering = Ok right after a down
-///         tick, FAUST's transitional credit), or 0. <c>sqrt(teams)</c>
-///         scales SLA with field size so it stays comparable to attack as
-///         the game grows (FAUST). A sum model means an Offline / Mumble /
-///         InternalError tick simply earns 0 — it never drags down a ratio,
-///         which is what made the old ratio model unfairly penalize teams
-///         for a <i>checker</i> fault (InternalError) they didn't cause.</item>
+///         <c>Σ tickCredit × SlaPerTickScale × sqrt(activeTeams)</c>, where a tick
+///         scores 1.0 (Ok), 0.5 (Recovering = Ok right after a down tick), or 0.
+///         <c>sqrt(teams)</c> keeps SLA on the same scale as the attack/defense
+///         pools as the field grows. A sum (not ratio) means an Offline / Mumble /
+///         InternalError tick simply earns 0 — it never drags a ratio down, which is
+///         what made the old ratio model unfairly punish a <i>checker</i> fault.</item>
 /// </list>
+///
+/// <para>Default pools are <b>1·1·1</b>. The rarity model makes a strong attacker's
+/// total attack land naturally on the same scale as a perfect-uptime team's SLA, so
+/// the board self-balances without tuning. Raise <see cref="AttackPool"/> for an
+/// offense-led board; raise <see cref="DefensePool"/> to make getting popped bite
+/// harder (it can push a heavily-farmed team's total negative).</para>
 /// </summary>
 public static class AdScoring
 {
-    /// <summary>Per-flag attack base, divided by sqrt of 1-indexed capture order.</summary>
-    public const double AttackBasePoints = 10.0;
+    /// <summary>Points one flag is worth in total, split among its capturers (rarity pool).</summary>
+    public const double AttackPool = 1.0;
 
-    /// <summary>Multiplier on the defense-loss penalty curve.</summary>
-    public const double DefensePenaltyScale = 2.0;
-
-    /// <summary>Sub-linear defense exponent (FAUST uses 0.75).</summary>
-    public const double DefenseExponent = 0.75;
+    /// <summary>Points a team loses per compromised flag (mirror of the attack pool).</summary>
+    public const double DefensePool = 1.0;
 
     /// <summary>Per-tick SLA scale, applied on top of sqrt(teams).</summary>
     public const double SlaPerTickScale = 1.0;
@@ -50,13 +60,24 @@ public static class AdScoring
     /// <summary>No credit — Mumble / Offline / InternalError.</summary>
     public const double SlaCreditNone = 0.0;
 
-    /// <summary>Attack points for the <paramref name="priorCapturers"/>-th capturer (0-indexed).</summary>
-    public static double AttackPoints(int priorCapturers) =>
-        AttackBasePoints / Math.Sqrt(priorCapturers + 1);
+    /// <summary>
+    /// One capturer's share of a flag that <paramref name="capturers"/> teams stole in
+    /// total: <c>AttackPool / capturers</c>. A flag only one team got pays that team the
+    /// whole pool; a flag k teams got pays each <c>1/k</c>. Returns 0 for a non-positive
+    /// count. Because the final capturer count isn't known until the flag expires,
+    /// attack is computed at scoreboard render, not at capture time.
+    /// </summary>
+    public static double AttackShare(int capturers) =>
+        capturers <= 0 ? 0.0 : AttackPool / capturers;
 
-    /// <summary>Defense loss for a team whose flags were captured <paramref name="timesCaptured"/> times.</summary>
-    public static double DefenseLoss(int timesCaptured) =>
-        Math.Pow(timesCaptured, DefenseExponent) * DefensePenaltyScale;
+    /// <summary>
+    /// Defense loss for a team: <see cref="DefensePool"/> per compromised flag — linear,
+    /// counted once per flag (not per capture), mirroring the single pool a flag's
+    /// stealers split. <paramref name="compromisedFlags"/> is the count of the team's
+    /// distinct flags that leaked.
+    /// </summary>
+    public static double DefenseLoss(int compromisedFlags) =>
+        DefensePool * compromisedFlags;
 
     /// <summary>
     /// Field-size weight (<c>sqrt(max(teams,1))</c>, the FAUST weighting that

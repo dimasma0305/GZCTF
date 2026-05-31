@@ -301,7 +301,13 @@ public class AdGameController(
         // each gets a distinct prior-count → distinct rank).
         var priorCapturers = await db.AdAttacks.CountAsync(
             a => a.AdFlagId == adFlag.Id && a.Id < attack.Id, token);
-        var points = AdScoring.AttackPoints(priorCapturers);
+        // Provisional share for immediate feedback only. The authoritative attack
+        // score is recomputed at scoreboard render from the flag's FINAL capturer
+        // count (AttackPool/k), which isn't known yet — later teams may also steal
+        // this flag. Right now the caller is the (priorCapturers+1)-th capturer, so
+        // this is the upper bound on their final share; it shrinks as more teams
+        // capture the same flag.
+        var points = AdScoring.AttackShare(priorCapturers + 1);
         attack.Points = points;
         await db.SaveChangesAsync(token);
         await tx.CommitAsync(token);

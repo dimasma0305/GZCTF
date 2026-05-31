@@ -87,23 +87,35 @@ public class AdScoreboardRepository(
         }).ToList();
         var challengeIds = challengeRows.Select(c => c.Id).ToList();
 
-        // Attack points + flags captured, per (attacker, challenge).
-        var attackByCell = await Context.AdAttacks
-            .Where(a => partIds.Contains(a.AttackerParticipationId) && challengeIds.Contains(a.ChallengeId)
-                     && (cutoff == null || a.SubmittedAt <= cutoff))
-            .GroupBy(a => new { a.AttackerParticipationId, a.ChallengeId })
-            .Select(g => new { g.Key.AttackerParticipationId, g.Key.ChallengeId, Points = g.Sum(a => a.Points), Count = g.Count() })
+        // Load every capture for these challenges once; both attack (rarity pool,
+        // AttackPool/k) and defense (mirror, DefensePool per leaked flag) derive from
+        // it in memory. k = total distinct capturers of a flag, so attack can't be
+        // precomputed at capture time — it's resolved here at render. (Volume is the
+        // capture count, not the unbounded check table; the scoreboard is cached. A
+        // SQL window function could replace the in-memory pass if a game ever needs it.)
+        var capRows = await Context.AdAttacks
+            .Where(a => challengeIds.Contains(a.ChallengeId) && (cutoff == null || a.SubmittedAt <= cutoff))
+            .Select(a => new { a.AttackerParticipationId, a.VictimParticipationId, a.ChallengeId, a.AdFlagId })
             .ToListAsync(token);
-        var attackLookup = attackByCell.ToDictionary(x => (x.AttackerParticipationId, x.ChallengeId), x => (x.Points, x.Count));
 
-        // Times captured, per (victim, challenge).
-        var defenseByCell = await Context.AdAttacks
-            .Where(a => partIds.Contains(a.VictimParticipationId) && challengeIds.Contains(a.ChallengeId)
-                     && (cutoff == null || a.SubmittedAt <= cutoff))
-            .GroupBy(a => new { a.VictimParticipationId, a.ChallengeId })
-            .Select(g => new { g.Key.VictimParticipationId, g.Key.ChallengeId, Count = g.Count() })
-            .ToListAsync(token);
-        var defenseLookup = defenseByCell.ToDictionary(x => (x.VictimParticipationId, x.ChallengeId), x => x.Count);
+        // k per flag = distinct teams that stole it.
+        var flagK = capRows.GroupBy(r => r.AdFlagId)
+            .ToDictionary(g => g.Key, g => g.Select(r => r.AttackerParticipationId).Distinct().Count());
+
+        // Attack per (attacker, challenge) = Σ AttackPool/k over flags they stole; Count = flags taken.
+        var attackLookup = capRows
+            .Where(r => partIds.Contains(r.AttackerParticipationId))
+            .GroupBy(r => (r.AttackerParticipationId, r.ChallengeId))
+            .ToDictionary(g => g.Key,
+                g => (Points: g.Sum(r => AdScoring.AttackShare(flagK[r.AdFlagId])), Count: g.Count()));
+
+        // Defense per (victim, challenge): distinct compromised flags (drives the loss)
+        // + raw times captured (display only).
+        var defenseLookup = capRows
+            .Where(r => partIds.Contains(r.VictimParticipationId))
+            .GroupBy(r => (r.VictimParticipationId, r.ChallengeId))
+            .ToDictionary(g => g.Key,
+                g => (Flags: g.Select(r => r.AdFlagId).Distinct().Count(), Times: g.Count()));
 
         // SLA credit SUM per (team, challenge). Live view reads the per-service
         // running total (O(teams), no scan of the unbounded check table); the
@@ -161,13 +173,13 @@ public class AdScoreboardRepository(
                 var key = (p.Id, ch.ChallengeId);
 
                 var (atkPts, atkCnt) = attackLookup.GetValueOrDefault(key, (0d, 0));
-                var caps = defenseLookup.GetValueOrDefault(key, 0);
-                var defLoss = AdScoring.DefenseLoss(caps);
+                var (compromised, timesCap) = defenseLookup.GetValueOrDefault(key, (0, 0));
+                var defLoss = AdScoring.DefenseLoss(compromised);
                 var sla = AdScoring.SlaPoints(slaLookup.GetValueOrDefault(key, 0));
                 var net = atkPts + sla - defLoss;
 
                 tAttack += atkPts; tDefense += defLoss; tSla += sla;
-                tFlags += atkCnt; tCaptured += caps;
+                tFlags += atkCnt; tCaptured += timesCap;
 
                 services.Add(new AdServiceScore
                 {
@@ -177,7 +189,7 @@ public class AdScoreboardRepository(
                     SlaPoints = sla,
                     Net = net,
                     FlagsCaptured = atkCnt,
-                    TimesCaptured = caps,
+                    TimesCaptured = timesCap,
                     LastCheckStatus = statusLookup.GetValueOrDefault(key)?.ToString()
                 });
             }
@@ -248,24 +260,30 @@ public class AdScoreboardRepository(
             .Select(c => c.Id)
             .ToListAsync(token)).ToHashSet();
 
-        // Aggregate in SQL per (team, round) instead of loading every row — avoids
-        // pulling the whole (unbounded) AdCheckResults / AdAttacks tables into memory.
-        var atkByTeamRound = (await Context.AdAttacks
-                .Where(a => partIds.Contains(a.AttackerParticipationId) && adChallengeIds.Contains(a.ChallengeId)
-                    && (cutoff == null || a.SubmittedAt <= cutoff))
-                .GroupBy(a => new { a.AttackerParticipationId, a.SubmittedAtRound })
-                .Select(g => new { g.Key.AttackerParticipationId, g.Key.SubmittedAtRound, Points = g.Sum(a => a.Points) })
-                .ToListAsync(token))
-            .ToDictionary(x => (x.AttackerParticipationId, x.SubmittedAtRound), x => x.Points);
+        // Load captures once and derive attack (rarity AttackPool/k) + defense
+        // (distinct compromised flags) in memory — same model as the live scoreboard,
+        // so the chart can't diverge from the team Total. k = total distinct capturers
+        // of a flag (as-of the cutoff for a frozen view).
+        var capRows = (await Context.AdAttacks
+                .Where(a => adChallengeIds.Contains(a.ChallengeId) && (cutoff == null || a.SubmittedAt <= cutoff))
+                .Select(a => new { a.AttackerParticipationId, a.VictimParticipationId, a.AdFlagId, a.SubmittedAtRound })
+                .ToListAsync(token));
 
-        var capsByTeamRound = (await Context.AdAttacks
-                .Where(a => partIds.Contains(a.VictimParticipationId) && adChallengeIds.Contains(a.ChallengeId)
-                    && (cutoff == null || a.SubmittedAt <= cutoff))
-                .GroupBy(a => new { a.VictimParticipationId, a.ChallengeId, a.SubmittedAtRound })
-                .Select(g => new { g.Key.VictimParticipationId, g.Key.ChallengeId, g.Key.SubmittedAtRound, Count = g.Count() })
-                .ToListAsync(token))
-            .GroupBy(x => (x.VictimParticipationId, x.SubmittedAtRound))
-            .ToDictionary(g => g.Key, g => g.Select(x => (x.ChallengeId, x.Count)).ToList());
+        var flagK = capRows.GroupBy(r => r.AdFlagId)
+            .ToDictionary(g => g.Key, g => g.Select(r => r.AttackerParticipationId).Distinct().Count());
+
+        // Attack per (attacker, round) = Σ AttackPool/k over that round's captures.
+        var atkByTeamRound = capRows
+            .Where(r => partIds.Contains(r.AttackerParticipationId))
+            .GroupBy(r => (r.AttackerParticipationId, r.SubmittedAtRound))
+            .ToDictionary(g => g.Key, g => g.Sum(r => AdScoring.AttackShare(flagK[r.AdFlagId])));
+
+        // Distinct compromised flag ids per (victim, round) — unioned into a running
+        // set in the loop so cumulative defense = distinct flags leaked so far.
+        var capsByTeamRound = capRows
+            .Where(r => partIds.Contains(r.VictimParticipationId))
+            .GroupBy(r => (r.VictimParticipationId, r.SubmittedAtRound))
+            .ToDictionary(g => g.Key, g => g.Select(r => r.AdFlagId).Distinct().ToList());
 
         var slaByTeamRound = (await Context.AdCheckResults
                 .Where(c => cutoff == null || c.CheckedAt <= cutoff)
@@ -294,22 +312,21 @@ public class AdScoreboardRepository(
             };
 
             double cumAttack = 0, cumSla = 0;
-            var cumCaps = new Dictionary<int, int>();
+            var cumCompromised = new HashSet<int>(); // distinct flag ids leaked so far
 
             for (var i = 0; i < rounds.Count; i++)
             {
                 var round = rounds[i];
                 cumAttack += atkByTeamRound.GetValueOrDefault((team.Id, round.Number), 0);
                 cumSla += slaByTeamRound.GetValueOrDefault((team.Id, round.Number), 0);
-                if (capsByTeamRound.TryGetValue((team.Id, round.Number), out var caps))
-                    foreach (var (ch, cnt) in caps)
-                        cumCaps[ch] = cumCaps.GetValueOrDefault(ch) + cnt;
+                if (capsByTeamRound.TryGetValue((team.Id, round.Number), out var flags))
+                    cumCompromised.UnionWith(flags);
 
                 // Only materialize a point at each downsample boundary (and the last round).
                 if (i % emitEvery != 0 && i != rounds.Count - 1)
                     continue;
 
-                var defenseLoss = cumCaps.Values.Sum(AdScoring.DefenseLoss);
+                var defenseLoss = AdScoring.DefenseLoss(cumCompromised.Count);
                 tl.Items.Add(new AdTimelinePoint
                 {
                     Round = round.Number,
