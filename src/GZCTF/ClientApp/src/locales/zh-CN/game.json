@@ -78,7 +78,12 @@
         "no_service_cell": "无服务",
         "cell": {
           "no_check": "未测"
-        }
+        },
+        "round_label": "第 {{round}} 回合",
+        "next_tick": "下一回合 {{time}}",
+        "next_tick_now": "下一回合…",
+        "next_tick_tip": "距离下一回合（tick）的时间 —— 每 {{seconds}} 秒检测一次服务并轮换 flag。",
+        "frozen_short": "已冻结"
       }
     },
     "ad": {

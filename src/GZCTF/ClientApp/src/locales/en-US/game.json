@@ -80,7 +80,12 @@
           "no_check": "n/a"
         },
         "team_detail_error": "Could not load team members.",
-        "team_detail_empty": "No members to show."
+        "team_detail_empty": "No members to show.",
+        "round_label": "Round {{round}}",
+        "next_tick": "next tick {{time}}",
+        "next_tick_now": "next tick…",
+        "next_tick_tip": "Time until the next tick — services are re-checked and flags rotate every {{seconds}}s.",
+        "frozen_short": "frozen"
       }
     },
     "ad": {

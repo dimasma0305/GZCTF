@@ -17,6 +17,13 @@ namespace GZCTF.Models.Response.Admin;
 public sealed partial class AdScoreboardModel
 {
     public int LatestRound { get; set; }
+
+    /// <summary>UTC time the current round (tick) ends — when the next tick begins. Drives the live countdown. Null if no rounds yet.</summary>
+    public DateTimeOffset? CurrentRoundEndsAt { get; set; }
+
+    /// <summary>Round (tick) length in seconds, for the countdown / cadence display.</summary>
+    public int TickSeconds { get; set; }
+
     public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
 
     /// <summary>True when this response is an ICPC-freeze snapshot (caller is a non-monitor and now ∈ [freeze, end)).</summary>
@@ -93,6 +100,13 @@ public sealed partial class AdTeamScoreRow
 public sealed partial class KothScoreboardModel
 {
     public int LatestRound { get; set; }
+
+    /// <summary>UTC time the current round (tick) ends — when the next tick begins. Drives the live countdown. Null if no rounds yet.</summary>
+    public DateTimeOffset? CurrentRoundEndsAt { get; set; }
+
+    /// <summary>Round (tick) length in seconds, for the countdown / cadence display.</summary>
+    public int TickSeconds { get; set; }
+
     public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
     public bool IsFrozenView { get; set; }
     public DateTimeOffset? Freeze { get; set; }

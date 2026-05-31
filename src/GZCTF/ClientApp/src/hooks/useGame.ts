@@ -161,6 +161,8 @@ export interface KothTeamScoreRow {
 }
 export interface KothScoreboardModel {
   latestRound: number
+  currentRoundEndsAt?: string | null
+  tickSeconds: number
   generatedAt: string
   isFrozenView: boolean
   freeze: string | null

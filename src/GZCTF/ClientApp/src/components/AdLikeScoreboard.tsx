@@ -11,11 +11,12 @@ import {
   Table,
   Text,
   TextInput,
+  Tooltip,
   useMantineColorScheme,
   useMantineTheme,
 } from '@mantine/core'
 import { useDebouncedValue } from '@mantine/hooks'
-import { mdiAccountGroup, mdiCrosshairsGps, mdiMagnify } from '@mdi/js'
+import { mdiAccountGroup, mdiClockOutline, mdiCrosshairsGps, mdiMagnify } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import cx from 'clsx'
 import { CSSProperties, FC, ReactNode, useEffect, useMemo, useState } from 'react'
@@ -189,11 +190,72 @@ interface AdLikeToolbarProps {
   onFindMyTeam: () => void
   keyword: string
   onKeywordChange: (kw: string) => void
-  /** Already-translated "through round N" caption (engine-specific key). */
-  latestRoundText: string
+  /** Current round (tick) number. */
+  currentRound: number
+  /** UTC time the current tick ends — drives the live countdown. */
+  roundEndsAt?: string | null
+  /** Tick length in seconds (for the countdown tooltip). */
+  tickSeconds?: number
+  /** Frozen view — show "frozen" instead of a live countdown. */
+  frozen?: boolean
 }
 
-/** Division select + Find-My-Team button + latest-round caption + search. */
+/**
+ * Current round number + a live "next tick in M:SS" countdown to <c>endsAt</c>.
+ * Shared by the A&D and KotH boards. Re-renders once a second while live.
+ */
+const TickIndicator: FC<{
+  round: number
+  endsAt?: string | null
+  tickSeconds?: number
+  frozen?: boolean
+}> = ({ round, endsAt, tickSeconds, frozen }) => {
+  const { t } = useTranslation()
+  const [nowMs, setNowMs] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (frozen || !endsAt) return
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [frozen, endsAt])
+
+  const remaining = endsAt ? Math.max(0, Math.ceil((new Date(endsAt).getTime() - nowMs) / 1000)) : 0
+  const mmss = `${Math.floor(remaining / 60)}:${(remaining % 60).toString().padStart(2, '0')}`
+
+  return (
+    <Stack gap={0} align="flex-end">
+      <Text size="xs" fw={600} className={classes.text}>
+        {t('game.content.scoreboard.ad.round_label', { round, defaultValue: 'Round {{round}}' })}
+      </Text>
+      {frozen ? (
+        <Text size="xs" c="dimmed">
+          {t('game.content.scoreboard.ad.frozen_short', 'frozen')}
+        </Text>
+      ) : (
+        endsAt && (
+          <Tooltip
+            withinPortal
+            label={t('game.content.scoreboard.ad.next_tick_tip', {
+              seconds: tickSeconds ?? 0,
+              defaultValue: 'Time until the next tick — services are re-checked and flags rotate every {{seconds}}s.',
+            })}
+          >
+            <Group gap={3} wrap="nowrap" style={{ cursor: 'default' }}>
+              <Icon path={mdiClockOutline} size={0.55} />
+              <Text size="xs" c={remaining <= 5 ? 'orange' : 'dimmed'} className={misc.ffmono}>
+                {remaining > 0
+                  ? t('game.content.scoreboard.ad.next_tick', { time: mmss, defaultValue: 'next tick {{time}}' })
+                  : t('game.content.scoreboard.ad.next_tick_now', 'next tick…')}
+              </Text>
+            </Group>
+          </Tooltip>
+        )
+      )}
+    </Stack>
+  )
+}
+
+/** Division select + Find-My-Team button + round/tick countdown + search. */
 export const AdLikeToolbar: FC<AdLikeToolbarProps> = ({
   divisionOptions,
   selectValue,
@@ -203,7 +265,10 @@ export const AdLikeToolbar: FC<AdLikeToolbarProps> = ({
   onFindMyTeam,
   keyword,
   onKeywordChange,
-  latestRoundText,
+  currentRound,
+  roundEndsAt,
+  tickSeconds,
+  frozen,
 }) => {
   const { t } = useTranslation()
 
@@ -232,9 +297,7 @@ export const AdLikeToolbar: FC<AdLikeToolbarProps> = ({
       </Grid.Col>
       <Grid.Col span={2}>
         <Group justify="flex-end" gap="xs" h="100%">
-          <Text size="xs" c="dimmed">
-            {latestRoundText}
-          </Text>
+          <TickIndicator round={currentRound} endsAt={roundEndsAt} tickSeconds={tickSeconds} frozen={frozen} />
         </Group>
       </Grid.Col>
       <Grid.Col span={3}>

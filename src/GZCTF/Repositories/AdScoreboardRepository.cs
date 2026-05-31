@@ -56,11 +56,16 @@ public class AdScoreboardRepository(
         var freeze = await Context.Games
             .Where(g => g.Id == gameId).Select(g => g.FreezeTimeUtc).FirstOrDefaultAsync(token);
 
-        var latestRound = await Context.AdRounds
+        var latestRoundRow = await Context.AdRounds
             .Where(r => r.GameId == gameId && (cutoff == null || r.StartedAt <= cutoff))
             .OrderByDescending(r => r.Number)
-            .Select(r => r.Number)
+            .Select(r => new { r.Number, r.StartedAt, r.EndsAt })
             .FirstOrDefaultAsync(token);
+        var latestRound = latestRoundRow?.Number ?? 0;
+        var currentRoundEndsAt = latestRoundRow is null ? (DateTimeOffset?)null : latestRoundRow.EndsAt;
+        var tickSeconds = latestRoundRow is null
+            ? 0
+            : (int)Math.Round((latestRoundRow.EndsAt - latestRoundRow.StartedAt).TotalSeconds);
 
         var teams = await Context.Participations
             .Where(p => p.GameId == gameId && p.Status == ParticipationStatus.Accepted)
@@ -219,6 +224,8 @@ public class AdScoreboardRepository(
         return new AdScoreboardModel
         {
             LatestRound = latestRound,
+            CurrentRoundEndsAt = currentRoundEndsAt,
+            TickSeconds = tickSeconds,
             IsFrozenView = cutoff != null,
             Freeze = freeze,
             Challenges = challenges,
@@ -368,11 +375,16 @@ public class AdScoreboardRepository(
         var freeze = await Context.Games
             .Where(g => g.Id == gameId).Select(g => g.FreezeTimeUtc).FirstOrDefaultAsync(token);
 
-        var latestRound = await Context.AdRounds
+        var latestRoundRow = await Context.AdRounds
             .Where(r => r.GameId == gameId && (cutoff == null || r.StartedAt <= cutoff))
             .OrderByDescending(r => r.Number)
-            .Select(r => r.Number)
+            .Select(r => new { r.Number, r.StartedAt, r.EndsAt })
             .FirstOrDefaultAsync(token);
+        var latestRound = latestRoundRow?.Number ?? 0;
+        var currentRoundEndsAt = latestRoundRow is null ? (DateTimeOffset?)null : latestRoundRow.EndsAt;
+        var tickSeconds = latestRoundRow is null
+            ? 0
+            : (int)Math.Round((latestRoundRow.EndsAt - latestRoundRow.StartedAt).TotalSeconds);
 
         var hillRows = await Context.GameChallenges
             .Where(c => c.GameId == gameId && c.IsEnabled && c.Type == ChallengeType.KingOfTheHill)
@@ -389,6 +401,8 @@ public class AdScoreboardRepository(
         var result = new KothScoreboardModel
         {
             LatestRound = latestRound,
+            CurrentRoundEndsAt = currentRoundEndsAt,
+            TickSeconds = tickSeconds,
             IsFrozenView = cutoff != null,
             Freeze = freeze,
         };

@@ -123,10 +123,10 @@ export const AdScoreboardTable: FC<AdScoreboardTableProps> = ({ numId }) => {
           onFindMyTeam={findMyTeam}
           keyword={keyword}
           onKeywordChange={setKeyword}
-          latestRoundText={t('game.content.scoreboard.ad.latest_round', {
-            round: adScoreboard.latestRound,
-            defaultValue: 'through round {{round}}',
-          })}
+          currentRound={adScoreboard.latestRound}
+          roundEndsAt={adScoreboard.currentRoundEndsAt}
+          tickSeconds={adScoreboard.tickSeconds}
+          frozen={adScoreboard.isFrozenView}
         />
 
         <Box pos="relative" mih="calc(100vh - 14rem)">

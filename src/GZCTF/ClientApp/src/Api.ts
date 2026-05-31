@@ -1982,6 +1982,10 @@ export interface AdScoreboardChallenge {
 /** A&D — GET /api/Game/{id}/Ad/Scoreboard response. */
 export interface AdScoreboardModel {
   latestRound: number;
+  /** UTC time the current round (tick) ends — drives the next-tick countdown. Null if no rounds yet. */
+  currentRoundEndsAt?: string | null;
+  /** Round (tick) length in seconds. */
+  tickSeconds: number;
   generatedAt: string;
   /** True when this is an ICPC-freeze snapshot (non-monitor viewer during [freeze, end)). */
   isFrozenView: boolean;

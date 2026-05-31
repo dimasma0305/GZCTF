@@ -132,10 +132,10 @@ export const KothScoreboardTable: FC<KothScoreboardTableProps> = ({ numId }) => 
           onFindMyTeam={findMyTeam}
           keyword={keyword}
           onKeywordChange={setKeyword}
-          latestRoundText={t('game.content.scoreboard.koth.latest_round', {
-            round: kothScoreboard.latestRound,
-            defaultValue: 'through round {{round}}',
-          })}
+          currentRound={kothScoreboard.latestRound}
+          roundEndsAt={kothScoreboard.currentRoundEndsAt}
+          tickSeconds={kothScoreboard.tickSeconds}
+          frozen={kothScoreboard.isFrozenView}
         />
 
         <Box pos="relative" mih="calc(100vh - 14rem)">
