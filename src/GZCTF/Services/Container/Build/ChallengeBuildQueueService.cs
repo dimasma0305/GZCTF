@@ -213,6 +213,7 @@ public sealed class ChallengeBuildQueueService(
                 EnqueuedAtUtc = startedAt,
                 StartedAtUtc = startedAt,
                 Trigger = job.Trigger,
+                Kind = job.Kind,
                 Attempt = job.Attempt,
                 Status = ChallengeBuildStatus.Building
             };

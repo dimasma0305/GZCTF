@@ -39,6 +39,16 @@ public sealed class ChallengeBuildAudit
     public BuildTrigger Trigger { get; set; }
 
     /// <summary>
+    /// Which image this build produced — the challenge's service image or its
+    /// A&amp;D/KotH checker image. Lets the build history distinguish a checker-build
+    /// failure from a service-image failure on the same challenge. Defaults to
+    /// <see cref="GZCTF.Services.Container.Build.ChallengeBuildKind.Challenge"/> so
+    /// pre-existing rows read as service-image builds.
+    /// </summary>
+    public Services.Container.Build.ChallengeBuildKind Kind { get; set; } =
+        Services.Container.Build.ChallengeBuildKind.Challenge;
+
+    /// <summary>
     /// 1-based attempt counter for this build sequence. Auto-retry
     /// fills in 2 / 3 with the same source <see cref="Trigger"/>.
     /// </summary>

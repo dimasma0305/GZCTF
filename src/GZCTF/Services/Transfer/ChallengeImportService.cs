@@ -420,27 +420,50 @@ public sealed class ChallengeImportService(
     /// challenge image search: <c>./checker/src/Dockerfile</c> then
     /// <c>./checker/Dockerfile</c>. Returns false when no checker Dockerfile exists
     /// (the common case — challenge ships no custom checker).
+    ///
+    /// <para>Security: the checker Dockerfile + context come from an imported repo and
+    /// are built on the shared host. Reject any candidate whose path components contain
+    /// a symlink, or whose resolved context escapes the package — otherwise a malicious
+    /// repo could ship <c>checker -&gt; /etc</c> (or a deeper link) and
+    /// <see cref="CopyDirRecursive"/> would follow it at the context root and bake host
+    /// secrets (kubeconfig, WG keys, AD flags) into the checker image. Same guard the
+    /// challenge build (<see cref="ResolveBuildContext"/>) and the attachment path use.</para>
     /// </summary>
     private static bool TryResolveCheckerContext(string packageDir, out string contextDir, out string dockerfile)
     {
-        var checkerSrc = Path.Combine(packageDir, "checker", "src", "Dockerfile");
-        if (File.Exists(checkerSrc))
-        {
-            contextDir = Path.GetFullPath(Path.Combine(packageDir, "checker", "src"));
-            dockerfile = "Dockerfile";
-            return true;
-        }
-
-        var checkerRoot = Path.Combine(packageDir, "checker", "Dockerfile");
-        if (File.Exists(checkerRoot))
-        {
-            contextDir = Path.GetFullPath(Path.Combine(packageDir, "checker"));
-            dockerfile = "Dockerfile";
-            return true;
-        }
-
         contextDir = string.Empty;
         dockerfile = string.Empty;
+
+        var packageRoot = Path.GetFullPath(packageDir);
+
+        // (relativeDir, relativeDockerfile) candidates, in preference order.
+        foreach (var (relDir, relFile) in new[]
+                 {
+                     ("checker/src", "checker/src/Dockerfile"),
+                     ("checker", "checker/Dockerfile"),
+                 })
+        {
+            // Reject if checker / checker/src / the Dockerfile itself is reached
+            // through a symlinked component — a leaf-only check misses an
+            // intermediate dir symlink.
+            if (AnyComponentIsReparsePoint(packageDir, relFile))
+                continue;
+
+            var dockerfilePath = Path.Combine(packageDir, relFile.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(dockerfilePath))
+                continue;
+
+            var ctx = Path.GetFullPath(Path.Combine(packageDir, relDir.Replace('/', Path.DirectorySeparatorChar)));
+            // Canonical-prefix confinement: the resolved context must stay inside the package.
+            if (!string.Equals(ctx, packageRoot, StringComparison.Ordinal)
+                && !ctx.StartsWith(packageRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                continue;
+
+            contextDir = ctx;
+            dockerfile = "Dockerfile";
+            return true;
+        }
+
         return false;
     }
 

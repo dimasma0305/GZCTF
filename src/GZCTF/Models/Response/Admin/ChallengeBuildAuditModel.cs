@@ -18,6 +18,8 @@ public sealed class ChallengeBuildAuditModel
     public DateTimeOffset? StartedAtUtc { get; set; }
     public DateTimeOffset? FinishedAtUtc { get; set; }
     public BuildTrigger Trigger { get; set; }
+    /// <summary>Whether this row is a challenge service-image build or its checker-image build.</summary>
+    public ChallengeBuildKind Kind { get; set; }
     public int Attempt { get; set; }
     public ChallengeBuildStatus Status { get; set; }
     public string? Digest { get; set; }
@@ -37,6 +39,8 @@ public sealed class ChallengeBuildInProgressModel
     public string Slug { get; set; } = string.Empty;
     public int Attempt { get; set; }
     public BuildTrigger Trigger { get; set; }
+    /// <summary>Whether this in-flight build is the challenge service image or its checker image.</summary>
+    public ChallengeBuildKind Kind { get; set; }
     public DateTimeOffset StartedAtUtc { get; set; }
 }
 

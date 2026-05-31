@@ -1882,6 +1882,7 @@ public class AdminController(
                 StartedAtUtc = a.StartedAtUtc,
                 FinishedAtUtc = a.FinishedAtUtc,
                 Trigger = a.Trigger,
+                Kind = a.Kind,
                 Attempt = a.Attempt,
                 Status = a.Status,
                 Digest = a.Digest,
@@ -1913,6 +1914,7 @@ public class AdminController(
                 Slug = b.Slug,
                 Attempt = b.Attempt,
                 Trigger = b.Trigger,
+                Kind = b.Kind,
                 StartedAtUtc = b.StartedAtUtc
             })
             .ToArray();
