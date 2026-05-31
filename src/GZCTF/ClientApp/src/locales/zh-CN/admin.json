@@ -351,6 +351,10 @@
           "allow_snapshot_download": {
             "label": "终局快照",
             "description": "比赛结束时将团队容器提交为镜像 tar 包供下载，便于赛后复盘（仅 Docker 提供商）。"
+          },
+          "ssh_requires_flag": {
+            "label": "SSH 需先夺得 flag",
+            "description": "队伍必须先为本题提交至少一个有效的捕获 flag，才能 SSH 进入自己的服务容器。"
           }
         }
       },

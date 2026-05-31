@@ -80,6 +80,7 @@ public class GameChallenge : Challenge
         AdCheckerImage = model.AdCheckerImage?.Trim() ?? AdCheckerImage;
         AdAllowEgress = model.AdAllowEgress ?? AdAllowEgress;
         AdAllowSelfReset = model.AdAllowSelfReset ?? AdAllowSelfReset;
+        AdSshRequiresFlag = model.AdSshRequiresFlag ?? AdSshRequiresFlag;
 
         // isEnabled should be updated alone
         IsEnabled = model.IsEnabled ?? IsEnabled;
@@ -161,6 +162,14 @@ public class GameChallenge : Challenge
     /// shouldn't be resettable at all.
     /// </summary>
     public bool AdAllowSelfReset { get; set; } = true;
+
+    /// <summary>
+    /// A&D only: when true, a team can SSH into its service container only after it
+    /// has submitted at least one accepted captured flag (captured an opponent's
+    /// flag) for this challenge. Enforced in InternalAdSshController.Lookup (the
+    /// ssh-jump authorize path). Default false — SSH open to all keyholders.
+    /// </summary>
+    public bool AdSshRequiresFlag { get; set; }
 
     // Tick length, flag lifetime, reset cooldown, snapshot-download, and the
     // checker timing knobs (getflag jitter window + min grace period) are all

@@ -811,6 +811,7 @@ public sealed class ChallengeImportService(
                 c.AdCheckerImage = ad.CheckerImage.Trim();
             c.AdAllowEgress = ad.AllowEgress ?? c.AdAllowEgress;
             c.AdAllowSelfReset = ad.AllowSelfReset ?? c.AdAllowSelfReset;
+            c.AdSshRequiresFlag = ad.SshRequiresFlag ?? c.AdSshRequiresFlag;
         }
 
         // 'visible:' is intentionally ignored — admin is the only one who

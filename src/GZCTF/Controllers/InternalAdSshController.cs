@@ -111,6 +111,26 @@ public class InternalAdSshController(
         if (service?.Container?.ContainerId is not { Length: > 0 } cid)
             return NotFound();
 
+        // Optional "offense-gates-defense" lock: when this challenge has
+        // AdSshRequiresFlag set, reject SSH until the team has at least one accepted
+        // captured flag for THIS challenge. AdAttacks only stores accepted captures,
+        // so Any() == "captured ≥1 flag". 404 = reject the connection (same as the
+        // other deny paths above), so the jump host simply refuses.
+        var sshRequiresFlag = await db.GameChallenges
+            .Where(c => c.Id == challenge)
+            .Select(c => c.AdSshRequiresFlag)
+            .FirstOrDefaultAsync(token);
+        if (sshRequiresFlag
+            && !await db.AdAttacks.AnyAsync(
+                a => a.AttackerParticipationId == keyRow.ParticipationId
+                  && a.ChallengeId == challenge, token))
+        {
+            logger.LogInformation(
+                "InternalAdSsh: rejected SSH for participation {Pid} on challenge {Cid} — no captured flag yet (AdSshRequiresFlag)",
+                keyRow.ParticipationId, challenge);
+            return NotFound();
+        }
+
         // /Lookup runs at SSH key-OFFER time (AuthorizedKeysCommand), BEFORE sshd
         // verifies the client actually holds the private key — and public keys are
         // public — so an unauthenticated probe offering a victim's pubkey reaches

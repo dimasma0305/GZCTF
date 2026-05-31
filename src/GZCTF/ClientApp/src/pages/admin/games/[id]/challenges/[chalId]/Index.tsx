@@ -791,6 +791,22 @@ const GameChallengeEdit: FC = () => {
                   />
                 </Grid.Col>
               )}
+              {/* Offense-gates-defense: only let a team SSH into its box once it has
+                  captured a flag for this challenge. Per-team container only → hide for KotH. */}
+              {!isKoth && (
+                <Grid.Col span={6} display="flex" className={misc.alignCenter}>
+                  <Switch
+                    disabled={disabled}
+                    checked={challengeInfo.adSshRequiresFlag ?? false}
+                    label={SwitchLabel(
+                      t('admin.content.games.challenges.ad.ssh_requires_flag.label', 'SSH requires a captured flag'),
+                      t('admin.content.games.challenges.ad.ssh_requires_flag.description',
+                        'Teams can only SSH into their service container after submitting at least one accepted captured flag for this challenge.')
+                    )}
+                    onChange={(e) => setChallengeInfo({ ...challengeInfo, adSshRequiresFlag: e.target.checked })}
+                  />
+                </Grid.Col>
+              )}
             </Grid>
           </Stack>
         )}

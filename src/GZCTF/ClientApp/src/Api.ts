@@ -1583,6 +1583,8 @@ export interface ChallengeEditDetailModel {
   adAllowEgress?: boolean | null;
   /** A&D — When true, teams can self-reset to baseline. */
   adAllowSelfReset?: boolean | null;
+  /** A&D: SSH to the service container requires a captured flag for this challenge. */
+  adSshRequiresFlag?: boolean | null;
   /** Current build pipeline state */
   buildStatus?: ChallengeBuildStatus;
   /** Live-updated build log tail */
@@ -1840,6 +1842,8 @@ export interface ChallengeUpdateModel {
   adAllowEgress?: boolean | null;
   /** A&D — When true, teams can self-reset to baseline (default true). */
   adAllowSelfReset?: boolean | null;
+  /** A&D: SSH to the service container requires a captured flag for this challenge. */
+  adSshRequiresFlag?: boolean | null;
 }
 
 /**

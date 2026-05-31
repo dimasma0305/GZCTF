@@ -134,6 +134,9 @@ public class ChallengeUpdateModel
     /// <summary>A&amp;D — When true, teams can self-reset to baseline.</summary>
     public bool? AdAllowSelfReset { get; set; }
 
+    /// <summary>A&amp;D — When true, SSH to the service container requires a captured flag for this challenge.</summary>
+    public bool? AdSshRequiresFlag { get; set; }
+
     #endregion
 
     /// <summary>

@@ -347,6 +347,10 @@
           "allow_snapshot_download": {
             "label": "Snapshot at game end",
             "description": "Commit + save the team's container as a tarball at end-of-game; teams download for post-mortem study (Docker provider only)."
+          },
+          "ssh_requires_flag": {
+            "label": "SSH requires a captured flag",
+            "description": "Teams can only SSH into their service container after submitting at least one accepted captured flag for this challenge."
           }
         }
       },
