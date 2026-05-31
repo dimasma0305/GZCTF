@@ -457,20 +457,20 @@ export const AdGuideModal: FC<AdToolkitModalProps> = ({ gameId, ...modalProps })
                         <Text component="span" fw={600} c="teal">
                           {t('game.content.ad.guide.scoring.attack_label', 'Attack')}:
                         </Text>{' '}
-                        <Code className={misc.ffmono}>10 / sqrt(N_capturers)</Code>{' '}
+                        <Code className={misc.ffmono}>AttackPool / k</Code>{' '}
                         {t(
                           'game.content.ad.guide.scoring.attack',
-                          'per flag you capture. First capturer gets 10 pts, second ~7.07, third ~5.77, and so on — being fast pays.'
+                          'Each flag is worth 1 point total, split among everyone who steals it — if k teams grab it, you each get 1/k. A flag only you can crack is worth the full point; one everyone gets is worth a sliver. Find what others can\'t. (Points shown at submit are provisional and settle as more teams steal the same flag.)'
                         )}
                       </List.Item>
                       <List.Item icon={<Icon path={mdiShieldHalfFull} size={0.8} color="var(--mantine-color-red-6)" />}>
                         <Text component="span" fw={600} c="red">
                           {t('game.content.ad.guide.scoring.defense_label', 'Defense loss')}:
                         </Text>{' '}
-                        <Code className={misc.ffmono}>2.0 × N_times_captured ^ 0.75</Code>.{' '}
+                        <Code className={misc.ffmono}>DefensePool × flags_leaked</Code>.{' '}
                         {t(
                           'game.content.ad.guide.scoring.defense',
-                          'Each time another team captures one of your flags increments your captured-count. Sub-linear so early losses hurt more than later ones — patch fast.'
+                          'You lose 1 point for each of your flags that leaks — counted once per flag, no matter how many teams steal it. A flag that never leaks costs nothing, so patch fast.'
                         )}
                       </List.Item>
                       <List.Item icon={<Icon path={mdiCounter} size={0.8} color="var(--mantine-color-blue-6)" />}>

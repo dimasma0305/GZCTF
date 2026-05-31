@@ -155,9 +155,9 @@
           "title": "How scoring works",
           "intro": "Three components add up to your team total:",
           "attack_label": "Attack",
-          "attack": "per flag you capture. First capturer gets 10 pts, second ~7.07, third ~5.77, and so on — being fast pays.",
+          "attack": "Each flag is worth 1 point total, split among everyone who steals it — if k teams grab it, you each get 1/k. A flag only you can crack is worth the full point; one everyone gets is worth a sliver. Find what others can't. (Points shown at submit are provisional and settle as more teams steal the same flag.)",
           "defense_label": "Defense loss",
-          "defense": "Each time another team captures one of your flags increments your captured-count. Sub-linear so early losses hurt more than later ones — patch fast.",
+          "defense": "You lose 1 point for each of your flags that leaks — counted once per flag, no matter how many teams steal it. A flag that never leaks costs nothing, so patch fast.",
           "sla_label": "SLA",
           "sla": "Each tick your service is checked. A passing check scores 1.0, a service that just came back up scores 0.5 (recovering), a failing or unreachable one scores 0. Credits sum over the whole game and scale with the number of teams. A checker error costs you nothing — it just adds no points.",
           "total_formula": "Total = Attack + SLA − Defense loss"
