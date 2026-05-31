@@ -14,7 +14,8 @@ public sealed record BuildInProgress(
     string Slug,
     int Attempt,
     BuildTrigger Trigger,
-    DateTimeOffset StartedAtUtc);
+    DateTimeOffset StartedAtUtc,
+    ChallengeBuildKind Kind = ChallengeBuildKind.Challenge);
 
 /// <summary>
 /// Outcome of an enqueue attempt.
@@ -60,11 +61,11 @@ public interface IChallengeBuildQueue
     EnqueueResult Enqueue(ChallengeBuildJob job);
 
     /// <summary>
-    /// True when a job for this challenge is queued or running. Lets
+    /// True when a job for this challenge + kind is queued or running. Lets
     /// callers (e.g. the per-challenge Rebuild endpoint) avoid setting
     /// up state for a build that won't actually be enqueued.
     /// </summary>
-    bool IsPending(int challengeId);
+    bool IsPending(int challengeId, ChallengeBuildKind kind = ChallengeBuildKind.Challenge);
 
     /// <summary>
     /// Snapshot of every build currently being executed by a worker.
@@ -81,17 +82,19 @@ public interface IChallengeBuildQueue
 public sealed class ChallengeBuildQueue : IChallengeBuildQueue
 {
     private readonly System.Threading.Channels.ChannelWriter<ChallengeBuildJob> _writer;
-    private readonly ConcurrentDictionary<int, BuildInProgress> _inProgress = new();
+    // Keyed on (ChallengeId, Kind): a challenge's service image and its checker
+    // image build independently and must not dedup against each other.
+    private readonly ConcurrentDictionary<(int, ChallengeBuildKind), BuildInProgress> _inProgress = new();
 
     /// <summary>
-    /// Tracks challenges with an enqueued OR running build. Used for
-    /// dedup at <see cref="Enqueue"/> time. A challenge enters this
+    /// Tracks (challenge, kind) pairs with an enqueued OR running build. Used for
+    /// dedup at <see cref="Enqueue"/> time. A pair enters this
     /// set the moment a job is accepted and leaves when the worker
     /// calls <see cref="MarkEnd"/> in its finally block. AutoRetry
     /// re-enqueues by the worker itself stay in the set across the
     /// backoff delay — preserving the dedup property across retries.
     /// </summary>
-    private readonly ConcurrentDictionary<int, byte> _queuedOrRunning = new();
+    private readonly ConcurrentDictionary<(int, ChallengeBuildKind), byte> _queuedOrRunning = new();
 
     public ChallengeBuildQueue(System.Threading.Channels.ChannelWriter<ChallengeBuildJob> writer)
     {
@@ -104,30 +107,31 @@ public sealed class ChallengeBuildQueue : IChallengeBuildQueue
         // our dedup signal. We don't write to the channel in that case
         // because some other request already did, and the worker will
         // satisfy both intents with a single docker build.
-        if (!_queuedOrRunning.TryAdd(job.ChallengeId, 0))
+        if (!_queuedOrRunning.TryAdd((job.ChallengeId, job.Kind), 0))
             return EnqueueResult.AlreadyPending;
 
         if (!_writer.TryWrite(job))
         {
             // Bounded channel rejected the write. Roll back the dedup
             // entry so a later, less-loaded call can succeed.
-            _queuedOrRunning.TryRemove(job.ChallengeId, out _);
+            _queuedOrRunning.TryRemove((job.ChallengeId, job.Kind), out _);
             return EnqueueResult.Rejected;
         }
 
         return EnqueueResult.Enqueued;
     }
 
-    public bool IsPending(int challengeId) => _queuedOrRunning.ContainsKey(challengeId);
+    public bool IsPending(int challengeId, ChallengeBuildKind kind = ChallengeBuildKind.Challenge)
+        => _queuedOrRunning.ContainsKey((challengeId, kind));
 
     public IReadOnlyCollection<BuildInProgress> GetInProgress() => _inProgress.Values.ToArray();
 
-    internal void MarkStart(BuildInProgress entry) => _inProgress[entry.ChallengeId] = entry;
+    internal void MarkStart(BuildInProgress entry) => _inProgress[(entry.ChallengeId, entry.Kind)] = entry;
 
-    internal void MarkEnd(int challengeId)
+    internal void MarkEnd(int challengeId, ChallengeBuildKind kind = ChallengeBuildKind.Challenge)
     {
-        _inProgress.TryRemove(challengeId, out _);
-        _queuedOrRunning.TryRemove(challengeId, out _);
+        _inProgress.TryRemove((challengeId, kind), out _);
+        _queuedOrRunning.TryRemove((challengeId, kind), out _);
     }
 
     /// <summary>
@@ -145,6 +149,6 @@ public sealed class ChallengeBuildQueue : IChallengeBuildQueue
     /// terminate the build (transient failure → about to retry).
     /// Clears the in-progress entry but leaves the dedup set sticky.
     /// </summary>
-    internal void MarkAttemptDoneRetrying(int challengeId)
-        => _inProgress.TryRemove(challengeId, out _);
+    internal void MarkAttemptDoneRetrying(int challengeId, ChallengeBuildKind kind = ChallengeBuildKind.Challenge)
+        => _inProgress.TryRemove((challengeId, kind), out _);
 }

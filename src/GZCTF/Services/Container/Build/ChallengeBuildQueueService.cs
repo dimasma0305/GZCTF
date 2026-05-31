@@ -172,7 +172,7 @@ public sealed class ChallengeBuildQueueService(
                     // transient-retry path re-enqueues from inside ProcessOneAsync
                     // and never propagates here, so this only fires on terminal
                     // failures (e.g. a DB blip during the status-flip SaveChanges).
-                    ((ChallengeBuildQueue)queue).MarkEnd(job.ChallengeId);
+                    ((ChallengeBuildQueue)queue).MarkEnd(job.ChallengeId, job.Kind);
                     // Best-effort cleanup so we don't leak temp dirs on
                     // a runaway exception inside ProcessOneAsync.
                     if (job.OwnsContextDir) SafeDelete(job.ContextDir);
@@ -200,7 +200,12 @@ public sealed class ChallengeBuildQueueService(
                 return;
             }
 
-            ch.BuildStatus = ChallengeBuildStatus.Building;
+            // Only the challenge's own service-image build owns the shared
+            // GameChallenge.BuildStatus / LastBuildLog. A checker build records its
+            // outcome solely on its audit row so it can't flip the challenge card to
+            // "Building"/"Failed" for the wrong image.
+            if (job.Kind == ChallengeBuildKind.Challenge)
+                ch.BuildStatus = ChallengeBuildStatus.Building;
             audit = new ChallengeBuildAudit
             {
                 ChallengeId = ch.Id,
@@ -216,7 +221,7 @@ public sealed class ChallengeBuildQueueService(
         }
 
         var inflight = new BuildInProgress(audit.Id, job.ChallengeId, job.GameId, job.Slug,
-            job.Attempt, job.Trigger, startedAt);
+            job.Attempt, job.Trigger, startedAt, job.Kind);
         ((ChallengeBuildQueue)queue).MarkStart(inflight);
 
         // Live-log sink. Each docker output line is appended to a
@@ -246,6 +251,10 @@ public sealed class ChallengeBuildQueueService(
                 if (liveBuf.Length > 32 * 1024)
                     liveBuf.Remove(0, liveBuf.Length - 32 * 1024);
             }
+            // A checker build must not stream into the challenge's LastBuildLog —
+            // that field belongs to the service-image build. The checker's full log
+            // still lands on its own audit row at the terminal write.
+            if (job.Kind != ChallengeBuildKind.Challenge) return;
             var now = Environment.TickCount64;
             if (now - Interlocked.Read(ref lastFlushTicks) < FlushIntervalMs) return;
             Interlocked.Exchange(ref lastFlushTicks, now);
@@ -273,7 +282,7 @@ public sealed class ChallengeBuildQueueService(
         try
         {
             result = await imageBuilder.BuildAsync(
-                new ChallengeBuildRequest(job.ChallengeId, job.GameId, job.Slug, job.ContextDir, job.Dockerfile),
+                new ChallengeBuildRequest(job.ChallengeId, job.GameId, job.Slug, job.ContextDir, job.Dockerfile, job.Kind),
                 stoppingToken,
                 sink);
         }
@@ -282,7 +291,7 @@ public sealed class ChallengeBuildQueueService(
             // App is shutting down; leave the audit row in Building so
             // the next startup's ResetStuckBuildsAsync flips it to
             // Failed with the right message.
-            ((ChallengeBuildQueue)queue).MarkEnd(job.ChallengeId);
+            ((ChallengeBuildQueue)queue).MarkEnd(job.ChallengeId, job.Kind);
             return;
         }
         catch (Exception ex)
@@ -333,7 +342,15 @@ public sealed class ChallengeBuildQueueService(
                     : (transient ? ChallengeBuildStatus.Building : ChallengeBuildStatus.Failed);
             }
 
-            if (ch is not null)
+            if (ch is not null && job.Kind == ChallengeBuildKind.Checker)
+            {
+                // Checker build: on success point the challenge's checker at the freshly
+                // built image. Failure is recorded only on the audit row (above) — it
+                // must not flip the challenge's own service-image BuildStatus.
+                if (success && !string.IsNullOrEmpty(result?.ImageTag))
+                    ch.AdCheckerImage = result.ImageTag;
+            }
+            else if (ch is not null)
             {
                 ch.LastBuildLog = Truncate(logTail, 32 * 1024);
                 if (success)
@@ -364,22 +381,22 @@ public sealed class ChallengeBuildQueueService(
             // Clear the in-progress entry but keep the challenge in the
             // dedup set across the backoff delay (TryRetry bypasses the
             // dedup check on the re-enqueue path).
-            q.MarkAttemptDoneRetrying(job.ChallengeId);
+            q.MarkAttemptDoneRetrying(job.ChallengeId, job.Kind);
             try { await Task.Delay(delay, stoppingToken); }
-            catch (OperationCanceledException) { q.MarkEnd(job.ChallengeId); return; }
+            catch (OperationCanceledException) { q.MarkEnd(job.ChallengeId, job.Kind); return; }
             if (!q.TryRetry(job with { Attempt = job.Attempt + 1, Trigger = BuildTrigger.AutoRetry }))
             {
                 logger.LogError("ChallengeBuildQueueService: failed to re-enqueue retry for {Id}", job.ChallengeId);
                 // Channel rejected the retry write (full?). Clear the
                 // dedup set so the operator can manually retry.
-                q.MarkEnd(job.ChallengeId);
+                q.MarkEnd(job.ChallengeId, job.Kind);
             }
             return;
         }
 
         // Terminal outcome — clear in-progress AND dedup set so future
         // builds for this challenge enqueue normally.
-        q.MarkEnd(job.ChallengeId);
+        q.MarkEnd(job.ChallengeId, job.Kind);
         if (job.OwnsContextDir) SafeDelete(job.ContextDir);
     }
 

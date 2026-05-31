@@ -1,6 +1,22 @@
 namespace GZCTF.Services.Container.Build;
 
 /// <summary>
+/// What a build job produces, so one challenge can have two independent builds:
+/// its service image and (for A&amp;D/KotH) its functional checker image. The
+/// worker writes the resulting tag to a different column per kind
+/// (<see cref="GZCTF.Models.Data.GameChallenge.ContainerImage"/> vs
+/// <see cref="GZCTF.Models.Data.GameChallenge.AdCheckerImage"/>), and the queue
+/// dedups on (ChallengeId, Kind) so the two don't collide.
+/// </summary>
+public enum ChallengeBuildKind
+{
+    /// <summary>The challenge's own service/container image.</summary>
+    Challenge,
+    /// <summary>The A&amp;D/KotH functional checker image (built from <c>./checker</c>).</summary>
+    Checker
+}
+
+/// <summary>
 /// One unit of work for <see cref="ChallengeBuildQueueService"/>.
 /// Carries the build context as filesystem paths because the worker
 /// runs on the same host as the import that extracted the archive —
@@ -36,4 +52,5 @@ public sealed record ChallengeBuildJob(
     string Dockerfile,
     BuildTrigger Trigger,
     int Attempt = 1,
-    bool OwnsContextDir = true);
+    bool OwnsContextDir = true,
+    ChallengeBuildKind Kind = ChallengeBuildKind.Challenge);

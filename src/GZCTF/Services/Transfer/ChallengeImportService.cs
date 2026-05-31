@@ -365,11 +365,83 @@ public sealed class ChallengeImportService(
             }
         }
 
+        // Auto-build the A&D/KotH functional checker from a ./checker folder in the
+        // package, if present. The checker image isn't built by the challenge-image
+        // path above (that builds the service/hill image); without this an imported
+        // A&D/KotH challenge with a checkerImage falls back to the built-in TCP probe
+        // (or InternalErrors on a missing custom image). Only for trusted imports, and
+        // only when the author didn't pin an explicit registry checker image (an empty
+        // or {{template}} value means "build the one in this package"). The built tag
+        // is written to AdCheckerImage by the build worker (Checker kind).
+        if (opts.AutoApprove && type.UsesAdEngine())
+        {
+            var declaredChecker = model.Ad?.CheckerImage?.Trim();
+            var checkerIsBuildable = string.IsNullOrEmpty(declaredChecker)
+                                     || declaredChecker.Contains("{{");
+            if (checkerIsBuildable
+                && TryResolveCheckerContext(packageDir, out var checkerCtx, out var checkerDf))
+            {
+                string? checkerSnap = null;
+                try
+                {
+                    checkerSnap = PrepareBuildSnapshot(checkerCtx);
+                    var checkerEnqueue = buildQueue.Enqueue(new ChallengeBuildJob(
+                        challenge.Id, game.Id, model.Name!,
+                        checkerSnap, checkerDf,
+                        BuildTrigger.Import,
+                        Kind: ChallengeBuildKind.Checker));
+                    if (checkerEnqueue != EnqueueResult.Enqueued)
+                        SafeDelete(checkerSnap); // AlreadyPending dedup or queue full — drop the snapshot
+                    else
+                        logger.SystemLog(
+                            $"Checker build enqueued: game={game.Id} name={model.Name}",
+                            TaskStatus.Pending, LogLevel.Information);
+                }
+                catch (Exception ex)
+                {
+                    if (checkerSnap is not null) SafeDelete(checkerSnap);
+                    // Non-fatal: the challenge itself imported fine; the checker just
+                    // won't auto-build this round. Surface it in the log, not as a
+                    // failed import.
+                    logger.LogError(ex, "ChallengeImportService: checker enqueue failed for {Challenge}", model.Name);
+                }
+            }
+        }
+
         if (intent.Kind == BuildIntentKind.MissingDockerfile)
             return new(OutcomeKind.Skipped,
                 $"'{model.Name}': Dockerfile not found at '{image}'.");
 
         return new(kind, null);
+    }
+
+    /// <summary>
+    /// Locate a checker build context in an imported package. Convention mirrors the
+    /// challenge image search: <c>./checker/src/Dockerfile</c> then
+    /// <c>./checker/Dockerfile</c>. Returns false when no checker Dockerfile exists
+    /// (the common case — challenge ships no custom checker).
+    /// </summary>
+    private static bool TryResolveCheckerContext(string packageDir, out string contextDir, out string dockerfile)
+    {
+        var checkerSrc = Path.Combine(packageDir, "checker", "src", "Dockerfile");
+        if (File.Exists(checkerSrc))
+        {
+            contextDir = Path.GetFullPath(Path.Combine(packageDir, "checker", "src"));
+            dockerfile = "Dockerfile";
+            return true;
+        }
+
+        var checkerRoot = Path.Combine(packageDir, "checker", "Dockerfile");
+        if (File.Exists(checkerRoot))
+        {
+            contextDir = Path.GetFullPath(Path.Combine(packageDir, "checker"));
+            dockerfile = "Dockerfile";
+            return true;
+        }
+
+        contextDir = string.Empty;
+        dockerfile = string.Empty;
+        return false;
     }
 
     /// <summary>

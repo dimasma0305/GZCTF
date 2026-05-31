@@ -43,7 +43,11 @@ public sealed class DockerChallengeImageBuilder(
         // tag-cleanup would delete the sibling's image — silently breaking a live challenge.
         // The id makes the repo unique per challenge; this slug flows to the build tag, the
         // push repository, and the cleanup target, so all three stay consistent.
-        var slug = $"{req.ChallengeId}-{NormalizeSlug(req.ChallengeSlug)}";
+        // Checker builds get a distinct repo suffix so the challenge's service image
+        // and its checker image never share a gzctf-auto repo (a shared repo's
+        // tag-cleanup would delete the sibling).
+        var kindSuffix = req.Kind == ChallengeBuildKind.Checker ? "-checker" : string.Empty;
+        var slug = $"{req.ChallengeId}-{NormalizeSlug(req.ChallengeSlug)}{kindSuffix}";
         var contextTar = Path.Combine(Path.GetTempPath(), $"gzctf-build-{Guid.NewGuid():N}.tar.gz");
 
         try

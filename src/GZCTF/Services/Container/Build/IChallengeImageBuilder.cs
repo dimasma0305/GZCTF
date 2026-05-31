@@ -10,7 +10,8 @@ public sealed record ChallengeBuildRequest(
     int GameId,
     string ChallengeSlug,
     string ContextDir,
-    string Dockerfile);
+    string Dockerfile,
+    ChallengeBuildKind Kind = ChallengeBuildKind.Challenge);
 
 /// <summary>
 /// Outcome of a single build. On success <see cref="ImageTag"/> is what
