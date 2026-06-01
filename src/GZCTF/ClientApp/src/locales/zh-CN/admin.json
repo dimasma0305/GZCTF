@@ -53,7 +53,6 @@
       "import": "导入",
       "new": "新建题目",
       "pending": "待审核",
-      "watches": "仓库监听",
       "bulk_rebuild": "重建失败镜像",
       "select": "选择题目",
       "select_all": "全选",
@@ -122,15 +121,6 @@
     "audit": {
       "download": "下载压缩包",
       "rebuild": "重新构建"
-    },
-    "watches": {
-      "add": "添加监听",
-      "run": "立即运行",
-      "pause": "暂停",
-      "resume": "恢复",
-      "delete": "删除",
-      "open_binding": "查看绑定",
-      "token": "更新 Token"
     },
     "repo_binding": {
       "add": "添加仓库",
@@ -1011,39 +1001,6 @@
         "conflict_with": "冲突来自",
         "value": "值"
       }
-    },
-    "watches": {
-      "title": "仓库监听",
-      "add": "添加监听",
-      "empty": "添加一个以按计划从仓库导入题目。",
-      "empty_title": "尚未配置监听",
-      "one_per_event": "每场比赛只关联一个仓库。如需切换，请先删除现有监听。",
-      "last_scan": "最近扫描",
-      "next_scan": "下次扫描",
-      "never_scanned": "尚未扫描",
-      "managed_by_binding": {
-        "title": "由仓库绑定管理",
-        "subtitle": "该比赛由全局仓库绑定自动创建。绑定轮询器按其自身节奏重新扫描仓库，无需添加单独的监听。"
-      },
-      "repo_url": "仓库 URL",
-      "ref": "分支 / 标签",
-      "subpath": "子路径",
-      "interval": "间隔（秒）",
-      "token": "GitHub Token（可选）",
-      "token_help": "仅私有仓库需要。加密存储。建议使用细粒度 PAT（Contents: read）。",
-      "token_prompt": "粘贴新的 GitHub Token（留空以清除）：",
-      "has_token": "已配置 Token",
-      "run_immediately": "立即运行",
-      "column": {
-        "repo": "仓库",
-        "ref": "Ref",
-        "subpath": "子路径",
-        "interval": "间隔",
-        "last_run": "最近一次",
-        "commit": "Commit",
-        "status": "状态",
-        "actions": "操作"
-      }
     }
   },
   "label": {
@@ -1197,11 +1154,6 @@
       "approved": "题目已通过",
       "rejected": "题目已驳回",
       "deleted": "{{name}} 已删除"
-    },
-    "watch": {
-      "created": "已创建监听",
-      "run_queued": "将在下一个心跳触发",
-      "token_updated": "Token 已更新"
     },
     "anti_cheat": {
       "cleared": "已清除"

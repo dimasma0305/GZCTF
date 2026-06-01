@@ -12,9 +12,8 @@ namespace GZCTF.Models.Data;
 /// under that event root is imported via the existing
 /// <see cref="GZCTF.Services.Transfer.ChallengeImportService"/>.
 ///
-/// Distinct from per-game <see cref="RepoWatch"/> — that targets one
-/// game whose admin already exists. This shape creates games
-/// automatically and lives at the platform level.
+/// Creates games automatically from discovered .gzevent manifests and
+/// lives at the platform level (global, not per-game).
 /// </summary>
 [Index(nameof(RepoUrl), IsUnique = true)]
 [Index(nameof(NextScanUtc), nameof(Status))]

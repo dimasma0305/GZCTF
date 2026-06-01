@@ -155,7 +155,6 @@ internal static class ServicesExtension
             builder.Services.AddHostedService<CronJobService>();
             builder.Services.AddHostedService<HoneypotPortListenerService>();
             builder.Services.AddHostedService<HoneypotChainDetectorService>();
-            builder.Services.AddHostedService<RepoWatchService>();
             builder.Services.AddHostedService<RepoBindingScanService>();
             builder.Services.AddHostedService<Services.Container.Build.ChallengeBuildQueueService>();
             builder.Services.AddSingleton<Services.AdFlagMountService>();

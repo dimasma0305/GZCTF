@@ -10,8 +10,7 @@ namespace GZCTF.Services.Transfer;
 /// <see cref="RepoBindingDiscoveryService.ScanAsync"/> on every binding
 /// whose <see cref="GameRepoBinding.NextScanUtc"/> has passed.
 ///
-/// Mirror of <see cref="RepoWatchService"/> for the per-game watch
-/// layer — same tick cadence, same fault isolation per row, same
+/// Same tick cadence, fault isolation per row, and
 /// "always advance NextScanUtc so a broken target doesn't hot-loop"
 /// invariant. The discovery itself is idempotent (upsert by
 /// <c>(BindingId, EventManifestPath)</c>), so re-running per tick is

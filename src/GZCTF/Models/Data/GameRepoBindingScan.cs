@@ -10,7 +10,6 @@ namespace GZCTF.Models.Data;
 /// instead of just the truncated summary in
 /// <see cref="GameRepoBinding.LastScanMessage"/>.
 ///
-/// Mirror of <see cref="RepoWatchSync"/> for the per-game watch layer.
 /// Append-only; the binding poller writes one of these every tick.
 /// </summary>
 [Index(nameof(BindingId), nameof(RanAtUtc))]

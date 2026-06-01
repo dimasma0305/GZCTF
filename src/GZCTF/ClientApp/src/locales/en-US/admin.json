@@ -42,7 +42,6 @@
       "import": "Import",
       "new": "New Challenge",
       "pending": "Pending Review",
-      "watches": "Repo Watches",
       "bulk_rebuild": "Rebuild failed",
       "select": "Select challenge",
       "select_all": "Select all",
@@ -111,15 +110,6 @@
     "audit": {
       "download": "Download archive",
       "rebuild": "Rebuild"
-    },
-    "watches": {
-      "add": "Add watch",
-      "run": "Run now",
-      "pause": "Pause",
-      "resume": "Resume",
-      "delete": "Remove",
-      "open_binding": "Open binding",
-      "token": "Update token"
     },
     "repo_binding": {
       "add": "Add repository",
@@ -1033,39 +1023,6 @@
         "conflict_with": "Conflict with",
         "value": "Value"
       }
-    },
-    "watches": {
-      "title": "Repository watch",
-      "add": "Add a new watch",
-      "empty": "Add one to import challenges from a repo on a schedule.",
-      "empty_title": "No watch configured",
-      "one_per_event": "Each game uses one repository. Delete the existing watch before pointing this game at a different repo.",
-      "repo_url": "Repo URL",
-      "ref": "Branch / tag",
-      "subpath": "Subpath",
-      "interval": "Interval (seconds)",
-      "token": "GitHub token (optional)",
-      "token_help": "Required only for private repos. Encrypted at rest. Use a fine-grained PAT scoped to 'Contents: read'.",
-      "token_prompt": "Paste the new GitHub token (leave empty to clear):",
-      "has_token": "Token configured",
-      "run_immediately": "Run immediately",
-      "last_scan": "Last scan",
-      "next_scan": "Next scan",
-      "never_scanned": "Never scanned",
-      "managed_by_binding": {
-        "title": "Managed by repo binding",
-        "subtitle": "This game was auto-created by a global repo binding. The binding poller re-scans the repo on its own cadence; no per-game watch is needed."
-      },
-      "column": {
-        "repo": "Repo",
-        "ref": "Ref",
-        "subpath": "Subpath",
-        "interval": "Interval",
-        "last_run": "Last run",
-        "commit": "Commit",
-        "status": "Status",
-        "actions": "Actions"
-      }
     }
   },
   "label": {
@@ -1230,11 +1187,6 @@
       "approved": "Challenge approved",
       "rejected": "Challenge rejected",
       "deleted": "{{name}} deleted"
-    },
-    "watch": {
-      "created": "Watch created",
-      "run_queued": "Watch will run on the next tick",
-      "token_updated": "Token updated"
     },
     "anti_cheat": {
       "cleared": "Block cleared"

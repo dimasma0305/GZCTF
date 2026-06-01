@@ -86,7 +86,6 @@ public enum BuildTrigger : byte
 
 /// <summary>
 /// Health of the encrypted GitHub access token stored on a
-/// <see cref="GZCTF.Models.Data.RepoWatch"/> or
 /// <see cref="GZCTF.Models.Data.GameRepoBinding"/>. The background
 /// poller updates this on every tick so the admin UI can show a clear
 /// "Token decrypt failed" badge instead of a generic scan-failure
@@ -104,7 +103,8 @@ public enum TokenStatus : byte
 }
 
 /// <summary>
-/// Lifecycle state of a <see cref="GZCTF.Models.Data.RepoWatch"/>.
+/// Lifecycle state of a <see cref="GZCTF.Models.Data.GameRepoBinding"/>
+/// (Active / Paused). Named RepoWatchStatus for historical reasons.
 /// </summary>
 [JsonConverter(typeof(JsonStringEnumConverter<RepoWatchStatus>))]
 public enum RepoWatchStatus : byte

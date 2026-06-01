@@ -9,7 +9,6 @@ import {
   mdiHeartPulse,
   mdiKeyboardBackspace,
   mdiSwordCross,
-  mdiSync,
   mdiTagOutline,
   mdiTextBoxOutline,
   mdiCommentTextOutline,
@@ -55,7 +54,6 @@ export const WithGameEditTab: FC<GameEditTabProps> = ({
     // 'pending' must precede 'challenges' so the fuzzy path.includes match
     // resolves /challenges/pending to this tab instead of plain Challenges.
     { icon: mdiClockOutline, title: t('admin.tab.games.pending', 'Pending'), path: 'pending' },
-    { icon: mdiSync, title: t('admin.tab.games.watches', 'Watches'), path: 'watches' },
     { icon: mdiFlagOutline, title: t('admin.tab.games.challenges'), path: 'challenges' },
     { icon: mdiTagOutline, title: t('admin.tab.games.divisions'), path: 'divisions' },
     { icon: mdiAccountGroupOutline, title: t('admin.tab.games.review'), path: 'review' },

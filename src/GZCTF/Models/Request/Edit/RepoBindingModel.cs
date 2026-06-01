@@ -37,8 +37,7 @@ public sealed class RepoBindingCreateModel
 /// <summary>
 /// Body for <c>PUT /api/Admin/RepoBindings/{id}</c>. Every field is
 /// optional with null = leave alone; <see cref="GitHubToken"/> follows
-/// the established "" = clear / value = re-protect convention from
-/// <see cref="RepoWatchUpdateModel"/>.
+/// the established "" = clear / value = re-protect convention.
 /// </summary>
 public sealed class RepoBindingUpdateModel
 {

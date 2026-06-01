@@ -28,9 +28,9 @@ public sealed record ChallengeImportResult(
 /// YAML → validate → upload attachment → upsert challenge + flags +
 /// attachment via the repository layer).
 ///
-/// Recurring github watches call <see cref="ImportFromGitHubAsync"/> on a
-/// schedule (see <see cref="RepoWatchService"/>). User submissions and
-/// admin one-shots call it through controller endpoints.
+/// The repo-binding poller calls <see cref="ImportFromGitHubAsync"/> on a
+/// schedule. User submissions and admin one-shots call it through controller
+/// endpoints.
 /// </summary>
 public sealed class ChallengeImportService(
     IGameRepository gameRepository,
