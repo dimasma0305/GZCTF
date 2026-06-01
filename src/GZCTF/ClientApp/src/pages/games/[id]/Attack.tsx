@@ -371,6 +371,7 @@ const ARENA_BODY = `
       <span class="label">// VIEW</span>
       <button class="btn ghost on" id="petalBtn">PETALS</button>
       <button class="btn ghost on" id="scanBtn">SCANLINE</button>
+      <button class="btn ghost on" id="soundBtn">SOUND</button>
       <span id="fbBtns" style="display:none">
         <button class="btn fb-ad" id="fbAdBtn">FB A&amp;D</button>
         <button class="btn fb-jeo" id="fbJeoBtn">FB JEO</button>
@@ -849,12 +850,142 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     logEl.scrollTop = logEl.scrollHeight
   }
 
-  function playFB() {
-    const a: any = $('fbSound')
-    if (a && a.getAttribute('src')) { a.currentTime = 0; a.play().catch(() => {}) }
+  /* -------- procedural sound engine (Web Audio; runs off the main thread) -------- */
+  let AC: any = null, masterGain: any = null, reverb: any = null, soundOn = true
+  function audio(): any {
+    try {
+      if (!AC) {
+        AC = new (window.AudioContext || (window as any).webkitAudioContext)()
+        masterGain = AC.createGain(); masterGain.gain.value = 0.5
+        const comp = AC.createDynamicsCompressor()
+        comp.threshold.value = -16; comp.ratio.value = 12; comp.attack.value = 0.003; comp.release.value = 0.25
+        masterGain.connect(comp); comp.connect(AC.destination)
+      }
+      if (AC.state === 'suspended') AC.resume()
+      return AC
+    } catch (e) { return null }
+  }
+  function makeReverb() {
+    const ac = audio(); if (!ac || reverb) return
+    const len = Math.floor(ac.sampleRate * 2.8), buf = ac.createBuffer(2, len, ac.sampleRate)
+    for (let ch = 0; ch < 2; ch++) { const d = buf.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.8) }
+    reverb = ac.createConvolver(); reverb.buffer = buf
+    const rg = ac.createGain(); rg.gain.value = 0.95; reverb.connect(rg); rg.connect(masterGain)
+  }
+  function distCurve(k: number) { const n = 2048, c = new Float32Array(n); for (let i = 0; i < n; i++) { const x = i * 2 / n - 1; c[i] = (3 + k) * x * 20 * (Math.PI / 180) / (Math.PI + k * Math.abs(x)) } return c }
+  function unlockAudio() {
+    const ac = audio(); if (ac && ac.state === 'suspended') ac.resume()
+    if ('speechSynthesis' in window) { try { speechSynthesis.getVoices() } catch (e) {} }
+  }
+  function tone(o: any) {
+    const ac = audio(); if (!ac) return; const t0 = ac.currentTime + (o.delay || 0)
+    const osc = ac.createOscillator(); osc.type = o.type || 'sine'
+    const g = ac.createGain(); const dur = o.dur || 0.15, vol = o.vol || 0.2, atk = o.attack || 0.005
+    osc.frequency.setValueAtTime(o.f, t0)
+    if (o.f2 != null) osc.frequency.exponentialRampToValueAtTime(Math.max(o.f2, 1), t0 + (o.glide || dur))
+    g.gain.setValueAtTime(0.0001, t0)
+    g.gain.exponentialRampToValueAtTime(vol, t0 + atk)
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur)
+    osc.connect(g); g.connect(masterGain)
+    if (o.rev && reverb) { const rs = ac.createGain(); rs.gain.value = o.rev; g.connect(rs); rs.connect(reverb) }
+    osc.start(t0); osc.stop(t0 + dur + 0.03)
+  }
+  function noiseBurst(o: any) {
+    const ac = audio(); if (!ac) return; const t0 = ac.currentTime + (o.delay || 0)
+    const dur = o.dur || 0.2, vol = o.vol || 0.2
+    const n = ac.createBufferSource()
+    const buf = ac.createBuffer(1, Math.max(1, Math.floor(ac.sampleRate * dur)), ac.sampleRate)
+    const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1
+    n.buffer = buf
+    const filt = ac.createBiquadFilter(); filt.type = o.type || 'highpass'
+    filt.frequency.setValueAtTime(o.f || 1000, t0); filt.Q.value = o.q || 1
+    if (o.fEnd != null) filt.frequency.exponentialRampToValueAtTime(Math.max(o.fEnd, 1), t0 + dur)
+    const g = ac.createGain()
+    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(vol, t0 + 0.005)
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur)
+    n.connect(filt); filt.connect(g); g.connect(masterGain)
+    if (o.rev && reverb) { const rs = ac.createGain(); rs.gain.value = o.rev; g.connect(rs); rs.connect(reverb) }
+    n.start(t0); n.stop(t0 + dur + 0.03)
+  }
+  function speakJP(text: string) {
+    if (!soundOn || !('speechSynthesis' in window)) return
+    try {
+      const u = new SpeechSynthesisUtterance(text)
+      u.lang = 'ja-JP'; u.rate = 0.92; u.pitch = 0.8; u.volume = 1
+      const vs = speechSynthesis.getVoices()
+      const jp = vs.find((v) => /ja(-|_)?JP/i.test(v.lang)) || vs.find((v) => /japan/i.test(v.name))
+      if (jp) u.voice = jp
+      speechSynthesis.cancel(); speechSynthesis.speak(u)
+    } catch (e) {}
+  }
+  function sfxAttack() {
+    if (!soundOn || !audio()) return
+    const p = Math.random(), d = rng(0.84, 1.2)
+    if (p < 0.25) { tone({ type: 'square', f: 900 * d, f2: 170 * d, dur: 0.13, vol: 0.15 }); noiseBurst({ type: 'highpass', f: 2200, fEnd: 500, dur: 0.09, vol: 0.05 }) }
+    else if (p < 0.5) { tone({ type: 'triangle', f: 1300 * d, f2: 320 * d, dur: 0.11, vol: 0.15 }); tone({ type: 'square', f: 650 * d, f2: 200 * d, dur: 0.08, vol: 0.07, delay: 0.012 }) }
+    else if (p < 0.75) { noiseBurst({ type: 'bandpass', f: 3200 * d, fEnd: 700, dur: 0.16, vol: 0.15, q: 1.2 }); tone({ type: 'sine', f: 520 * d, f2: 240 * d, dur: 0.1, vol: 0.06 }) }
+    else { tone({ type: 'square', f: 520 * d, f2: 520 * d, dur: 0.05, vol: 0.12 }); tone({ type: 'square', f: 780 * d, f2: 300 * d, dur: 0.09, vol: 0.11, delay: 0.05 }) }
+  }
+  function sfxDefend() {
+    if (!soundOn || !audio()) return
+    tone({ type: 'sine', f: 440, f2: 880, dur: 0.18, vol: 0.15, attack: 0.01 })
+    tone({ type: 'triangle', f: 660, f2: 1320, dur: 0.22, vol: 0.11, delay: 0.04 })
+    noiseBurst({ type: 'highpass', f: 4000, fEnd: 9000, dur: 0.18, vol: 0.05, delay: 0.02 })
+  }
+  function sfxDown() {
+    if (!soundOn || !audio()) return
+    tone({ type: 'sawtooth', f: 300, f2: 58, dur: 0.4, vol: 0.17 })
+    tone({ type: 'square', f: 160, f2: 46, dur: 0.45, vol: 0.11, delay: 0.02 })
+    noiseBurst({ type: 'lowpass', f: 1200, fEnd: 200, dur: 0.3, vol: 0.13 })
+    for (let i = 0; i < 4; i++) tone({ type: 'square', f: rng(120, 400), f2: rng(80, 200), dur: 0.03, vol: 0.06, delay: 0.05 + i * 0.04 })
+  }
+  function sfxCapture() {
+    if (!soundOn || !audio()) return
+    ;[392, 523, 659, 784].forEach((f, i) => tone({ type: 'triangle', f, f2: f, dur: 0.16, vol: 0.12, delay: i * 0.05 }))
+    noiseBurst({ type: 'highpass', f: 3000, fEnd: 8000, dur: 0.2, vol: 0.05, delay: 0.05 })
+  }
+  function braaam(delay: number, dur: number, baseF: number, vol: number) {
+    const ac = audio(); if (!ac) return; const t0 = ac.currentTime + delay
+    const out = ac.createGain()
+    out.gain.setValueAtTime(0.0001, t0); out.gain.exponentialRampToValueAtTime(vol, t0 + 0.07)
+    out.gain.setValueAtTime(vol, t0 + dur * 0.65); out.gain.exponentialRampToValueAtTime(0.0001, t0 + dur)
+    const filt = ac.createBiquadFilter(); filt.type = 'lowpass'; filt.Q.value = 7
+    filt.frequency.setValueAtTime(140, t0)
+    filt.frequency.exponentialRampToValueAtTime(2200, t0 + dur * 0.45)
+    filt.frequency.exponentialRampToValueAtTime(500, t0 + dur)
+    const shaper = ac.createWaveShaper(); shaper.curve = distCurve(10); shaper.oversample = '2x'
+    ;[1, 1.006, 0.994, 2, 0.5, 1.5].forEach((m, i) => {
+      const o = ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = baseF * m
+      const og = ac.createGain(); og.gain.value = i < 3 ? 1 : (i === 5 ? 0.35 : 0.5)
+      o.connect(og); og.connect(filt); o.start(t0); o.stop(t0 + dur + 0.05)
+    })
+    filt.connect(shaper); shaper.connect(out); out.connect(masterGain)
+    if (reverb) { const rs = ac.createGain(); rs.gain.value = 0.55; out.connect(rs); rs.connect(reverb) }
+  }
+  function crash(delay: number, dur: number, vol: number) { noiseBurst({ type: 'highpass', f: 5000, fEnd: 8500, dur, vol, delay, rev: 0.85 }) }
+  // big cinematic first-blood stinger (used when no mp3 is present)
+  function sfxFirstBlood() {
+    if (!soundOn || !audio()) return
+    makeReverb()
+    const slam = FB.slam / 1000
+    noiseBurst({ type: 'highpass', f: 200, fEnd: 7000, dur: slam, vol: 0.18, rev: 0.3 })
+    tone({ type: 'sawtooth', f: 55, f2: 190, dur: slam + 0.08, vol: 0.16, attack: 0.12 })
+    tone({ type: 'sine', f: 92, f2: 60, dur: 0.12, vol: 0.28, delay: slam * 0.34 })
+    tone({ type: 'sine', f: 92, f2: 60, dur: 0.12, vol: 0.38, delay: slam * 0.68 })
+    tone({ type: 'sine', f: 175, f2: 36, dur: 1.2, vol: 0.9, attack: 0.003, delay: slam })
+    tone({ type: 'sine', f: 88, f2: 28, dur: 1.4, vol: 0.65, attack: 0.003, delay: slam })
+    tone({ type: 'triangle', f: 250, f2: 54, dur: 0.5, vol: 0.42, delay: slam })
+    noiseBurst({ type: 'lowpass', f: 320, fEnd: 48, dur: 0.42, vol: 0.75, delay: slam, rev: 0.4 })
+    braaam(slam + 0.005, 1.5, 55, 0.55)
+    noiseBurst({ type: 'bandpass', f: 7200, fEnd: 1100, dur: 0.36, vol: 0.42, q: 0.6, delay: slam + 0.01, rev: 0.55 })
+    crash(slam + 0.015, 1.7, 0.24)
+    ;[523, 415, 622].forEach((f, i) => tone({ type: 'square', f, f2: f * 0.5, dur: 0.6, vol: 0.1, delay: slam + 0.02 + i * 0.006 }))
+    tone({ type: 'sine', f: 1320, f2: 660, dur: 0.7, vol: 0.13, delay: slam + 0.04, rev: 0.4 })
+    noiseBurst({ type: 'lowpass', f: 120, fEnd: 38, dur: 1.5, vol: 0.2, delay: slam + 0.12, rev: 0.5 })
   }
 
   function resolveFlag(atkr: any, vic: any, svc: any, pts: number, isFB: boolean) {
+    if (!isFB) sfxAttack()
     atkr.score += pts; atkr.atk++
     if (vic && svc && svc.status === 'def') { svc.status = 'vuln'; setTimeout(() => { if (svc.status === 'vuln') { svc.status = 'def'; renderSvc(vic) } }, rng(3000, 7000)) }
     renderScore(atkr); if (vic) { renderSvc(vic); pulseBase(vic, vic.color) }
@@ -872,9 +1003,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   // Per-kind first-blood theming. A&D = blood clash, Jeopardy = flag capture,
   // KotH = coronation ("FIRST CROWN").
   const FB_THEME: any = {
-    ad: { title: 'FIRST BLOOD', kanji: 'ファーストブラッド', accent: '#ff3b5b', accent2: '#ff2350', vs: 'VS', tag: 'A&D' },
-    jeopardy: { title: 'FIRST BLOOD', kanji: '初撃破', accent: '#ffc637', accent2: '#ff9a1f', vs: '⚑', tag: 'JEOPARDY' },
-    koth: { title: 'FIRST CROWN', kanji: '初戴冠', accent: '#9d6bff', accent2: '#b98bff', vs: '♛', tag: 'KOTH' },
+    ad: { title: 'FIRST BLOOD', kanji: 'ファーストブラッド', accent: '#ff3b5b', accent2: '#ff2350', vs: 'VS', tag: 'A&D', announce: 'ファーストブラッド' },
+    jeopardy: { title: 'FIRST BLOOD', kanji: '初撃破', accent: '#ffc637', accent2: '#ff9a1f', vs: '⚑', tag: 'JEOPARDY', announce: 'ファーストブラッド' },
+    koth: { title: 'FIRST CROWN', kanji: '初戴冠', accent: '#9d6bff', accent2: '#b98bff', vs: '♛', tag: 'KOTH', announce: 'ファーストクラウン' },
   }
 
   // opt: { kind, oppName, oppColor, oppPortrait(html), beamTo, onImpact }
@@ -896,7 +1027,12 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const an: any = $('fbAtkNm'); an.textContent = atkr.name; an.style.color = atkr.color
     const vn: any = $('fbVicNm'); vn.textContent = oppName; vn.style.color = oppColor
     ov.classList.remove('play'); void ov.offsetWidth; ov.classList.add('play')
-    setTimeout(() => { try { playFB() } catch (e) {} }, FB.soundDelay)
+    setTimeout(() => {
+      if (!soundOn) return
+      const a: any = $('fbSound')
+      if (a && a.getAttribute('src')) { a.currentTime = 0; a.play().catch(() => {}) } else sfxFirstBlood()
+    }, FB.soundDelay)
+    setTimeout(() => speakJP(th.announce), FB.slam + 60)
     setTimeout(() => {
       const sh: any = root.querySelector('.shell'); if (sh) { sh.classList.add('shake'); setTimeout(() => sh.classList.remove('shake'), 520) }
       if (opt.onImpact) opt.onImpact()
@@ -1061,13 +1197,13 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
         if (old && old !== ns) {
           if (ns === 'down' && old !== 'down') {
             addLog('SLA', 'sla', `<span class="who">${esc(t.name)}</span> :: <span class="svc">${esc(sv.name)}</span> went <span class="em">DOWN</span>`)
-            spawnDown(t.x, t.y, '#ff3b5b')
+            spawnDown(t.x, t.y, '#ff3b5b'); sfxDown()
             const g = $('base-' + t.id)
             if (g) { g.classList.remove('node-down'); void g.offsetWidth; g.classList.add('node-down'); setTimeout(() => g.classList.remove('node-down'), 1300) }
             totalEvents++
           } else if (ns === 'def' && old === 'down') {
             addLog('DEFEND', 'def', `<span class="who">${esc(t.name)}</span> restored <span class="svc">${esc(sv.name)}</span>`)
-            spawnShield(t.x, t.y, SVC_COLOR.def); totalEvents++
+            spawnShield(t.x, t.y, SVC_COLOR.def); sfxDefend(); totalEvents++
           }
         }
         prevSvcState[key] = ns; sv.status = ns
@@ -1121,7 +1257,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     h.owner = newOwner; renderHill(h)
     if (newOwner) {
       if (!firstCrown && !cinema) { firstCrown = true; fbKoth(newOwner, h, () => {}) }
-      spawnCapture(newOwner, h, newOwner.color)
+      spawnCapture(newOwner, h, newOwner.color); sfxCapture()
       floatText(h.x, h.y - 30, contested ? 'SEIZED' : 'CAPTURED', newOwner.color)
       addLog('HILL', 'hill', `<span class="who">${esc(newOwner.name)}</span> ${contested ? 'seized' : 'captured'} <span class="svc">${esc(h.name)}</span>`)
     } else {
@@ -1240,7 +1376,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const t = pick(TEAMS)
     const s = t.svc.find((x: any) => x.status === 'vuln') || t.svc.find((x: any) => x.status === 'down') || pick(t.svc)
     s.status = 'def'; t.def++; t.score += Math.floor(rng(10, 28))
-    renderSvc(t); renderScore(t); pulseBase(t, SVC_COLOR.def); spawnShield(t.x, t.y, SVC_COLOR.def)
+    renderSvc(t); renderScore(t); pulseBase(t, SVC_COLOR.def); spawnShield(t.x, t.y, SVC_COLOR.def); sfxDefend()
     floatText(t.x, t.y - 66, 'PATCHED', SVC_COLOR.def)
     addLog('DEFEND', 'def', `<span class="who">${esc(t.name)}</span> shielded <span class="svc">${esc(s.name)}</span>`)
     totalEvents++; refreshRank(); refreshStats()
@@ -1249,7 +1385,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const t = pick(TEAMS)
     const s = pick(t.svc.filter((x: any) => x.status !== 'down')) || pick(t.svc)
     s.status = 'down'; t.sla = Math.max(40, t.sla - Math.floor(rng(2, 6))); t.score = Math.max(0, t.score - Math.floor(rng(8, 20)))
-    renderSvc(t); renderScore(t); spawnDown(t.x, t.y, '#ff3b5b')
+    renderSvc(t); renderScore(t); spawnDown(t.x, t.y, '#ff3b5b'); sfxDown()
     const g = $('base-' + t.id); if (g) { g.classList.remove('node-down'); void g.offsetWidth; g.classList.add('node-down'); setTimeout(() => g.classList.remove('node-down'), 1300) }
     floatText(t.x, t.y - 66, '▼ DOWN', '#ff5b6e')
     addLog('SLA', 'sla', `<span class="who">${esc(t.name)}</span> :: <span class="svc">${esc(s.name)}</span> went <span class="em">DOWN</span>`)
@@ -1261,7 +1397,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const h = pick(HILLS); let atkr = pick(TEAMS); let g = 0
     while (h.owner === atkr && g++ < 8) atkr = pick(TEAMS)
     const contested = h.owner && h.owner !== atkr
-    h.owner = atkr; renderHill(h); spawnCapture(atkr, h, atkr.color); atkr.score += Math.floor(rng(20, 45)); renderScore(atkr)
+    h.owner = atkr; renderHill(h); spawnCapture(atkr, h, atkr.color); sfxCapture(); atkr.score += Math.floor(rng(20, 45)); renderScore(atkr)
     floatText(h.x, h.y - 30, contested ? 'SEIZED' : 'CAPTURED', atkr.color)
     addLog('HILL', 'hill', `<span class="who">${esc(atkr.name)}</span> ${contested ? 'seized' : 'captured'} <span class="svc">${esc(h.name)}</span>`)
     totalEvents++; refreshRank(); refreshStats()
@@ -1307,11 +1443,22 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   // autoplay until then — so the auto-played seed/live stinger stays silent
   // until the viewer interacts; any of the buttons below also count).
   const primeAudio = () => {
+    unlockAudio()
     const a: any = $('fbSound')
     if (a) { a.play().then(() => { a.pause(); a.currentTime = 0 }).catch(() => {}) }
     document.removeEventListener('pointerdown', primeAudio)
+    document.removeEventListener('keydown', primeAudio)
   }
   document.addEventListener('pointerdown', primeAudio, { once: true })
+  document.addEventListener('keydown', primeAudio, { once: true })
+
+  const soundBtn: any = $('soundBtn')
+  if (soundBtn) soundBtn.onclick = function () {
+    soundOn = !soundOn
+    soundBtn.classList.toggle('on', soundOn)
+    if (soundOn) unlockAudio()
+    else if ('speechSynthesis' in window) { try { speechSynthesis.cancel() } catch (e) {} }
+  }
 
   // Preview-only: manually trigger each first-blood variant.
   const fbAdBtn: any = $('fbAdBtn')
@@ -1357,6 +1504,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     if (raf) cancelAnimationFrame(raf)
     window.removeEventListener('resize', onResize)
     document.removeEventListener('pointerdown', primeAudio)
+    document.removeEventListener('keydown', primeAudio)
+    if ('speechSynthesis' in window) { try { speechSynthesis.cancel() } catch (e) {} }
+    if (AC) { try { AC.close() } catch (e) {} AC = null }
     if (ws) { try { ws.onclose = null; ws.close() } catch (e) {} ws = null }
   }
 }
