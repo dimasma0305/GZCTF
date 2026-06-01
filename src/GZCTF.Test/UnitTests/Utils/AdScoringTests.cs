@@ -10,26 +10,31 @@ namespace GZCTF.Test.UnitTests.Utils;
 /// </summary>
 public class AdScoringTests
 {
+    // Attack is a RARITY POOL: each flag is worth AttackPool total, split among the
+    // teams that stole it, so a capturer of a flag k teams took gets AttackPool/k.
     [Theory]
-    [InlineData(0, 10.0)]        // first blood — full base
-    [InlineData(1, 7.0710678)]   // 10 / sqrt(2)
-    [InlineData(3, 5.0)]         // 10 / sqrt(4)
-    public void AttackPoints_FirstBloodWeighted(int priorCapturers, double expected)
-        => Assert.Equal(expected, AdScoring.AttackPoints(priorCapturers), 6);
+    [InlineData(1, 1.0)]          // only you → the whole pool
+    [InlineData(2, 0.5)]          // shared by 2 → half each
+    [InlineData(4, 0.25)]         // shared by 4 → quarter each
+    [InlineData(0, 0.0)]          // non-positive count → 0 (no divide-by-zero)
+    public void AttackShare_RarityPool(int capturers, double expected)
+        => Assert.Equal(expected, AdScoring.AttackShare(capturers), 6);
 
     [Fact]
-    public void AttackPoints_DecreasesWithMoreCapturers()
+    public void AttackShare_DecreasesWithMoreCapturers()
     {
-        Assert.True(AdScoring.AttackPoints(0) > AdScoring.AttackPoints(1));
-        Assert.True(AdScoring.AttackPoints(1) > AdScoring.AttackPoints(5));
+        Assert.True(AdScoring.AttackShare(1) > AdScoring.AttackShare(2));
+        Assert.True(AdScoring.AttackShare(2) > AdScoring.AttackShare(5));
     }
 
+    // Defense is the linear mirror: DefensePool per distinct compromised flag,
+    // counted once per flag (not per capture).
     [Theory]
-    [InlineData(0, 0.0)]    // never captured → no loss
-    [InlineData(1, 2.0)]    // 2 * 1^0.75
-    [InlineData(16, 16.0)]  // 2 * 16^0.75 = 2 * 8
-    public void DefenseLoss_SubLinearPenalty(int timesCaptured, double expected)
-        => Assert.Equal(expected, AdScoring.DefenseLoss(timesCaptured), 6);
+    [InlineData(0, 0.0)]    // never leaked → no loss
+    [InlineData(1, 1.0)]    // one leaked flag
+    [InlineData(16, 16.0)]  // sixteen leaked flags
+    public void DefenseLoss_LinearPerCompromisedFlag(int compromisedFlags, double expected)
+        => Assert.Equal(expected, AdScoring.DefenseLoss(compromisedFlags), 6);
 
     [Theory]
     [InlineData(4, 2.0)]    // sqrt(4)
