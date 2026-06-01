@@ -1,2348 +1,1191 @@
 /**
- * Public per-game attack animation page.
+ * Public per-game live Attack & Defense / King of the Hill battle arena.
  *
- * Route: /games/{id}/attack (no authentication).
+ * Route: /games/{id}/attack  (no authentication).
  *
- * Tactical-ops HUD aesthetic: fixed header/footer strips, event-stream
- * feed panel (left), scoreboard + stats panel (right), hexagonal HQ in
- * the center, team nodes arranged as a ring / dual-ring / active-only
- * column depending on team count.
+ * Arcade / anime "cyber arena" design & animation by lawbyte
+ * (https://github.com/lawbyte). Ported into the platform here and wired to the
+ * live plain-WebSocket attack feed (/hub/attack/ws?game={id}) plus the public
+ * A&D / KotH scoreboards (/api/Game/{id}/Ad/Scoreboard, .../Ad/Koth/Scoreboard).
  *
- * Field visuals (bullets, laser charge/beam/impact, debris, shockwaves)
- * are rendered by a PixiJS WebGL renderer in attackEffects.ts.  First
- * blood triggers a 10-second dread-build laser strike that shakes the
- * whole viewport and shatters the screen.
+ * The whole piece is a self-contained imperative SVG + canvas scene with its
+ * own full-page CSS, so it is mounted into a Shadow DOM: that isolates its
+ * styles and DOM from the React app shell completely (and a ShadowRoot still
+ * supports getElementById, which the engine relies on). The engine runs in a
+ * useEffect and tears itself down (WebSocket, timers, rAF) on unmount.
  */
-import { mdiWater } from '@mdi/js'
-import { Icon } from '@mdi/react'
-import { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useTranslation } from 'react-i18next'
-import * as signalR from '@microsoft/signalr'
+import { FC, useEffect, useRef } from 'react'
 import { useParams } from 'react-router'
-import api, {
-  ChallengeCategory,
-  DetailedGameInfoModel,
-  ScoreboardItem,
-  ScoreboardModel,
-  SubmissionType,
-} from '@Api'
-import {
-  disposeEffects,
-  fireBullet,
-  fireKothBeam,
-  hillPulse,
-  initEffects,
-  isLowFPS,
-  playPew,
-  setPausedState,
-  spawnFirstBlood,
-  unlockAudio,
-} from './attackEffects'
+
+const FONTS_HREF =
+  'https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=DotGothic16&display=swap'
 
 /* -------------------------------------------------------------------------- */
-/* Types                                                                      */
+/* Scene CSS (lawbyte). `body` is remapped to `:host` for the shadow root.    */
 /* -------------------------------------------------------------------------- */
-
-interface AttackEvent {
-  teamName: string
-  teamAvatar: string | null
-  teamScore: number | null
-  challengeTitle: string
-  category: ChallengeCategory
-  type: SubmissionType
-  time: string
-  // Attack & Defense only: the team whose flag was captured. When this
-  // resolves to a node on the board the projectile flies there instead of
-  // into the center HQ. Undefined/null for jeopardy submissions.
-  victimTeamName?: string | null
-}
-
-interface FeedLine {
-  key: string
-  time: string
-  teamName: string
-  challengeTitle: string
-  type: SubmissionType
-  // KotH control-change line. When set, FeedPanel renders `text` verbatim
-  // with a crown prefix instead of the attack prefix + team :: challenge.
-  koth?: { text: string; lost: boolean }
-}
-
-interface FirstBloodBanner {
-  id: number
-  teamName: string
-  challengeTitle: string
-  category: ChallengeCategory
-  startedAt: number
-}
-
-interface TickerEvent {
-  id: number
-  teamName: string
-  challengeTitle: string
-  category: ChallengeCategory
-  type: SubmissionType
-}
-
-/* -------------------------------------------------------------------------- */
-/* King-of-the-Hill                                                            */
-/* -------------------------------------------------------------------------- */
-
-/** A KotH objective ("hill"). One per KotH challenge. The holder is the
- *  team currently in control of the hill (null = uncontrolled / neutral). */
-interface KothHill {
-  challengeId: number
-  title: string
-  holderName: string | null
-  holderAvatar: string | null
-  status: string | null
-}
-
-/** Public seed shape from GET /api/game/{id}/KothHills. */
-interface KothHillSeed {
-  challengeId: number
-  title: string
-  holderTeamName: string | null
-  holderTeamAvatar: string | null
-  status: string | null
-}
-
-/** Live control-change event from the SignalR hub (ReceivedKothControl).
- *  Only fired on an actual change of holder, so every event animates. */
-interface KothControlEvent {
-  challengeId: number
-  challengeTitle: string
-  round: number
-  holderTeamName: string | null
-  holderTeamAvatar: string | null
-  previousTeamName: string | null
-  status: string
-}
-
-/* -------------------------------------------------------------------------- */
-/* Constants                                                                  */
-/* -------------------------------------------------------------------------- */
-
-const SCOREBOARD_REFRESH_MS = 30_000
-const SCOREBOARD_DEBOUNCE_MS = 2000
-const FIRST_BLOOD_BANNER_MS = 10_000
-const BURST_COUNT = 8
-const BURST_INTERVAL_MS = 200
-const BURST_RATE_WINDOW_MS = 3000
-const BURST_RATE_LIMIT = 15
-const FEED_MAX = 18
-
-const colorForType = (t: SubmissionType): string => {
-  switch (t) {
-    case SubmissionType.FirstBlood:
-      return '#ffd34a'
-    case SubmissionType.Normal:
-      return '#3ae85c'
-    case SubmissionType.SecondBlood:
-    case SubmissionType.ThirdBlood:
-      return '#f4b619'
-    case SubmissionType.Unaccepted:
-    default:
-      return '#ff6262'
+const ARENA_CSS = `
+  :host{
+    --bg:#06050f; --bg2:#0b0918; --panel:rgba(13,10,28,0.72);
+    --line:rgba(132,98,238,0.16); --line2:rgba(132,98,238,0.32);
+    --text:#e9e6ff; --dim:#7d78ad; --dimmer:#4f4a78;
+    --cyan:#27e3ff; --magenta:#ff39a8; --lime:#b9ff42; --amber:#ffc637;
+    --violet:#9d6bff; --orange:#ff7a3a; --blue:#4d8bff; --red:#ff4d5e;
+    --good:#3dffb0; --warn:#ffd23a; --bad:#ff3b5b;
+    --glow:0 0 18px;
+    display:block; position:absolute; inset:0; overflow:hidden;
+    color:var(--text); font-family:'VT323',monospace; -webkit-font-smoothing:none;
+    background:
+      radial-gradient(1200px 700px at 50% 42%, #15102e 0%, rgba(8,6,18,0) 60%),
+      radial-gradient(900px 600px at 8% 12%, rgba(255,57,168,0.10), transparent 55%),
+      radial-gradient(900px 600px at 92% 16%, rgba(39,227,255,0.10), transparent 55%),
+      var(--bg);
   }
-}
-
-const feedPrefix = (t: SubmissionType): string => {
-  switch (t) {
-    case SubmissionType.FirstBlood:
-      return '!! 1st-BLOOD !! '
-    case SubmissionType.Normal:
-      return '[ SOLVE  ] '
-    case SubmissionType.SecondBlood:
-      return '[ 2nd-BLD] '
-    case SubmissionType.ThirdBlood:
-      return '[ 3rd-BLD] '
-    default:
-      return '[ MISS   ] '
+  *{box-sizing:border-box;margin:0;padding:0}
+  .circuit{position:absolute;inset:0;z-index:0;opacity:.5;pointer-events:none;
+    background-image:
+      linear-gradient(var(--line) 1px,transparent 1px),
+      linear-gradient(90deg,var(--line) 1px,transparent 1px),
+      linear-gradient(var(--line) 1px,transparent 1px),
+      linear-gradient(90deg,var(--line) 1px,transparent 1px);
+    background-size:96px 96px,96px 96px,24px 24px,24px 24px;
+    background-position:-1px -1px,-1px -1px,-1px -1px,-1px -1px;
+    mask-image:radial-gradient(1100px 700px at 50% 45%,#000 30%,transparent 85%);
   }
-}
+  .scan{position:absolute;inset:0;z-index:60;pointer-events:none;
+    background:repeating-linear-gradient(0deg,rgba(0,0,0,0.16) 0px,rgba(0,0,0,0.16) 1px,transparent 2px,transparent 3px);
+    mix-blend-mode:multiply;opacity:.55;transition:opacity .2s}
+  .scan.off{opacity:0}
+  .grain{position:absolute;inset:0;z-index:61;pointer-events:none;opacity:.05;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+  .vignette{position:absolute;inset:0;z-index:59;pointer-events:none;
+    box-shadow:inset 0 0 240px 60px rgba(0,0,0,.85)}
 
-// Uncontrolled / neutral hill color (matches the muted team-node grey).
-const KOTH_NEUTRAL = '#6b7183'
+  .shell{position:relative;z-index:5;height:100vh;display:grid;
+    grid-template-rows:auto 1fr auto;gap:10px;padding:12px}
+  .midrow{display:grid;grid-template-columns:clamp(200px,20vw,300px) minmax(0,1fr) clamp(210px,21vw,320px);gap:12px;min-height:0;min-width:0}
 
-/** Stable per-team color derived from the team name. Hashes the name to a
- *  hue in a vivid band so two different teams almost never collide, and the
- *  same team always gets the same crown tint across re-renders / events. */
-const colorForTeam = (name: string | null | undefined): string => {
-  if (!name) return KOTH_NEUTRAL
-  let h = 0
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
-  const hue = h % 360
-  const sat = 70 + (h % 18) // 70-87%
-  const light = 56 + (h % 10) // 56-65%
-  return hslToHex(hue, sat, light)
-}
+  .topbar{display:flex;align-items:center;justify-content:space-between;
+    padding:8px 16px;border:1px solid var(--line2);background:var(--panel);
+    clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,14px 100%,0 calc(100% - 14px));
+    backdrop-filter:blur(3px)}
+  .brand{display:flex;align-items:baseline;gap:14px}
+  .brand .logo{font-family:'Press Start 2P';font-size:15px;letter-spacing:1px;
+    color:#fff;text-shadow:var(--glow) var(--magenta),0 0 4px var(--magenta)}
+  .brand .logo b{color:var(--cyan);text-shadow:var(--glow) var(--cyan)}
+  .brand .mode{font-family:'Press Start 2P';font-size:9px;color:var(--dim);
+    border:1px solid var(--line2);padding:5px 8px}
+  .brand .jp{font-family:'DotGothic16';font-size:14px;color:var(--violet);opacity:.85}
+  .topright{display:flex;align-items:center;gap:18px;font-size:19px}
+  .live{display:flex;align-items:center;gap:7px;color:var(--good);
+    font-family:'Press Start 2P';font-size:9px;letter-spacing:1px}
+  .live.off{color:var(--dim)}
+  .live.off .dot{background:var(--dim);box-shadow:none;animation:none}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--good);
+    box-shadow:var(--glow) var(--good);animation:blink 1.1s steps(2) infinite}
+  @keyframes blink{50%{opacity:.25}}
+  .clock{color:var(--cyan);font-size:24px;letter-spacing:2px;
+    text-shadow:0 0 8px rgba(39,227,255,.6)}
+  .roundpill{font-family:'Press Start 2P';font-size:9px;color:var(--amber);
+    border:1px solid rgba(255,198,55,.4);padding:6px 9px;
+    text-shadow:0 0 6px rgba(255,198,55,.6)}
 
-const hslToHex = (h: number, s: number, l: number): string => {
-  const sN = s / 100
-  const lN = l / 100
-  const c = (1 - Math.abs(2 * lN - 1)) * sN
-  const x = c * (1 - Math.abs(((h / 60) % 2) - 1))
-  const m = lN - c / 2
-  let r = 0,
-    g = 0,
-    b = 0
-  if (h < 60) [r, g, b] = [c, x, 0]
-  else if (h < 120) [r, g, b] = [x, c, 0]
-  else if (h < 180) [r, g, b] = [0, c, x]
-  else if (h < 240) [r, g, b] = [0, x, c]
-  else if (h < 300) [r, g, b] = [x, 0, c]
-  else [r, g, b] = [c, 0, x]
-  const to = (v: number): string =>
-    Math.round((v + m) * 255)
-      .toString(16)
-      .padStart(2, '0')
-  return `#${to(r)}${to(g)}${to(b)}`
-}
+  .panel{position:relative;border:1px solid var(--line2);background:var(--panel);
+    backdrop-filter:blur(3px);display:flex;flex-direction:column;min-height:0;min-width:0;
+    clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px))}
+  .panel::before{content:"";position:absolute;inset:0;pointer-events:none;
+    border-top:1px solid rgba(255,255,255,.04)}
+  .phead{display:flex;align-items:center;justify-content:space-between;
+    padding:7px 12px;border-bottom:1px solid var(--line);
+    background:linear-gradient(90deg,rgba(157,107,255,.10),transparent)}
+  .phead .t{font-family:'Press Start 2P';font-size:9px;letter-spacing:1px;color:#fff}
+  .phead .jp{font-family:'DotGothic16';font-size:12px;color:var(--dim)}
+  .accent-c{box-shadow:inset 3px 0 0 var(--cyan)}
+  .accent-m{box-shadow:inset 3px 0 0 var(--magenta)}
+  .accent-v{box-shadow:inset 3px 0 0 var(--violet)}
 
-/* -------------------------------------------------------------------------- */
-/* Layout                                                                     */
-/* -------------------------------------------------------------------------- */
+  #log{flex:1;overflow-y:auto;overflow-x:hidden;padding:8px 10px;display:flex;flex-direction:column;
+    gap:3px;font-size:15px;line-height:1.25;justify-content:flex-start;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+  #log::-webkit-scrollbar{width:6px}#log::-webkit-scrollbar-thumb{background:var(--line2);border-radius:3px}
+  .lg{flex:0 0 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.92;
+    animation:logIn .25s ease-out}
+  @keyframes logIn{from{opacity:0;transform:translateX(-8px)}}
+  .lg .ts{color:var(--dimmer);margin-right:5px}
+  .lg .tag{font-family:'Press Start 2P';font-size:8px;padding:1px 4px;margin-right:6px;
+    vertical-align:middle}
+  .tag.flag{color:#fff;background:rgba(255,77,94,.18);border:1px solid var(--red)}
+  .tag.def{color:#fff;background:rgba(61,255,176,.14);border:1px solid var(--good)}
+  .tag.sla{color:#fff;background:rgba(255,210,58,.14);border:1px solid var(--warn)}
+  .tag.fb{color:#fff;background:rgba(255,57,168,.2);border:1px solid var(--magenta)}
+  .tag.sys{color:var(--dim);border:1px solid var(--line2)}
+  .tag.hill{color:#fff;background:rgba(157,107,255,.2);border:1px solid var(--violet)}
+  .lg .who{color:var(--cyan)}
+  .lg .vic{color:var(--magenta)}
+  .lg .svc{color:var(--amber)}
+  .lg .em{color:#fff}
+  .prompt{color:var(--good);font-size:17px;padding:2px 10px 8px;border-top:1px solid var(--line)}
+  .prompt b{color:var(--cyan)}
+  .cur{display:inline-block;width:8px;height:14px;background:var(--good);
+    margin-left:3px;vertical-align:-2px;animation:blink .9s steps(2) infinite}
 
-interface TeamPos {
-  id: number
-  name: string
-  score: number
-  rank: number
-  avatar: string | null
-  x: number
-  y: number
-  labelled: boolean
-}
+  .arena-wrap{position:relative;display:flex;align-items:center;justify-content:center;
+    min-height:0;min-width:0;overflow:hidden}
+  .arena{position:relative;aspect-ratio:1/1;height:100%;max-height:100%;max-width:100%}
+  #svg{position:absolute;inset:0;width:100%;height:100%}
+  #fx{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  .arena-note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    text-align:center;font-family:'Press Start 2P';font-size:11px;color:var(--dim);
+    line-height:2;padding:20px;z-index:8}
+  .corner-tag{position:absolute;font-family:'Press Start 2P';font-size:8px;
+    color:var(--dim);z-index:6;opacity:.7}
+  .ct-tl{top:6px;left:6px}.ct-tr{top:6px;right:6px;text-align:right}
+  .ct-bl{bottom:6px;left:6px}.ct-br{bottom:6px;right:6px;text-align:right}
 
-type Layout = 'ring' | 'dual-ring' | 'active'
+  .rightcol{display:flex;flex-direction:column;gap:12px;min-height:0;min-width:0}
+  .panel.rank{flex:1;min-height:0}
+  #ranklist{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:6px;
+    scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+  #ranklist::-webkit-scrollbar{width:6px}#ranklist::-webkit-scrollbar-thumb{background:var(--line2);border-radius:3px}
+  .rk{flex:0 0 auto;display:flex;align-items:center;gap:9px;padding:6px 7px;margin-bottom:5px;
+    border:1px solid var(--line);position:relative;
+    background:linear-gradient(90deg,rgba(255,255,255,.02),transparent);
+    transition:transform .35s cubic-bezier(.2,.9,.2,1)}
+  .rk .pos{font-family:'Press Start 2P';font-size:12px;width:22px;text-align:center;color:var(--dim)}
+  .rk.p1 .pos{color:var(--amber);text-shadow:0 0 8px var(--amber)}
+  .rk.p2 .pos{color:#d8e0ff}
+  .rk.p3 .pos{color:var(--orange)}
+  .rk .av{width:38px;height:38px;flex:none;border:1px solid var(--line2);
+    border-radius:5px;overflow:hidden;background:#0a0818}
+  .rk .av svg{display:block;width:100%;height:100%}
+  .rk .body{flex:1;min-width:0}
+  .rk .nm{font-family:'Press Start 2P';font-size:8px;letter-spacing:.5px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rk .bars{display:flex;gap:3px;margin-top:4px;height:5px}
+  .rk .bars i{display:block;height:100%;border-radius:1px;opacity:.9}
+  .rk .sc{font-size:22px;color:#fff;line-height:1;text-align:right;min-width:46px;
+    text-shadow:0 0 8px rgba(255,255,255,.25)}
+  .rk .sc small{display:block;font-size:11px;color:var(--good);margin-top:1px}
+  .rk .sc small.dn{color:var(--bad)}
 
-interface LayoutResult {
-  layout: Layout
-  positions: TeamPos[]
-  cx: number
-  cy: number
-  hqSize: number
-  px0: number
-  py0: number
-  px1: number
-  py1: number
-  pw: number
-  ph: number
-  rankColumn: { x: number; y: number; w: number; h: number } | null
-  ringRx: number
-  ringRy: number
-}
+  #stats{padding:8px 12px;font-size:19px}
+  .strow{display:flex;justify-content:space-between;padding:3px 0;
+    border-bottom:1px dashed var(--line)}
+  .strow:last-child{border-bottom:0}
+  .strow .k{color:var(--dim);font-size:16px;font-family:'DotGothic16'}
+  .strow .v{color:#fff;letter-spacing:1px}
+  .strow .v.acc{color:var(--cyan);text-shadow:0 0 6px rgba(39,227,255,.5)}
+  .legend{display:flex;gap:12px;padding:8px 12px;border-top:1px solid var(--line);
+    font-family:'Press Start 2P';font-size:7px;color:var(--dim);flex-wrap:wrap}
+  .legend span{display:inline-flex;align-items:center;gap:5px}
+  .legend i{width:9px;height:9px;display:inline-block}
 
-const FEED_W_MIN = 240
-const FEED_W_MAX = 360
-const BOARD_W_MIN = 220
-const BOARD_W_MAX = 300
-const HEADER_H = 46
-const FOOTER_H = 40
-const GUTTER = 18
-const INNER_PAD = 20
-const LABEL_MARGIN = 60
+  .devbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:8px 14px;
+    border:1px solid var(--line2);background:var(--panel);backdrop-filter:blur(3px);
+    clip-path:polygon(14px 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%,0 14px)}
+  .devbar .label{font-family:'Press Start 2P';font-size:8px;color:var(--violet);
+    letter-spacing:1px;margin-right:4px}
+  .btn{font-family:'Press Start 2P';font-size:8px;letter-spacing:.5px;color:#0a0612;
+    border:0;padding:8px 11px;cursor:pointer;position:relative;
+    clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%,0 6px);
+    transition:transform .08s,filter .15s}
+  .btn:active{transform:translateY(2px)}
+  .btn:hover{filter:brightness(1.15)}
+  .btn.ghost{background:transparent;color:var(--dim);border:1px solid var(--line2);box-shadow:none}
+  .btn.ghost.on{color:#0a0612;background:var(--cyan);border-color:var(--cyan)}
+  .sp{flex:1}
+  .ticker{overflow:hidden;white-space:nowrap;max-width:46%}
+  .ticker .run{display:inline-block;padding-left:100%;animation:run 26s linear infinite;
+    font-size:17px;color:var(--dim)}
+  .ticker .run b{color:var(--cyan)}.ticker .run em{color:var(--magenta);font-style:normal}
+  @keyframes run{to{transform:translateX(-100%)}}
 
-const computeLayout = (
-  teams: ScoreboardItem[],
-  w: number,
-  h: number
-): LayoutResult => {
-  // Panel widths scale with the shorter viewport dimension so they don't
-  // dominate narrow laptops or vanish on 4K projectors.  The previous
-  // pure w*0.19 pushed feed to 360px on 4K (tiny) and ate 260px on a
-  // 1366-wide laptop (too much).
-  const shortDim = Math.min(w, h)
-  const feedW = Math.min(FEED_W_MAX, Math.max(FEED_W_MIN, shortDim * 0.28))
-  const boardW = Math.min(BOARD_W_MAX, Math.max(BOARD_W_MIN, shortDim * 0.24))
-  const px0 = GUTTER + feedW + INNER_PAD
-  const px1 = w - GUTTER - boardW - INNER_PAD
-  const py0 = HEADER_H + INNER_PAD
-  const py1 = h - FOOTER_H - INNER_PAD
-  const pw = px1 - px0
-  const ph = py1 - py0
+  .float{position:absolute;font-family:'Press Start 2P';font-size:9px;pointer-events:none;
+    z-index:7;text-shadow:0 0 6px currentColor;animation:floatUp 1.1s ease-out forwards}
+  @keyframes floatUp{0%{opacity:0;transform:translateY(4px) scale(.7)}
+    20%{opacity:1;transform:translateY(-2px) scale(1.1)}
+    100%{opacity:0;transform:translateY(-30px) scale(1)}}
 
-  const cx = w / 2
-  const cy = h / 2
-  const hqSize = Math.min(280, Math.max(160, Math.min(pw, ph) * 0.28))
+  .u-float{animation:bob 2.8s ease-in-out infinite}
+  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3.5px)}}
 
-  const sorted = [...teams].sort((a, b) => a.rank - b.rank)
-  const count = sorted.length
-  let layout: Layout
-  if (count <= 24) layout = 'ring'
-  else if (count <= 70) layout = 'dual-ring'
-  else layout = 'active'
+  @keyframes shake{
+    0%,100%{transform:translate(0,0)}
+    10%{transform:translate(-5px,3px)}25%{transform:translate(6px,-4px)}
+    40%{transform:translate(-7px,2px)}55%{transform:translate(5px,4px)}
+    70%{transform:translate(-4px,-3px)}85%{transform:translate(3px,2px)}}
+  .shell.shake{animation:shake .5s cubic-bezier(.36,.07,.19,.97)}
 
-  const hqHalfV = hqSize * 0.6
-  const hqHalfH = hqSize * 0.5
-  const rxRoom = Math.min(cx - px0, px1 - cx) - LABEL_MARGIN
-  const ryRoom = Math.min(cy - py0, py1 - cy) - LABEL_MARGIN
-  const rMin = Math.max(hqHalfV, hqHalfH) + 40
-  const rxFinal = Math.max(rMin, Math.min(Math.max(rxRoom, rMin), Math.max(rMin, pw * 0.45)))
-  const ryFinal = Math.max(rMin, Math.min(Math.max(ryRoom, rMin), Math.max(rMin, ph * 0.45)))
+  @keyframes nodeGlitch{0%,100%{opacity:1;filter:none}18%{opacity:.35;filter:brightness(1.7) hue-rotate(-18deg)}40%{opacity:.9}58%{opacity:.25;filter:brightness(.5) saturate(2.2)}78%{opacity:.7}}
+  .node-down{animation:nodeGlitch .42s steps(2) 3}
 
-  const positions: TeamPos[] = []
-  let rankColumn: LayoutResult['rankColumn'] = null
+  /* ===== FIRST BLOOD CINEMATIC ===== */
+  .fb-overlay{position:fixed;inset:0;z-index:95;pointer-events:none;visibility:hidden;overflow:hidden}
+  .fb-overlay.play{visibility:visible}
+  .fb-overlay>div{position:absolute;opacity:0}
+  .fb-dark{inset:0;background:radial-gradient(circle at 50% 45%,rgba(40,2,12,.72),rgba(2,1,6,.97))}
+  .fb-bar{left:0;width:100%;height:11vh;background:#040308;border-color:#ff3b5b}
+  .fb-bar.t{top:0;border-bottom:2px solid #ff3b5b}
+  .fb-bar.b{bottom:0;border-top:2px solid #ff3b5b}
+  .fb-rays{inset:-25%;mix-blend-mode:screen;
+    background:repeating-conic-gradient(from 0deg at 50% 47%,rgba(255,255,255,0) 0deg 3.4deg,rgba(255,90,110,.24) 3.4deg 4deg);
+    -webkit-mask:radial-gradient(circle at 50% 47%,transparent 11%,#000 40%,transparent 78%);
+            mask:radial-gradient(circle at 50% 47%,transparent 11%,#000 40%,transparent 78%)}
+  .fb-splat{left:50%;top:47%;width:44vmin;height:44vmin;transform:translate(-50%,-50%);
+    background:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20200%20200'%3E%3Cg%20fill='%23a30f24'%3E%3Ccircle%20cx='100'%20cy='100'%20r='44'/%3E%3Ccircle%20cx='58'%20cy='66'%20r='15'/%3E%3Ccircle%20cx='150'%20cy='78'%20r='13'/%3E%3Ccircle%20cx='70'%20cy='150'%20r='17'/%3E%3Ccircle%20cx='142'%20cy='146'%20r='12'/%3E%3Ccircle%20cx='38'%20cy='118'%20r='8'/%3E%3Ccircle%20cx='168'%20cy='120'%20r='7'/%3E%3Ccircle%20cx='112'%20cy='36'%20r='9'/%3E%3Ccircle%20cx='30'%20cy='80'%20r='5'/%3E%3Ccircle%20cx='175'%20cy='150'%20r='5'/%3E%3C/g%3E%3Ccircle%20cx='100'%20cy='100'%20r='28'%20fill='%23d11630'/%3E%3C/svg%3E") center/contain no-repeat;
+    filter:drop-shadow(0 0 22px rgba(209,22,48,.45))}
+  .fb-crack{left:50%;top:47%;width:80vmin;height:80vmin;transform:translate(-50%,-50%);mix-blend-mode:screen;
+    background:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20200%20200'%20stroke='%23fff'%20fill='none'%20stroke-width='1.1'%3E%3Cpath%20d='M100%20100%20L44%2030%20L60%2046'/%3E%3Cpath%20d='M100%20100%20L170%2042%20L150%2058'/%3E%3Cpath%20d='M100%20100%20L182%20118%20L160%20116'/%3E%3Cpath%20d='M100%20100%20L150%20180%20L138%20158'/%3E%3Cpath%20d='M100%20100%20L60%20184%20L72%20158'/%3E%3Cpath%20d='M100%20100%20L18%20140%20L42%20126'/%3E%3Cpath%20d='M100%20100%20L22%2076%20L46%2086'/%3E%3C/svg%3E") center/contain no-repeat}
+  .fb-flash{inset:0;background:#fff}
+  .fb-overlay .fb-core{inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.4vh;text-align:center;opacity:1}
+  .fb-kanji{font-family:'DotGothic16';font-size:clamp(20px,4.4vw,52px);color:#ff5566;letter-spacing:.3em;
+    text-shadow:0 0 18px rgba(255,59,91,.9);opacity:0}
+  .fb-title{font-family:'Press Start 2P';font-size:clamp(26px,7vw,86px);color:#fff;line-height:1;opacity:0;
+    text-shadow:4px 0 #ff2350,-4px 0 #27e3ff,0 0 26px rgba(255,40,80,.9),0 0 60px rgba(255,40,80,.6)}
+  .fb-sub{font-family:'Press Start 2P';font-size:clamp(9px,1.5vw,15px);color:#ffd0d6;opacity:0;
+    letter-spacing:1px;text-shadow:0 0 10px rgba(255,80,110,.7)}
+  .fb-overlay.play .fb-dark{animation:fbDark 2.9s ease-out forwards}
+  .fb-overlay.play .fb-bar.t{animation:fbBarT 2.9s ease-out forwards}
+  .fb-overlay.play .fb-bar.b{animation:fbBarB 2.9s ease-out forwards}
+  .fb-overlay.play .fb-rays{animation:fbRays 2.9s ease-out forwards}
+  .fb-overlay.play .fb-splat{animation:fbSplat 2.9s cubic-bezier(.2,1.4,.3,1) forwards}
+  .fb-overlay.play .fb-crack{animation:fbCrack 2.9s ease-out forwards}
+  .fb-overlay.play .fb-flash{animation:fbFlash 2.9s linear forwards}
+  .fb-overlay.play .fb-kanji{animation:fbKanji 2.9s ease-out forwards}
+  .fb-overlay.play .fb-title{animation:fbTitle 2.9s cubic-bezier(.2,1.5,.3,1) forwards}
+  .fb-overlay.play .fb-sub{animation:fbSub 2.9s ease-out forwards}
+  @keyframes fbDark{0%{opacity:0}5%{opacity:.95}82%{opacity:.95}100%{opacity:0}}
+  @keyframes fbBarT{0%{opacity:1;transform:translateY(-100%)}9%{transform:translateY(0)}84%{opacity:1;transform:translateY(0)}100%{opacity:1;transform:translateY(-100%)}}
+  @keyframes fbBarB{0%{opacity:1;transform:translateY(100%)}9%{transform:translateY(0)}84%{opacity:1;transform:translateY(0)}100%{opacity:1;transform:translateY(100%)}}
+  @keyframes fbRays{0%,12%{opacity:0;transform:rotate(0deg) scale(.6)}16%{opacity:.75;transform:rotate(5deg) scale(1)}82%{opacity:.5}100%{opacity:0;transform:rotate(38deg) scale(1.12)}}
+  @keyframes fbSplat{0%,12%{opacity:0;transform:translate(-50%,-50%) scale(.25)}16%{opacity:.6;transform:translate(-50%,-50%) scale(1.08)}22%{transform:translate(-50%,-50%) scale(1)}82%{opacity:.5}100%{opacity:0;transform:translate(-50%,-50%) scale(1.06)}}
+  @keyframes fbCrack{0%,13%{opacity:0}16%{opacity:.9}82%{opacity:.45}100%{opacity:0}}
+  @keyframes fbFlash{0%,11%{opacity:0}13%{opacity:.95}16%{opacity:0}18%{opacity:.5}21%{opacity:0}100%{opacity:0}}
+  @keyframes fbKanji{0%,8%{opacity:0;letter-spacing:1.4em;filter:blur(8px)}16%{opacity:1;letter-spacing:.3em;filter:blur(0)}80%{opacity:.95}100%{opacity:0;transform:translateY(-12px)}}
+  @keyframes fbTitle{0%{opacity:0;transform:scale(4.2);filter:blur(12px)}11%{opacity:.25}15%{opacity:1;transform:scale(.92);filter:blur(0)}19%{transform:scale(1.05)}24%{transform:scale(1)}45%{transform:scale(1.015)}65%{transform:scale(1)}80%{opacity:1}100%{opacity:0;transform:scale(1.7);filter:blur(7px)}}
+  @keyframes fbSub{0%,21%{opacity:0;transform:translateY(16px)}29%{opacity:1;transform:translateY(0)}82%{opacity:1}100%{opacity:0}}
+  .fb-overlay .fb-vs{display:flex;align-items:center;justify-content:center;gap:clamp(18px,7vw,90px);opacity:1}
+  .fb-fighter{display:flex;flex-direction:column;align-items:center;gap:6px;opacity:0}
+  .fb-fighter .por{width:clamp(64px,11vw,124px);height:clamp(64px,11vw,124px);border-radius:50%;
+    overflow:hidden;border:3px solid #fff;box-shadow:0 0 26px rgba(255,40,80,.7);background:#0a0818}
+  .fb-fighter .por svg{display:block;width:100%;height:100%}
+  .fb-fighter .nm{font-family:'Press Start 2P';font-size:clamp(8px,1.1vw,13px);color:#fff;text-shadow:0 0 8px currentColor}
+  .fb-vs-x{font-family:'Press Start 2P';font-size:clamp(16px,2.4vw,30px);color:#fff;opacity:0;
+    text-shadow:0 0 14px #ff3b5b,2px 0 #ff2350,-2px 0 #27e3ff}
+  .fb-fighter.atk{transform:translateX(-130vw)}
+  .fb-fighter.vic{transform:translateX(130vw)}
+  .fb-slash{position:absolute;left:50%;top:50%;width:140vw;height:8px;transform:translate(-50%,-50%) rotate(-18deg) scaleX(0);
+    background:linear-gradient(90deg,transparent,#fff,#ff3b5b,#fff,transparent);box-shadow:0 0 30px #ff3b5b;opacity:0}
+  .fb-overlay.play .fb-vs .fb-fighter.atk{animation:fbAtk 2.9s cubic-bezier(.2,1.3,.3,1) forwards}
+  .fb-overlay.play .fb-vs .fb-fighter.vic{animation:fbVic 2.9s cubic-bezier(.2,1.3,.3,1) forwards}
+  .fb-overlay.play .fb-vs-x{animation:fbVsx 2.9s ease-out forwards}
+  .fb-overlay.play .fb-slash{animation:fbSlash 2.9s ease-out forwards}
+  @keyframes fbAtk{0%{opacity:0;transform:translateX(-130vw)}9%{opacity:1;transform:translateX(-14px)}
+    14%{transform:translateX(14px)}16%{transform:translateX(0)}80%{opacity:1;transform:translateX(0)}100%{opacity:0;transform:translateX(-22vw)}}
+  @keyframes fbVic{0%{opacity:0;transform:translateX(130vw)}9%{opacity:1;transform:translateX(14px)}
+    14%{transform:translateX(26px) rotate(6deg)}16%{transform:translateX(20px) rotate(4deg)}80%{opacity:1;transform:translateX(20px) rotate(4deg)}100%{opacity:0;transform:translateX(22vw)}}
+  @keyframes fbVsx{0%,12%{opacity:0;transform:scale(2.4)}16%{opacity:1;transform:scale(1)}80%{opacity:1}100%{opacity:0}}
+  @keyframes fbSlash{0%,12%{opacity:0;transform:translate(-50%,-50%) rotate(-18deg) scaleX(0)}
+    15%{opacity:1;transform:translate(-50%,-50%) rotate(-18deg) scaleX(1)}26%{opacity:1}40%{opacity:0}100%{opacity:0}}
 
-  const pushTeam = (t: ScoreboardItem, x: number, y: number, labelled: boolean): void => {
-    positions.push({
-      id: t.id,
-      name: t.name,
-      score: t.score,
-      rank: t.rank,
-      avatar: t.avatar ?? null,
-      x,
-      y,
-      labelled,
-    })
+  @media (max-width:900px){
+    :host{overflow-y:auto;position:absolute}
+    .shell{height:auto;min-height:100vh}
+    .midrow{display:flex;flex-direction:column;gap:12px}
+    .arena-wrap{order:-1;height:auto;padding:8px}
+    .arena{width:min(92vw,560px);height:auto;max-height:none}
+    .panel.log-panel,.rightcol{display:flex}
+    .panel.log-panel{order:1}.rightcol{order:2}
+    #log{height:30vh;flex:none}
+    .panel.rank{flex:none}
+    #ranklist{max-height:48vh;overflow-y:auto}
+    .ticker{display:none}
   }
-
-  if (count === 0) {
-    // Nothing to lay out — emit empty positions but still give geometry for fallbacks
-  } else if (layout === 'ring') {
-    const perim = Math.PI * (3 * (rxFinal + ryFinal) - Math.sqrt((3 * rxFinal + ryFinal) * (rxFinal + 3 * ryFinal)))
-    const showLabels = perim / count >= 70
-    sorted.forEach((t, i) => {
-      const a = (i / count) * Math.PI * 2 - Math.PI / 2
-      pushTeam(t, cx + rxFinal * Math.cos(a), cy + ryFinal * Math.sin(a), showLabels)
-    })
-  } else if (layout === 'dual-ring') {
-    const innerCount = Math.min(12, count)
-    const inner = sorted.slice(0, innerCount)
-    const outer = sorted.slice(innerCount)
-    // Enforce a minimum 40% radius gap between inner and outer rings so
-    // they don't visually merge on small viewports where rxFinal is tight.
-    const ratio = 0.55
-    const rxI = Math.min(rxFinal * ratio, rxFinal - 60)
-    const ryI = Math.min(ryFinal * ratio, ryFinal - 60)
-    inner.forEach((t, i) => {
-      const a = (i / inner.length) * Math.PI * 2 - Math.PI / 2
-      pushTeam(t, cx + rxI * Math.cos(a), cy + ryI * Math.sin(a), true)
-    })
-    outer.forEach((t, i) => {
-      const a = (i / outer.length) * Math.PI * 2 - Math.PI / 2
-      pushTeam(t, cx + rxFinal * Math.cos(a), cy + ryFinal * Math.sin(a), false)
-    })
-  } else {
-    // active-only: left rank column (top 20); remaining teams spawn from random points
-    const colX = px0
-    const colY = py0
-    const colW = Math.min(240, pw * 0.22)
-    const colH = py1 - py0
-    rankColumn = { x: colX, y: colY, w: colW, h: colH }
-    const visible = sorted.slice(0, 20)
-    const rowH = (colH - 36) / Math.max(visible.length, 1)
-    visible.forEach((t, i) => {
-      pushTeam(t, colX + colW + 10, colY + 36 + (i + 0.5) * rowH, true)
-    })
+  @media (max-width:680px){
+    .shell{padding:8px;gap:8px}
+    .topbar{flex-wrap:wrap;gap:8px;padding:8px 12px}
+    .brand{gap:9px}.brand .logo{font-size:12px}.brand .jp{display:none}
+    .clock{font-size:18px}.topright{gap:11px}
+    .devbar{flex-wrap:wrap;gap:7px;justify-content:center}
+    .btn{font-size:7px;padding:7px 8px}
+    .arena{width:96vw}
+    #log{font-size:13px;height:25vh}
+    .corner-tag{font-size:7px}
+    .sp{display:none}
   }
+`
 
-  return {
-    layout,
-    positions,
-    cx,
-    cy,
-    hqSize,
-    px0,
-    py0,
-    px1,
-    py1,
-    pw,
-    ph,
-    rankColumn,
-    ringRx: rxFinal,
-    ringRy: ryFinal,
+/* -------------------------------------------------------------------------- */
+/* Scene markup. Dynamic regions (#svg / #log / #ranklist / #stats / FB       */
+/* portraits) are populated by the engine.                                    */
+/* -------------------------------------------------------------------------- */
+const ARENA_BODY = `
+  <div class="circuit"></div>
+  <div class="shell">
+    <div class="topbar">
+      <div class="brand">
+        <div class="logo" id="brandLogo">CYBER<b>A/D</b>.ARENA</div>
+        <div class="mode">// A/D + KOTH</div>
+        <div class="jp">サイバー攻防戦</div>
+      </div>
+      <div class="topright">
+        <div class="roundpill" id="roundPill">ROUND 00</div>
+        <div class="clock" id="clock">00:00:00</div>
+        <div class="live off" id="liveBadge"><span class="dot"></span>OFFLINE</div>
+      </div>
+    </div>
+    <div class="midrow">
+      <div class="panel log-panel">
+        <div class="phead accent-m"><span class="t">// BATTLE LOG</span><span class="jp">バトルログ</span></div>
+        <div id="log"></div>
+        <div class="prompt">$ <b>arena</b>.watch()<span class="cur"></span></div>
+      </div>
+      <div class="panel arena-wrap accent-v">
+        <div class="corner-tag ct-tl">// LIVE MAP</div>
+        <div class="corner-tag ct-tr" id="teamCount">攻防 // 0 TEAMS</div>
+        <div class="corner-tag ct-bl" id="netStat">SIGNAL // CONNECTING</div>
+        <div class="corner-tag ct-br">攻防戦</div>
+        <div class="arena" id="arena">
+          <svg id="svg" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid meet"></svg>
+          <canvas id="fx" width="870" height="870"></canvas>
+        </div>
+      </div>
+      <div class="rightcol">
+        <div class="panel rank">
+          <div class="phead accent-c"><span class="t">// RANKING</span><span class="jp">ランキング</span></div>
+          <div id="ranklist"></div>
+        </div>
+        <div class="panel">
+          <div class="phead accent-c"><span class="t">// STATS</span><span class="jp">ステータス</span></div>
+          <div id="stats"></div>
+          <div class="legend">
+            <span><i style="background:var(--good)"></i>DEFENDED</span>
+            <span><i style="background:var(--bad)"></i>EXPLOITED</span>
+            <span><i style="background:var(--dimmer)"></i>SLA DOWN</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="devbar">
+      <span class="label">// VIEW</span>
+      <button class="btn ghost on" id="petalBtn">PETALS</button>
+      <button class="btn ghost on" id="scanBtn">SCANLINE</button>
+      <span class="sp"></span>
+      <div class="ticker"><span class="run" id="ticker"></span></div>
+    </div>
+  </div>
+
+  <div class="fb-overlay" id="fbOverlay">
+    <div class="fb-dark"></div>
+    <div class="fb-rays"></div>
+    <div class="fb-splat"></div>
+    <div class="fb-crack"></div>
+    <div class="fb-bar t"></div>
+    <div class="fb-bar b"></div>
+    <div class="fb-slash"></div>
+    <div class="fb-core">
+      <div class="fb-kanji">ファーストブラッド</div>
+      <div class="fb-vs">
+        <div class="fb-fighter atk"><div class="por" id="fbAtkPor"></div><div class="nm" id="fbAtkNm"></div></div>
+        <div class="fb-vs-x">VS</div>
+        <div class="fb-fighter vic"><div class="por" id="fbVicPor"></div><div class="nm" id="fbVicNm"></div></div>
+      </div>
+      <div class="fb-title">FIRST BLOOD</div>
+      <div class="fb-sub" id="fbSub"></div>
+    </div>
+    <div class="fb-flash"></div>
+  </div>
+  <audio id="fbSound" preload="auto" src="/attack/firstblood.mp3"></audio>
+
+  <div class="scan" id="scan"></div>
+  <div class="grain"></div>
+  <div class="vignette"></div>
+`
+
+/* -------------------------------------------------------------------------- */
+/* The imperative engine. Operates entirely within `root` (the shadow root)   */
+/* and returns a teardown function. Heavily uses `any` because this is a       */
+/* self-contained DOM/canvas scene, not app data flow.                        */
+/* -------------------------------------------------------------------------- */
+function runArena(root: ShadowRoot, gameId: string): () => void {
+  let killed = false
+  const timers: number[] = []
+  let raf = 0
+  let ws: WebSocket | null = null
+  let wsRetry = 0
+
+  const $ = (id: string): any => root.getElementById(id)
+  const NS = 'http://www.w3.org/2000/svg'
+  const el = (tag: string, attrs: Record<string, any>): any => {
+    const e = document.createElementNS(NS, tag)
+    for (const k in attrs) e.setAttribute(k, String(attrs[k]))
+    return e
   }
-}
+  const rng = (a: number, b: number) => a + Math.random() * (b - a)
+  const pick = (arr: any[]) => arr[Math.floor(Math.random() * arr.length)]
+  const esc = (s: any) =>
+    String(s == null ? '' : s).replace(/[&<>"]/g, (c: string) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string),
+    )
 
-/* -------------------------------------------------------------------------- */
-/* Hill (KotH objective) layout                                                */
-/* -------------------------------------------------------------------------- */
-
-interface HillPos {
-  challengeId: number
-  x: number
-  y: number
-}
-
-/**
- * Place KotH hill objective nodes on an INNER ring between the HQ hex and
- * the team ring — visually distinct from both. The ring radius is derived
- * from the HQ size so hills hug the objective core without overlapping the
- * hex or colliding with team nodes. Hills are spread around the ring
- * (starting at -90°) so they read as "objectives orbiting the HQ".
- */
-const computeHillPositions = (
-  count: number,
-  cx: number,
-  cy: number,
-  hqSize: number
-): HillPos[] => {
-  const out: HillPos[] = []
-  if (count <= 0) return out
-  // Ring sits just outside the hex (hqSize*0.6 ≈ hex vertical half) with a
-  // comfortable margin; never larger than the hex footprint by much so it
-  // stays clearly "inner".
-  const r = hqSize * 0.6 + 64
-  // Single hill: park it directly above the HQ. Multiple: even arc.
-  for (let i = 0; i < count; i++) {
-    const a =
-      count === 1
-        ? -Math.PI / 2
-        : (i / count) * Math.PI * 2 - Math.PI / 2
-    out.push({
-      challengeId: i,
-      x: cx + Math.cos(a) * r,
-      y: cy + Math.sin(a) * r * 0.92,
-    })
-  }
-  return out
-}
-
-/* -------------------------------------------------------------------------- */
-/* Component                                                                  */
-/* -------------------------------------------------------------------------- */
-
-/** When ?preview=1 (or preview=N for N mock teams) the page runs with
- *  mock data + an on-screen trigger panel — no backend / SignalR.  Used
- *  for fast local iteration on the visuals. */
-const parsePreviewParam = (): number | null => {
-  if (typeof window === 'undefined') return null
-  const v = new URLSearchParams(window.location.search).get('preview')
-  if (v === null) return null
-  const n = parseInt(v)
-  return Number.isFinite(n) && n >= 0 ? n : 10
-}
-
-const makeMockScoreboard = (teams: number): ScoreboardModel => {
-  const base = [
-    'ROOT-SKSD', 'BINARY-SHOCK', 'NULLBYTE-ID', 'SEGFAULT', 'CTRL-Z', '0X4D4',
-    'HEAPOVERFLOW', 'BLUEHAWKS', 'SHELL-STORM', 'KERNEL-PANIC',
+  const CX = 500, CY = 500, RING = 362, CORE = 92, HILLR = 212
+  const PALETTE = ['#ff4d5e', '#27e3ff', '#ffc637', '#ff39a8', '#b9ff42', '#ff7a3a', '#9d6bff', '#4d8bff', '#3dffb0', '#ff9d63', '#7fd7ff', '#e667ff', '#ffd23a', '#5ad1a8']
+  const LOOKS = [
+    { hair: '#ff5a6a', skin: '#ffd9c2', eye: '#ff4d5e', style: 'spiky', gear: 'horns', expr: 'angry', prop: 'gaunt' },
+    { hair: '#7fe9ff', skin: '#ffe2cf', eye: '#27e3ff', style: 'bob', gear: 'headset', expr: 'cool', prop: 'none' },
+    { hair: '#ffd86b', skin: '#ffd9c2', eye: '#ffb020', style: 'pony', gear: 'clip', expr: 'soft', prop: 'orb' },
+    { hair: '#ff7ec2', skin: '#ffe2cf', eye: '#ff39a8', style: 'twin', gear: 'catears', expr: 'wink', prop: 'none' },
+    { hair: '#c8ff6e', skin: '#ecc6a6', eye: '#9bff42', style: 'spiky', gear: 'headband', expr: 'keen', prop: 'katana' },
+    { hair: '#ff9d63', skin: '#ffd9c2', eye: '#ff7a3a', style: 'long', gear: 'visor', expr: 'grin', prop: 'none' },
+    { hair: '#b99dff', skin: '#e9d6ff', eye: '#9d6bff', style: 'long', gear: 'hood', expr: 'calm', prop: 'kunai' },
+    { hair: '#86b3ff', skin: '#ffe2cf', eye: '#4d8bff', style: 'bob', gear: 'headset', expr: 'cool', prop: 'shield' },
   ]
-  const items = Array.from({ length: teams }).map((_, i) => ({
-    id: i + 1,
-    name: i < base.length ? base[i] : `TEAM-${String(i + 1).padStart(3, '0')}`,
-    score: 5000 - i * 40 - Math.floor(Math.random() * 30),
-    rank: i + 1,
-    avatar: null,
-    // Unknown optional fields filled from the Api model default
-  })) as ScoreboardModel['items']
-  return { items } as unknown as ScoreboardModel
+
+  let TEAMS: any[] = [], SERVICES: any[] = [], HILLS: any[] = []
+  let round = 0, totalFlags = 0, totalEvents = 0, cinema = false
+  let tNow = Date.now(), tickLeft = 0, liveRoundEndsAt: number | null = null
+  const speed = 1
+  let petals = true
+  const prevSvcState: Record<string, string> = {}
+  const FB = { total: 3000, slam: 430, soundDelay: 0 }
+
+  const teamByName = (n: any) => TEAMS.find((t) => t.name === n)
+  function makeLook(t: any, i: number) {
+    const base = LOOKS[i % LOOKS.length]
+    const h = t.hue != null ? t.hue : (i * 47) % 360
+    return { ...base, eye: t.color, hair: `hsl(${h} 80% 70%)`, skin: base.skin }
+  }
+
+  /* -------- avatar (chibi SVG) -------- */
+  function avatar(L: any, color: string) {
+    const { hair, skin, eye, style } = L
+    const acc = L.gear || 'none'
+    let hairTop = ''
+    if (style === 'spiky') hairTop = `<path d="M14 30 L20 12 L26 26 L32 10 L38 26 L44 12 L50 30 Z" fill="${hair}"/>`
+    else if (style === 'bob') hairTop = `<path d="M13 34 Q13 12 32 12 Q51 12 51 34 L51 40 Q44 30 32 30 Q20 30 13 40 Z" fill="${hair}"/>`
+    else if (style === 'pony') hairTop = `<path d="M14 32 Q14 12 32 12 Q50 12 50 32 L46 30 Q46 18 32 18 Q18 18 18 30 Z" fill="${hair}"/><path d="M48 22 Q60 28 56 46 Q52 40 46 38 Z" fill="${hair}"/>`
+    else if (style === 'twin') hairTop = `<path d="M15 32 Q15 13 32 13 Q49 13 49 32 L45 30 Q45 19 32 19 Q19 19 19 30 Z" fill="${hair}"/><circle cx="14" cy="30" r="7" fill="${hair}"/><circle cx="50" cy="30" r="7" fill="${hair}"/>`
+    else hairTop = `<path d="M12 44 Q10 12 32 11 Q54 12 52 44 L48 44 Q48 26 32 26 Q16 26 16 44 Z" fill="${hair}"/>`
+    let ears = ''
+    if (acc === 'catears') ears = `<path d="M16 24 L12 8 L26 18 Z" fill="${hair}"/><path d="M48 24 L52 8 L38 18 Z" fill="${hair}"/><path d="M17 21 L15 12 L22 17 Z" fill="${color}"/><path d="M47 21 L49 12 L42 17 Z" fill="${color}"/>`
+    let gear = ''
+    if (acc === 'visor') gear = `<rect x="18" y="34" width="28" height="9" rx="3" fill="${color}" opacity=".9"/><rect x="20" y="36" width="9" height="3" fill="#fff" opacity=".7"/>`
+    if (acc === 'headset') gear = `<path d="M16 38 Q16 22 32 22 Q48 22 48 38" fill="none" stroke="${color}" stroke-width="3"/><rect x="12" y="36" width="6" height="10" rx="2" fill="${color}"/><rect x="46" y="36" width="6" height="10" rx="2" fill="${color}"/>`
+    if (acc === 'horns') gear = `<path d="M18 22 L10 6 L24 16 Z" fill="${color}"/><path d="M46 22 L54 6 L40 16 Z" fill="${color}"/>`
+    if (acc === 'headband') gear = `<rect x="13" y="30" width="38" height="6" rx="2" fill="${color}"/><path d="M50 33 L60 28 L58 40 Z" fill="${color}" opacity=".85"/>`
+    if (acc === 'hood') gear = `<path d="M10 40 Q8 8 32 8 Q56 8 54 40 L54 30 Q54 18 32 18 Q10 18 10 30 Z" fill="${color}" opacity=".9"/>`
+    if (acc === 'clip') gear = `<path d="M44 24 l3 -5 l3 5 l-3 5 Z" fill="${color}"/>`
+    const eyes = acc === 'visor' ? '' :
+      `<ellipse cx="25" cy="42" rx="4.4" ry="6" fill="#fff"/><ellipse cx="39" cy="42" rx="4.4" ry="6" fill="#fff"/>
+       <circle cx="25.5" cy="43" r="3" fill="${eye}"/><circle cx="39.5" cy="43" r="3" fill="${eye}"/>
+       <circle cx="24" cy="41.5" r="1.1" fill="#fff"/><circle cx="38" cy="41.5" r="1.1" fill="#fff"/>`
+    const gid = String(L.eye).replace('#', '') + Math.floor(rng(0, 99999))
+    return `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+      <defs><radialGradient id="bg_${gid}" cx="50%" cy="40%" r="70%">
+        <stop offset="0%" stop-color="${color}" stop-opacity=".34"/><stop offset="100%" stop-color="#0a0818"/>
+      </radialGradient></defs>
+      <rect width="64" height="64" fill="url(#bg_${gid})"/>
+      ${ears}
+      <ellipse cx="32" cy="44" rx="15" ry="15.5" fill="${skin}"/>
+      <ellipse cx="22" cy="48" rx="3.2" ry="2.2" fill="${color}" opacity=".35"/>
+      <ellipse cx="42" cy="48" rx="3.2" ry="2.2" fill="${color}" opacity=".35"/>
+      ${eyes}
+      <path d="M29 52 Q32 55 35 52" fill="none" stroke="#9a6b58" stroke-width="1.6" stroke-linecap="round"/>
+      ${hairTop}${gear}
+    </svg>`
+  }
+
+  const svg: any = $('svg')
+  const fx: any = $('fx')
+  const ctx: any = fx.getContext('2d')
+  const arena: any = $('arena')
+  const logEl: any = $('log')
+  const rankEl: any = $('ranklist')
+  const statsEl: any = $('stats')
+
+  function hexPts(cx: number, cy: number, r: number) {
+    const p: string[] = []
+    for (let i = 0; i < 6; i++) { const a = (60 * i - 90) * Math.PI / 180; p.push((cx + r * Math.cos(a)).toFixed(1) + ',' + (cy + r * Math.sin(a)).toFixed(1)) }
+    return p.join(' ')
+  }
+
+  function buildArena() {
+    svg.innerHTML = ''
+    const defs = el('defs', {})
+    defs.innerHTML = `
+      <radialGradient id="coreG" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#ffffff"/><stop offset="22%" stop-color="#7fe9ff"/>
+        <stop offset="60%" stop-color="#9d6bff"/><stop offset="100%" stop-color="#1a1040"/>
+      </radialGradient>
+      <filter id="soft"><feGaussianBlur stdDeviation="3"/></filter>
+      <filter id="glow"><feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>`
+    svg.appendChild(defs)
+
+    const step = 360 / TEAMS.length, R = 470
+    TEAMS.forEach((t, i) => {
+      const a0 = (-90 + i * step - step / 2) * Math.PI / 180
+      const a1 = (-90 + i * step + step / 2) * Math.PI / 180
+      const x0 = CX + R * Math.cos(a0), y0 = CY + R * Math.sin(a0)
+      const x1 = CX + R * Math.cos(a1), y1 = CY + R * Math.sin(a1)
+      const p = el('path', { d: `M${CX} ${CY} L${x0} ${y0} A${R} ${R} 0 0 1 ${x1} ${y1} Z`, fill: t.color, opacity: 0.06, stroke: t.color, 'stroke-width': 0.6, 'stroke-opacity': 0.18 })
+      svg.appendChild(p)
+    })
+
+    const ringG = el('g', {})
+    ringG.appendChild(el('circle', { cx: CX, cy: CY, r: 470, fill: 'none', stroke: 'var(--line2)', 'stroke-width': 1.2 }))
+    const dash = el('circle', { cx: CX, cy: CY, r: 455, fill: 'none', stroke: '#9d6bff', 'stroke-width': 1.4, 'stroke-dasharray': '3 16', 'stroke-opacity': 0.55 })
+    dash.innerHTML = `<animateTransform attributeName="transform" type="rotate" from="0 ${CX} ${CY}" to="360 ${CX} ${CY}" dur="60s" repeatCount="indefinite"/>`
+    ringG.appendChild(dash)
+    const dash2 = el('circle', { cx: CX, cy: CY, r: 300, fill: 'none', stroke: '#27e3ff', 'stroke-width': 1, 'stroke-dasharray': '2 10', 'stroke-opacity': 0.4 })
+    dash2.innerHTML = `<animateTransform attributeName="transform" type="rotate" from="360 ${CX} ${CY}" to="0 ${CX} ${CY}" dur="44s" repeatCount="indefinite"/>`
+    ringG.appendChild(dash2)
+    ringG.appendChild(el('circle', { cx: CX, cy: CY, r: RING, fill: 'none', stroke: 'var(--line)', 'stroke-width': 1, 'stroke-dasharray': '1 7' }))
+    svg.appendChild(ringG)
+
+    TEAMS.forEach((t) => {
+      const ix = CX + CORE * Math.cos(t.ang), iy = CY + CORE * Math.sin(t.ang)
+      const ox = CX + (RING - 44) * Math.cos(t.ang), oy = CY + (RING - 44) * Math.sin(t.ang)
+      svg.appendChild(el('line', { x1: ix, y1: iy, x2: ox, y2: oy, stroke: t.color, 'stroke-width': 1, 'stroke-opacity': 0.16, 'stroke-dasharray': '4 6' }))
+    })
+
+    const coreG = el('g', { filter: 'url(#glow)' })
+    const halo = el('circle', { cx: CX, cy: CY, r: CORE + 22, fill: 'none', stroke: '#9d6bff', 'stroke-width': 2, 'stroke-opacity': 0.5 })
+    halo.innerHTML = `<animate attributeName="r" values="${CORE + 18};${CORE + 30};${CORE + 18}" dur="3.4s" repeatCount="indefinite"/>
+      <animate attributeName="stroke-opacity" values="0.5;0.15;0.5" dur="3.4s" repeatCount="indefinite"/>`
+    coreG.appendChild(halo)
+    coreG.appendChild(el('polygon', { points: hexPts(CX, CY, CORE), fill: 'url(#coreG)', stroke: '#cfe9ff', 'stroke-width': 2 }))
+    coreG.appendChild(el('polygon', { points: hexPts(CX, CY, CORE - 16), fill: 'none', stroke: '#0a0818', 'stroke-width': 2, 'stroke-opacity': 0.5 }))
+    svg.appendChild(coreG)
+    const mk = (y: number, fill: string, fs: number, fam: string, txt: string) => {
+      const e = el('text', { x: CX, y, 'text-anchor': 'middle', fill, 'font-family': fam, 'font-size': fs, 'font-weight': 'bold' }); e.textContent = txt; return e
+    }
+    svg.appendChild(mk(CY - 10, '#0a0818', 15, "'Press Start 2P'", 'SCORE'))
+    svg.appendChild(mk(CY + 12, '#0a0818', 15, "'Press Start 2P'", 'CORE'))
+    svg.appendChild(mk(CY + 34, '#1a1040', 15, "'DotGothic16'", '中枢'))
+
+    HILLS.forEach((h) => svg.appendChild(buildHill(h)))
+    TEAMS.forEach((t) => svg.appendChild(buildBase(t)))
+    TEAMS.forEach((t) => renderSvc(t))
+  }
+
+  function buildHill(h: any) {
+    const g = el('g', { id: 'hill-' + h.id, transform: `translate(${h.x} ${h.y})` })
+    g.style.color = h.owner ? h.owner.color : '#7b78a6'
+    const owned = !!h.owner
+    g.innerHTML = `
+      <ellipse cx="0" cy="22" rx="30" ry="9" fill="currentColor" opacity="${owned ? 0.18 : 0.08}" filter="url(#soft)"/>
+      <ellipse cx="0" cy="22" rx="20" ry="5.5" fill="#0b0a1c" stroke="currentColor" stroke-width="1.2" stroke-opacity="0.7"/>
+      <g stroke="currentColor" fill="currentColor">
+        <rect x="-15" y="-14" width="4.5" height="34" rx="1" stroke-width="0"/>
+        <rect x="10.5" y="-14" width="4.5" height="34" rx="1" stroke-width="0"/>
+        <path d="M-23 -18 Q0 -24 23 -18 L23 -13 Q0 -18 -23 -13 Z" stroke-width="0"/>
+        <rect x="-19" y="-9" width="38" height="4" stroke-width="0"/>
+        <rect x="-2" y="-13" width="4" height="6" stroke-width="0"/>
+      </g>
+      <circle cx="0" cy="0" r="27" fill="none" stroke="currentColor" stroke-width="1.5" stroke-opacity="0.5" stroke-dasharray="3 6">
+        <animateTransform attributeName="transform" type="rotate" from="0 0 0" to="360 0 0" dur="14s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="0" cy="-1" r="6.5" fill="currentColor"><animate attributeName="opacity" values="1;.45;1" dur="2.2s" repeatCount="indefinite"/></circle>
+      <circle cx="-2" cy="-3" r="1.8" fill="#fff" opacity="0.85"/>
+      <text x="0" y="42" text-anchor="middle" fill="#cfd2ee" font-family="'Press Start 2P'" font-size="8" paint-order="stroke" stroke="#06050f" stroke-width="3.5">${esc(h.name)}</text>
+      <text id="hown-${h.id}" x="0" y="55" text-anchor="middle" fill="currentColor" font-family="'VT323'" font-size="15" paint-order="stroke" stroke="#06050f" stroke-width="3">${owned ? esc(h.owner.name) : 'NEUTRAL'}</text>`
+    return g
+  }
+  function renderHill(h: any) {
+    const g = $('hill-' + h.id); if (!g) return
+    g.style.color = h.owner ? h.owner.color : '#7b78a6'
+    const own = $('hown-' + h.id); if (own) own.textContent = h.owner ? h.owner.name : 'NEUTRAL'
+  }
+
+  function labelOffset(t: any) {
+    const c = Math.cos(t.ang), s = Math.sin(t.ang)
+    let x = 0, y = -58, anc = 'middle'
+    if (s < -0.5) { y = -60 } else if (s > 0.5) { y = 72 }
+    if (c > 0.5) { x = 58; anc = 'start'; y = -4 } else if (c < -0.5) { x = -58; anc = 'end'; y = -4 }
+    if (Math.abs(s) > 0.85) { x = 0; anc = 'middle'; y = s < 0 ? -62 : 72 }
+    return { x, y, anc }
+  }
+
+  function buildBase(t: any) {
+    const c = t.color, L = t.look, idx = t.idx, hair = L.hair, skin = L.skin, eye = L.eye, expr = L.expr
+    const g = el('g', { id: 'base-' + t.id, transform: `translate(${t.x} ${t.y})` })
+    const body = `
+      <rect x="-7" y="14" width="6" height="13" rx="3" fill="#14122e" stroke="${c}" stroke-width="1.2"/>
+      <rect x="1" y="14" width="6" height="13" rx="3" fill="#14122e" stroke="${c}" stroke-width="1.2"/>
+      <path d="M-13 0 Q-13 -3 -9 -3 L9 -3 Q13 -3 13 0 L13 14 Q13 18 9 18 L-9 18 Q-13 18 -13 14 Z" fill="#1b1838" stroke="${c}" stroke-width="2"/>
+      <path d="M-13 0 Q-13 -3 -9 -3 L0 -3 L0 18 L-9 18 Q-13 18 -13 14 Z" fill="${c}" opacity="0.8"/>
+      <path d="M-9 -3 L0 5 L9 -3 Z" fill="#0c0a1c"/>
+      <circle cx="0" cy="8" r="3" fill="${c}"><animate attributeName="opacity" values="1;.4;1" dur="1.8s" repeatCount="indefinite"/></circle>
+      <rect x="-17" y="2" width="5" height="12" rx="2.5" fill="#14122e" stroke="${c}" stroke-width="1.2"/>
+      <rect x="12" y="2" width="5" height="12" rx="2.5" fill="#14122e" stroke="${c}" stroke-width="1.2"/>`
+    let back = ''
+    if (L.style === 'pony') back += `<path d="M11 -16 Q28 -8 22 12 Q19 0 9 -4 Z" fill="${hair}"/>`
+    if (L.style === 'long') back += `<path d="M-15 -12 Q-18 -30 0 -30 Q18 -30 15 -12 L16 12 L11 12 Q12 -14 0 -14 Q-12 -14 -11 12 L-16 12 Z" fill="${hair}" opacity="0.95"/>`
+    if (L.style === 'twin') back += `<path d="M-14 -14 Q-22 -2 -18 12 Q-15 2 -10 -4 Z" fill="${hair}"/><path d="M14 -14 Q22 -2 18 12 Q15 2 10 -4 Z" fill="${hair}"/>`
+    if (L.prop === 'katana') back += `<g transform="rotate(-26)"><rect x="13" y="-32" width="2.6" height="34" rx="1.2" fill="#e6ecff"/><rect x="11" y="0" width="7" height="3" rx="1" fill="${c}"/><rect x="13.4" y="3" width="2" height="9" rx="1" fill="#2a2740"/></g>`
+    let props = ''
+    if (L.prop === 'orb') props += `<circle cx="21" cy="7" r="8" fill="none" stroke="${c}" stroke-width="0.9" opacity="0.5"/><circle cx="21" cy="7" r="4.6" fill="${c}"><animate attributeName="r" values="4.6;5.6;4.6" dur="2s" repeatCount="indefinite"/></circle><circle cx="19.4" cy="5.6" r="1.4" fill="#fff" opacity="0.8"/>`
+    if (L.prop === 'gaunt') props += `<rect x="13" y="9" width="11" height="10" rx="2.5" fill="#1b1838" stroke="${c}" stroke-width="1.6"/><rect x="14.5" y="10.5" width="8" height="2.4" fill="${c}"/>`
+    if (L.prop === 'kunai') props += `<g transform="rotate(28 20 8)"><path d="M20 0 L24 7 L20 9 L16 7 Z" fill="#dfe6ff"/><rect x="19" y="9" width="2" height="6" fill="#2a2740"/><circle cx="20" cy="16" r="2.2" fill="none" stroke="#dfe6ff" stroke-width="1.2"/></g>`
+    if (L.prop === 'shield') props += `<g transform="translate(-20 4)"><path d="M0 -7 L8 -4 Q8 7 0 13 Q-8 7 -8 -4 Z" fill="#1b1838" stroke="${c}" stroke-width="1.6"/><circle cx="0" cy="1" r="2.4" fill="${c}"/></g>`
+
+    const EW = `<ellipse cx="-6" cy="-12" rx="4" ry="5.2" fill="#fff"/><ellipse cx="6" cy="-12" rx="4" ry="5.2" fill="#fff"/><circle cx="-5.4" cy="-11" r="2.7" fill="${eye}"/><circle cx="6.6" cy="-11" r="2.7" fill="${eye}"/><circle cx="-6.6" cy="-12.6" r="1" fill="#fff"/><circle cx="5.4" cy="-12.6" r="1" fill="#fff"/>`
+    const FACE: any = {
+      angry: `${EW}<path d="M-10 -17 L-3 -14" stroke="#7a2230" stroke-width="2" stroke-linecap="round"/><path d="M10 -17 L3 -14" stroke="#7a2230" stroke-width="2" stroke-linecap="round"/><path d="M-3 -3 Q0 -6 3 -3 Q0 -1 -3 -3 Z" fill="#5a0f1a"/><rect x="-1" y="-4" width="2" height="2" fill="#fff"/>`,
+      cool: `<ellipse cx="-6" cy="-11" rx="4" ry="3.4" fill="#fff"/><ellipse cx="6" cy="-11" rx="4" ry="3.4" fill="#fff"/><circle cx="-5.6" cy="-10.6" r="2.4" fill="${eye}"/><circle cx="6.4" cy="-10.6" r="2.4" fill="${eye}"/><path d="M-10 -13 L-2 -13" stroke="${skin}" stroke-width="3"/><path d="M2 -13 L10 -13" stroke="${skin}" stroke-width="3"/><path d="M-2 -3 L2 -3" stroke="#9a5b4e" stroke-width="1.4" stroke-linecap="round"/>`,
+      wink: `<ellipse cx="-6" cy="-12" rx="4" ry="5.2" fill="#fff"/><circle cx="-5.4" cy="-11" r="2.7" fill="${eye}"/><circle cx="-6.6" cy="-12.6" r="1" fill="#fff"/><path d="M2 -11 Q6 -15 10 -11" stroke="#7a3a52" stroke-width="1.8" fill="none" stroke-linecap="round"/><path d="M-2 -3 Q1 -1 3 -4" stroke="#9a5b4e" stroke-width="1.4" fill="none" stroke-linecap="round"/><path d="M11 -19 l1.4 -2.6 l1.4 2.6 l-1.4 2.6 Z" fill="${c}"/>`,
+      grin: `<ellipse cx="-6" cy="-12" rx="4" ry="4.6" fill="#fff"/><ellipse cx="6" cy="-12" rx="4" ry="4.6" fill="#fff"/><circle cx="-5.4" cy="-11.5" r="2.7" fill="${eye}"/><circle cx="6.6" cy="-11.5" r="2.7" fill="${eye}"/><circle cx="-6.6" cy="-13" r="1" fill="#fff"/><circle cx="5.4" cy="-13" r="1" fill="#fff"/><path d="M-4 -4 Q0 2 4 -4 Z" fill="#5a0f1a"/><path d="M-4 -4 L4 -4" stroke="#fff" stroke-width="1.6"/>`,
+      keen: `${EW.replace(/ry="5\.2"/g, 'ry="4.4"')}<path d="M-10 -16 L-3 -15" stroke="#5a3a2a" stroke-width="1.8" stroke-linecap="round"/><path d="M10 -16 L3 -15" stroke="#5a3a2a" stroke-width="1.8" stroke-linecap="round"/><path d="M-2 -3 L2 -3" stroke="#9a5b4e" stroke-width="1.4" stroke-linecap="round"/>`,
+      soft: `${EW}<path d="M-2 -4 Q0 -2 2 -4" stroke="#9a5b4e" stroke-width="1.3" fill="none" stroke-linecap="round"/>`,
+      calm: `${EW}<path d="M-2 -3 L2 -3" stroke="#9a5b4e" stroke-width="1.3" stroke-linecap="round"/>`,
+    }
+    const HAIR: any = {
+      spiky: `<path d="M-15 -13 L-11 -28 L-6 -18 L0 -31 L6 -18 L11 -28 L15 -13 Q12 -23 0 -23 Q-12 -23 -15 -13 Z" fill="${hair}"/>`,
+      bob: `<path d="M-15 -9 Q-16 -29 0 -29 Q16 -29 15 -9 L15 -3 Q11 -17 0 -17 Q-11 -17 -15 -3 Z" fill="${hair}"/>`,
+      pony: `<path d="M-14 -11 Q-14 -29 0 -29 Q14 -29 14 -11 L11 -13 Q11 -23 0 -23 Q-11 -23 -11 -13 Z" fill="${hair}"/>`,
+      twin: `<path d="M-13 -12 Q-13 -29 0 -29 Q13 -29 13 -12 L10 -14 Q10 -23 0 -23 Q-10 -23 -10 -14 Z" fill="${hair}"/>`,
+      long: `<path d="M-15 -9 Q-16 -30 0 -30 Q16 -30 15 -9 L15 -3 Q11 -17 0 -17 Q-11 -17 -15 -3 Z" fill="${hair}"/>`,
+    }
+    const GEAR: any = {
+      horns: `<path d="M-9 -23 L-14 -36 L-3 -26 Z" fill="${c}"/><path d="M9 -23 L14 -36 L3 -26 Z" fill="${c}"/>`,
+      headset: `<path d="M-14 -15 Q-14 -30 0 -30 Q14 -30 14 -15" stroke="${c}" stroke-width="2.4" fill="none"/><rect x="-18" y="-15" width="5" height="9" rx="2" fill="${c}"/><rect x="13" y="-15" width="5" height="9" rx="2" fill="${c}"/><path d="M-16 -7 Q-10 -3 -4 -5" stroke="${c}" stroke-width="1.4" fill="none"/>`,
+      headband: `<rect x="-15" y="-21" width="30" height="4.6" rx="1.6" fill="${c}"/><path d="M14 -20 L26 -15 L23 -21 Z" fill="${c}"/><path d="M14 -18 L27 -9 L22 -18 Z" fill="${c}" opacity="0.7"/>`,
+      catears: `<path d="M-13 -23 L-17 -37 L-5 -27 Z" fill="${hair}"/><path d="M13 -23 L17 -37 L5 -27 Z" fill="${hair}"/><path d="M-12 -25 L-14 -32 L-8 -27 Z" fill="${c}"/><path d="M12 -25 L14 -32 L8 -27 Z" fill="${c}"/>`,
+      clip: `<path d="M9 -25 l1.6 -3 l1.6 3 l-1.6 3 Z" fill="${c}"/>`,
+      none: '',
+    }
+    const blush = `<ellipse cx="-8" cy="-7" rx="3" ry="2" fill="${c}" opacity="0.3"/><ellipse cx="8" cy="-7" rx="3" ry="2" fill="${c}" opacity="0.3"/>`
+    let head
+    if (L.gear === 'hood') {
+      head = `<ellipse cx="0" cy="-12" rx="15" ry="15" fill="${skin}"/>
+        <path d="M-16 -6 Q-20 -34 0 -34 Q20 -34 16 -6 L16 -2 Q13 -19 0 -19 Q-13 -19 -16 -2 Z" fill="${c}" opacity="0.93"/>
+        <path d="M-9 -12 L-3 -11 L-4 -8 L-9 -9 Z" fill="${eye}"/><path d="M9 -12 L3 -11 L4 -8 L9 -9 Z" fill="${eye}"/>
+        <path d="M-9 -6 Q0 -3 9 -6 L9 0 Q0 4 -9 0 Z" fill="#15122b" stroke="${c}" stroke-width="1"/>`
+    } else if (L.gear === 'visor') {
+      head = `<ellipse cx="0" cy="-12" rx="15" ry="15" fill="${skin}"/>${HAIR[L.style]}
+        <rect x="-13" y="-15" width="26" height="8.5" rx="3.5" fill="${c}" opacity="0.92"/>
+        <rect x="-11" y="-13.5" width="9" height="2.6" rx="1" fill="#fff" opacity="0.75"/>
+        <path d="M-4 -3 Q0 0 4 -3" stroke="#9a5b4e" stroke-width="1.4" fill="none" stroke-linecap="round"/>`
+    } else {
+      head = `<ellipse cx="0" cy="-12" rx="15" ry="15" fill="${skin}"/>${blush}${HAIR[L.style]}${FACE[expr] || FACE.cool}${GEAR[L.gear] || ''}`
+    }
+    const flag = `<line x1="-17" y1="-2" x2="-17" y2="-25" stroke="#cfd2ee" stroke-width="1.6"/><path d="M-17 -25 L-33 -21 L-17 -18 Z" fill="${c}" stroke="#0a0818" stroke-width="0.8"/>`
+    const lo = labelOffset(t)
+    g.innerHTML = `
+      <ellipse cx="0" cy="30" rx="40" ry="13" fill="${c}" opacity="0.13" filter="url(#soft)"/>
+      <ellipse cx="0" cy="31" rx="22" ry="6" fill="#000" opacity="0.42"/>
+      <ellipse cx="0" cy="28" rx="24" ry="7" fill="#0b0a1c" stroke="${c}" stroke-width="1.6" stroke-opacity="0.75"/>
+      <ellipse cx="0" cy="28" rx="14" ry="3.6" fill="none" stroke="${c}" stroke-width="1" stroke-opacity="0.4"/>
+      <g class="u-float" style="animation-delay:${(idx * 0.34).toFixed(2)}s">
+        ${back}${body}${props}${head}${flag}
+      </g>
+      <g id="svc-${t.id}" transform="translate(0 41)"></g>
+      <text x="${lo.x}" y="${lo.y}" text-anchor="${lo.anc}" fill="#fff" font-family="'Press Start 2P'" font-size="11" paint-order="stroke" stroke="#06050f" stroke-width="4">${esc(t.name)}</text>
+      <text id="sc-${t.id}" x="${lo.x}" y="${lo.y + 18}" text-anchor="${lo.anc}" fill="${c}" font-family="'VT323'" font-size="22" paint-order="stroke" stroke="#06050f" stroke-width="4">${t.score}</text>`
+    return g
+  }
+
+  const SVC_COLOR: any = { def: '#3dffb0', vuln: '#ff3b5b', down: '#4f4a78' }
+  function renderSvc(t: any) {
+    const g = $('svc-' + t.id); if (!g) return
+    g.innerHTML = ''
+    const n = t.svc.length, w = 11, gap = 4, tot = n * w + (n - 1) * gap, start = -tot / 2
+    t.svc.forEach((s: any, i: number) => {
+      const x = start + i * (w + gap)
+      const r = el('rect', { x, y: 0, width: w, height: 11, rx: 2, fill: SVC_COLOR[s.status], stroke: '#06050f', 'stroke-width': 1 })
+      if (s.status === 'vuln') r.innerHTML = `<animate attributeName="opacity" values="1;0.25;1" dur="0.5s" repeatCount="indefinite"/>`
+      g.appendChild(r)
+    })
+  }
+  function renderScore(t: any) { const e = $('sc-' + t.id); if (e) e.textContent = t.score }
+  function pulseBase(t: any, col: string) {
+    const g = $('base-' + t.id); if (!g) return
+    g.style.transition = 'none'; g.style.filter = `drop-shadow(0 0 10px ${col})`
+    requestAnimationFrame(() => { g.style.transition = 'filter .6s'; g.style.filter = 'none' })
+  }
+
+  /* -------- FX canvas -------- */
+  let SC = 1
+  function sizeCanvas() {
+    const r = arena.getBoundingClientRect()
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    fx.width = r.width * dpr; fx.height = r.height * dpr
+    SC = (r.width / 1000) * dpr; ctx.setTransform(SC, 0, 0, SC, 0, 0)
+  }
+  const onResize = () => sizeCanvas()
+  window.addEventListener('resize', onResize)
+
+  const shots: any[] = [], sparks: any[] = [], fxq: any[] = []
+  let petalArr: any[] = []
+  function spawnPetals() { petalArr = []; for (let i = 0; i < 26; i++) petalArr.push({ x: rng(0, 1000), y: rng(0, 1000), s: rng(3, 6), vy: rng(8, 20), vx: rng(-6, 6), rot: rng(0, 6.28), vr: rng(-1, 1), hue: pick([330, 262, 190, 80]) }) }
+  spawnPetals()
+
+  function fireShot(from: any, to: any, col: string) {
+    const cx = (from.x + to.x) / 2, cy = (from.y + to.y) / 2
+    const dx = to.x - from.x, dy = to.y - from.y
+    const px = -dy, py = dx, len = Math.hypot(px, py) || 1
+    const bow = rng(40, 90) * (Math.random() < 0.5 ? 1 : -1)
+    shots.push({ x: from.x, y: from.y, fx: from.x, fy: from.y, tx: to.x, ty: to.y, cx: cx + px / len * bow, cy: cy + py / len * bow, t: 0, sp: rng(0.018, 0.028) * speed, col, trail: [] })
+  }
+  const bez = (a: number, c: number, b: number, t: number) => { const u = 1 - t; return u * u * a + 2 * u * t * c + t * t * b }
+  function addSpark(x: number, y: number, col: string) {
+    for (let i = 0; i < 16; i++) { const a = rng(0, 6.28), v = rng(60, 260); sparks.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 1, col }) }
+    sparks.push({ x, y, ring: true, r: 4, life: 1, col })
+  }
+  function hexPath(x: number, y: number, r: number) { ctx.beginPath(); for (let i = 0; i < 6; i++) { const a = (60 * i - 90) * Math.PI / 180; const px = x + r * Math.cos(a), py = y + r * Math.sin(a); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py) } ctx.closePath() }
+  function spawnShield(x: number, y: number, col: string) {
+    fxq.push({ kind: 'shield', x, y, col, t: 0, dur: 0.95 })
+    for (let i = 0; i < 10; i++) { const a = -1.57 + rng(-1, 1); const v = rng(70, 150); sparks.push({ x: x + rng(-14, 14), y: y + 10, vx: Math.cos(a) * v * 0.4, vy: -Math.abs(v), life: 1, col }) }
+  }
+  function spawnDown(x: number, y: number, col: string) {
+    fxq.push({ kind: 'down', x, y, col, t: 0, dur: 1.0 })
+    for (let i = 0; i < 14; i++) { const v = rng(60, 180); sparks.push({ x: x + rng(-12, 12), y: y - 6, vx: rng(-40, 40), vy: Math.abs(v), life: 1, col }) }
+  }
+  function spawnBeam(from: any, to: any, col: string, big: boolean) { fxq.push({ kind: 'beam', fx: from.x, fy: from.y, tx: to.x, ty: to.y, col, t: 0, dur: big ? 0.6 : 0.42, big: !!big }) }
+  function spawnCapture(from: any, hill: any, col: string) { spawnBeam(from, hill, col, false); fxq.push({ kind: 'shield', x: hill.x, y: hill.y, col, t: 0, dur: 0.9 }) }
+
+  function drawFX(dt: number) {
+    ctx.clearRect(0, 0, 1000, 1000)
+    if (petals) {
+      for (const p of petalArr) {
+        p.y += p.vy * dt; p.x += p.vx * dt; p.rot += p.vr * dt
+        if (p.y > 1010) { p.y = -10; p.x = rng(0, 1000) }
+        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot)
+        ctx.fillStyle = `hsla(${p.hue},90%,72%,0.5)`
+        ctx.beginPath(); ctx.ellipse(0, 0, p.s, p.s * 0.55, 0, 0, 6.28); ctx.fill(); ctx.restore()
+      }
+    }
+    for (let i = shots.length - 1; i >= 0; i--) {
+      const s = shots[i]; s.t += s.sp * dt * 60
+      const x = bez(s.fx, s.cx, s.tx, Math.min(s.t, 1))
+      const y = bez(s.fy, s.cy, s.ty, Math.min(s.t, 1))
+      s.trail.push({ x, y }); if (s.trail.length > 14) s.trail.shift()
+      ctx.lineCap = 'round'
+      for (let j = 1; j < s.trail.length; j++) {
+        ctx.globalAlpha = (j / s.trail.length) * 0.9
+        ctx.strokeStyle = s.col; ctx.lineWidth = 2 + (j / s.trail.length) * 5
+        ctx.beginPath(); ctx.moveTo(s.trail[j - 1].x, s.trail[j - 1].y); ctx.lineTo(s.trail[j].x, s.trail[j].y); ctx.stroke()
+      }
+      ctx.globalAlpha = 1
+      ctx.fillStyle = '#fff'; ctx.shadowColor = s.col; ctx.shadowBlur = 16
+      ctx.beginPath(); ctx.arc(x, y, 5, 0, 6.28); ctx.fill(); ctx.shadowBlur = 0
+      if (s.t >= 1) { addSpark(s.tx, s.ty, s.col); shots.splice(i, 1) }
+    }
+    for (let i = sparks.length - 1; i >= 0; i--) {
+      const sp = sparks[i]
+      if (sp.ring) {
+        sp.r += 420 * dt; sp.life -= 2.2 * dt
+        ctx.globalAlpha = Math.max(sp.life, 0); ctx.strokeStyle = sp.col; ctx.lineWidth = 3
+        ctx.beginPath(); ctx.arc(sp.x, sp.y, sp.r, 0, 6.28); ctx.stroke()
+        for (let k = 0; k < 8; k++) { const a = k / 8 * 6.28; ctx.beginPath(); ctx.moveTo(sp.x + Math.cos(a) * sp.r, sp.y + Math.sin(a) * sp.r); ctx.lineTo(sp.x + Math.cos(a) * (sp.r + 10), sp.y + Math.sin(a) * (sp.r + 10)); ctx.stroke() }
+        ctx.globalAlpha = 1
+      } else {
+        sp.x += sp.vx * dt; sp.y += sp.vy * dt; sp.vx *= 0.92; sp.vy *= 0.92; sp.life -= 2.4 * dt
+        ctx.globalAlpha = Math.max(sp.life, 0); ctx.fillStyle = sp.col
+        ctx.fillRect(sp.x - 2, sp.y - 2, 4, 4); ctx.globalAlpha = 1
+      }
+      if (sp.life <= 0) sparks.splice(i, 1)
+    }
+    for (let i = fxq.length - 1; i >= 0; i--) {
+      const e = fxq[i]; e.t += dt / e.dur; const p = Math.min(e.t, 1)
+      if (e.kind === 'shield') {
+        ctx.lineCap = 'round'
+        const rIn = 70 - 58 * Math.min(p * 2, 1)
+        ctx.globalAlpha = (1 - p) * 0.9; ctx.strokeStyle = e.col; ctx.lineWidth = 3
+        hexPath(e.x, e.y, Math.max(rIn, 12)); ctx.stroke()
+        const rOut = 18 + 60 * p
+        ctx.globalAlpha = (1 - p) * 0.6; ctx.lineWidth = 2
+        hexPath(e.x, e.y, rOut); ctx.stroke()
+        ctx.globalAlpha = (1 - p) * 0.28; ctx.fillStyle = e.col
+        hexPath(e.x, e.y, Math.max(rIn, 12)); ctx.fill()
+        ctx.globalAlpha = 1
+      } else if (e.kind === 'down') {
+        const r = 70 * (1 - p)
+        ctx.globalAlpha = (1 - p) * 0.85; ctx.strokeStyle = e.col; ctx.lineWidth = 3
+        ctx.beginPath(); ctx.arc(e.x, e.y, Math.max(r, 2), 0, 6.28); ctx.stroke()
+        ctx.globalAlpha = (1 - p) * 0.5
+        for (let k = 0; k < 3; k++) { const yy = e.y + rng(-26, 26); ctx.fillStyle = e.col; ctx.fillRect(e.x - 30, yy, 60, 2) }
+        ctx.globalAlpha = 1
+      } else if (e.kind === 'beam') {
+        const tt = Math.min(p / 0.55, 1)
+        const hx = e.fx + (e.tx - e.fx) * tt, hy = e.fy + (e.ty - e.fy) * tt
+        const w = (e.big ? 16 : 9) * (1 - p * 0.4)
+        ctx.lineCap = 'round'
+        ctx.globalAlpha = Math.min(p * 3, 1) * (1 - Math.max(p - 0.7, 0) / 0.3)
+        ctx.strokeStyle = e.col; ctx.shadowColor = e.col; ctx.shadowBlur = e.big ? 28 : 16; ctx.lineWidth = w
+        ctx.beginPath(); ctx.moveTo(e.fx, e.fy); ctx.lineTo(hx, hy); ctx.stroke()
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = w * 0.4; ctx.shadowBlur = 0
+        ctx.beginPath(); ctx.moveTo(e.fx, e.fy); ctx.lineTo(hx, hy); ctx.stroke()
+        ctx.globalAlpha = 1
+        if (!e.hit && tt >= 1) { e.hit = true; addSpark(e.tx, e.ty, e.col) }
+      }
+      if (e.t >= 1) fxq.splice(i, 1)
+    }
+  }
+
+  function floatText(wx: number, wy: number, txt: string, col: string) {
+    const r = arena.getBoundingClientRect()
+    const px = (wx / 1000) * r.width, py = (wy / 1000) * r.height
+    const d = document.createElement('div')
+    d.className = 'float'; d.style.left = px + 'px'; d.style.top = py + 'px'
+    d.style.color = col; d.style.transform = 'translate(-50%,-50%)'; d.textContent = txt
+    arena.appendChild(d); setTimeout(() => d.remove(), 1100)
+  }
+
+  /* -------- log -------- */
+  const clk = () => new Date(tNow).toUTCString().slice(17, 25)
+  function addLog(tag: string, cls: string, html: string) {
+    const row = document.createElement('div'); row.className = 'lg'
+    row.innerHTML = `<span class="ts">${clk()}</span><span class="tag ${cls}">${tag}</span>${html}`
+    logEl.appendChild(row)
+    while (logEl.children.length > 60) logEl.removeChild(logEl.firstChild)
+    logEl.scrollTop = logEl.scrollHeight
+  }
+
+  function playFB() {
+    const a: any = $('fbSound')
+    if (a && a.getAttribute('src')) { a.currentTime = 0; a.play().catch(() => {}) }
+  }
+
+  function resolveFlag(atkr: any, vic: any, svc: any, pts: number, isFB: boolean) {
+    atkr.score += pts; atkr.atk++
+    if (vic && svc && svc.status === 'def') { svc.status = 'vuln'; setTimeout(() => { if (svc.status === 'vuln') { svc.status = 'def'; renderSvc(vic) } }, rng(3000, 7000)) }
+    renderScore(atkr); if (vic) { renderSvc(vic); pulseBase(vic, vic.color) }
+    floatText(atkr.x, atkr.y - 66, '+' + pts, atkr.color)
+    if (vic) floatText(vic.x, vic.y - 66, isFB ? 'FIRST BLOOD' : 'PWNED', vic.color)
+    if (isFB) addLog('FIRST BLOOD', 'fb', `<span class="who">${esc(atkr.name)}</span> drew first blood${vic ? ` on <span class="vic">${esc(vic.name)}</span>` : ''}`)
+    else addLog('FLAG', 'flag', `<span class="who">${esc(atkr.name)}</span> &gt; <span class="vic">${vic ? esc(vic.name) : 'CORE'}</span> :: <span class="svc">${esc(svc ? svc.name : 'flag')}</span> <span class="em">+${pts}</span>`)
+    totalFlags++; refreshRank(); refreshStats()
+  }
+
+  function fbCinematic(atkr: any, vic: any, onImpact: () => void) {
+    cinema = true
+    const ov: any = $('fbOverlay')
+    const vicName = vic ? vic.name : 'THE FIELD', vicColor = vic ? vic.color : '#ff3b5b'
+    $('fbSub').innerHTML = `<span style="color:${atkr.color}">${esc(atkr.name)}</span> &nbsp;&#9656;&nbsp; <span style="color:${vicColor}">${esc(vicName)}</span>`
+    $('fbAtkPor').innerHTML = avatar(atkr.look, atkr.color)
+    $('fbVicPor').innerHTML = vic ? avatar(vic.look, vic.color) : ''
+    const an: any = $('fbAtkNm'); an.textContent = atkr.name; an.style.color = atkr.color
+    const vn: any = $('fbVicNm'); vn.textContent = vicName; vn.style.color = vicColor
+    ov.classList.remove('play'); void ov.offsetWidth; ov.classList.add('play')
+    setTimeout(() => { try { playFB() } catch (e) {} }, FB.soundDelay)
+    setTimeout(() => {
+      const sh: any = root.querySelector('.shell'); if (sh) { sh.classList.add('shake'); setTimeout(() => sh.classList.remove('shake'), 520) }
+      if (onImpact) onImpact()
+    }, FB.slam)
+    setTimeout(() => { if (vic) { spawnBeam(atkr, vic, atkr.color, true); pulseBase(vic, vic.color) } }, FB.total - 680)
+    setTimeout(() => { ov.classList.remove('play'); cinema = false }, FB.total)
+  }
+
+  /* -------- rank + stats -------- */
+  let rankInit = false
+  function rebuildRank() {
+    rankEl.innerHTML = ''
+    TEAMS.forEach((t) => {
+      const div = document.createElement('div'); div.id = 'rk-' + t.id; div.className = 'rk'
+      div.innerHTML = `<div class="pos"></div>
+        <div class="av">${avatar(t.look, t.color)}</div>
+        <div class="body"><div class="nm" style="color:${t.color}">${esc(t.name)}</div>
+          <div class="bars"><i id="ba-${t.id}" style="background:#27e3ff"></i><i id="bd-${t.id}" style="background:#3dffb0"></i></div></div>
+        <div class="sc" id="rsc-${t.id}"></div>`
+      rankEl.appendChild(div)
+    })
+    rankInit = true
+    rankEl.style.display = 'flex'; rankEl.style.flexDirection = 'column'
+  }
+  function refreshRank() {
+    if (!rankInit) rebuildRank()
+    const sorted = [...TEAMS].sort((a, b) => b.score - a.score)
+    sorted.forEach((t, i) => {
+      const div = $('rk-' + t.id); if (!div) return
+      div.className = 'rk p' + (i + 1)
+      div.style.order = String(i)
+      div.querySelector('.pos').textContent = (i + 1 < 10 ? '0' : '') + (i + 1)
+      $('ba-' + t.id).style.flex = String(Math.max(t.atk, 1))
+      $('bd-' + t.id).style.flex = String(Math.max(t.def, 1))
+      $('rsc-' + t.id).innerHTML = `${t.score}<small>${t.sla}% SLA</small>`
+    })
+  }
+  function refreshStats() {
+    const up = TEAMS.reduce((a, t) => a + t.svc.filter((s: any) => s.status === 'def').length, 0)
+    const tot = TEAMS.length * SERVICES.length
+    $('roundPill').textContent = 'ROUND ' + String(round).padStart(2, '0')
+    statsEl.innerHTML = `
+      <div class="strow"><span class="k">攻 ATTACK FLAGS</span><span class="v acc">${totalFlags}</span></div>
+      <div class="strow"><span class="k">守 SVC ONLINE</span><span class="v">${up} / ${tot}</span></div>
+      <div class="strow"><span class="k">EVENTS</span><span class="v">${totalEvents}</span></div>
+      <div class="strow"><span class="k">TEAMS</span><span class="v">${TEAMS.length}</span></div>
+      <div class="strow"><span class="k">SERVICES</span><span class="v">${SERVICES.length}</span></div>
+      <div class="strow"><span class="k">TICK</span><span class="v acc">${tickLeft}s</span></div>`
+  }
+
+  function buildTicker(title: string | null) {
+    const t: any = $('ticker')
+    const head = title ? `<b>// ${esc(title)}</b>` : `<b>// CYBER A/D ARENA</b>`
+    t.innerHTML = `${head} attack/defense + king of the hill &nbsp;//&nbsp; capture flags off enemy services &nbsp;//&nbsp; hold the <em>torii</em> gates &nbsp;//&nbsp; keep your own patched &nbsp;//&nbsp; SLA down = score bleed &nbsp;//&nbsp; <b>arena.watch()</b> &nbsp;//&nbsp; 攻防戦 &nbsp;//&nbsp; signal nominal &nbsp;//&nbsp; `
+  }
+
+  /* -------- loop / clock -------- */
+  let lastTs = performance.now()
+  function loop(ts: number) {
+    if (killed) return
+    const dt = Math.min((ts - lastTs) / 1000, 0.05); lastTs = ts
+    drawFX(dt)
+    raf = requestAnimationFrame(loop)
+  }
+  function tickClock() {
+    tNow = Date.now()
+    const cl = $('clock'); if (cl) cl.textContent = clk()
+    if (liveRoundEndsAt) {
+      tickLeft = Math.max(0, Math.round((liveRoundEndsAt - Date.now()) / 1000))
+      refreshStats()
+    }
+  }
+
+  /* -------- live data -------- */
+  const statusFromCheck = (cs: any) => (cs === 'Ok' ? 'def' : cs === 'Mumble' ? 'vuln' : 'down')
+  async function fetchJSON(url: string): Promise<any> {
+    const r = await fetch(url, { headers: { Accept: 'application/json' } })
+    if (!r.ok) throw new Error(url + ' -> ' + r.status)
+    return r.json()
+  }
+
+  function buildLiveModel(ad: any, koth: any, title: string | null) {
+    const kothHills = koth && koth.hills ? koth.hills : []
+    const kothIds = new Set(kothHills.map((h: any) => h.challengeId))
+    const svcDefs = (ad.challenges || []).filter((c: any) => !kothIds.has(c.challengeId))
+    SERVICES = svcDefs.map((c: any) => c.title)
+    const svcIds = svcDefs.map((c: any) => c.challengeId)
+
+    TEAMS = (ad.teams || []).map((row: any, i: number) => {
+      const color = PALETTE[i % PALETTE.length]
+      const t: any = {
+        id: 'p' + row.participationId, pid: row.participationId, name: row.teamName,
+        color, hue: Math.round((i * 137.508) % 360), score: Math.round(row.total || 0),
+        atk: Math.max(1, Math.round(row.flagsCaptured || 0)),
+        def: Math.max(1, (row.services || []).filter((s: any) => s.lastCheckStatus === 'Ok').length),
+      }
+      const byId: any = {}; (row.services || []).forEach((s: any) => { byId[s.challengeId] = s })
+      t.svc = svcIds.map((cid: any, j: number) => { const s = byId[cid]; return { name: SERVICES[j], cid, status: s ? statusFromCheck(s.lastCheckStatus) : 'def' } })
+      const ok = t.svc.filter((s: any) => s.status === 'def').length
+      t.sla = t.svc.length ? Math.round(100 * ok / t.svc.length) : 100
+      return t
+    })
+
+    TEAMS.forEach((t, i) => {
+      const ang = (-90 + i * (360 / TEAMS.length)) * Math.PI / 180
+      t.idx = i; t.ang = ang
+      t.x = CX + RING * Math.cos(ang); t.y = CY + RING * Math.sin(ang)
+      t.look = makeLook(t, i)
+    })
+
+    HILLS = kothHills.map((h: any) => ({ id: 'h' + h.challengeId, cid: h.challengeId, name: h.title, jp: '', owner: h.currentHolderTeamName ? (teamByName(h.currentHolderTeamName) || null) : null }))
+    HILLS.forEach((h, i) => {
+      const ang = (-90 + (i + 0.5) * (360 / HILLS.length)) * Math.PI / 180
+      h.idx = i; h.ang = ang
+      h.x = CX + HILLR * Math.cos(ang); h.y = CY + HILLR * Math.sin(ang)
+    })
+
+    round = ad.latestRound || (koth && koth.latestRound) || 0
+    liveRoundEndsAt = ad.currentRoundEndsAt ? new Date(ad.currentRoundEndsAt).getTime() : null
+    if (title) $('brandLogo').textContent = title.toUpperCase().slice(0, 22)
+  }
+
+  function applyLivePoll(ad: any, koth: any) {
+    const kothHills = koth && koth.hills ? koth.hills : []
+    const adById: any = {}; (ad.teams || []).forEach((r: any) => { adById['p' + r.participationId] = r })
+    TEAMS.forEach((t) => {
+      const row = adById[t.id]; if (!row) return
+      t.score = Math.round(row.total || 0)
+      const byId: any = {}; (row.services || []).forEach((s: any) => { byId[s.challengeId] = s })
+      t.svc.forEach((sv: any) => {
+        const s = byId[sv.cid]; const ns = s ? statusFromCheck(s.lastCheckStatus) : 'def'
+        const key = t.id + ':' + sv.cid; const old = prevSvcState[key]
+        if (old && old !== ns) {
+          if (ns === 'down' && old !== 'down') {
+            addLog('SLA', 'sla', `<span class="who">${esc(t.name)}</span> :: <span class="svc">${esc(sv.name)}</span> went <span class="em">DOWN</span>`)
+            spawnDown(t.x, t.y, '#ff3b5b')
+            const g = $('base-' + t.id)
+            if (g) { g.classList.remove('node-down'); void g.offsetWidth; g.classList.add('node-down'); setTimeout(() => g.classList.remove('node-down'), 1300) }
+            totalEvents++
+          } else if (ns === 'def' && old === 'down') {
+            addLog('DEFEND', 'def', `<span class="who">${esc(t.name)}</span> restored <span class="svc">${esc(sv.name)}</span>`)
+            spawnShield(t.x, t.y, SVC_COLOR.def); totalEvents++
+          }
+        }
+        prevSvcState[key] = ns; sv.status = ns
+      })
+      const ok = t.svc.filter((s: any) => s.status === 'def').length
+      t.sla = t.svc.length ? Math.round(100 * ok / t.svc.length) : 100
+      renderSvc(t); renderScore(t)
+    })
+    kothHills.forEach((kh: any) => {
+      const h = HILLS.find((x) => x.cid === kh.challengeId); if (!h) return
+      const newOwner = kh.currentHolderTeamName ? (teamByName(kh.currentHolderTeamName) || null) : null
+      if ((h.owner && h.owner.id) !== (newOwner && newOwner.id)) { h.owner = newOwner; renderHill(h) }
+    })
+    round = ad.latestRound || round
+    liveRoundEndsAt = ad.currentRoundEndsAt ? new Date(ad.currentRoundEndsAt).getTime() : liveRoundEndsAt
+    refreshRank(); refreshStats()
+  }
+
+  async function pollLive() {
+    if (killed) return
+    try {
+      const ad = await fetchJSON(`/api/Game/${gameId}/Ad/Scoreboard`)
+      let koth: any = null; try { koth = await fetchJSON(`/api/Game/${gameId}/Ad/Koth/Scoreboard`) } catch (e) {}
+      if (!killed) applyLivePoll(ad, koth)
+    } catch (e) { /* transient */ }
+  }
+
+  function liveAttack(f: any) {
+    if (f.type === 'Unaccepted') return
+    const atkr = teamByName(f.teamName); if (!atkr) return
+    const vic = f.victimTeamName ? teamByName(f.victimTeamName) : null
+    let svc: any = null
+    if (vic) svc = vic.svc.find((s: any) => s.name === f.challengeTitle) || pick(vic.svc)
+    let pts = 0
+    if (f.teamScore != null) { pts = Math.max(0, Math.round(f.teamScore) - atkr.score); atkr.score = Math.round(f.teamScore) }
+    if (pts <= 0) pts = Math.floor(rng(40, 90))
+    const isFB = f.type === 'FirstBlood'
+    if (isFB) {
+      if (cinema) { resolveFlag(atkr, vic, svc, pts, true); return }
+      fbCinematic(atkr, vic, () => resolveFlag(atkr, vic, svc, pts, true))
+      return
+    }
+    if (vic) fireShot(atkr, vic, atkr.color)
+    setTimeout(() => { if (!killed) resolveFlag(atkr, vic, svc, pts, false) }, (vic ? 320 : 0) / Math.max(speed, 1) + (vic ? 120 : 0))
+  }
+  function liveKoth(f: any) {
+    const h = HILLS.find((x) => x.cid === f.challengeId); if (!h) return
+    const newOwner = f.holderTeamName ? (teamByName(f.holderTeamName) || null) : null
+    const contested = h.owner && newOwner && h.owner !== newOwner
+    h.owner = newOwner; renderHill(h)
+    if (newOwner) {
+      spawnCapture(newOwner, h, newOwner.color)
+      floatText(h.x, h.y - 30, contested ? 'SEIZED' : 'CAPTURED', newOwner.color)
+      addLog('HILL', 'hill', `<span class="who">${esc(newOwner.name)}</span> ${contested ? 'seized' : 'captured'} <span class="svc">${esc(h.name)}</span>`)
+    } else {
+      addLog('HILL', 'hill', `<span class="svc">${esc(h.name)}</span> went <span class="em">NEUTRAL</span>`)
+    }
+    totalEvents++; refreshStats()
+  }
+
+  function setLiveBadge(connected: boolean) {
+    const b: any = $('liveBadge'); if (!b) return
+    b.classList.toggle('off', !connected)
+    b.childNodes[1].nodeValue = connected ? 'LIVE' : 'OFFLINE'
+    const ns = $('netStat'); if (ns) ns.textContent = connected ? 'SIGNAL // LIVE FEED' : 'SIGNAL // RECONNECTING'
+  }
+  function connectWS() {
+    if (killed) return
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+    ws = new WebSocket(`${proto}://${location.host}/hub/attack/ws?game=${gameId}`)
+    ws.onopen = () => { wsRetry = 0; setLiveBadge(true) }
+    ws.onmessage = (m) => {
+      if (killed) return
+      let f: any; try { f = JSON.parse(m.data) } catch (e) { return }
+      if (!f || !f.kind) return
+      if (f.kind === 'attack') liveAttack(f)
+      else if (f.kind === 'koth') liveKoth(f)
+    }
+    ws.onclose = () => {
+      if (killed) return
+      setLiveBadge(false); wsRetry = Math.min(wsRetry + 1, 6)
+      timers.push(window.setTimeout(connectWS, 1000 * wsRetry))
+    }
+    ws.onerror = () => { try { if (ws) ws.close() } catch (e) {} }
+  }
+
+  function showNote(msg: string) {
+    const note = document.createElement('div'); note.className = 'arena-note'; note.innerHTML = msg
+    arena.appendChild(note)
+  }
+
+  async function start() {
+    let ad: any
+    try {
+      ad = await fetchJSON(`/api/Game/${gameId}/Ad/Scoreboard`)
+    } catch (e) {
+      if (killed) return
+      const ns = $('netStat'); if (ns) ns.textContent = 'SIGNAL // NO A&D DATA'
+      const lb = $('liveBadge'); if (lb) lb.childNodes[1].nodeValue = 'NO DATA'
+      showNote('NO LIVE A&amp;D DATA<br/>this game has no Attack &amp; Defense<br/>or King of the Hill challenges')
+      addLog('SYS', 'sys', `<span class="em">// NO A&amp;D / KOTH SCOREBOARD</span> for this game`)
+      tNow = Date.now(); timers.push(window.setInterval(tickClock, 1000)); raf = requestAnimationFrame(loop)
+      return
+    }
+    let koth: any = null; try { koth = await fetchJSON(`/api/Game/${gameId}/Ad/Koth/Scoreboard`) } catch (e) {}
+    let title: string | null = null; try { const gi = await fetchJSON(`/api/Game/${gameId}`); title = gi && gi.title } catch (e) {}
+    if (killed) return
+
+    buildLiveModel(ad, koth, title)
+    if (!TEAMS.length) { showNote('NO TEAMS ON THE A&amp;D BOARD YET'); tNow = Date.now(); timers.push(window.setInterval(tickClock, 1000)); raf = requestAnimationFrame(loop); return }
+
+    TEAMS.forEach((t) => t.svc.forEach((sv: any) => { prevSvcState[t.id + ':' + sv.cid] = sv.status }))
+
+    buildArena()
+    $('teamCount').textContent = '攻防 // ' + TEAMS.length + ' TEAMS'
+    refreshRank(); refreshStats(); buildTicker(title)
+    sizeCanvas()
+    addLog('SYS', 'sys', `<span class="em">// ARENA ONLINE</span> :: ${TEAMS.length} teams // ${SERVICES.length} services // live feed`)
+
+    connectWS()
+    timers.push(window.setInterval(pollLive, 15000))
+    timers.push(window.setInterval(tickClock, 1000))
+    raf = requestAnimationFrame(loop)
+  }
+
+  /* -------- viewer toggles -------- */
+  const petalBtn: any = $('petalBtn')
+  if (petalBtn) petalBtn.onclick = function () { petals = !petals; petalBtn.classList.toggle('on', petals) }
+  const scanBtn: any = $('scanBtn')
+  if (scanBtn) scanBtn.onclick = function () { const offNow = $('scan').classList.toggle('off'); scanBtn.classList.toggle('on', !offNow) }
+
+  start()
+
+  /* -------- teardown -------- */
+  return () => {
+    killed = true
+    timers.forEach((id) => clearInterval(id))
+    timers.forEach((id) => clearTimeout(id))
+    if (raf) cancelAnimationFrame(raf)
+    window.removeEventListener('resize', onResize)
+    if (ws) { try { ws.onclose = null; ws.close() } catch (e) {} ws = null }
+  }
 }
 
-const CHALLS: Array<[ChallengeCategory, string]> = [
-  [ChallengeCategory.Pwn, 'BABU-FORMAT'],
-  [ChallengeCategory.Web, 'BIJI'],
-  [ChallengeCategory.Web, 'WHITE-NIGHTS'],
-  [ChallengeCategory.Crypto, 'VIRTUOSO'],
-  [ChallengeCategory.Forensics, 'BAD-OPSEC'],
-  [ChallengeCategory.Reverse, 'LATENT-KINGDOM'],
-]
-
-// Mock KotH hills for ?preview mode so the crown nodes + takeover beam are
-// demoable without a backend. Holders point at the first mock teams.
-const makeMockHills = (): KothHill[] => [
-  { challengeId: 9001, title: 'KING-HILL', holderName: 'ROOT-SKSD', holderAvatar: null, status: 'held' },
-  { challengeId: 9002, title: 'CROWN-CTRL', holderName: 'SEGFAULT', holderAvatar: null, status: 'held' },
-  { challengeId: 9003, title: 'THRONE-RM', holderName: null, holderAvatar: null, status: null },
-]
+/* -------------------------------------------------------------------------- */
 
 const Attack: FC = () => {
-  const { t } = useTranslation()
   const { id } = useParams()
-  const numId = parseInt(id ?? '-1')
+  const hostRef = useRef<HTMLDivElement>(null)
+  const cleanupRef = useRef<null | (() => void)>(null)
 
-  const previewTeams = useMemo(() => parsePreviewParam(), [])
-  const isPreview = previewTeams !== null
-
-  const [game, setGame] = useState<DetailedGameInfoModel | null>(
-    isPreview ? ({ title: 'CJ2025 · FINALS' } as DetailedGameInfoModel) : null
-  )
-  const [scoreboard, setScoreboard] = useState<ScoreboardModel | null>(
-    isPreview ? makeMockScoreboard(previewTeams ?? 10) : null
-  )
-  const [viewport, setViewport] = useState({
-    w: typeof window !== 'undefined' ? window.innerWidth : 1920,
-    h: typeof window !== 'undefined' ? window.innerHeight : 1080,
-  })
-
-  const [audioEnabled, setAudioEnabled] = useState(false)
-  const [showAudioToast, setShowAudioToast] = useState(true)
-
-  const [feedLines, setFeedLines] = useState<FeedLine[]>([])
-  const [firstBlood, setFirstBlood] = useState<FirstBloodBanner | null>(null)
-  const [ticker, setTicker] = useState<TickerEvent | null>(null)
-  const tickerQueueRef = useRef<TickerEvent[]>([])
-  const [audioMuted, setAudioMuted] = useState(false)
-  const [paused, setPaused] = useState(false)
-  const [showDevPanel, setShowDevPanel] = useState(true)
-
-  // KotH hills. Empty => game has no hills (or is hidden/frozen) and the
-  // page behaves exactly as before. Seeded with mocks in preview mode.
-  const [hills, setHills] = useState<KothHill[]>(isPreview ? makeMockHills() : [])
-  const [seizeCount, setSeizeCount] = useState(0)
-  // Set once we observe any A&D-style victim event; combined with hills>0
-  // this distinguishes "mixed" from pure-KotH for header framing.
-  const sawAdVictimRef = useRef(false)
-  const [sawAdVictim, setSawAdVictim] = useState(isPreview)
-
-  const [eventCount, setEventCount] = useState(0)
-  const [fbCount, setFbCount] = useState(0)
-  // Clock + attack-rate are ref-driven (direct textContent writes) so the
-  // 1s interval doesn't re-render the whole Attack tree + 300 child nodes.
-  const clockRef = useRef<HTMLSpanElement | null>(null)
-  const atkRateRef = useRef<HTMLSpanElement | null>(null)
-  // SignalR status refs — header dot + label updated imperatively on
-  // connection state transitions without re-rendering the whole tree.
-  const liveBadgeRef = useRef<HTMLSpanElement | null>(null)
-  const liveLabelRef = useRef<HTMLSpanElement | null>(null)
-
-  const audioRef = useRef<HTMLAudioElement | null>(null)
-  const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const hexRef = useRef<HTMLDivElement | null>(null)
-
-  const pixiReadyRef = useRef(false)
-  const lastBloodSoundAtRef = useRef(0)
-  const atkTimestampsRef = useRef<number[]>([])
-  const burstTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
-  const burstSpawnTimesRef = useRef<number[]>([])
-  const scoreboardRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const nextFeedKeyRef = useRef(0)
-
-  /* ---- Viewport tracking ---- */
   useEffect(() => {
-    const onResize = (): void =>
-      setViewport({ w: window.innerWidth, h: window.innerHeight })
-    window.addEventListener('resize', onResize)
-    window.addEventListener('orientationchange', onResize)
-    return () => {
-      window.removeEventListener('resize', onResize)
-      window.removeEventListener('orientationchange', onResize)
+    const host = hostRef.current
+    if (!host || !id) return
+
+    // Google Fonts must live at document level so @font-face resolves inside
+    // the shadow root (font-family references in a shadow root match
+    // document-level @font-face rules).
+    if (!document.getElementById('cyber-arena-fonts')) {
+      const link = document.createElement('link')
+      link.id = 'cyber-arena-fonts'
+      link.rel = 'stylesheet'
+      link.href = FONTS_HREF
+      document.head.appendChild(link)
     }
-  }, [])
 
-  const isTooSmall = viewport.w < 900 && viewport.w < viewport.h  // portrait < 900px
-  const isUnsupported = viewport.w < 700  // too small even in landscape
-
-  /* ---- Initial data load ---- */
-  useEffect(() => {
-    if (isPreview) return
-    if (Number.isNaN(numId) || numId < 0) return
-    void (async () => {
-      try {
-        const [gameRes, scoreRes] = await Promise.all([
-          api.game.gameGame(numId),
-          api.game.gameScoreboard(numId),
-        ])
-        setGame(gameRes.data)
-        setScoreboard(scoreRes.data)
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.warn('[attack] initial load failed', e)
-      }
-      try {
-        const feedRes = await fetch(`/api/game/${numId}/AttackFeed?limit=50`)
-        if (feedRes.ok) {
-          const feed = (await feedRes.json()) as AttackEvent[]
-          setFeedLines(
-            feed.slice(-FEED_MAX).reverse().map((e) => ({
-              key: `seed-${nextFeedKeyRef.current++}`,
-              time: new Date(e.time).toTimeString().slice(0, 8),
-              teamName: e.teamName,
-              challengeTitle: e.challengeTitle,
-              type: e.type,
-            }))
-          )
-        }
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.warn('[attack] attack-feed failed', e)
-      }
-      // KotH hill seed — graceful: an empty array (or any failure) renders
-      // no hill nodes and the page works exactly as a jeopardy/A&D board.
-      try {
-        const hillsRes = await fetch(`/api/game/${numId}/KothHills`)
-        if (hillsRes.ok) {
-          const seed = (await hillsRes.json()) as KothHillSeed[]
-          if (Array.isArray(seed)) {
-            setHills(
-              seed.map((s) => ({
-                challengeId: s.challengeId,
-                title: s.title,
-                holderName: s.holderTeamName,
-                holderAvatar: s.holderTeamAvatar,
-                status: s.status,
-              }))
-            )
-          }
-        }
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.warn('[attack] koth-hills failed', e)
-      }
-    })()
-  }, [numId])
-
-  const refreshScoreboard = useCallback(async () => {
-    try {
-      const res = await api.game.gameScoreboard(numId)
-      setScoreboard(res.data)
-    } catch {
-      // non-fatal
-    }
-  }, [numId])
-
-  useEffect(() => {
-    if (isPreview) return
-    if (Number.isNaN(numId) || numId < 0) return
-    const iv = setInterval(() => void refreshScoreboard(), SCOREBOARD_REFRESH_MS)
-    return () => clearInterval(iv)
-  }, [numId, refreshScoreboard, isPreview])
-
-  /* ---- PixiJS lifecycle ---- */
-  useEffect(() => {
-    if (!canvasRef.current) return
-    const canvas = canvasRef.current
-    let cancelled = false
-    void initEffects(canvas).then(() => {
-      if (!cancelled) pixiReadyRef.current = true
-    })
-    return () => {
-      cancelled = true
-      pixiReadyRef.current = false
-      disposeEffects()
-    }
-  }, [])
-
-  /* ---- Audio unlock on first user interaction ---- */
-  useEffect(() => {
-    if (audioEnabled) return
-    const unlock = (): void => {
-      setAudioEnabled(true)
-      setShowAudioToast(false)
-      unlockAudio()
-      if (audioRef.current) {
-        audioRef.current.volume = 0
-        audioRef.current
-          .play()
-          .then(() => {
-            audioRef.current?.pause()
-            if (audioRef.current) {
-              audioRef.current.currentTime = 0
-              audioRef.current.volume = 0.85
-            }
-          })
-          .catch(() => undefined)
-      }
-    }
-    window.addEventListener('click', unlock, { once: true })
-    window.addEventListener('keydown', unlock, { once: true })
-    return () => {
-      window.removeEventListener('click', unlock)
-      window.removeEventListener('keydown', unlock)
-    }
-  }, [audioEnabled])
-
-  /* ---- Layout ---- */
-  const layoutResult = useMemo(
-    () => computeLayout(scoreboard?.items ?? [], viewport.w, viewport.h),
-    [scoreboard, viewport.w, viewport.h]
-  )
-  const { layout, positions, cx, cy, hqSize, px0, py0, px1, py1, pw, ph, rankColumn, ringRx, ringRy } =
-    layoutResult
-
-  const teamIndex = useMemo(() => {
-    const m = new Map<string, TeamPos>()
-    positions.forEach((p) => m.set(p.name, p))
-    return m
-  }, [positions])
-
-  /* ---- KotH hills: positions + engine framing ----
-   * Engine detection (per spec): hills.length > 0 turns KotH features on.
-   * If we ALSO see A&D-style victim events the game is "mixed"; pure hills
-   * with no victim attacks reads as "KotH"; no hills = A&D/jeopardy today. */
-  const hasHills = hills.length > 0
-  const engine: 'koth' | 'mixed' | 'classic' = !hasHills
-    ? 'classic'
-    : sawAdVictim
-      ? 'mixed'
-      : 'koth'
-
-  const hillPositions = useMemo(
-    () => computeHillPositions(hills.length, cx, cy, hqSize),
-    [hills.length, cx, cy, hqSize]
-  )
-
-  const top5 = useMemo(
-    () => (scoreboard?.items ?? []).slice().sort((a, b) => a.rank - b.rank).slice(0, 5),
-    [scoreboard]
-  )
-
-  /* ---- Clock + rolling attack-rate ---- */
-  useEffect(() => {
-    const iv = setInterval(() => {
-      if (clockRef.current) clockRef.current.textContent = new Date().toISOString().slice(11, 19)
-      const now = Date.now()
-      while (atkTimestampsRef.current[0] < now - 60_000) atkTimestampsRef.current.shift()
-      if (atkRateRef.current) atkRateRef.current.textContent = `${atkTimestampsRef.current.length}/min`
-    }, 1000)
-    return () => clearInterval(iv)
-  }, [])
-
-  /* ---- Resolve source position for an attacker ----
-   * For teams present in the scoreboard we pin to their ring position.
-   * For events from unknown teams (empty scoreboard / debug triggers) we
-   * place the source on a ring ~1.6x the HQ radius at a team-name-hashed
-   * BASE angle plus a small per-event jitter — so bursts from the same
-   * team cluster together but don't pile up on one spot, and the charge
-   * visuals never appear against the screen edges.
-   */
-  const resolveSource = useCallback(
-    (evt: AttackEvent): { x: number; y: number } => {
-      const from = teamIndex.get(evt.teamName)
-      if (from) return { x: from.x, y: from.y }
-      let h = 0
-      for (let i = 0; i < evt.teamName.length; i++) h = (h * 31 + evt.teamName.charCodeAt(i)) >>> 0
-      const baseAngle = ((h % 360) / 360) * Math.PI * 2
-      // ±70° jitter around base angle → bursts from same team land in a sector
-      const jitter = (Math.random() - 0.5) * (Math.PI * 70 / 180 * 2)
-      const angle = baseAngle + jitter
-      const ringR = Math.min(Math.min(pw, ph) * 0.3, hqSize * 1.8)
-      const x = cx + Math.cos(angle) * ringR
-      const y = cy + Math.sin(angle) * ringR
-      return {
-        x: Math.min(px1 - 40, Math.max(px0 + 40, x)),
-        y: Math.min(py1 - 40, Math.max(py0 + 40, y)),
-      }
-    },
-    [teamIndex, px0, py0, px1, py1, pw, ph, cx, cy, hqSize]
-  )
-
-  /* ---- HQ center resolved from layout geometry ---- */
-  const hqCenter = useMemo(() => ({ x: cx, y: cy }), [cx, cy])
-
-  /* ---- Handle incoming attack event ---- */
-  const handleAttack = useCallback(
-    (evt: AttackEvent) => {
-      const time = new Date().toTimeString().slice(0, 8)
-
-      setFeedLines((prev) => {
-        const line: FeedLine = {
-          key: `f-${nextFeedKeyRef.current++}`,
-          time,
-          teamName: evt.teamName,
-          challengeTitle: evt.challengeTitle,
-          type: evt.type,
-        }
-        return [line, ...prev].slice(0, FEED_MAX)
-      })
-      setEventCount((c) => c + 1)
-      atkTimestampsRef.current.push(Date.now())
-
-      // Queue a SOLVED ticker entry for the audience on the projector.
-      // Accepted events only — wrong answers are noise on the ticker.
-      if (evt.type !== SubmissionType.Unaccepted) {
-        const tEvt: TickerEvent = {
-          id: nextFeedKeyRef.current++,
-          teamName: evt.teamName,
-          challengeTitle: evt.challengeTitle,
-          category: evt.category,
-          type: evt.type,
-        }
-        // First-blood jumps the queue.
-        if (evt.type === SubmissionType.FirstBlood) {
-          tickerQueueRef.current = [tEvt, ...tickerQueueRef.current]
-        } else {
-          tickerQueueRef.current = [...tickerQueueRef.current, tEvt].slice(-5)
-        }
-        setTicker((cur) => cur ?? tickerQueueRef.current.shift() ?? null)
-      }
-
-      // Engine framing signal: an A&D capture carries a victim team. Once
-      // seen, a game that ALSO has hills is "mixed". Ref-gated so we only
-      // bump the (cheap) state flag once instead of on every event.
-      if (evt.victimTeamName && !sawAdVictimRef.current) {
-        sawAdVictimRef.current = true
-        setSawAdVictim(true)
-      }
-
-      const src = resolveSource(evt)
-      const color = colorForType(evt.type)
-
-      // Attack target: for an A&D capture (victimTeamName set) aim at the
-      // victim team's node; otherwise (jeopardy) aim at the center HQ.
-      const target = (() => {
-        if (evt.victimTeamName) {
-          const victim = teamIndex.get(evt.victimTeamName)
-          if (victim) return { x: victim.x, y: victim.y }
-        }
-        return hqCenter
-      })()
-
-      // Visual effects only fire once Pixi has finished initializing;
-      // the feed/stats updates above still run so data stays fresh.
-      if (!pixiReadyRef.current) {
-        if (evt.type === SubmissionType.FirstBlood) {
-          setFbCount((c) => c + 1)
-          setFirstBlood({
-            id: Math.random(),
-            teamName: evt.teamName,
-            challengeTitle: evt.challengeTitle,
-            category: evt.category,
-            startedAt: performance.now(),
-          })
-        }
-        return
-      }
-
-      if (evt.type === SubmissionType.FirstBlood) {
-        lastFbEvtRef.current = evt
-        // Strike the resolved target: the victim node for an A&D first blood,
-        // or the center HQ for jeopardy. The hex punch only makes sense when
-        // the laser actually hits the HQ hex, so skip it when hitting a node
-        // (the shatter cracks already land at the impact point).
-        const hitsHq = target === hqCenter
-        spawnFirstBlood(src.x, src.y, target.x, target.y, color, {
-          hexElement: hitsHq ? hexRef.current : null,
-          onImpact: () => {
-            if (audioEnabled && audioRef.current) {
-              audioRef.current.currentTime = 0
-              audioRef.current.play().catch(() => undefined)
-              lastBloodSoundAtRef.current = performance.now()
-            }
-          },
-        })
-        setFbCount((c) => c + 1)
-        setFirstBlood({
-          id: Math.random(),
-          teamName: evt.teamName,
-          challengeTitle: evt.challengeTitle,
-          category: evt.category,
-          startedAt: performance.now(),
-        })
-      } else {
-        // Rate-limit bullet bursts
-        const now = performance.now()
-        const recent = burstSpawnTimesRef.current.filter((t) => now - t < BURST_RATE_WINDOW_MS)
-        const canBurst = recent.length < BURST_RATE_LIMIT
-        if (canBurst) {
-          recent.push(now)
-          burstSpawnTimesRef.current = recent
-          for (let i = 0; i < BURST_COUNT; i++) {
-            const t = setTimeout(() => {
-              burstTimersRef.current.delete(t)
-              fireBullet(src.x, src.y, target.x, target.y, color, evt.type)
-              playPew(evt.type)
-            }, i * BURST_INTERVAL_MS)
-            burstTimersRef.current.add(t)
-          }
-        } else {
-          burstSpawnTimesRef.current = recent
-          // Fire a single reduced arc so the event still registers visually
-          fireBullet(src.x, src.y, target.x, target.y, color, evt.type)
-        }
-      }
-
-      // Debounced scoreboard refresh (non-rejected solves affect rank).
-      // Skipped in preview mode — otherwise vite's /api proxy would replace
-      // the mock scoreboard with a real (possibly empty) backend response
-      // and the teams would disappear mid-sequence.
-      if (!isPreview && evt.type !== SubmissionType.Unaccepted) {
-        if (scoreboardRefreshTimerRef.current) clearTimeout(scoreboardRefreshTimerRef.current)
-        scoreboardRefreshTimerRef.current = setTimeout(() => {
-          void refreshScoreboard()
-        }, SCOREBOARD_DEBOUNCE_MS)
-      }
-    },
-    [audioEnabled, hqCenter, teamIndex, refreshScoreboard, resolveSource, isPreview]
-  )
-
-  /* ---- Handle KotH control change ----
-   * Fired only on an actual takeover/loss, so every event animates. We:
-   *   1. update the hill's holder in state (cheap — keyed by challengeId),
-   *   2. recolor + pulse the hill node (new holder color, or grey on loss),
-   *   3. on a seize, beam from the new holder's team node → the hill node.
-   * Resolving the holder position reuses teamIndex; an unknown holder still
-   * recolors the node and beams from the HQ center as a sensible fallback. */
-  const hillPosByIdRef = useRef<Map<number, HillPos>>(new Map())
-  const handleKothControl = useCallback(
-    (evt: KothControlEvent) => {
-      const time = new Date().toTimeString().slice(0, 8)
-      const lost = !evt.holderTeamName
-      const color = lost ? KOTH_NEUTRAL : colorForTeam(evt.holderTeamName)
-
-      // 1. Update holder in state (keyed by challengeId; no-op if unknown id).
-      setHills((prev) =>
-        prev.map((h) =>
-          h.challengeId === evt.challengeId
-            ? {
-                ...h,
-                holderName: evt.holderTeamName,
-                holderAvatar: evt.holderTeamAvatar,
-                status: evt.status,
-              }
-            : h
-        )
-      )
-
-      // Feed line — distinct from flag captures so the stream stays readable.
-      const feedText = lost
-        ? t('game.attack.koth.feedNeutral', '{{title}} went NEUTRAL').replace(
-            '{{title}}',
-            evt.challengeTitle
-          )
-        : t('game.attack.koth.feedSeized', '!! HILL SEIZED !! {{title}} -> {{team}}')
-            .replace('{{title}}', evt.challengeTitle)
-            .replace('{{team}}', evt.holderTeamName ?? '')
-      setFeedLines((prev) => {
-        const line: FeedLine = {
-          key: `k-${nextFeedKeyRef.current++}`,
-          time,
-          teamName: evt.holderTeamName ?? '—',
-          challengeTitle: evt.challengeTitle,
-          type: SubmissionType.Normal,
-          koth: { text: feedText, lost },
-        }
-        return [line, ...prev].slice(0, FEED_MAX)
-      })
-
-      if (!lost) setSeizeCount((c) => c + 1)
-
-      // 2/3. Visual effects only once Pixi is ready.
-      if (!pixiReadyRef.current) return
-
-      const hp = hillPosByIdRef.current.get(evt.challengeId)
-      // Hill node position (fallback to HQ center if not yet laid out).
-      const hx = hp ? hp.x : cx
-      const hy = hp ? hp.y : cy
-
-      if (lost) {
-        // Loss: just a soft grey pulse on the node, no beam.
-        hillPulse(hx, hy, KOTH_NEUTRAL, true)
-        return
-      }
-
-      hillPulse(hx, hy, color, false)
-
-      // Beam from the new holder's team node → hill node. Unknown holder
-      // (not on the board) beams from the HQ center instead. Respect the
-      // low-FPS guard so takeover storms don't pile up beams.
-      if (isLowFPS()) return
-      const holder = evt.holderTeamName ? teamIndex.get(evt.holderTeamName) : undefined
-      const sx = holder ? holder.x : cx
-      const sy = holder ? holder.y : cy
-      fireKothBeam(sx, sy, hx, hy, color)
-    },
-    [t, teamIndex, cx, cy]
-  )
-
-  // Keep a challengeId -> position map so the SignalR handler can resolve a
-  // hill node without re-subscribing whenever the layout shifts.
-  useEffect(() => {
-    const m = new Map<number, HillPos>()
-    hills.forEach((h, i) => {
-      const p = hillPositions[i]
-      if (p) m.set(h.challengeId, { challengeId: h.challengeId, x: p.x, y: p.y })
-    })
-    hillPosByIdRef.current = m
-  }, [hills, hillPositions])
-
-  /* ---- Cleanup burst timers on unmount ---- */
-  useEffect(() => {
-    const timers = burstTimersRef.current
-    return () => {
-      timers.forEach((t) => clearTimeout(t))
-      timers.clear()
-    }
-  }, [])
-
-  /* ---- First-blood banner auto-dismiss ---- */
-  useEffect(() => {
-    if (!firstBlood) return
-    const t = setTimeout(() => setFirstBlood(null), FIRST_BLOOD_BANNER_MS)
-    return () => clearTimeout(t)
-  }, [firstBlood])
-
-  /* ---- Keyboard shortcuts: M(ute) / P(ause) / R(eplay-last-FB) ----
-   * Only active once audio is unlocked so we don't fight the click-to-begin
-   * overlay.  Mute flips <audio>.muted + audioCtx master gain. Pause toggles
-   * the Pixi ticker.  Replay re-dispatches the most recent FB event. */
-  const mutedRef = useRef(false)
-  const pausedRef = useRef(false)
-  const lastFbEvtRef = useRef<AttackEvent | null>(null)
-  useEffect(() => {
-    if (!audioEnabled) return
-    const handler = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-      const k = e.key.toLowerCase()
-      if (k === 'm') {
-        mutedRef.current = !mutedRef.current
-        if (audioRef.current) audioRef.current.muted = mutedRef.current
-        setAudioMuted(mutedRef.current)
-      } else if (k === 'p') {
-        pausedRef.current = !pausedRef.current
-        setPausedState(pausedRef.current)
-        setPaused(pausedRef.current)
-      } else if (k === 'r') {
-        if (lastFbEvtRef.current) handleAttack(lastFbEvtRef.current)
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [audioEnabled])
-
-  /* ---- SOLVED ticker queue drain — one event at a time, 4s each ---- */
-  useEffect(() => {
-    if (ticker) return
-    const next = tickerQueueRef.current.shift()
-    if (next) setTicker(next)
-  }, [ticker])
-  useEffect(() => {
-    if (!ticker) return
-    const dur = ticker.type === SubmissionType.FirstBlood ? 6000 : 4000
-    const t = setTimeout(() => setTicker(null), dur)
-    return () => clearTimeout(t)
-  }, [ticker])
-
-  /* ---- SignalR ---- */
-  useEffect(() => {
-    if (isPreview) return
-    if (Number.isNaN(numId) || numId < 0) return
-    const connection = new signalR.HubConnectionBuilder()
-      .withUrl(`/hub/attack?game=${numId}`)
-      .withHubProtocol(new signalR.JsonHubProtocol())
-      .withAutomaticReconnect()
-      .configureLogging(signalR.LogLevel.None)
-      .build()
-    connection.serverTimeoutInMilliseconds = 60 * 1000 * 60 * 2
-
-    connection.on('ReceivedAttack', (msg: AttackEvent) => {
-      handleAttack(msg)
-    })
-
-    // New KotH client method on the SAME hub — no extra connection.
-    connection.on('ReceivedKothControl', (evt: KothControlEvent) => {
-      handleKothControl(evt)
-    })
-
-    // Imperative live-status indicator: paint the header LIVE dot + label
-    // directly via refs so connection-state churn never re-renders the
-    // whole Attack component.
-    const setStatus = (label: string, color: string, pulse: boolean) => {
-      if (liveLabelRef.current) liveLabelRef.current.textContent = label
-      if (liveBadgeRef.current) {
-        liveBadgeRef.current.style.color = color
-        const dot = liveBadgeRef.current.firstElementChild as HTMLElement | null
-        if (dot) {
-          dot.style.background = color
-          dot.style.boxShadow = `0 0 16px ${color}, 0 0 32px ${color}66`
-          dot.style.animation = pulse ? 'attackPulse 1.2s infinite' : 'none'
-          dot.style.opacity = pulse ? '1' : '0.6'
-        }
-      }
-    }
-    connection.onreconnecting(() =>
-      setStatus(t('game.attack.status.reconnecting', 'RECONNECTING'), '#f4b619', true)
-    )
-    connection.onreconnected(() => setStatus(t('game.attack.status.live', 'LIVE'), '#3ae85c', true))
-    connection.onclose(() => setStatus(t('game.attack.status.offline', 'OFFLINE'), '#ff2a2a', false))
-
-    connection
-      .start()
-      .then(() => setStatus(t('game.attack.status.live', 'LIVE'), '#3ae85c', true))
-      .catch((err) => {
-        setStatus(t('game.attack.status.offline', 'OFFLINE'), '#ff2a2a', false)
-        // eslint-disable-next-line no-console
-        console.warn('[attack] signalR connect failed', err)
-      })
+    const shadow = host.shadowRoot ?? host.attachShadow({ mode: 'open' })
+    shadow.innerHTML = `<style>${ARENA_CSS}</style>${ARENA_BODY}`
+    cleanupRef.current = runArena(shadow, id)
 
     return () => {
-      connection.stop().catch(() => undefined)
+      cleanupRef.current?.()
+      cleanupRef.current = null
     }
-  }, [numId, handleAttack, handleKothControl, isPreview, t])
+  }, [id])
 
-  /* ---- Preview triggers ---- */
-  const fireMockEvent = useCallback(
-    (type: SubmissionType) => {
-      const teams = scoreboard?.items ?? []
-      const team = teams[Math.floor(Math.random() * Math.max(teams.length, 1))]
-      // Pick a different team as the A&D victim so the preview fires team→team
-      // (the projectile/laser lands on the victim node, not the center HQ).
-      const others = teams.filter((t) => t.name !== team?.name)
-      const victim = others.length
-        ? others[Math.floor(Math.random() * others.length)]
-        : undefined
-      const chall = CHALLS[Math.floor(Math.random() * CHALLS.length)]
-      const evt: AttackEvent = {
-        teamName: team?.name ?? 'MOCK-TEAM',
-        teamAvatar: null,
-        teamScore: team?.score ?? null,
-        challengeTitle: chall[1],
-        category: chall[0],
-        type,
-        time: new Date().toISOString(),
-        victimTeamName: victim?.name ?? null,
-      }
-      handleAttack(evt)
-    },
-    [handleAttack, scoreboard]
-  )
-
-  /* ---- Preview: simulate a KotH takeover on a random hill ---- */
-  const fireMockKoth = useCallback(() => {
-    if (hills.length === 0) return
-    const teams = scoreboard?.items ?? []
-    const hill = hills[Math.floor(Math.random() * hills.length)]
-    // 1-in-4 events send the hill neutral; otherwise a (different) team seizes.
-    const goNeutral = Math.random() < 0.25
-    const candidates = teams.filter((tm) => tm.name !== hill.holderName)
-    const next = candidates.length
-      ? candidates[Math.floor(Math.random() * candidates.length)]
-      : teams[0]
-    handleKothControl({
-      challengeId: hill.challengeId,
-      challengeTitle: hill.title,
-      round: 1,
-      holderTeamName: goNeutral ? null : next?.name ?? null,
-      holderTeamAvatar: null,
-      previousTeamName: hill.holderName,
-      status: goNeutral ? 'neutral' : 'held',
-    })
-  }, [hills, scoreboard, handleKothControl])
-
-  /* ---- Render ---- */
-  const eventTitle = game?.title ?? 'ATTACK'
-  const sortedTop = positions.slice(0, 20)
-  // Engine-aware framing so a KotH / mixed game isn't mislabeled as pure
-  // "attacks". Kept tasteful — the existing A&D aesthetic stays intact.
-  const engineTag =
-    engine === 'koth'
-      ? t('game.attack.engine.koth', 'KING-OF-THE-HILL')
-      : engine === 'mixed'
-        ? t('game.attack.engine.mixed', 'A&D · KOTH')
-        : t('game.attack.engine.classic', 'TACTICAL-OPS')
-
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        width: '100vw',
-        height: '100vh',
-        background: '#060609',
-        color: '#d7dbe4',
-        fontFamily: '"Space Grotesk", system-ui, sans-serif',
-        overflow: 'hidden',
-        userSelect: 'none',
-      }}
-    >
-      {/* Shared keyframes + screen-shake classes.
-          Shake targets a WRAPPER (.attack-shake-zone) containing the canvas
-          + theater (HQ + team nodes), NOT <html> — so the static HUD
-          (header, footer, feed, scoreboard, FB strip, INCOMING) stays
-          anchored while only the scene jolts at impact. */}
-      <style>{`
-        .attack-shake-zone.attack-shake,
-        .attack-shake-zone.attack-quake,
-        .attack-shake-zone.attack-rumble { will-change: transform }
-        .attack-shake-zone.attack-shake{animation:attackShake .9s cubic-bezier(.36,.07,.19,.97)}
-        @keyframes attackShake{10%,90%{transform:translate3d(-1px,0,0)}20%,80%{transform:translate3d(2px,0,0)}30%,50%,70%{transform:translate3d(-4px,0,0)}40%,60%{transform:translate3d(4px,0,0)}}
-        .attack-shake-zone.attack-quake{animation:attackQuake 1.4s cubic-bezier(.36,.07,.19,.97)}
-        @keyframes attackQuake{
-          0%,100%{transform:translate3d(0,0,0) rotate(0)}
-          3%{transform:translate3d(-34px,-20px,0) rotate(-1.1deg)}
-          7%{transform:translate3d(32px,24px,0) rotate(.9deg)}
-          12%{transform:translate3d(-40px,14px,0) rotate(-1.3deg)}
-          18%{transform:translate3d(36px,-22px,0) rotate(1.1deg)}
-          25%{transform:translate3d(-28px,22px,0) rotate(-.8deg)}
-          33%{transform:translate3d(24px,-16px,0) rotate(.6deg)}
-          42%{transform:translate3d(-18px,12px,0) rotate(-.4deg)}
-          52%{transform:translate3d(14px,-10px,0)}
-          62%{transform:translate3d(-10px,7px,0)}
-          72%{transform:translate3d(7px,-5px,0)}
-          82%{transform:translate3d(-4px,3px,0)}
-          92%{transform:translate3d(2px,-1px,0)}
-        }
-        .attack-shake-zone.attack-rumble{animation:attackRumble .12s linear infinite}
-        @keyframes attackRumble{
-          0%,100%{transform:translate3d(0,0,0)}
-          25%{transform:translate3d(-1.5px,-1px,0)}
-          50%{transform:translate3d(2px,1.5px,0)}
-          75%{transform:translate3d(-1px,2px,0)}
-        }
-        @keyframes attackHexBreathe { 50% { opacity: .6 } }
-        @keyframes attackSpin { to { transform: translate(-50%,-50%) rotate(360deg) } }
-        @keyframes attackSpinRev { from { transform: translate(-50%,-50%) rotate(0) } to { transform: translate(-50%,-50%) rotate(-360deg) } }
-        @keyframes attackPulse { 50% { opacity: .4 } }
-        @keyframes attackCursor { 50% { opacity: 0 } }
-        @keyframes attackFbStrip {
-          0%   { transform: translate(-50%,-140%); opacity: 0 }
-          3%   { transform: translate(-50%,0);     opacity: 1 }
-          92%  { transform: translate(-50%,0);     opacity: 1 }
-          100% { transform: translate(-50%,-140%); opacity: 0 }
-        }
-        @keyframes attackTickerIn {
-          from { opacity: 0; transform: translate(-50%, 12px) }
-          to   { opacity: 1; transform: translate(-50%, 0)    }
-        }
-      `}</style>
-
-      {/* Scanlines + grid backdrop */}
-      <div
-        aria-hidden
-        style={{
-          position: 'fixed',
-          inset: 0,
-          pointerEvents: 'none',
-          zIndex: 1,
-          background:
-            'repeating-linear-gradient(to bottom, transparent 0 2px, rgba(255,255,255,.018) 2px 3px)',
-        }}
-      />
-      <div
-        aria-hidden
-        style={{
-          position: 'fixed',
-          inset: 0,
-          pointerEvents: 'none',
-          zIndex: 1,
-          backgroundImage:
-            'linear-gradient(#14161f 1px, transparent 1px), linear-gradient(90deg, #14161f 1px, transparent 1px)',
-          backgroundSize: '48px 48px',
-          opacity: 0.28,
-        }}
-      />
-
-      {/* Header */}
-      <div
-        style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          height: HEADER_H,
-          zIndex: 30,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: `0 ${GUTTER}px`,
-          fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-          fontSize: 11,
-          color: '#6b7183',
-          letterSpacing: '.22em',
-          textTransform: 'uppercase',
-          background:
-            'linear-gradient(to bottom, rgba(12,13,18,.9), rgba(12,13,18,.5))',
-          borderBottom: '1px solid rgba(255,42,42,.3)',
-        }}
-      >
-        <span>
-          <span style={{ color: '#ff2a2a' }}>▙</span>
-          &nbsp;{eventTitle} //// {engineTag}
-        </span>
-        <span>
-          <span
-            ref={liveBadgeRef}
-            style={{ color: '#3ae85c', display: 'inline-flex', alignItems: 'center', gap: 8 }}
-          >
-            <span
-              style={{
-                width: 12,
-                height: 12,
-                borderRadius: '50%',
-                background: '#3ae85c',
-                boxShadow: '0 0 16px #3ae85c, 0 0 32px rgba(58,232,92,.4)',
-                animation: 'attackPulse 1.2s infinite',
-                flexShrink: 0,
-              }}
-            />
-            <span ref={liveLabelRef}>{t('game.attack.status.live', 'LIVE')}</span>
-          </span>
-          &nbsp;//&nbsp; <span ref={clockRef}>{new Date().toISOString().slice(11, 19)}</span> UTC
-        </span>
-      </div>
-
-      {/* Footer */}
-      <div
-        style={{
-          position: 'fixed',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          height: FOOTER_H,
-          zIndex: 30,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: `0 ${GUTTER}px`,
-          fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-          fontSize: 10.5,
-          color: '#6b7183',
-          letterSpacing: '.22em',
-          textTransform: 'uppercase',
-          background: 'linear-gradient(to top, rgba(12,13,18,.9), rgba(12,13,18,.5))',
-          borderTop: '1px solid rgba(255,211,74,.2)',
-        }}
-      >
-        <span>
-          SIGNAL NOMINAL &nbsp;//&nbsp; {positions.length} TEAMS &nbsp;//&nbsp; {eventCount} EVENTS
-          {hasHills && (
-            <>
-              &nbsp;//&nbsp; {hills.length}{' '}
-              {t('game.attack.koth.hillsLabel', 'HILLS')} &nbsp;//&nbsp; {seizeCount}{' '}
-              {t('game.attack.koth.seizesLabel', 'SEIZES')}
-            </>
-          )}
-        </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {audioMuted && (
-            <span style={{ color: '#ff6262', fontWeight: 700 }}>MUTED</span>
-          )}
-          {paused && (
-            <span style={{ color: '#f4b619', fontWeight: 700 }}>PAUSED</span>
-          )}
-          <span style={{ opacity: 0.6 }}>[M] MUTE · [P] PAUSE · [R] REPLAY-FB</span>
-        </span>
-      </div>
-
-      {/* Small-viewport / portrait warning.  The attack page is designed
-          for large landscape displays (projectors, 1080p+); anything
-          smaller collapses the HUD into the play area.  Show a nudge
-          instead of rendering a broken layout. */}
-      {(isTooSmall || isUnsupported) && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 220,
-            background: '#060609',
-            color: '#d7dbe4',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-            textAlign: 'center',
-            padding: 32,
-          }}
-        >
-          <div style={{ fontSize: 60, marginBottom: 16 }}>↺</div>
-          <div
-            style={{
-              fontSize: 14,
-              letterSpacing: '.35em',
-              color: '#f4b619',
-              marginBottom: 10,
-              textTransform: 'uppercase',
-            }}
-          >
-            {t('game.attack.gate.title', 'LANDSCAPE DISPLAY REQUIRED')}
-          </div>
-          <div style={{ fontSize: 12, letterSpacing: '.1em', color: '#6b7183', maxWidth: 420 }}>
-            {isUnsupported
-              ? t(
-                  'game.attack.gate.unsupported',
-                  'The attack feed needs at least 700px of horizontal space. Open it on a laptop, projector, or cast to a larger screen.'
-                )
-              : t(
-                  'game.attack.gate.rotate',
-                  'Rotate your device to landscape, or open on a larger screen for the full visualization.'
-                )}
-          </div>
-        </div>
-      )}
-
-      {/* Fullscreen audio-unlock overlay — doubles as a title card so
-          the page looks intentional before the user clicks.  Dismisses
-          on any click/keydown, which also satisfies the WebAudio
-          user-gesture requirement. */}
-      {showAudioToast && (
-        <div
-          role="button"
-          tabIndex={0}
-          onClick={() => {
-            setAudioEnabled(true)
-            setShowAudioToast(false)
-            unlockAudio()
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              setAudioEnabled(true)
-              setShowAudioToast(false)
-              unlockAudio()
-            }
-          }}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 210,
-            background: 'rgba(6,6,9,.92)',
-            backdropFilter: 'blur(4px)',
-            WebkitBackdropFilter: 'blur(4px)',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            textAlign: 'center',
-            padding: 24,
-            fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-          }}
-        >
-          <div
-            style={{
-              fontSize: 12,
-              letterSpacing: '.4em',
-              color: '#ff2a2a',
-              marginBottom: 20,
-            }}
-          >
-            ▙ GZCTF // TACTICAL-OPS
-          </div>
-          <div
-            style={{
-              fontSize: 'clamp(32px, 6vw, 72px)',
-              fontWeight: 700,
-              letterSpacing: '.12em',
-              color: '#ffd34a',
-              textTransform: 'uppercase',
-              textShadow: '0 0 32px rgba(255,211,74,.5)',
-              maxWidth: '70vw',
-              lineHeight: 1.1,
-            }}
-          >
-            {eventTitle}
-          </div>
-          <div
-            style={{
-              fontSize: 12,
-              letterSpacing: '.35em',
-              color: '#6b7183',
-              marginTop: 20,
-            }}
-          >
-            {t('game.attack.overlay.subtitle', 'LIVE ATTACK FEED · PUBLIC')}
-          </div>
-          <div
-            style={{
-              marginTop: 48,
-              padding: '14px 32px',
-              background: '#f4b619',
-              color: '#0b0b11',
-              fontSize: 14,
-              fontWeight: 700,
-              letterSpacing: '.25em',
-              textTransform: 'uppercase',
-              animation: 'attackPulse 1.4s infinite',
-            }}
-          >
-            ▶ {t('game.attack.overlay.begin', 'CLICK ANYWHERE TO BEGIN')}
-          </div>
-        </div>
-      )}
-
-      {/* Hidden first-blood audio */}
-      <audio
-        ref={audioRef}
-        src={`/attack/firstblood.mp3?v=${import.meta.env.VITE_APP_GIT_SHA ?? 'dev'}`}
-        preload="auto"
-        style={{ display: 'none' }}
-      />
-
-      {/* Feed panel (left) */}
-      <FeedPanel
-        left={GUTTER}
-        top={HEADER_H + GUTTER}
-        bottom={FOOTER_H + GUTTER}
-        width={
-          Math.min(FEED_W_MAX, Math.max(FEED_W_MIN, viewport.w * 0.19))
-        }
-        lines={feedLines}
-      />
-
-      {/* Scoreboard + stats (right) */}
-      <ScoreboardPanel
-        right={GUTTER}
-        top={HEADER_H + GUTTER}
-        width={
-          Math.min(BOARD_W_MAX, Math.max(BOARD_W_MIN, viewport.w * 0.16))
-        }
-        top5={top5}
-        eventCount={eventCount}
-        fbCount={fbCount}
-        atkRateRef={atkRateRef}
-        hasHills={hasHills}
-        hillCount={hills.length}
-        seizeCount={seizeCount}
-      />
-
-      {/* Single shake container — hex + canvas + title all inside so they
-          share one transform and can't desync during the quake.  Inner
-          z-indices: theater=5 (hex behind canvas), canvas=12, title=15.
-          HUD panels outside this wrapper stay anchored to the viewport. */}
-      <div
-        className="attack-shake-zone"
-        style={{ position: 'fixed', inset: 0, pointerEvents: 'none' }}
-      >
-      <div
-        style={{ position: 'fixed', inset: 0, zIndex: 5, pointerEvents: 'none' }}
-      >
-        {/* Inner dashed ring */}
-        <div
-          style={{
-            position: 'absolute',
-            left: cx,
-            top: cy,
-            width: ringRx * 0.75 * 2,
-            height: ringRy * 0.75 * 2,
-            border: '1px dashed rgba(255,42,42,.22)',
-            borderRadius: '50%',
-            transform: 'translate(-50%,-50%)',
-            animation: 'attackSpin 40s linear infinite',
-          }}
-        />
-        {/* Outer dashed ring (gold) */}
-        <div
-          style={{
-            position: 'absolute',
-            left: cx,
-            top: cy,
-            width: ringRx * 2,
-            height: ringRy * 2,
-            border: '1px dashed rgba(255,211,74,.15)',
-            borderRadius: '50%',
-            transform: 'translate(-50%,-50%)',
-            animation: 'attackSpinRev 70s linear infinite',
-          }}
-        />
-
-        {/* HQ hex — outer wrapper holds the centering transform (static);
-            the inner hex element is what hqPunch animates (scale/rotate only).
-            Sits above the canvas so the title stays readable during the charge. */}
-        <div
-          style={{
-            position: 'absolute',
-            left: '50%',
-            top: '50%',
-            transform: 'translate(-50%,-50%)',
-            zIndex: 15,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            pointerEvents: 'none',
-          }}
-        >
-          {/* Hex SHAPE only — sits at z:5 below the canvas so the laser
-              visibly strikes the hex outline.  Text labels live in a
-              separate z:15 overlay below. */}
-          <div
-            ref={hexRef}
-            style={{
-              width: hqSize,
-              height: hqSize * 1.12,
-              position: 'relative',
-              clipPath: 'polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)',
-              background:
-                'radial-gradient(circle at center, #1a1214 0%, #141018 55%, rgba(20,16,24,0.0) 100%)',
-              willChange: 'transform',
-            }}
-          />
-        </div>
-
-        {/* Team nodes */}
-        {positions.map((t) => {
-          const isLeft = t.x < viewport.w / 2
-          const nameShort = t.name.length > 18 ? `${t.name.slice(0, 17)}…` : t.name
-          return (
-            <div
-              key={t.id}
-              title={t.name}
-              style={{
-                position: 'absolute',
-                left: t.x,
-                top: t.y,
-                transform: 'translate(-50%,-50%)',
-                color: '#d7dbe4',
-                fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-                fontSize: 10.5,
-                letterSpacing: '.06em',
-                textTransform: 'uppercase',
-                display: 'flex',
-                flexDirection: isLeft ? 'row' : 'row-reverse',
-                alignItems: 'center',
-                gap: t.labelled ? 6 : 0,
-                whiteSpace: 'nowrap',
-                pointerEvents: 'auto',
-              }}
-            >
-              <span
-                style={{
-                  width: t.labelled ? 10 : 8,
-                  height: t.labelled ? 10 : 8,
-                  borderRadius: '50%',
-                  background: t.labelled ? '#6b7183' : '#ff2a2a',
-                  opacity: t.labelled ? 1 : 0.5,
-                  boxShadow: '0 0 6px currentColor',
-                  flexShrink: 0,
-                }}
-              />
-              {t.labelled && <span>{nameShort}</span>}
-            </div>
-          )
-        })}
-
-        {/* KotH hill objective nodes — crown glyphs on an inner ring around
-            the HQ, tinted to the current holder's color (grey = neutral).
-            DOM overlays, matching how team nodes / HQ labels are rendered;
-            the takeover beam + capture pulse are drawn on the pixi canvas. */}
-        {hills.map((h, i) => {
-          const p = hillPositions[i]
-          if (!p) return null
-          const tint = colorForTeam(h.holderName)
-          const neutral = !h.holderName
-          const titleShort = h.title.length > 14 ? `${h.title.slice(0, 13)}…` : h.title
-          return (
-            <div
-              key={h.challengeId}
-              title={
-                h.holderName
-                  ? `${h.title} · ${h.holderName}`
-                  : `${h.title} · ${t('game.attack.koth.neutral', 'UNCONTROLLED')}`
-              }
-              style={{
-                position: 'absolute',
-                left: p.x,
-                top: p.y,
-                transform: 'translate(-50%,-50%)',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 4,
-                pointerEvents: 'auto',
-                zIndex: 16,
-              }}
-            >
-              <div
-                style={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: '50%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 16,
-                  lineHeight: 1,
-                  color: neutral ? KOTH_NEUTRAL : '#0b0b11',
-                  background: neutral ? 'rgba(12,13,18,.9)' : tint,
-                  border: `2px solid ${tint}`,
-                  boxShadow: neutral ? 'none' : `0 0 14px ${tint}, 0 0 28px ${tint}66`,
-                  transition: 'background .25s ease, box-shadow .25s ease, border-color .25s ease',
-                }}
-              >
-                ♛
-              </div>
-              <span
-                style={{
-                  fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-                  fontSize: 9.5,
-                  letterSpacing: '.08em',
-                  textTransform: 'uppercase',
-                  color: neutral ? KOTH_NEUTRAL : tint,
-                  whiteSpace: 'nowrap',
-                  textShadow: '0 1px 3px #000',
-                }}
-              >
-                {titleShort}
-              </span>
-            </div>
-          )
-        })}
-      </div>
-
-      {/* HQ text labels — inside the shake wrapper at z:15 (above the
-          pixi canvas) so the title + TARGET + OPS stay legible on top
-          of the charge halo, and move in perfect sync with the hex. */}
-      <div
-        style={{
-          position: 'fixed',
-          left: '50%',
-          top: '50%',
-          transform: 'translate(-50%,-50%)',
-          zIndex: 15,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          pointerEvents: 'none',
-          width: hqSize - 60,
-          textAlign: 'center',
-        }}
-      >
-        <div
-          style={{
-            fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-            fontSize: 10,
-            letterSpacing: '.35em',
-            color: '#f4b619',
-            opacity: 0.85,
-            marginBottom: 4,
-          }}
-        >
-          // TARGET
-        </div>
-        <div
-          title={eventTitle}
-          style={{
-            fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-            fontSize: 24,
-            fontWeight: 700,
-            textTransform: 'uppercase',
-            letterSpacing: '.12em',
-            color: '#ffd34a',
-            lineHeight: 1.15,
-            textShadow: '0 0 22px rgba(255,211,74,.55)',
-            maxWidth: hqSize - 30,
-            // Up to 2 lines, then ellipsize — long titles like
-            // "CSIRT - Finals 2026" now wrap cleanly instead of getting
-            // truncated to "CSIRT - Final…" on narrow hexes.
-            display: '-webkit-box',
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
-            wordBreak: 'break-word',
-            textAlign: 'center',
-          }}
-        >
-          {eventTitle}
-        </div>
-        <div
-          style={{
-            fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-            fontSize: 11,
-            letterSpacing: '.35em',
-            color: '#94a1b8',
-            marginTop: 12,
-          }}
-        >
-          OPS · CONTROL · HQ
-        </div>
-      </div>
-      </div>{/* end .attack-shake-zone wrapper */}
-
-      {/* Rank column (active-only layout) */}
-      {layout === 'active' && rankColumn && (
-        <div
-          style={{
-            position: 'fixed',
-            left: rankColumn.x,
-            top: rankColumn.y,
-            width: rankColumn.w,
-            height: rankColumn.h,
-            zIndex: 18,
-            background: '#0c0d12',
-            padding: '14px 16px',
-            overflow: 'hidden',
-            fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-          }}
-        >
-          <div
-            style={{
-              fontSize: 10,
-              letterSpacing: '.25em',
-              color: '#3ae85c',
-              marginBottom: 10,
-            }}
-          >
-            // ACTIVE · TOP 20 (of {positions.length})
-          </div>
-          {sortedTop.map((t) => (
-            <div
-              key={t.id}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '28px 1fr',
-                gap: 6,
-                fontSize: 11.5,
-                padding: '3px 0',
-                borderBottom: '1px dashed #1c1f2a',
-              }}
-            >
-              <span style={{ color: '#ffd34a', fontWeight: 700 }}>
-                {String(t.rank).padStart(2, '0')}
-              </span>
-              <span
-                style={{
-                  color: '#d7dbe4',
-                  letterSpacing: '.06em',
-                  textTransform: 'uppercase',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {t.name}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* PixiJS canvas — inside the shake wrapper so it moves with theater + title. */}
-      <canvas
-        ref={canvasRef}
-        style={{
-          position: 'fixed',
-          inset: 0,
-          width: '100vw',
-          height: '100vh',
-          zIndex: 12,
-          pointerEvents: 'none',
-        }}
-      />
-
-      {/* SOLVED ticker — big readable call-out for the projector audience. */}
-      {ticker && (
-        <div
-          key={ticker.id}
-          style={{
-            position: 'fixed',
-            left: '50%',
-            bottom: FOOTER_H + 14,
-            transform: 'translateX(-50%)',
-            zIndex: 35,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 14,
-            padding: '10px 22px',
-            background: 'rgba(12,13,18,.92)',
-            border: `2px solid ${colorForType(ticker.type)}`,
-            fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-            fontSize: 14,
-            letterSpacing: '.18em',
-            textTransform: 'uppercase',
-            color: '#d7dbe4',
-            maxWidth: '70vw',
-            animation: 'attackTickerIn .3s ease-out both',
-            pointerEvents: 'none',
-          }}
-        >
-          <span
-            style={{
-              background: colorForType(ticker.type),
-              color: '#0b0b11',
-              padding: '3px 10px',
-              fontWeight: 700,
-              letterSpacing: '.2em',
-              fontSize: 11,
-            }}
-          >
-            {ticker.type === SubmissionType.FirstBlood
-              ? '1ST BLOOD'
-              : ticker.type === SubmissionType.SecondBlood
-                ? '2ND BLOOD'
-                : ticker.type === SubmissionType.ThirdBlood
-                  ? '3RD BLOOD'
-                  : 'SOLVED'}
-          </span>
-          <span style={{ fontWeight: 700, color: '#ffd34a' }}>{ticker.teamName}</span>
-          <span style={{ color: '#6b7183' }}>»</span>
-          <span style={{ color: '#94a1b8' }}>{ticker.category}</span>
-          <span style={{ color: '#6b7183' }}>/</span>
-          <span style={{ color: '#d7dbe4' }}>{ticker.challengeTitle}</span>
-        </div>
-      )}
-
-      {/* First-blood strip (slides down from header) */}
-      {firstBlood && (
-        <div
-          key={firstBlood.id}
-          style={{
-            position: 'fixed',
-            left: '50%',
-            top: HEADER_H + 12,
-            transform: 'translate(-50%,-140%)',
-            zIndex: 40,
-            display: 'flex',
-            alignItems: 'stretch',
-            fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-            fontWeight: 700,
-            textTransform: 'uppercase',
-            border: '2px solid #0b0b11',
-            animation: `attackFbStrip ${FIRST_BLOOD_BANNER_MS}ms ease-out both`,
-          }}
-        >
-          <div
-            style={{
-              background: '#ff2a2a',
-              color: '#0b0b11',
-              padding: '10px 18px',
-              letterSpacing: '.24em',
-              fontSize: 14,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-            }}
-          >
-            <Icon path={mdiWater} size={0.85} color="#0b0b11" />
-            <span>FIRST BLOOD</span>
-          </div>
-          <div
-            style={{
-              background: '#0b0b11',
-              color: '#f4b619',
-              padding: '10px 18px',
-              letterSpacing: '.22em',
-              fontSize: 12,
-              display: 'flex',
-              alignItems: 'center',
-              borderLeft: '2px solid #ff2a2a',
-            }}
-          >
-            {firstBlood.category} / {firstBlood.challengeTitle} · {firstBlood.teamName}
-          </div>
-        </div>
-      )}
-
-      {/* Dev controls — only when ?preview=N is in the URL. N=0 still
-          spawns the panel so the developer can click buttons; they can
-          hide it with the × and re-open via page reload. */}
-      {isPreview && showDevPanel && (
-        <div
-          style={{
-            position: 'fixed',
-            left: 20,
-            bottom: FOOTER_H + 16,
-            zIndex: 80,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 6,
-            background: '#14141f',
-            padding: 10,
-            border: '2px solid #ff2a2a',
-            fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              fontSize: 10,
-              letterSpacing: '.25em',
-              color: '#ff2a2a',
-            }}
-          >
-            <span>// DEV CONTROLS · {previewTeams} teams</span>
-            <button
-              onClick={() => setShowDevPanel(false)}
-              aria-label="Hide dev panel"
-              style={{
-                background: 'none',
-                border: 'none',
-                color: '#6b7183',
-                cursor: 'pointer',
-                fontSize: 14,
-                padding: '0 4px',
-                marginLeft: 10,
-              }}
-            >
-              ×
-            </button>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              onClick={() => fireMockEvent(SubmissionType.FirstBlood)}
-              style={previewBtn('#ff2a2a', '#ffffff')}
-            >
-              FB LASER
-            </button>
-            <button
-              onClick={() => fireMockEvent(SubmissionType.Normal)}
-              style={previewBtn('#3ae85c', '#0b0b11')}
-            >
-              NORMAL
-            </button>
-            <button
-              onClick={() => fireMockEvent(SubmissionType.SecondBlood)}
-              style={previewBtn('#f4b619', '#0b0b11')}
-            >
-              AMBER
-            </button>
-            <button
-              onClick={() => fireMockEvent(SubmissionType.Unaccepted)}
-              style={previewBtn('#ff6262', '#0b0b11')}
-            >
-              WRONG
-            </button>
-            <button
-              onClick={() => fireMockKoth()}
-              style={previewBtn('#9b6bff', '#ffffff')}
-            >
-              HILL
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  )
+  return <div ref={hostRef} style={{ position: 'fixed', inset: 0, zIndex: 100 }} />
 }
-
-const previewBtn = (bg: string, fg: string): React.CSSProperties => ({
-  background: bg,
-  color: fg,
-  border: 'none',
-  padding: '8px 14px',
-  fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-  fontSize: 11,
-  fontWeight: 700,
-  letterSpacing: '.15em',
-  textTransform: 'uppercase',
-  cursor: 'pointer',
-})
-
-/* -------------------------------------------------------------------------- */
-/* Feed panel                                                                  */
-/* -------------------------------------------------------------------------- */
-
-interface FeedPanelProps {
-  left: number
-  top: number
-  bottom: number
-  width: number
-  lines: FeedLine[]
-}
-
-const FeedPanel: FC<FeedPanelProps> = ({ left, top, bottom, width, lines }) => {
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        left,
-        top,
-        bottom,
-        width,
-        zIndex: 20,
-        background: '#0c0d12',
-        padding: '16px 18px 14px',
-        overflow: 'hidden',
-        contain: 'layout style paint' as React.CSSProperties['contain'],
-      }}
-    >
-      {/* Bracket corners */}
-      <Bracket placement="tl" />
-      <Bracket placement="tr" />
-      <Bracket placement="bl" />
-      <Bracket placement="br" />
-
-      <div
-        style={{
-          fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-          fontSize: 10,
-          letterSpacing: '.25em',
-          color: '#ff2a2a',
-          marginBottom: 12,
-        }}
-      >
-        // EVENT STREAM
-      </div>
-      {lines.map((line) => (
-        <div
-          key={line.key}
-          style={{
-            fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-            fontSize: 12,
-            lineHeight: 1.5,
-            marginBottom: 3,
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}
-        >
-          <span style={{ color: '#6b7183' }}>{line.time}</span>{' '}
-          {line.koth ? (
-            <span
-              style={{
-                color: line.koth.lost ? '#6b7183' : '#9b6bff',
-                fontWeight: line.koth.lost ? 400 : 700,
-              }}
-            >
-              ♛ {line.koth.text}
-            </span>
-          ) : (
-            <span
-              style={{
-                color: lineColorFor(line.type),
-                fontWeight: line.type === SubmissionType.FirstBlood ? 700 : 400,
-                opacity: line.type === SubmissionType.Unaccepted ? 0.55 : 1,
-              }}
-            >
-              {feedPrefix(line.type)}
-              {line.teamName} :: {line.challengeTitle}
-            </span>
-          )}
-        </div>
-      ))}
-      <div
-        style={{
-          fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-          fontSize: 12,
-          lineHeight: 1.5,
-          color: '#6b7183',
-        }}
-      >
-        $ gzctf.watch()
-        <span
-          className="attack-cursor"
-          style={{
-            display: 'inline-block',
-            width: 7,
-            height: 12,
-            background: '#3ae85c',
-            verticalAlign: -1,
-            animation: 'attackCursor 1s steps(2,start) infinite',
-            marginLeft: 2,
-          }}
-        />
-      </div>
-    </div>
-  )
-}
-
-const lineColorFor = (t: SubmissionType): string => {
-  switch (t) {
-    case SubmissionType.FirstBlood:
-      return '#ff2a2a'
-    case SubmissionType.Normal:
-      return '#3ae85c'
-    case SubmissionType.SecondBlood:
-    case SubmissionType.ThirdBlood:
-      return '#f4b619'
-    default:
-      return '#ff6262'
-  }
-}
-
-const Bracket: FC<{ placement: 'tl' | 'tr' | 'bl' | 'br' }> = ({ placement }) => {
-  // Offset the bracket by 2px so its outer edge doesn't double over the
-  // parent's own border on HiDPI screens (visible 3-4px line).
-  const base: React.CSSProperties = {
-    position: 'absolute',
-    width: 16,
-    height: 16,
-    border: '2px solid #ff2a2a',
-    pointerEvents: 'none',
-  }
-  if (placement === 'tl')
-    Object.assign(base, { top: -2, left: -2, borderRight: 'none', borderBottom: 'none' })
-  if (placement === 'tr')
-    Object.assign(base, { top: -2, right: -2, borderLeft: 'none', borderBottom: 'none' })
-  if (placement === 'bl')
-    Object.assign(base, { bottom: -2, left: -2, borderRight: 'none', borderTop: 'none' })
-  if (placement === 'br')
-    Object.assign(base, { bottom: -2, right: -2, borderLeft: 'none', borderTop: 'none' })
-  return <div style={base} />
-}
-
-/* -------------------------------------------------------------------------- */
-/* Scoreboard + stats panel                                                    */
-/* -------------------------------------------------------------------------- */
-
-interface ScoreboardPanelProps {
-  right: number
-  top: number
-  width: number
-  top5: ScoreboardItem[]
-  eventCount: number
-  fbCount: number
-  atkRateRef: React.RefObject<HTMLSpanElement | null>
-  hasHills: boolean
-  hillCount: number
-  seizeCount: number
-}
-
-const ScoreboardPanel: FC<ScoreboardPanelProps> = ({
-  right,
-  top,
-  width,
-  top5,
-  eventCount,
-  fbCount,
-  atkRateRef,
-  hasHills,
-  hillCount,
-  seizeCount,
-}) => {
-  const { t } = useTranslation()
-  const rowCount = Math.max(top5.length, 1)
-  // Board height: 36px header + rowCount * 32px row + 30px padding.
-  // Using the actual row count instead of a hardcoded 6 avoids the
-  // ~100px gap below an empty-ish scoreboard.
-  const boardHeight = 36 + rowCount * 32 + 30
-  const statsTop = top + boardHeight + 10
-
-  return (
-    <>
-      <div
-        style={{
-          position: 'fixed',
-          right,
-          top,
-          width,
-          zIndex: 20,
-          background: '#0c0d12',
-          padding: '16px 18px 14px',
-          contain: 'layout style paint' as React.CSSProperties['contain'],
-        }}
-      >
-        <Bracket placement="tl" />
-        <Bracket placement="tr" />
-        <Bracket placement="bl" />
-        <Bracket placement="br" />
-        <div
-          style={{
-            fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-            fontSize: 10,
-            letterSpacing: '.25em',
-            color: '#f4b619',
-            marginBottom: 12,
-            display: 'flex',
-            justifyContent: 'space-between',
-          }}
-        >
-          <span>// SCOREBOARD</span>
-          <span>TOP {rowCount}</span>
-        </div>
-        {top5.map((t) => (
-          <div
-            key={t.id}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '32px 1fr auto',
-              alignItems: 'baseline',
-              padding: '6px 0',
-              borderBottom: '1px dashed #20232d',
-              gap: 8,
-            }}
-          >
-            <span
-              style={{
-                fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-                fontWeight: 700,
-                fontSize: 20,
-                color: '#ffd34a',
-                lineHeight: 1,
-                textAlign: 'right',
-                textShadow: t.rank === 1 ? '0 0 14px rgba(255,211,74,.6)' : undefined,
-              }}
-            >
-              {String(t.rank).padStart(2, '0')}
-            </span>
-            <span
-              style={{
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                letterSpacing: '.07em',
-                fontSize: 12,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {t.name}
-            </span>
-            <span
-              style={{
-                fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-                fontWeight: 500,
-                color: '#6b7183',
-                fontSize: 11.5,
-              }}
-            >
-              {t.score}
-            </span>
-          </div>
-        ))}
-        {top5.length === 0 && (
-          <div style={{ color: '#475569', fontSize: 12 }}>
-            {t('game.attack.scoreboard.empty', 'No scoreboard yet')}
-          </div>
-        )}
-      </div>
-      <div
-        style={{
-          position: 'fixed',
-          right,
-          top: statsTop,
-          width,
-          zIndex: 20,
-          background: '#0c0d12',
-          padding: '12px 18px',
-          contain: 'layout style paint' as React.CSSProperties['contain'],
-        }}
-      >
-        <div
-          style={{
-            fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-            fontSize: 10,
-            letterSpacing: '.25em',
-            color: '#3ae85c',
-            marginBottom: 8,
-          }}
-        >
-          // STATS
-        </div>
-        <StatsRow label="ATK_RATE" value="0/min" valueRef={atkRateRef} />
-        <StatsRow label="1ST_BLOOD" value={String(fbCount)} />
-        <StatsRow label="EVENTS" value={String(eventCount)} />
-        {hasHills && (
-          <>
-            <StatsRow label={t('game.attack.koth.hillsStat', 'HILLS')} value={String(hillCount)} />
-            <StatsRow
-              label={t('game.attack.koth.seizesStat', 'HILL_SEIZES')}
-              value={String(seizeCount)}
-            />
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                marginTop: 8,
-                paddingTop: 8,
-                borderTop: '1px dashed #20232d',
-                fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-                fontSize: 10,
-                color: '#6b7183',
-                letterSpacing: '.06em',
-              }}
-            >
-              <span style={{ color: '#ffd34a', fontSize: 14, lineHeight: 1 }}>♛</span>
-              <span>{t('game.attack.koth.legend', 'HILL = OBJECTIVE · tint = holder')}</span>
-            </div>
-          </>
-        )}
-      </div>
-    </>
-  )
-}
-
-const StatsRow: FC<{
-  label: string
-  value: string
-  valueRef?: React.RefObject<HTMLSpanElement | null>
-}> = ({ label, value, valueRef }) => (
-  <div
-    style={{
-      display: 'flex',
-      justifyContent: 'space-between',
-      padding: '3px 0',
-      fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-      fontSize: 11,
-    }}
-  >
-    <span style={{ color: '#6b7183', letterSpacing: '.1em' }}>{label}</span>
-    <span ref={valueRef} style={{ color: '#d7dbe4', fontWeight: 700 }}>{value}</span>
-  </div>
-)
 
 export default Attack
