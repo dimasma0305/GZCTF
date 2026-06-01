@@ -191,6 +191,10 @@ const ARENA_CSS = `
   .btn:hover{filter:brightness(1.15)}
   .btn.ghost{background:transparent;color:var(--dim);border:1px solid var(--line2);box-shadow:none}
   .btn.ghost.on{color:#0a0612;background:var(--cyan);border-color:var(--cyan)}
+  .btn.fb-ad{background:var(--red);box-shadow:0 0 14px rgba(255,77,94,.5)}
+  .btn.fb-jeo{background:var(--amber);box-shadow:0 0 14px rgba(255,198,55,.5)}
+  .btn.fb-koth{background:#9d6bff;color:#0a0612;box-shadow:0 0 14px rgba(157,107,255,.5)}
+  #fbBtns{display:inline-flex;gap:10px}
   .sp{flex:1}
   .ticker{overflow:hidden;white-space:nowrap;max-width:46%}
   .ticker .run{display:inline-block;padding-left:100%;animation:run 26s linear infinite;
@@ -368,6 +372,11 @@ const ARENA_BODY = `
       <span class="label">// VIEW</span>
       <button class="btn ghost on" id="petalBtn">PETALS</button>
       <button class="btn ghost on" id="scanBtn">SCANLINE</button>
+      <span id="fbBtns" style="display:none">
+        <button class="btn fb-ad" id="fbAdBtn">FB A&amp;D</button>
+        <button class="btn fb-jeo" id="fbJeoBtn">FB JEO</button>
+        <button class="btn fb-koth" id="fbKothBtn">FB KOTH</button>
+      </span>
       <span class="sp"></span>
       <div class="ticker"><span class="run" id="ticker"></span></div>
     </div>
@@ -441,7 +450,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
 
   let TEAMS: any[] = [], SERVICES: any[] = [], HILLS: any[] = []
   let round = 0, totalFlags = 0, totalEvents = 0, cinema = false
-  let matchFirstBlood = false, sinceEvent = 0
+  let matchFirstBlood = false, firstCrown = false, sinceEvent = 0
   let tNow = Date.now(), tickLeft = 0, liveRoundEndsAt: number | null = null
   const speed = 1
   let petals = true
@@ -857,23 +866,53 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     totalFlags++; refreshRank(); refreshStats()
   }
 
-  function fbCinematic(atkr: any, vic: any, onImpact: () => void) {
+  // Opponent glyphs for the non-A&D cinematics (jeopardy flag / KotH crown).
+  const flagGlyph = (col: string) => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="fgg" cx="50%" cy="40%" r="70%"><stop offset="0%" stop-color="${col}" stop-opacity=".4"/><stop offset="100%" stop-color="#0a0818"/></radialGradient></defs><rect width="64" height="64" fill="url(#fgg)"/><rect x="20" y="11" width="3.2" height="43" rx="1.6" fill="#cfd2ee"/><path d="M23 13 L52 20 L23 31 Z" fill="${col}" stroke="#0a0818" stroke-width="1"/><circle cx="21.6" cy="10" r="3.2" fill="${col}"/></svg>`
+  const crownGlyph = (col: string) => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="cgg" cx="50%" cy="40%" r="70%"><stop offset="0%" stop-color="${col}" stop-opacity=".45"/><stop offset="100%" stop-color="#0a0818"/></radialGradient></defs><rect width="64" height="64" fill="url(#cgg)"/><path d="M13 45 L11 21 L24 34 L32 15 L40 34 L53 21 L51 45 Z" fill="${col}" stroke="#0a0818" stroke-width="1.4"/><rect x="13" y="44" width="38" height="8" rx="2.5" fill="${col}"/><circle cx="11" cy="19" r="3.2" fill="#fff"/><circle cx="53" cy="19" r="3.2" fill="#fff"/><circle cx="32" cy="13" r="3.6" fill="#fff"/></svg>`
+
+  // Per-kind first-blood theming. A&D = blood clash, Jeopardy = flag capture,
+  // KotH = coronation ("FIRST CROWN").
+  const FB_THEME: any = {
+    ad: { title: 'FIRST BLOOD', kanji: 'ファーストブラッド', accent: '#ff3b5b', accent2: '#ff2350', vs: 'VS', tag: 'A&D' },
+    jeopardy: { title: 'FIRST BLOOD', kanji: '初撃破', accent: '#ffc637', accent2: '#ff9a1f', vs: '⚑', tag: 'JEOPARDY' },
+    koth: { title: 'FIRST CROWN', kanji: '初戴冠', accent: '#9d6bff', accent2: '#b98bff', vs: '♛', tag: 'KOTH' },
+  }
+
+  // opt: { kind, oppName, oppColor, oppPortrait(html), beamTo, onImpact }
+  function fbCinematic(atkr: any, opt: any) {
     cinema = true
+    const th = FB_THEME[opt.kind] || FB_THEME.ad
+    const oppName = opt.oppName || 'THE FIELD'
+    const oppColor = opt.oppColor || th.accent
     const ov: any = $('fbOverlay')
-    const vicName = vic ? vic.name : 'THE FIELD', vicColor = vic ? vic.color : '#ff3b5b'
-    $('fbSub').innerHTML = `<span style="color:${atkr.color}">${esc(atkr.name)}</span> &nbsp;&#9656;&nbsp; <span style="color:${vicColor}">${esc(vicName)}</span>`
+    const ttl: any = root.querySelector('.fb-title')
+    if (ttl) { ttl.textContent = th.title; ttl.style.textShadow = `4px 0 ${th.accent2}, -4px 0 #27e3ff, 0 0 26px ${th.accent}, 0 0 60px ${th.accent}` }
+    const kj: any = root.querySelector('.fb-kanji'); if (kj) { kj.textContent = th.kanji; kj.style.color = th.accent; kj.style.textShadow = `0 0 18px ${th.accent}` }
+    const vsx: any = root.querySelector('.fb-vs-x'); if (vsx) { vsx.textContent = th.vs; vsx.style.textShadow = `0 0 14px ${th.accent},2px 0 ${th.accent2},-2px 0 #27e3ff` }
+    const slash: any = root.querySelector('.fb-slash'); if (slash) { slash.style.background = `linear-gradient(90deg,transparent,#fff,${th.accent},#fff,transparent)`; slash.style.boxShadow = `0 0 30px ${th.accent}` }
+    root.querySelectorAll('.fb-fighter .por').forEach((p: any) => { p.style.boxShadow = `0 0 26px ${th.accent}` })
+    $('fbSub').innerHTML = `<span style="color:${atkr.color}">${esc(atkr.name)}</span> &nbsp;&#9656;&nbsp; <span style="color:${oppColor}">${esc(oppName)}</span> &nbsp;<span style="color:${th.accent};opacity:.85">// ${th.tag}</span>`
     $('fbAtkPor').innerHTML = avatar(atkr.look, atkr.color)
-    $('fbVicPor').innerHTML = vic ? avatar(vic.look, vic.color) : ''
+    $('fbVicPor').innerHTML = opt.oppPortrait || ''
     const an: any = $('fbAtkNm'); an.textContent = atkr.name; an.style.color = atkr.color
-    const vn: any = $('fbVicNm'); vn.textContent = vicName; vn.style.color = vicColor
+    const vn: any = $('fbVicNm'); vn.textContent = oppName; vn.style.color = oppColor
     ov.classList.remove('play'); void ov.offsetWidth; ov.classList.add('play')
     setTimeout(() => { try { playFB() } catch (e) {} }, FB.soundDelay)
     setTimeout(() => {
       const sh: any = root.querySelector('.shell'); if (sh) { sh.classList.add('shake'); setTimeout(() => sh.classList.remove('shake'), 520) }
-      if (onImpact) onImpact()
+      if (opt.onImpact) opt.onImpact()
     }, FB.slam)
-    setTimeout(() => { if (vic) { spawnBeam(atkr, vic, atkr.color, true); pulseBase(vic, vic.color) } }, FB.total - 680)
+    setTimeout(() => { if (opt.beamTo) { spawnBeam(atkr, opt.beamTo, th.accent, true); if (opt.beamTo.id && opt.beamTo.color) pulseBase(opt.beamTo, opt.beamTo.color) } }, FB.total - 680)
     setTimeout(() => { ov.classList.remove('play'); cinema = false }, FB.total)
+  }
+  function fbAd(atkr: any, vic: any, onImpact: () => void) {
+    fbCinematic(atkr, { kind: 'ad', oppName: vic ? vic.name : 'THE FIELD', oppColor: vic ? vic.color : '#ff3b5b', oppPortrait: vic ? avatar(vic.look, vic.color) : '', beamTo: vic || { x: CX, y: CY }, onImpact })
+  }
+  function fbJeopardy(atkr: any, chalName: string, onImpact: () => void) {
+    fbCinematic(atkr, { kind: 'jeopardy', oppName: chalName, oppColor: '#ffc637', oppPortrait: flagGlyph('#ffc637'), beamTo: { x: CX, y: CY }, onImpact })
+  }
+  function fbKoth(atkr: any, hill: any, onImpact: () => void) {
+    fbCinematic(atkr, { kind: 'koth', oppName: hill ? hill.name : 'THE HILL', oppColor: '#9d6bff', oppPortrait: crownGlyph('#9d6bff'), beamTo: hill || { x: CX, y: CY }, onImpact })
   }
 
   /* -------- rank + stats -------- */
@@ -1069,7 +1108,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const isFB = f.type === 'FirstBlood'
     if (isFB) {
       if (cinema) { resolveFlag(atkr, vic, svc, pts, true); return }
-      fbCinematic(atkr, vic, () => resolveFlag(atkr, vic, svc, pts, true))
+      if (vic) fbAd(atkr, vic, () => resolveFlag(atkr, vic, svc, pts, true))
+      else fbJeopardy(atkr, f.challengeTitle || 'a challenge', () => resolveFlag(atkr, null, null, pts, true))
       return
     }
     if (vic) fireShot(atkr, vic, atkr.color)
@@ -1081,6 +1121,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const contested = h.owner && newOwner && h.owner !== newOwner
     h.owner = newOwner; renderHill(h)
     if (newOwner) {
+      if (!firstCrown && !cinema) { firstCrown = true; fbKoth(newOwner, h, () => {}) }
       spawnCapture(newOwner, h, newOwner.color)
       floatText(h.x, h.y - 30, contested ? 'SEIZED' : 'CAPTURED', newOwner.color)
       addLog('HILL', 'hill', `<span class="who">${esc(newOwner.name)}</span> ${contested ? 'seized' : 'captured'} <span class="svc">${esc(h.name)}</span>`)
@@ -1192,7 +1233,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const svc = pick(vic.svc.filter((s: any) => s.status !== 'down')) || pick(vic.svc)
     const pts = Math.floor(rng(35, 95))
     const isFB = force === 'fb' || !matchFirstBlood
-    if (isFB) { if (cinema) return; matchFirstBlood = true; fbCinematic(atkr, vic, () => resolveFlag(atkr, vic, svc, pts, true)); return }
+    if (isFB) { if (cinema) return; matchFirstBlood = true; fbAd(atkr, vic, () => resolveFlag(atkr, vic, svc, pts, true)); return }
     fireShot(atkr, vic, atkr.color)
     setTimeout(() => { if (!killed) resolveFlag(atkr, vic, svc, pts, false) }, 380 / speed + 120)
   }
@@ -1244,6 +1285,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     $('teamCount').textContent = '攻防 // ' + TEAMS.length + ' TEAMS'
     const lb: any = $('liveBadge'); if (lb) { lb.classList.remove('off'); lb.style.color = 'var(--amber)'; lb.childNodes[1].nodeValue = 'PREVIEW' }
     const ns = $('netStat'); if (ns) ns.textContent = 'SIGNAL // PREVIEW (SIMULATED)'
+    const fbb: any = $('fbBtns'); if (fbb) fbb.style.display = ''
     refreshRank(); refreshStats(); buildTicker((title ? title + ' ' : '') + '— PREVIEW')
     sizeCanvas()
     addLog('SYS', 'sys', `<span class="em">// PREVIEW MODE</span> :: simulated battle — ${TEAMS.length} teams`)
@@ -1262,6 +1304,50 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   const scanBtn: any = $('scanBtn')
   if (scanBtn) scanBtn.onclick = function () { const offNow = $('scan').classList.toggle('off'); scanBtn.classList.toggle('on', !offNow) }
 
+  // Unlock the first-blood audio on the first user gesture (browsers block
+  // autoplay until then — so the auto-played seed/live stinger stays silent
+  // until the viewer interacts; any of the buttons below also count).
+  const primeAudio = () => {
+    const a: any = $('fbSound')
+    if (a) { a.play().then(() => { a.pause(); a.currentTime = 0 }).catch(() => {}) }
+    document.removeEventListener('pointerdown', primeAudio)
+  }
+  document.addEventListener('pointerdown', primeAudio, { once: true })
+
+  // Preview-only: manually trigger each first-blood variant.
+  const fbAdBtn: any = $('fbAdBtn')
+  if (fbAdBtn) fbAdBtn.onclick = () => {
+    if (cinema || !TEAMS.length) return
+    const a = pick(TEAMS); let v = pick(TEAMS); let g = 0
+    while (v === a && g++ < 8) v = pick(TEAMS)
+    const svc = pick(v.svc); const pts = Math.floor(rng(60, 99))
+    fbAd(a, v, () => resolveFlag(a, v, svc, pts, true))
+  }
+  const fbJeoBtn: any = $('fbJeoBtn')
+  if (fbJeoBtn) fbJeoBtn.onclick = () => {
+    if (cinema || !TEAMS.length) return
+    const a = pick(TEAMS)
+    const ch = pick(SERVICES.length ? SERVICES : ['web-portal', 'crypto-rng', 'pwn-heap', 'rev-vm'])
+    const pts = Math.floor(rng(60, 99))
+    fbJeopardy(a, ch, () => {
+      a.score += pts; totalFlags++; renderScore(a)
+      floatText(a.x, a.y - 66, '+' + pts, a.color)
+      addLog('FIRST BLOOD', 'fb', `<span class="who">${esc(a.name)}</span> first-blooded <span class="svc">${esc(ch)}</span> <span class="em">+${pts}</span>`)
+      refreshRank(); refreshStats()
+    })
+  }
+  const fbKothBtn: any = $('fbKothBtn')
+  if (fbKothBtn) fbKothBtn.onclick = () => {
+    if (cinema || !TEAMS.length) return
+    const a = pick(TEAMS); const h = HILLS.length ? pick(HILLS) : null; const pts = Math.floor(rng(30, 60))
+    fbKoth(a, h, () => {
+      if (h) { h.owner = a; renderHill(h); spawnCapture(a, h, a.color) }
+      a.score += pts; renderScore(a)
+      addLog('HILL', 'hill', `<span class="who">${esc(a.name)}</span> first crowned <span class="svc">${esc(h ? h.name : 'the hill')}</span>`)
+      totalEvents++; refreshRank(); refreshStats()
+    })
+  }
+
   if (preview) startPreview(); else start()
 
   /* -------- teardown -------- */
@@ -1271,6 +1357,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     timers.forEach((id) => clearTimeout(id))
     if (raf) cancelAnimationFrame(raf)
     window.removeEventListener('resize', onResize)
+    document.removeEventListener('pointerdown', primeAudio)
     if (ws) { try { ws.onclose = null; ws.close() } catch (e) {} ws = null }
   }
 }
