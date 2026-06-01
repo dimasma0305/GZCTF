@@ -865,14 +865,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       return AC
     } catch (e) { return null }
   }
-  function makeReverb() {
-    const ac = audio(); if (!ac || reverb) return
-    const len = Math.floor(ac.sampleRate * 2.8), buf = ac.createBuffer(2, len, ac.sampleRate)
-    for (let ch = 0; ch < 2; ch++) { const d = buf.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.8) }
-    reverb = ac.createConvolver(); reverb.buffer = buf
-    const rg = ac.createGain(); rg.gain.value = 0.95; reverb.connect(rg); rg.connect(masterGain)
-  }
-  function distCurve(k: number) { const n = 2048, c = new Float32Array(n); for (let i = 0; i < n; i++) { const x = i * 2 / n - 1; c[i] = (3 + k) * x * 20 * (Math.PI / 180) / (Math.PI + k * Math.abs(x)) } return c }
   function unlockAudio() {
     const ac = audio(); if (ac && ac.state === 'suspended') ac.resume()
     if ('speechSynthesis' in window) { try { speechSynthesis.getVoices() } catch (e) {} }
@@ -907,17 +899,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     if (o.rev && reverb) { const rs = ac.createGain(); rs.gain.value = o.rev; g.connect(rs); rs.connect(reverb) }
     n.start(t0); n.stop(t0 + dur + 0.03)
   }
-  function speakJP(text: string) {
-    if (!soundOn || !('speechSynthesis' in window)) return
-    try {
-      const u = new SpeechSynthesisUtterance(text)
-      u.lang = 'ja-JP'; u.rate = 0.92; u.pitch = 0.8; u.volume = 1
-      const vs = speechSynthesis.getVoices()
-      const jp = vs.find((v) => /ja(-|_)?JP/i.test(v.lang)) || vs.find((v) => /japan/i.test(v.name))
-      if (jp) u.voice = jp
-      speechSynthesis.cancel(); speechSynthesis.speak(u)
-    } catch (e) {}
-  }
   function sfxAttack() {
     if (!soundOn || !audio()) return
     const p = Math.random(), d = rng(0.84, 1.2)
@@ -944,46 +925,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     ;[392, 523, 659, 784].forEach((f, i) => tone({ type: 'triangle', f, f2: f, dur: 0.16, vol: 0.12, delay: i * 0.05 }))
     noiseBurst({ type: 'highpass', f: 3000, fEnd: 8000, dur: 0.2, vol: 0.05, delay: 0.05 })
   }
-  function braaam(delay: number, dur: number, baseF: number, vol: number) {
-    const ac = audio(); if (!ac) return; const t0 = ac.currentTime + delay
-    const out = ac.createGain()
-    out.gain.setValueAtTime(0.0001, t0); out.gain.exponentialRampToValueAtTime(vol, t0 + 0.07)
-    out.gain.setValueAtTime(vol, t0 + dur * 0.65); out.gain.exponentialRampToValueAtTime(0.0001, t0 + dur)
-    const filt = ac.createBiquadFilter(); filt.type = 'lowpass'; filt.Q.value = 7
-    filt.frequency.setValueAtTime(140, t0)
-    filt.frequency.exponentialRampToValueAtTime(2200, t0 + dur * 0.45)
-    filt.frequency.exponentialRampToValueAtTime(500, t0 + dur)
-    const shaper = ac.createWaveShaper(); shaper.curve = distCurve(10); shaper.oversample = '2x'
-    ;[1, 1.006, 0.994, 2, 0.5, 1.5].forEach((m, i) => {
-      const o = ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = baseF * m
-      const og = ac.createGain(); og.gain.value = i < 3 ? 1 : (i === 5 ? 0.35 : 0.5)
-      o.connect(og); og.connect(filt); o.start(t0); o.stop(t0 + dur + 0.05)
-    })
-    filt.connect(shaper); shaper.connect(out); out.connect(masterGain)
-    if (reverb) { const rs = ac.createGain(); rs.gain.value = 0.55; out.connect(rs); rs.connect(reverb) }
-  }
-  function crash(delay: number, dur: number, vol: number) { noiseBurst({ type: 'highpass', f: 5000, fEnd: 8500, dur, vol, delay, rev: 0.85 }) }
-  // big cinematic first-blood stinger (used when no mp3 is present)
-  function sfxFirstBlood() {
-    if (!soundOn || !audio()) return
-    makeReverb()
-    const slam = FB.slam / 1000
-    noiseBurst({ type: 'highpass', f: 200, fEnd: 7000, dur: slam, vol: 0.18, rev: 0.3 })
-    tone({ type: 'sawtooth', f: 55, f2: 190, dur: slam + 0.08, vol: 0.16, attack: 0.12 })
-    tone({ type: 'sine', f: 92, f2: 60, dur: 0.12, vol: 0.28, delay: slam * 0.34 })
-    tone({ type: 'sine', f: 92, f2: 60, dur: 0.12, vol: 0.38, delay: slam * 0.68 })
-    tone({ type: 'sine', f: 175, f2: 36, dur: 1.2, vol: 0.9, attack: 0.003, delay: slam })
-    tone({ type: 'sine', f: 88, f2: 28, dur: 1.4, vol: 0.65, attack: 0.003, delay: slam })
-    tone({ type: 'triangle', f: 250, f2: 54, dur: 0.5, vol: 0.42, delay: slam })
-    noiseBurst({ type: 'lowpass', f: 320, fEnd: 48, dur: 0.42, vol: 0.75, delay: slam, rev: 0.4 })
-    braaam(slam + 0.005, 1.5, 55, 0.55)
-    noiseBurst({ type: 'bandpass', f: 7200, fEnd: 1100, dur: 0.36, vol: 0.42, q: 0.6, delay: slam + 0.01, rev: 0.55 })
-    crash(slam + 0.015, 1.7, 0.24)
-    ;[523, 415, 622].forEach((f, i) => tone({ type: 'square', f, f2: f * 0.5, dur: 0.6, vol: 0.1, delay: slam + 0.02 + i * 0.006 }))
-    tone({ type: 'sine', f: 1320, f2: 660, dur: 0.7, vol: 0.13, delay: slam + 0.04, rev: 0.4 })
-    noiseBurst({ type: 'lowpass', f: 120, fEnd: 38, dur: 1.5, vol: 0.2, delay: slam + 0.12, rev: 0.5 })
-  }
-
   function resolveFlag(atkr: any, vic: any, svc: any, pts: number, isFB: boolean) {
     if (!isFB) sfxAttack()
     atkr.score += pts; atkr.atk++
@@ -1027,12 +968,12 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const an: any = $('fbAtkNm'); an.textContent = atkr.name; an.style.color = atkr.color
     const vn: any = $('fbVicNm'); vn.textContent = oppName; vn.style.color = oppColor
     ov.classList.remove('play'); void ov.offsetWidth; ov.classList.add('play')
+    // First-blood stinger: the shipped /attack/firstblood.mp3 (unchanged).
     setTimeout(() => {
       if (!soundOn) return
       const a: any = $('fbSound')
-      if (a && a.getAttribute('src')) { a.currentTime = 0; a.play().catch(() => {}) } else sfxFirstBlood()
+      if (a && a.getAttribute('src')) { a.currentTime = 0; a.play().catch(() => {}) }
     }, FB.soundDelay)
-    setTimeout(() => speakJP(th.announce), FB.slam + 60)
     setTimeout(() => {
       const sh: any = root.querySelector('.shell'); if (sh) { sh.classList.add('shake'); setTimeout(() => sh.classList.remove('shake'), 520) }
       if (opt.onImpact) opt.onImpact()
