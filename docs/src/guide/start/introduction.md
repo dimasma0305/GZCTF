@@ -8,6 +8,13 @@ This site documents **a fork** of that platform. The fork keeps the entire jeopa
 This documentation covers **the fork's additions only**. The platform core remains AGPLv3 ([GZTimeWalker/GZCTF](https://github.com/GZTimeWalker/GZCTF)); see [License](#license) below.
 :::
 
+:::tip Two repos you'll use
+The docs are built around two companion repositories:
+
+- **[gzctf-platform-template](https://github.com/TCP1P/gzctf-platform-template)** — the deploy scaffold. An interactive wizard plus `make` targets bring up GZCTF (the published image) behind Traefik + Let's Encrypt TLS, with config in `appsettings.json`. Start here: [Quick start](/guide/start/quick-start).
+- **[TCP1PADTesting](https://github.com/TCP1P/TCP1PADTesting)** — ready-to-import example challenges (two A&D, two KotH; OWASP web + PWN). You import it via an admin **Repo Binding** to populate a game. See [Repo bindings](/guide/authoring/repo-bindings).
+:::
+
 ## What this fork adds
 
 The fork introduces two new challenge types alongside the four jeopardy types. Both are defined in `src/GZCTF/Utils/Enums.cs` as members of the `ChallengeType` enum:
@@ -106,7 +113,7 @@ See [Challenge YAML](/guide/authoring/challenge-yaml) and [Templates](/guide/aut
 
 | Page | What you'll find |
 | --- | --- |
-| [Quick start](/guide/start/quick-start) | Stand up the fork and run your first live-engine game. |
+| [Quick start](/guide/start/quick-start) | **Stand it up** — deploy GZCTF with the `gzctf-platform-template` wizard, then import the example challenges and run your first live-engine game. |
 | [Attack & Defense](/guide/features/attack-defense) | Per-team service topology, VPN access, attack/defense/SLA scoring. |
 | [King of the Hill](/guide/features/king-of-the-hill) | The shared hill, the `/koth/king` marker, hold points, resets, and leader blocking. |
 | [Scoring](/guide/features/scoring) | How per-tick AdEngine scoring works alongside jeopardy dynamic scoring. |

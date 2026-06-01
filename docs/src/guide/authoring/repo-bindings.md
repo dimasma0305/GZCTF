@@ -257,135 +257,123 @@ Two fields, both surfaced on the admin repo-bindings card, tell you whether a bi
 A **private or missing repo**, or a **missing/expired token**, does not crash the poller — it surfaces as a concise scan warning on the binding row (a friendly hint plus git's stderr), logged once per tick as a single warning rather than a stack-trace flood. There is no `TokenStatus` value for "present but rejected," because a rejected token can't be told apart from a correct one without a probe; the actionable hint rides in `LastScanMessage` instead.
 :::
 
-## Worked example: the `gzctf-mix-demo` repo
-
-A complete, public reference repo lives at **[github.com/dimasma0305/gzctf-mix-demo](https://github.com/dimasma0305/gzctf-mix-demo)** — point a binding at it to see the whole pipeline end to end. It's a **type × category coverage matrix**: one challenge for every `ChallengeType` crossed with every category (72 in total), so the scoreboard, the jeopardy/A&D/KotH kind switcher, and every category band render with real content.
-
-### Layout
-
-A single root `.gzevent` defines the game; each top-level directory is a category, and each leaf folder is one challenge:
-
-```text
-gzctf-mix-demo/
-├── .gzevent                  # → one Game: "GZCTF — Type×Category Mix Demo"
-├── AI/
-│   ├── aandd-ai/             # type: AttackDefense  (image auto-built from ./src/Dockerfile)
-│   │   ├── challenge.yaml
-│   │   └── src/{Dockerfile,service.py}
-│   ├── koth-ai-hill/         # type: KingOfTheHill
-│   │   └── challenge.yaml
-│   ├── ai-per-team-box/      # type: DynamicContainer
-│   ├── ai-per-team-drop/     # type: DynamicAttachment (ships dist/)
-│   ├── ai-sampler/           # type: StaticAttachment
-│   └── ai-service/           # type: StaticContainer
-├── Blockchain/  Crypto/  Forensics/  Hardware/  Misc/
-├── Mobile/  PPC/  Pentest/  Pwn/  Reverse/  Web/   # same six types per category
-└── ...
-```
-
-### The manifest
-
-The repo's root `.gzevent` — note the event-wide `ad:` block that every A&D/KotH challenge in this game shares:
-
-```yaml
-title: "GZCTF — Type×Category Mix Demo"
-start: "2026-05-28T00:00:00Z"
-end:   "2026-06-30T00:00:00Z"
-hidden: false
-summary: "Showcase event with one challenge per (type, category) cell — 72 total."
-acceptWithoutReview: true
-practiceMode: true
-teamMemberCountLimit: 0      # 0 = unlimited
-containerCountLimit: 5
-bloodBonus: 50
-ad:
-  tickSeconds: 60
-  flagLifetimeTicks: 5
-  warmupSeconds: 60
-  resetCooldownMinutes: 5
-```
-
-### A challenge — A&D and KotH side by side
-
-`AI/aandd-ai/challenge.yaml` — an Attack & Defense service whose image is **auto-built** from `./src/Dockerfile` (no `containerImage`):
-
-```yaml
-name: "A&D — AI"
-author: "GZCTF Mix Demo"
-description: |
-  Live A&D — patch your team's container, attack the others.
-category: "AI"
-type: "AttackDefense"
-container:
-  exposePort: 80
-  memoryLimit: 128
-  cpuCount: 1
-  storageLimit: 256
-ad:
-  allowEgress: true
-  allowSelfReset: true
-```
-
-`AI/koth-ai-hill/challenge.yaml` — a King of the Hill challenge (one shared hill), here pinned to a prebuilt registry image:
-
-```yaml
-name: "KotH — AI Hill"
-category: "AI"
-type: "KingOfTheHill"
-container:
-  containerImage: "gzctf/echo-http:test"
-  exposePort: 80
-  memoryLimit: 128
-  cpuCount: 1
-  storageLimit: 256
-```
-
-:::tip
-`challenge.yaml` and `challenge.yml` are both accepted. The A&D entry omits `containerImage`, so the platform auto-builds `./src/Dockerfile` (see [Challenge Build Pipeline](/guide/authoring/build-pipeline)); the KotH entry points at a prebuilt registry image instead.
-:::
-
-### Bind it
-
-The repo is public, so no token is needed:
-
-1. **Admin → Repo Bindings → add**, with `RepoUrl = https://github.com/dimasma0305/gzctf-mix-demo`, an empty ref (default branch), and `IntervalSeconds = 60`.
-2. Wait one poll cycle (or hit **Scan now**). The `.gzevent` becomes the *Type×Category Mix Demo* game and all 72 `challenge.yaml` files are imported; `LastScanMessage` shows `games +1`, `challenges +72`, `failures 0`.
-3. Push a change to the repo; the next scan picks up the new commit SHA and re-imports just the changed challenges (unchanged scans short-circuit on the SHA).
-
 ## Worked example: a ready-to-run A&D + KotH event
 
-If you just want to **try the Attack & Defense and King of the Hill engine on a local deploy** without authoring anything, point a binding at the public testing repo **[github.com/TCP1P/TCP1PADTesting](https://github.com/TCP1P/TCP1PADTesting)**. It's a focused four-challenge event — two A&D services and two KotH hills — that exercises the whole A&D/KotH pipeline end to end (round engine, per-team containers, the auto-built `./checker` images, the shared hill, scoring).
+If you just want to **try the Attack & Defense and King of the Hill engine without authoring anything**, point a binding at the public testing repo **[github.com/TCP1P/TCP1PADTesting](https://github.com/TCP1P/TCP1PADTesting)**. It's a focused four-challenge event — two A&D services and two KotH hills — that exercises the whole A&D/KotH pipeline end to end (the round engine, per-team containers, the shared hill, the auto-built `./src` services and `./checker` SLA images, and scoring). The server clones the repo itself, so there is nothing to build or run locally first; just register the binding.
 
 ### What's in it
 
-A single `.gzevent` under `events/tcp1p-testing/` defines the game; each challenge ships its service in `./src`, a functional SLA checker in `./checker` (auto-built on import — no `containerImage`/`checkerImage` to pin), and a reference `./solver`:
+A single `.gzevent` under `events/tcp1p-testing/` defines the game. Each challenge ships its service in `./src`, a functionality/health SLA checker in `./checker` (both **auto-built on import** — no `containerImage`/`checkerImage` is pinned), a reference `./solver`, and — for the two KotH hills — a player handout in `./dist`:
 
 ```text
 TCP1PADTesting/
 └── events/tcp1p-testing/
     ├── .gzevent                       # → one Game: "TCP1P A&D + KotH Testing"
     ├── Web/
-    │   ├── owasp-portal/   # type: AttackDefense — OWASP Top-10 notes portal; every feature leaks the flag
-    │   └── koth-throne/    # type: KingOfTheHill  — OWASP web hill; write your token into /koth/king
+    │   ├── owasp-portal/              # type: AttackDefense — OWASP Top-10 notes portal; every feature leaks the flag
+    │   │   ├── challenge.yml
+    │   │   ├── src/                   #   service image (auto-built from ./src/Dockerfile)
+    │   │   ├── checker/               #   functionality-only SLA checker (auto-built)
+    │   │   └── solver/                #   reference exploit
+    │   └── koth-throne/               # type: KingOfTheHill — OWASP web hill; write your token into /koth/king
+    │       ├── challenge.yml
+    │       ├── src/  checker/  solver/
+    │       └── dist/                  #   player handout (provide: "./dist")
     └── Pwn/
-        ├── pwn-armory/     # type: AttackDefense — heap binary, ten memory-corruption bug classes
-        └── koth-pwn/       # type: KingOfTheHill  — binary hill; corrupt is_admin / ret2 do_crown()
+        ├── pwn-armory/                # type: AttackDefense — heap binary, classic memory-corruption bug classes
+        │   ├── challenge.yml
+        │   └── src/  checker/  solver/
+        └── koth-pwn/                  # type: KingOfTheHill — binary hill; flip is_admin / ret2 do_crown()
+            ├── challenge.yml
+            └── src/  checker/  solver/  dist/
 ```
 
-The root `.gzevent` carries the event-wide `ad:` block (tick length, flag lifetime, warmup, reset cooldown) every challenge shares, and is imported **hidden** so you flip it visible in the admin UI when you're ready.
+| Path | Type | What it exercises |
+|---|---|---|
+| `Web/owasp-portal/` | `AttackDefense` | OWASP Top 10 (2021) notes portal; every feature carries one vuln and all ten leak the per-tick flag. `allowSelfReset: true`. |
+| `Web/koth-throne/` | `KingOfTheHill` | OWASP web hill — write your per-round control token into `/koth/king`. One shared hill, so `allowSelfReset: false`. |
+| `Pwn/pwn-armory/` | `AttackDefense` | Menu-driven heap binary (no canary/PIE/RELRO) with classic memory-corruption bug classes; every bug reaches the flag. `allowSelfReset: true`. |
+| `Pwn/koth-pwn/` | `KingOfTheHill` | Binary hill — flip `is_admin` or `ret2 do_crown()` to enthrone your token in `/koth/king`. Shared hill, `allowSelfReset: false`. |
+
+### The manifest
+
+`events/tcp1p-testing/.gzevent` defines the one game and carries the event-wide `ad:` block (tick length, flag lifetime, warmup, reset cooldown) that **every A&D/KotH challenge in this event shares** — abridged:
+
+```yaml
+title: "TCP1P A&D + KotH Testing"
+summary: "Four targets: OWASP-Top-10 and PWN, in both Attack & Defense and King of the Hill."
+start: "2026-05-31T10:00:00+08:00"   # local offsets are fine — normalized to UTC on import
+end:   "2026-05-31T22:00:00+08:00"
+hidden: true                         # imported hidden — you flip it visible in the admin UI
+practiceMode: true
+acceptWithoutReview: false
+teamMemberCountLimit: 5
+containerCountLimit: 5
+ad:
+  tickSeconds: 60                    # round length in seconds
+  flagLifetimeTicks: 5               # ticks a planted flag stays submittable
+  warmupSeconds: 600                 # grace after start before scoring begins
+  resetCooldownMinutes: 5            # min minutes between a team's self-resets
+  allowSnapshotDownload: true
+```
+
+### A challenge — A&D and KotH side by side
+
+`Web/owasp-portal/challenge.yml` — an Attack & Defense service whose image is **auto-built** from `./src/Dockerfile` (no `containerImage`), with a functionality-only checker auto-built from `./checker`:
+
+```yaml
+name: owasp-portal
+author: TCP1P
+type: AttackDefense
+category: Web
+container:
+  memoryLimit: 512
+  cpuCount: 1
+  storageLimit: 512
+  exposePort: 8080
+ad:
+  allowEgress: true
+  allowSelfReset: true
+  sshRequiresFlag: false   # true ⇒ a team may SSH into its own box only after capturing a flag here
+```
+
+`Web/koth-throne/challenge.yml` — a King of the Hill challenge (one shared hill). KotH is hold-scored, not flag-scored, so `value` is fixed; `provide: "./dist"` ships the hill source as the player handout:
+
+```yaml
+name: "koth-throne"
+author: "TCP1P"
+category: "Web"
+type: "KingOfTheHill"      # don't touch this value
+value: 1000                # don't touch this value (KotH is hold-scored, not flag-scored)
+provide: "./dist"          # player handout, zipped from ./dist
+container:
+  exposePort: 8080
+  memoryLimit: 512
+  cpuCount: 1
+  storageLimit: 512
+ad:
+  allowEgress: true
+  allowSelfReset: false    # MUST stay false — the hill is SHARED; a self-reset wipes everyone's foothold + the king
+```
+
+:::tip
+`challenge.yaml` and `challenge.yml` are both accepted. Neither entry pins a `containerImage` or `checkerImage`, so the platform auto-builds each service from `./src/Dockerfile` **and** each SLA checker from `./checker/Dockerfile` — eight images for the four challenges. See [Challenge Build Pipeline](/guide/authoring/build-pipeline) for the build flow and [Challenge YAML](/guide/authoring/challenge-yaml) for the per-challenge `ad:` block.
+:::
 
 ### Bind it
 
 The repo is public, so no token is needed:
 
-1. **Admin → Repo Bindings → add**, with `RepoUrl = https://github.com/TCP1P/TCP1PADTesting`, an empty ref (default branch), and `IntervalSeconds = 60`.
-2. Wait one poll cycle (or hit **Scan now**). The `.gzevent` becomes the *TCP1P A&D + KotH Testing* game and the four `challenge.yml` files import; `LastScanMessage` shows `games +1`, `challenges +4`, `failures 0`. The four `./checker` images build automatically in the background (watch **admin → Builds**).
-3. The game imports **hidden** — open **admin → game → Info**, set your own start/end time, and unhide it. Those game-level settings are yours to edit afterward; a later sync keeps your challenges current but won't revert your Info-page changes.
+1. **Admin → Repo Bindings → Add**, with `RepoUrl = https://github.com/TCP1P/TCP1PADTesting`, an **empty ref** (default branch), and `IntervalSeconds = 60`. Leave the token blank.
+2. Hit **Scan now** (or wait one poll cycle). The `events/tcp1p-testing/.gzevent` manifest becomes the *TCP1P A&D + KotH Testing* game and the four `challenge.yml` files import; `LastScanMessage` shows `games +1`, `challenges +4`, `failures 0`. The **eight** images (one `./src` service + one `./checker` per challenge) build in the background — watch them under **admin → Builds**.
+3. The game imports **hidden** — open **admin → game → Info**, set your own start/end time, and unhide it. The Info page also exposes the round settings; those game-level edits are yours to keep, and a later sync refreshes the challenges without reverting your Info-page changes (see the [event-wide `ad:` block](#what-the-event-wide-ad-block-configures)).
 
 :::tip
-This is the fastest way to see a populated A&D/KotH scoreboard, the live attack feed (`/games/{id}/attack`), and the per-game cheat analysis with real data on a fresh local deploy. The checker images are local-only — if an aggressive `docker image prune` removes one, the platform rebuilds it from the persisted build context on the next tick.
+This is the fastest way to see a populated A&D/KotH scoreboard, the live attack feed (`/games/{id}/attack`), and the per-game cheat analysis with real data on a fresh deploy. The auto-built checker images are local-only — if an aggressive `docker image prune` removes one, the platform rebuilds it from the persisted build context on the next tick.
 :::
 
 :::info
 For a **private** repo, the only difference is adding a PAT on the binding (and `Contents:write` if you want [`PushOnEdit`](#pushonedit-write-approved-edits-back-to-the-repo)). The layout, manifest, and challenge files are identical.
 :::
+
+For the engine these challenges drive, see [Attack & Defense](/guide/features/attack-defense) and [King of the Hill](/guide/features/king-of-the-hill).

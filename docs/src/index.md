@@ -27,10 +27,10 @@ features:
     details: Everything upstream GZ::CTF does — dynamic scoring, dynamic containers, scoreboards, cheat detection — still works alongside the A&D engine.
     icon: 🚩
   - title: Author from a repo
-    details: Ready-to-edit challenge templates, a challenge.yml schema, .gzevent manifests and GitHub repo bindings that auto-import on every push.
+    details: Point a repo binding at the TCP1PADTesting example repo and the server clones it, globs its .gzevent, and auto-builds every service + checker. Re-scans on the interval you set.
     icon: 📦
   - title: Docker or Kubernetes
-    details: Flip the container provider between Docker and K8s. Per-team bridges, egress isolation, resource limits and snapshot capture.
+    details: Stand the platform up with the wizard + make platform-up, then set ContainerProvider in appsettings.json to Docker or Kubernetes. Per-team containers, egress isolation, resource limits and snapshot capture.
     icon: 🐳
   - title: Open source
     details: Built on GZ::CTF (AGPLv3). The A&D / KotH engine, scoring and authoring pipeline are documented here.

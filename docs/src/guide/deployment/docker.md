@@ -1,339 +1,292 @@
 # Deploy with Docker
 
-This page is a complete walkthrough of running a real event on the **Docker** container backend, based on the project's `docker-compose.yml`. Docker is the simplest provider to operate: challenge instances spawn as host Docker containers, the A&D `/flag` is delivered as a read-only bind-mount, and you get precise `docker diff` plus post-game snapshot tarballs with no Kubernetes cluster to babysit.
+This page is a complete walkthrough of standing up a real event on the **Docker** container backend using the [`gzctf-platform-template`](https://github.com/TCP1P/gzctf-platform-template) repo. That template is now the supported way to run GZCTF: it ships a **published image** (no building from source), an interactive wizard that generates every secret for you, a Traefik front-end with automatic Let's Encrypt TLS, and all platform config in a single `appsettings.json`.
+
+Docker is the simplest provider to operate: challenge instances spawn as host Docker containers, the A&D `/flag` is delivered as a read-only bind-mount, and you get precise `docker diff` plus post-game snapshot tarballs with no Kubernetes cluster to babysit.
 
 If you are weighing Docker against Kubernetes, read [/guide/deployment/provider](/guide/deployment/provider) first. For the exhaustive list of configuration keys, see [/config/appsettings](/config/appsettings).
 
-## The services at a glance
+## Quick start
 
-The compose project is named `testing-gzctf` and defines five services. Two of them (`ssh-jump`, `wireguard`) are the A&D engine's networking sidecars; the rest are the platform and its datastores.
+```bash
+git clone https://github.com/TCP1P/gzctf-platform-template
+cd gzctf-platform-template
+
+make wizard       # interactive prompts → writes compose/.env + compose/appsettings.json
+make setup        # creates the external 'traefik' + 'challenges' docker networks
+make platform-up  # renders config if missing, then starts gzctf + db + cache + traefik
+```
+
+The wizard **prints the auto-generated admin password once, at the end** — copy it before you close the terminal. Then browse to `https://PUBLIC_ENTRY`, log in as user **`Admin`** with that password, and change it from the profile menu.
+
+:::tip
+There is no build step and no migration step. The image is pulled (`dimasmaualana/gzctf:develop`), and database migrations run **automatically** on first boot — the schema is created on launch, and later boots apply any new migrations before serving traffic.
+:::
+
+## Repository layout
+
+Everything lives under two directories: `compose/` (the docker-compose stack) and `scripts/` (the wizard + config renderer). The `k8s/` directory is the Kubernetes alternative — see [Kubernetes](#kubernetes) below.
+
+| Path | What it is |
+| --- | --- |
+| `compose/compose.yml` | The base stack: `gzctf`, `db`, `cache`, `wireguard`, `ssh-jump`. Always loaded. |
+| `compose/compose.traefik.yml` | Overlay adding the `traefik` reverse proxy + Let's Encrypt TLS on ports 80/443. Loaded by the TLS targets. |
+| `compose/compose.standalone.yml` | Overlay for **no-TLS / local** runs — exposes `gzctf` directly on host `:8080`. Loaded by the `*-no-traefik` targets. |
+| `compose/appsettings.example.json` | The config template, with `{{.PublicEntry}}` / `{{.XorKey}}` / `{{.PostgresPassword}}` / `{{.AdSshInternalSecret}}` / `{{.AdSshPublicPort}}` placeholders. |
+| `compose/appsettings.json` | The **rendered** config gzctf actually mounts. Generated from the example; `chmod 600`, gitignored. Never commit it. |
+| `compose/.env.example` | Starter env file. |
+| `compose/.env` | The **rendered** env: `PUBLIC_ENTRY`, `WORKSPACE`, `ACME_EMAIL`, and the auto-generated secrets. `chmod 600`, gitignored. Never commit it. |
+| `Makefile` | All the operator targets (`make help` lists them). |
+
+The `make` targets always run docker-compose from inside `compose/` with the right overlay combination, so you never compose the `-f` flags by hand.
+
+## The wizard and config rendering
+
+Two scripts own all the secret-handling. You normally only run the wizard once.
+
+### `make wizard` (`scripts/wizard.sh`)
+
+Interactive first-time setup. It prompts for:
+
+- **`PUBLIC_ENTRY`** — the hostname participants type into their browser. **No scheme, no path** (e.g. `ctf.example.com`); the wizard rejects a value without a dot.
+- **`ACME_EMAIL`** — where Let's Encrypt sends cert-expiry warnings.
+- **SMTP relay** *(optional)* — host / port / sender / username / password, enabling email verification + password reset. Skippable; you can set it later under `/admin/settings` → Email.
+- **Cloudflare Turnstile captcha** *(optional)* — site key + secret key, to slow down account-creation bots. Skippable; also settable later under `/admin/settings` → Captcha.
+
+Everything else is **auto-generated**:
+
+| Generated value | How | Lands in |
+| --- | --- | --- |
+| `WORKSPACE` | `gzctf-<8 random hex>` | `.env` (docker-compose project name + Traefik route suffix) |
+| `XOR_KEY` | `openssl rand -hex 32` (256 bits) | `.env` |
+| `ADMIN_PASSWORD` | `Aa1` + random hex | `.env` |
+| `POSTGRES_PASSWORD` | `Aa1` + random hex | `.env` |
+
+:::info
+The `Aa1` prefix on the generated passwords is deliberate: ASP.NET Identity's default password policy requires an uppercase letter, a lowercase letter, and a digit. Raw hex is all-lowercase and would silently fail `UserManager.CreateAsync`, leaving you with **no `Admin` user at all**.
+:::
+
+The wizard writes `compose/.env` and `compose/appsettings.json` (rendering the latter from `appsettings.example.json` via `sed`), `chmod 600`s both, and **refuses to overwrite an existing `appsettings.json`** — delete it first if you really want to re-run.
+
+### `make init-config` (`scripts/init-config.sh`)
+
+This is the non-interactive renderer, and it runs **automatically** as a prerequisite of `make platform-up`. If `appsettings.json` already exists it does nothing (idempotent). If `.env` is missing it copies `.env.example` for you and stops so you can fill in `PUBLIC_ENTRY` + `ACME_EMAIL`. On the edit-`.env`-by-hand path it generates any still-missing secrets — including `AD_SSH_INTERNAL_SECRET` (`openssl rand -hex 32`, written to both `.env` for the `ssh-jump` sidecar and `appsettings.json`'s `Ad.Ssh.InternalSecret` for `gzctf`) — substitutes the `{{.AdSshInternalSecret}}` / `{{.AdSshPublicPort}}` placeholders, persists everything back to `.env`, and prints any freshly-generated admin password once.
+
+### What `.env` holds vs. `appsettings.json`
+
+- **`compose/.env`** holds the values docker-compose itself needs: `WORKSPACE` (project name), `PUBLIC_ENTRY` + `ACME_EMAIL` (Traefik routing + ACME), `POSTGRES_PASSWORD` (passed to the `db` container's `POSTGRES_PASSWORD`), `AD_SSH_INTERNAL_SECRET` (passed to the `ssh-jump` sidecar's `INTERNAL_SECRET`), and `ADMIN_PASSWORD` (passed to gzctf's first-boot seed). It is shell-style `KEY=VALUE`.
+- **`compose/appsettings.json`** holds the platform's full runtime configuration — the same `POSTGRES_PASSWORD`, `XorKey`, and `AdSshInternalSecret` are substituted in here too, alongside `ContainerProvider`, `Ad`, `HoneypotConfig`, `ForwardedOptions`, and everything else (see [Configuration](#configuration)).
+
+The secret that appears in **both** files (`POSTGRES_PASSWORD`, `AD_SSH_INTERNAL_SECRET`) is written from a single source so the two copies can't diverge.
+
+:::danger
+**Do not rotate `XorKey` or `POSTGRES_PASSWORD` after first boot.**
+
+`XorKey` encrypts repo-binding tokens and registry passwords at rest — change it after data exists and every encrypted value in the DB becomes undecryptable. `POSTGRES_PASSWORD` is consumed by the `db` container only on its very first init; changing it later requires an `ALTER USER` inside the running database container plus a matching edit to `appsettings.json`'s `ConnectionStrings.Database`. Set both once, before the first `make platform-up`, and leave them alone.
+:::
+
+## The services
+
+`compose.yml` defines five services; the `traefik` overlay adds a sixth. Two of them (`ssh-jump`, `wireguard`) are the A&D engine's networking sidecars; the rest are the platform, its datastores, and the front-end.
 
 | Service | Image / Build | Role | Published ports |
 | --- | --- | --- | --- |
-| `gzctf` | builds `./src` via `GZCTF/Dockerfile.local` | The platform: web UI, API, A&D/KotH engine, container orchestrator | `8080:8080` |
-| `ssh-jump` | builds `./ssh-jump` | SSH jump host into A&D challenge containers | `22022:22` (override `AD_SSH_PUBLIC_PORT`) |
-| `wireguard` | builds `./wireguard` | WireGuard VPN endpoint into the challenge networks | `51820:51820/udp` |
-| `postgres` | `postgres:16-alpine` | Primary database | none (internal) |
-| `redis` | `redis:alpine` | Cache / signalling | none (internal) |
+| `gzctf` | `dimasmaualana/gzctf:develop` | The platform: web UI, API, A&D/KotH engine, container orchestrator, honeypot listeners | `2222`, `3306`, `5432`, `6379`, `11211`, `27017`, `9200` (honeypots) |
+| `db` | `postgres:17` | Primary database | none (internal, on `app_net`) |
+| `cache` | `redis:alpine` | Cache / scoreboard / signalling | none (internal, on `app_net`) |
+| `wireguard` | builds `../wireguard` | Per-team WireGuard VPN endpoint into the challenge networks | `51820:51820/udp` |
+| `ssh-jump` | builds `../ssh-jump` | SSH jump host into A&D challenge containers | `22022:22` (override `AD_SSH_PUBLIC_PORT`) |
+| `traefik` | `traefik:latest` *(overlay)* | Reverse proxy + Let's Encrypt TLS termination | `80:80`, `443:443` |
 
 :::info
-The compose file builds `gzctf` from source (`build.context: ./src`, `dockerfile: GZCTF/Dockerfile.local`) rather than pulling a published image. The same tree is the deploy worktree, so edit → build → up puts your change live. For production you can swap the `build:` block for an `image:` pin (see [Upgrades](#upgrades) below).
+Note that the `gzctf` service does **not** publish `8080` to the host in TLS mode — Traefik reaches it over the internal `traefik` network and terminates TLS for `Host(PUBLIC_ENTRY)` on the `websecure` entrypoint. The only host ports `gzctf` itself publishes are the **honeypot** listeners (see below). In standalone mode the overlay re-exposes `8080`.
 :::
 
-## The `gzctf` service
+### The honeypot ports
 
-This is the control plane. Everything else exists to support it.
+The seven ports `gzctf` publishes — `2222` (ssh), `3306` (mysql), `5432` (postgres), `6379` (redis), `11211` (memcached), `27017` (mongo), `9200` (elastic) — are **honeypot listeners**, not real services. Each one matches an entry in `appsettings.json` → `HoneypotConfig.Ports`. A team that connects to one of these from inside a challenge network is logged, and the chain-detector flags repeated probing. Drop any port mapping in `compose.yml` that you don't want exposed, or disable the matching entry in `HoneypotConfig.Ports`.
 
-### Ports
-
-Only `8080:8080` is published. That is the web UI and API. The commented-out lines (`3306`, `5432`, `6379`, `11211`, `27017`, `9200`) are datastore ports you would only expose for debugging — leave them commented in production.
-
-### Volumes
+### The `gzctf` service in detail
 
 ```yaml
 volumes:
-  - /var/run/docker.sock:/var/run/docker.sock
   - "gzctf-files:/app/files"
-  - "gzctf-repos:/app/repos"
+  - "./appsettings.json:/app/appsettings.json:ro"
+  - "/var/run/docker.sock:/var/run/docker.sock"
   - "wg-config:/wg-config"
-  - "ad-flags:/app/ad-flags"
-  - "./kube-config.k3d.yaml:/app/kube-config.yaml:ro"
 ```
 
 | Mount | Purpose |
 | --- | --- |
-| `/var/run/docker.sock` | The Docker provider talks to the host Docker daemon to spawn, inspect (`docker diff`), snapshot, and tear down challenge containers. **Required** for the Docker backend. |
-| `gzctf-files` → `/app/files` | Uploaded attachments, avatars, writeups, and generated artifacts. |
-| `gzctf-repos` → `/app/repos` | Git repositories used by the platform. |
-| `wg-config` → `/wg-config` | Shared with the `wireguard` sidecar (mounted there as `/config`). `AdWireGuardSyncService` reads `server.pub` / `server.key` and writes `wg0.conf` here. |
-| `ad-flags` → `/app/ad-flags` | Host-backed A&D flag files. gzctf auto-derives this volume's host path and bind-mounts each flag **read-only** into the matching team container so container-root cannot delete or tamper with `/flag`. Docker-provider only. |
-| `./kube-config.k3d.yaml` → `/app/kube-config.yaml:ro` | Kubeconfig, used **only** if you flip the provider to Kubernetes. Harmless under Docker. |
+| `gzctf-files` → `/app/files` | Uploaded attachments, avatars, writeups, generated artifacts. |
+| `./appsettings.json` → `/app/appsettings.json:ro` | The rendered config, mounted read-only. |
+| `/var/run/docker.sock` | The Docker provider talks to the host daemon to spawn, inspect (`docker diff`), snapshot, and tear down challenge containers. **Required** for the Docker backend. |
+| `wg-config` → `/wg-config` | Shared with the `wireguard` sidecar (mounted there as `/config`). `AdWireGuardSyncService` reads the server keypair and writes `wg0.conf` here. |
+
+`gzctf` joins three networks — `traefik` (front-end reach), `app_net` (control-plane reach to `db` + `cache`), and `challenges` (so `PlatformProxy` mode can reach challenge container IPs). It has a `:8080` healthcheck and a `deploy.resources` cap of 2 CPUs / 2 GB.
 
 :::warning
 Mounting `/var/run/docker.sock` gives the `gzctf` container full control of the host Docker daemon — effectively root on the host. This is inherent to the Docker provider (it needs the daemon to manage challenge containers). Run this host as a dedicated, isolated event box. If that boundary is unacceptable, use the Kubernetes provider instead — see [/guide/deployment/provider](/guide/deployment/provider).
 :::
 
-### Networking
+### The A&D sidecars
 
-The `gzctf` service joins two networks:
+The A&D / KotH engine needs two pieces of network plumbing that the jeopardy platform does not.
 
-```yaml
-networks:
-  - default
-  - k3d
-```
+- **`wireguard`** — the per-team VPN endpoint. It needs `cap_add: NET_ADMIN, SYS_MODULE`, `/dev/net/tun`, and the `src_valid_mark` / `ip_forward` sysctls to bring up the interface and route VPN traffic into the challenge networks. It shares the `wg-config` volume with `gzctf` (`/config` ↔ `/wg-config`): gzctf renders `wg0.conf`, the sidecar's inotify loop applies it. It sits on a **lonely** `wg-bootstrap` bridge with **no** interface on `app_net`, so a VPN client has no route to the control plane; `AdVpnTopology` (inside gzctf) attaches it to the challenge networks at runtime over the docker socket. The published `51820:51820/udp` must match `Ad.Vpn.ServerEndpoint` in `appsettings.json`.
+- **`ssh-jump`** — the A&D SSH bastion. Players run `ssh <challenge-id>@PUBLIC_ENTRY -p 22022` to land a shell inside their **own** challenge container; the username is the challenge id and the registered SSH key identifies the team. The bastion has no shell accounts — it proxies stdio to `docker exec` in the resolved container through gzctf's internal endpoints, reaching gzctf at `GZCTF_URL=http://gzctf:8080` over `app_net` and authenticating with `INTERNAL_SECRET` (which must equal `Ad.Ssh.InternalSecret` — `init-config` writes both from the same `${AD_SSH_INTERNAL_SECRET}`).
 
-- `default` carries control-plane traffic to `postgres` and `redis` (which live on the same default compose network).
-- `k3d` (external, named `k3d-gzctf`) lets gzctf reach the Kubernetes API server when running the K8s backend. Under Docker it is unused but joining it is harmless.
-
-Notably, **the challenge networks are not declared here.** The Docker provider's `EnsureNetworkCreated` calls `AttachSelfToNetwork` on startup, so gzctf auto-joins the platform-managed `challenges-open` and `challenges-isolated` bridges right after the provider initializes. Compose only needs to give it the default network for control-plane connectivity.
-
-## Core configuration (env vars)
-
-ASP.NET Core reads configuration from environment variables, mapping the `__` (double-underscore) separator onto nested config sections. So `ConnectionStrings__Database` populates `ConnectionStrings:Database` in the app's configuration, equivalent to a key in `appsettings.json`. The full key reference lives at [/config/appsettings](/config/appsettings); the load-bearing ones for a Docker deploy are below.
-
-### Connection strings
-
-```yaml
-- ConnectionStrings__Database=Host=postgres;Database=gzctf;Username=gzctf;Password=gzctf
-- ConnectionStrings__Redis=redis:6379,password=gzctf
-```
-
-- **Database** is a Npgsql/PostgreSQL connection string. `Host=postgres` is the compose service name. The matching `postgres` service is seeded with `POSTGRES_DB=gzctf`, `POSTGRES_USER=gzctf`, `POSTGRES_PASSWORD=gzctf` — keep all three in sync if you change them.
-- **Redis** is a StackExchange.Redis connection string (`host:port,option=value`). `password=gzctf` must match the `redis-server --requirepass gzctf` argument on the `redis` service.
-
-:::danger
-`gzctf` / `gzctf` / `gzctf-xor-key` are development defaults. Before a real event, change the Postgres password, the Redis password, and the `XorKey` together. Treat them as secrets.
+:::tip
+If you are running a **jeopardy-only** event with no A&D or KotH challenges, you can remove both sidecars: delete the `wireguard` and `ssh-jump` services, the `gzctf` `wg-config` volume mount, the `wg-bootstrap` network, and the `wg-config` volume.
 :::
 
-### XorKey
+### Networks and volumes
 
-```yaml
-- XorKey=gzctf-xor-key
-```
+| Network | Driver | Role |
+| --- | --- | --- |
+| `traefik` | external | Front-end: Traefik ↔ `gzctf`. Created by `make setup`. |
+| `app_net` | bridge | Control plane: `gzctf` ↔ `db` ↔ `cache` ↔ `ssh-jump`. |
+| `challenges` | external | Challenge container reach for `PlatformProxy`. Created by `make setup`; the same network challenge containers spawn onto. |
+| `wg-bootstrap` | bridge | The lonely bridge the `wireguard` sidecar attaches to so its UDP port mapping works. |
 
-`XorKey` is the secret gzctf uses to XOR-encrypt sensitive stored values (e.g. registered container/registry credentials). It is not a per-record key — if you change it after data exists, previously encrypted values can no longer be decrypted. Set it once, before first launch, to a strong random value.
+| Volume | Backs |
+| --- | --- |
+| `gzctf-files` | `/app/files` — uploads + artifacts |
+| `postgres-data` | the PostgreSQL data directory |
+| `wg-config` | the shared WireGuard config (gzctf + the sidecar) |
 
-### ContainerProvider
+`make setup` is what creates the two **external** networks (`traefik`, `challenges`) idempotently — they must exist before `make platform-up`, including in standalone mode, because the `gzctf` service attaches to both.
 
-This block selects and tunes the container backend.
+## Configuration
 
-```yaml
-- ContainerProvider__Type=Docker
-- ContainerProvider__DockerConfig__ChallengeNetwork=challenges
-- ContainerProvider__PortMappingType=PlatformProxy
-- ContainerProvider__EnableTrafficCapture=true
+All platform settings live in `compose/appsettings.json`, rendered from `appsettings.example.json`. This is standard ASP.NET Core JSON config — nested objects, not docker-compose `__` env vars. The full key reference is at [/config/appsettings](/config/appsettings); the load-bearing blocks for a Docker deploy are below.
+
+### `ContainerProvider`
+
+```json
+"ContainerProvider": {
+  "Type": "Docker",
+  "PortMappingType": "PlatformProxy",
+  "EnableTrafficCapture": true,
+  "PublicEntry": "PUBLIC_ENTRY",
+  "DockerConfig": {
+    "SwarmMode": false,
+    "ChallengeNetwork": "challenges",
+    "Uri": "unix:///var/run/docker.sock",
+    "UserName": "",
+    "Password": ""
+  },
+  "KubernetesConfig": {
+    "Namespace": "gzctf-challenges",
+    "ConfigPath": "kube-config.yaml",
+    "AllowCIDR": [ "10.0.0.0/8" ],
+    "DNS": [ "8.8.8.8", "223.5.5.5" ]
+  }
+}
 ```
 
 | Key | Value here | Meaning |
 | --- | --- | --- |
-| `ContainerProvider__Type` | `Docker` | Use the host Docker daemon as the backend. Set to `Kubernetes` to use the k3d backend instead (then `KubernetesConfig` + `Ad__FlagPullBaseUrl` apply). |
-| `ContainerProvider__DockerConfig__ChallengeNetwork` | `challenges` | Base name for the platform-managed challenge bridge networks (`challenges-open` / `challenges-isolated`). |
-| `ContainerProvider__PortMappingType` | `PlatformProxy` | gzctf proxies player traffic to challenge instances through the platform itself instead of publishing a host port per instance. |
-| `ContainerProvider__EnableTrafficCapture` | `true` | Enable per-connection traffic capture for challenge instances. |
+| `Type` | `Docker` | Use the host Docker daemon as the backend. Set to `Kubernetes` to use the cluster backend instead (then `KubernetesConfig` applies). |
+| `PortMappingType` | `PlatformProxy` | gzctf proxies player traffic to challenge instances through the platform itself instead of publishing a host port per instance. |
+| `EnableTrafficCapture` | `true` | Enable per-connection traffic capture for challenge instances. |
+| `PublicEntry` | `PUBLIC_ENTRY` | The public hostname the platform hands out in emails + scoreboard links. Rendered from `.env`'s `PUBLIC_ENTRY`. |
+| `DockerConfig.ChallengeNetwork` | `challenges` | Name of the platform-managed challenge bridge network — the same external `challenges` network the `gzctf` service joins. |
+| `DockerConfig.Uri` | `unix:///var/run/docker.sock` | How the provider reaches the daemon. |
 
-The Kubernetes-only keys are present but inert under Docker:
+The `KubernetesConfig` block is present but inert under Docker.
 
-```yaml
-- ContainerProvider__KubernetesConfig__KubeConfig=/app/kube-config.yaml
-- ContainerProvider__KubernetesConfig__Namespace=gzctf-challenges
-- ContainerProvider__KubernetesConfig__ImagePullPolicy=IfNotPresent
-- ContainerProvider__KubernetesConfig__AllowCidr__0=172.0.12.0/24
-- Ad__FlagPullBaseUrl=http://172.0.12.1:8080
-```
+### `Ad` (A&D / KotH engine)
 
-:::tip
-**PublicEntry** — when you publish challenge instances by exposing host ports (rather than `PlatformProxy`), set `ContainerProvider__PublicEntry` to the host/IP players should connect to so the platform hands out reachable `host:port` addresses. With `PortMappingType=PlatformProxy` as configured here, traffic goes through the platform proxy and `PublicEntry` is not the mechanism in play. See [/config/appsettings](/config/appsettings).
-:::
-
-### Forwarded headers
-
-Because gzctf sits behind a proxy, configure trust for forwarded headers so it reads the real client IP:
-
-```yaml
-- ForwardedOptions__ForwardedHeaders=1
-- ForwardedOptions__ForwardLimit=1
-- ForwardedOptions__TrustedNetworks__0=172.0.4.0/24
-```
-
-`ForwardedHeaders=1` enables `X-Forwarded-For`; `ForwardLimit=1` trusts one proxy hop; `TrustedNetworks__0` whitelists the proxy subnet. Adjust the CIDR to your actual front-end network.
-
-## A&D engine wiring
-
-The A&D / KotH engine needs two pieces of network plumbing that the jeopardy platform does not: an SSH jump host and a WireGuard endpoint. Both are sidecar services that share secrets and config with `gzctf`.
-
-### A&D env on `gzctf`
-
-```yaml
-# WireGuard
-- Ad__Vpn__ConfigDir=/wg-config
-- Ad__Vpn__ClientCidr=10.13.37.0/24
-- Ad__Vpn__ServerEndpoint=${AD_VPN_SERVER_ENDPOINT:-1pc.tf:51820}
-# SSH jump
-- Ad__Ssh__InternalSecret=${AD_SSH_INTERNAL_SECRET:-dev-only-rotate-me-before-prod}
-- Ad__Ssh__PublicHost=${AD_SSH_PUBLIC_HOST:-1pc.tf}
-- Ad__Ssh__PublicPort=${AD_SSH_PUBLIC_PORT:-22022}
-# Checker
-- Ad__Checker__MaxParallel=${AD_CHECKER_MAX_PARALLEL:-10}
-- Ad__Checker__TimeoutSeconds=${AD_CHECKER_TIMEOUT_SECONDS:-30}
+```json
+"Ad": {
+  "Vpn": {
+    "ConfigDir": "/wg-config",
+    "ClientCidr": "10.13.37.0/24",
+    "ServerEndpoint": "PUBLIC_ENTRY:51820",
+    "Dns": "1.1.1.1"
+  },
+  "Ssh": {
+    "InternalSecret": "<generated>",
+    "PublicHost": "PUBLIC_ENTRY",
+    "PublicPort": 22022
+  }
+}
 ```
 
 | Key | Default | Notes |
 | --- | --- | --- |
-| `Ad__Vpn__ConfigDir` | `/wg-config` | Must match the `wireguard` sidecar's `/config` mount (both share the `wg-config` volume). `AdWireGuardSyncService` reads `server.pub`/`server.key` and writes `wg0.conf` here. |
-| `Ad__Vpn__ClientCidr` | `10.13.37.0/24` | Address pool handed to VPN clients. |
-| `Ad__Vpn__ServerEndpoint` | `1pc.tf:51820` | The host-reachable UDP endpoint clients dial. **Override per host** via `AD_VPN_SERVER_ENDPOINT` — set it to your public IP/hostname + the published UDP port. |
-| `Ad__Ssh__InternalSecret` | `dev-only-rotate-me-before-prod` | Shared secret authenticating `ssh-jump` to gzctf's internal lookup/exec endpoints. The `ssh-jump` service must use the **same** value. |
-| `Ad__Ssh__PublicHost` | `1pc.tf` | Host players SSH to. |
-| `Ad__Ssh__PublicPort` | `22022` | Port players SSH to; must match the host side of the `ssh-jump` port mapping. |
-| `Ad__Checker__MaxParallel` | `10` | Concurrent checker-container runs. Sized for ~50 teams × ~5 challenges; raise it if SLA badges lag the round. |
-| `Ad__Checker__TimeoutSeconds` | `30` | Hard timeout per checker run. |
+| `Vpn.ConfigDir` | `/wg-config` | Must match the `wireguard` sidecar's `/config` mount (both share the `wg-config` volume). |
+| `Vpn.ClientCidr` | `10.13.37.0/24` | Address pool handed to VPN clients. |
+| `Vpn.ServerEndpoint` | `PUBLIC_ENTRY:51820` | The host-reachable UDP endpoint clients dial; must match the published `51820/udp`. |
+| `Ssh.InternalSecret` | *(generated)* | Shared secret authenticating `ssh-jump` to gzctf's internal lookup/exec endpoints. The platform **refuses the placeholder**, so without a real value `ssh <challenge-id>@PUBLIC_ENTRY -p 22022` stays disabled. `init-config` generates it and mirrors it into `.env`. |
+| `Ssh.PublicHost` | `PUBLIC_ENTRY` | Host players SSH to. |
+| `Ssh.PublicPort` | `22022` | Port players SSH to; must match the host side of the `ssh-jump` mapping (override with `AD_SSH_PUBLIC_PORT`). |
 
-:::danger
-Generate a real `AD_SSH_INTERNAL_SECRET` before going live: `openssl rand -hex 32`. The default literally says `dev-only-rotate-me-before-prod`. This secret is the only thing standing between the `ssh-jump` box and gzctf's internal exec endpoints — those services share a compose network with postgres/redis.
-:::
+Other blocks in `appsettings.example.json` worth knowing: `HoneypotConfig` (the seven listener ports + chain detection), `FlagEgressConfig`, `CheatDetectionConfig`, `EmailConfig` / `CaptchaConfig` (the wizard fills these if you opt in), `RegistryConfig` (private image registry creds, also settable from `/admin/settings`), and `ForwardedOptions` — which is **already tuned for running behind Traefik** (`ForwardedHeaders: 5`, one proxy hop, trusted private nets), so you don't need to touch it for the default stack.
 
-### `ssh-jump` sidecar
-
-```yaml
-ssh-jump:
-  build:
-    context: ./ssh-jump
-  environment:
-    - GZCTF_URL=http://gzctf:8080
-    - INTERNAL_SECRET=${AD_SSH_INTERNAL_SECRET:-dev-only-rotate-me-before-prod}
-  ports:
-    - "${AD_SSH_PUBLIC_PORT:-22022}:22"
-  depends_on:
-    - gzctf
-  networks:
-    - default
-  restart: unless-stopped
-```
-
-`ssh-jump` is an SSH server whose `AuthorizedKeysCommand` and WebSocket relay call gzctf's control plane (`GZCTF_URL=http://gzctf:8080`, using the internal Docker DNS name so traffic stays on the compose network). `INTERNAL_SECRET` must equal `Ad__Ssh__InternalSecret` on `gzctf`. Players connect with:
+## Make-target reference
 
 ```bash
-ssh <challenge-id>@<your-host> -p 22022
+make help        # list every target with a one-line description
 ```
 
-where `<challenge-id>` is the routing username and `22022` is `AD_SSH_PUBLIC_PORT`.
-
-### `wireguard` sidecar
-
-```yaml
-wireguard:
-  build:
-    context: ./wireguard
-  cap_add:
-    - NET_ADMIN
-    - SYS_MODULE
-  sysctls:
-    net.ipv4.conf.all.src_valid_mark: 1
-    net.ipv4.ip_forward: 1
-  devices:
-    - /dev/net/tun:/dev/net/tun
-  ports:
-    - "51820:51820/udp"
-  volumes:
-    - "wg-config:/config"
-  networks:
-    - wg-bootstrap
-  restart: unless-stopped
-```
-
-Why each piece exists:
-
-- `cap_add: NET_ADMIN, SYS_MODULE` and `devices: /dev/net/tun` are needed to bring up the WireGuard interface and program routing inside the container.
-- `sysctls` enable source-valid-mark and IPv4 forwarding so VPN traffic can be routed into the challenge networks.
-- `wg-config` → `/config` is the **same** volume gzctf mounts at `/wg-config`. gzctf writes `wg0.conf` and the sidecar serves it.
-- The sidecar sits **only** on the dedicated `wg-bootstrap` network — intentionally lonely. It deliberately has **no** interface on the gzctf `default` network (where postgres/redis live), so even with a wide-open iptables FORWARD chain there is no route from a VPN client into the control plane. At runtime, `AdVpnTopology` (in gzctf) inspects and attaches the sidecar to the platform's challenge networks — so adding or renaming a challenge network needs no compose change.
-
-:::info
-The published UDP port (`51820:51820/udp`) must line up with the port in `Ad__Vpn__ServerEndpoint`. If you change one, change the other.
-:::
-
-## Datastores
-
-```yaml
-postgres:
-  image: postgres:16-alpine
-  environment:
-    - POSTGRES_DB=gzctf
-    - POSTGRES_USER=gzctf
-    - POSTGRES_PASSWORD=gzctf
-  volumes:
-    - postgres_data:/var/lib/postgresql/data
-
-redis:
-  image: redis:alpine
-  command: redis-server --requirepass gzctf
-  volumes:
-    - redis_data:/data
-```
-
-Both persist to named volumes (`postgres_data`, `redis_data`). The `gzctf` service `depends_on` both, so compose starts them first. Their credentials must match the corresponding `ConnectionStrings__*` values on `gzctf`.
-
-## Volumes and networks summary
-
-```yaml
-volumes:
-  postgres_data:
-  redis_data:
-  gzctf-files:
-  gzctf-repos:
-  wg-config:
-  ad-flags:
-
-networks:
-  wg-bootstrap:
-    driver: bridge
-  k3d:
-    external: true
-    name: k3d-gzctf
-```
-
-The `k3d` network is `external: true` — it is created by `k3d cluster create`, not by this compose file. Under the Docker provider you can ignore it; under Kubernetes it must already exist (`name: k3d-gzctf`).
-
-## Bring-up
-
-From the repository root (where `docker-compose.yml` lives):
-
-```bash
-# Build the gzctf image and start everything in the background
-docker compose up -d --build
-```
-
-Database migrations run **automatically** on startup — there is no separate migration step. The first boot creates the schema; later boots apply any new migrations before serving traffic.
-
-Once the stack is up:
-
-- Web UI / API: `http://<host>:8080`
-- SSH jump: `<host>:22022`
-- WireGuard: UDP `<host>:51820`
-
-:::tip
-Admin is not granted by registration order. The platform seeds a fixed `Admin` account at first boot when `ADMIN_PASSWORD` (e.g. `GZCTF_ADMIN_PASSWORD`) is set — log in as `Admin` with that password. Self-registered users are created as ordinary Users in production. (Note: this compose pins `ASPNETCORE_ENVIRONMENT=Development`, which both auto-seeds an `Admin`/`Admin@2022` account and makes every self-registered user an Admin — set it to `Production` for a real event.)
-:::
-
-## Viewing logs
-
-```bash
-# Follow the platform logs
-docker compose logs -f gzctf
-
-# A specific sidecar
-docker compose logs -f ssh-jump
-docker compose logs -f wireguard
-
-# Everything, last 200 lines, following
-docker compose logs -f --tail=200
-```
-
-If A&D containers misbehave, the platform logs are where the provider reports container spawn / `docker diff` / snapshot activity, and where `AdWireGuardSyncService` / `AdVpnTopology` log their attach steps.
-
-## Upgrades
-
-The shipped compose builds from source. The upgrade flow is therefore: get the new code, rebuild, restart. Migrations apply automatically on the new container's startup.
-
-```bash
-# Pull the latest source for this fork
-git pull
-
-# Rebuild the gzctf image and recreate the container
-docker compose up -d --build gzctf
-```
-
-If you instead run a **pinned published image** (recommended for production — replace the `build:` block with an `image:` line), the flow is the conventional pull + restart:
-
-```bash
-docker compose pull gzctf
-docker compose up -d gzctf
-```
+| Target | What it does |
+| --- | --- |
+| `make wizard` | Interactive first-time setup → writes `.env` + `appsettings.json`. |
+| `make setup` | Create the external `traefik` + `challenges` networks (idempotent). |
+| `make init-config` | Render `appsettings.json` from the example + `.env` (auto-runs on `platform-up`). |
+| `make platform-up` | Start `gzctf` + `db` + `cache` + `traefik` (TLS). |
+| `make platform-up-no-traefik` | Start `gzctf` + `db` + `cache` only, exposing `gzctf` on host `:8080`. |
+| `make platform-down` | Stop everything; **keeps volumes**. |
+| `make platform-restart` | `platform-down` then `platform-up`. |
+| `make platform-clean` | Stop everything **and drop volumes** — data loss. |
+| `make platform-logs` | Tail logs for all services. |
+| `make gzctf-logs` / `db-logs` / `cache-logs` / `traefik-logs` | Tail one service. |
+| `make traefik-restart` | Restart traefik only. |
+| `make flush-cache` | `redis-cli FLUSHALL` on `cache` — rebuilds the scoreboard cache on next request. |
+| `make pull` / `pull-no-traefik` / `pull-gzctf` | Pull the latest image(s) without recreating anything. |
+| `make update` / `update-no-traefik` / `update-gzctf` | Pull, then recreate the changed container(s). |
 
 :::warning
-Named volumes (`postgres_data`, `redis_data`, `gzctf-files`, `gzctf-repos`, `wg-config`, `ad-flags`) survive `docker compose up`/`down`. Do **not** run `docker compose down -v` on a live event — `-v` deletes the volumes, wiping the database, uploaded files, the WireGuard config, and the A&D flag store. Take a Postgres dump before any risky operation.
+**Do not run `make platform-clean` on a live event.** It runs `docker compose down -v`, which deletes the `postgres-data`, `gzctf-files`, and `wg-config` volumes — wiping the database, uploaded files, and the WireGuard config. Use `make platform-down` to stop without data loss, and take a Postgres dump before any risky operation.
 :::
+
+## Updating the platform image
+
+The stack runs a published image, so upgrades are a pull + recreate — no source checkout, no rebuild.
+
+```bash
+# Pull the new gzctf image and recreate just the gzctf container.
+# traefik + db + cache keep running; only gzctf blips.
+make update-gzctf
+```
+
+Migrations apply automatically on the new container's startup. `make update-gzctf` only touches `gzctf`. To refresh **every** image (including `traefik`/`postgres`/`redis`) and recreate any container whose digest changed, use `make update` (or `make update-no-traefik` in standalone mode). If you'd rather pull first and recreate later, `make pull-gzctf` / `make pull` download images without restarting anything.
+
+## No-TLS / local runs
+
+For a workstation or an internal box without a public hostname:
+
+```bash
+make platform-up-no-traefik   # gzctf on http://<host>:8080
+```
+
+This loads `compose.standalone.yml` instead of the Traefik overlay. The external `traefik` + `challenges` networks still need to exist (`make setup` creates them); the `traefik` network membership is harmless when no Traefik container is using it.
+
+:::info
+`appsettings.json` → `ContainerProvider.PublicEntry` was rendered from `.env`'s `PUBLIC_ENTRY` as an HTTPS hostname. For standalone use, edit it to e.g. `http://<host>:8080` so emails and scoreboard links resolve to the right place.
+:::
+
+## Importing example challenges
+
+The companion [`TCP1PADTesting`](https://github.com/TCP1P/TCP1PADTesting) repo ships four ready-to-run challenges (two A&D, two KotH; OWASP web + heap pwn) you can import to populate a game and exercise the engine end to end. You import it via a **repo binding** — gzctf clones the repo itself and globs `.gzevent` recursively:
+
+1. Log in as `Admin`, go to **Repo Bindings → Add**.
+2. Set `RepoUrl` to `https://github.com/TCP1P/TCP1PADTesting`, leave the ref empty, set `IntervalSeconds` to `60`, and add **no token** (the repo is public).
+3. **Scan now**, then watch the eight images build under **admin → Builds** (each challenge ships an auto-built service + checker, neither pinned).
+
+Challenges import **hidden**; set the start/end times and unhide them in **admin → game → Info**. The A&D round settings on that Info page are covered in [/guide/deployment/provider](/guide/deployment/provider) and the appsettings reference.
 
 ## Host tuning for many challenge containers
 
@@ -392,7 +345,24 @@ find /proc/*/fd -lname 'anon_inode:inotify' 2>/dev/null | wc -l
 ```
 :::
 
+## Kubernetes
+
+The template also ships a `k8s/` directory for running the same platform on k3s (or any other distribution), swapping `ContainerProvider.Type` to `Kubernetes` so challenge instances spawn as pods in the `gzctf-challenges` namespace. Apply the manifests **in order**:
+
+```bash
+kubectl apply -f 00-namespace.yaml
+kubectl apply -f 10-postgres.yaml
+kubectl apply -f 20-redis.yaml
+kubectl apply -f 30-gzctf-config.yaml
+kubectl apply -f 40-gzctf.yaml
+kubectl apply -f 50-ingress.yaml
+
+kubectl -n gzctf rollout status deploy/gzctf
+```
+
+Secrets are supplied via the `gzctf-secrets` Secret (postgres password, `xor-key`, admin password — generate them with `openssl rand` exactly as the compose path does, and **don't rotate `xor-key` after first boot**). The platform's `appsettings.json` lives in a ConfigMap (`30-gzctf-config.yaml`), which also grants the gzctf ServiceAccount RBAC scoped to the `gzctf-challenges` namespace. See `k8s/README.md` in the template, and [/guide/deployment/provider](/guide/deployment/provider) for what the Kubernetes backend gives the A&D engine versus Docker.
+
 ## Where to go next
 
-- [/guide/deployment/provider](/guide/deployment/provider) — Docker vs. Kubernetes: the trade-offs, and how to flip `ContainerProvider__Type` between them.
+- [/guide/deployment/provider](/guide/deployment/provider) — Docker vs. Kubernetes: the trade-offs, and how to flip `ContainerProvider.Type` between them.
 - [/config/appsettings](/config/appsettings) — the complete configuration key reference (every `ContainerProvider`, `Ad`, `Honeypot`, and `ForwardedOptions` key, with defaults).

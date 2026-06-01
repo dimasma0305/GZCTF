@@ -1,9 +1,13 @@
 # Challenge Templates
 
-A companion repo, [`TCP1P/gzctf-platform-template`](https://github.com/TCP1P/gzctf-platform-template), ships four ready-to-edit challenge scaffolds. Each is a complete, runnable example — copy a folder, edit it, and you have a valid challenge. This page explains what each scaffold is for, the shared folder layout, and how to get a challenge onto the platform.
+The platform repo, [`TCP1P/gzctf-platform-template`](https://github.com/TCP1P/gzctf-platform-template), ships four ready-to-edit challenge scaffolds under `challenges/`. Each is a complete, runnable example — copy a folder, edit it, and you have a valid challenge. This page explains what each scaffold is for, the shared folder layout, and how to get a challenge onto the platform.
 
 :::tip
 You don't have to start from scratch. Every scaffold already has a working `challenge.yml`, a buildable `src/`, and a real `solver/`. The fastest path is "copy the closest folder, then edit," not "write a `challenge.yml` from memory."
+:::
+
+:::tip Want a fuller worked example?
+The scaffolds here are deliberately minimal — one of each type, with a toy bug. For a complete, realistic A&D/KotH event you can import as-is, point a repo binding at [`TCP1P/TCP1PADTesting`](https://github.com/TCP1P/TCP1PADTesting). It's a focused four-challenge game — two Attack & Defense services (an OWASP web portal and a heap-corruption pwn binary) and two King of the Hill hills (an OWASP web hill and a binary hill) — wired with real vulnerabilities, auto-built `./checker` images, and reference solvers. See [/guide/authoring/repo-bindings](/guide/authoring/repo-bindings) for how to import it.
 :::
 
 ## The four scaffolds
@@ -48,27 +52,30 @@ Every scaffold follows the same shape:
 1. **Copy the closest scaffold folder** and rename it.
 2. **Edit `challenge.yml`** — set `name`, `author`, `description`, and the type-specific block (`flags:` / `container:` / `ad:`).
 3. **Fill in `src/`** (your service or attachment) and **`dist/`** (player downloads), and write a real `solver/`.
-4. **Import it** one of two ways:
+4. **Import it** — three ways, in order of scale:
 
-```bash
-# Option A — push from the repo with gzcli
-gzcli sync          # importer reads each challenge.yml; container types auto-build ./src/Dockerfile
-```
+### A — Repo binding (recommended)
 
-```text
-Option B — web upload
-Zip the challenge folder and drop it at:
-  https://PUBLIC_ENTRY/games/<id>/submit
-This requires an admin to enable "Allow user submissions" for that game
-(admin → game → Info). Otherwise the page is disabled and the API returns 403.
-```
+Commit your challenges to a Git repo, then point the platform at it: **admin → Repo Bindings → Add**, with the repo URL, an empty ref (default branch), and `IntervalSeconds` (default `60`, clamped to `[60, 86400]`). For a public repo leave the token empty. The platform clones the repo itself, globs every `.gzevent` recursively, and imports the `challenge.yml` files under each event — container types auto-build their `./src/Dockerfile`. After the first poll (or hit **Scan now**) the import re-runs automatically on every push, so this is the path that scales to a whole event.
+
+This is exactly how you'd import [`TCP1P/TCP1PADTesting`](https://github.com/TCP1P/TCP1PADTesting). Full walkthrough — binding fields, scan cadence, `Status`/`TokenStatus`, private-repo tokens — is in [/guide/authoring/repo-bindings](/guide/authoring/repo-bindings).
+
+### B — Web upload (one-off, gated)
+
+Zip the challenge folder and drop it at `https://PUBLIC_ENTRY/games/<id>/submit`. This requires an admin to enable **Allow user submissions** for that game (admin → game → Info); otherwise the page is disabled and the API returns `403`. Submitted challenges land in `Pending` review.
 
 The first three types (`static-attachment`, `dynamic-container`, `attack-defense`) are also **one-click downloads on the in-app submit page**. King of the Hill has **no download button** — zip the folder and upload it.
 
-For details on connecting a repo so the platform watches and syncs it automatically, see [/guide/authoring/repo-bindings](/guide/authoring/repo-bindings).
+### C — Admin tarball import (one-off)
+
+An admin can import a packaged event/challenge archive directly through the admin import API without a repo binding — useful for a one-shot load of an existing tree. See [/guide/authoring/repo-bindings](/guide/authoring/repo-bindings) for the import endpoints and when to use each.
+
+:::info
+Repo bindings (A) are the supported, server-side way to keep a game in sync — prefer them for anything beyond a one-off challenge.
+:::
 
 :::tip Stopping a challenge from re-syncing
-Deleting a challenge in the admin UI removes it from the platform but **not** from the repo, so a repo watch will re-import (resurrect) it on the next sync. To keep it gone, add `ignore: true` to its `challenge.yml`:
+Deleting a challenge in the admin UI removes it from the platform but **not** from the repo, so a repo binding will re-import (resurrect) it on the next scan. To keep it gone, add `ignore: true` to its `challenge.yml`:
 
 ```yaml
 name: "old-challenge"
@@ -195,6 +202,6 @@ KotH scoring knobs — hold points per tick (default `1.0`) and the N-tick refre
 ## Where to go next
 
 - [/guide/authoring/challenge-yaml](/guide/authoring/challenge-yaml) — the full `challenge.yml` schema and every field.
-- [/guide/authoring/repo-bindings](/guide/authoring/repo-bindings) — connecting a repo so the platform imports and re-syncs challenges.
+- [/guide/authoring/repo-bindings](/guide/authoring/repo-bindings) — connecting a repo so the platform imports and re-syncs challenges (and the TCP1PADTesting walkthrough).
 - [/guide/features/attack-defense](/guide/features/attack-defense) — how A&D ticks, flags, checkers, and scoring work end to end.
 - [/guide/features/king-of-the-hill](/guide/features/king-of-the-hill) — how KotH tokens, the shared hill, and hold scoring work.

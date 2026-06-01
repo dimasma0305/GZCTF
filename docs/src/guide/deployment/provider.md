@@ -4,54 +4,51 @@ The A&D and KotH engine runs on top of GZ::CTF's existing container abstraction 
 
 ## Choosing the provider
 
-The backend is selected by a single config key, `ContainerProvider:Type`, which is a string enum with two values defined in `Configs.cs`:
+The backend is selected by a single config key — `ContainerProvider.Type` in `compose/appsettings.json` — a string enum with two values, `Docker` and `Kubernetes`. If you leave it at the shipped default you get **Docker**: the provider/manager pair is bound once at process start and never both, so there is no runtime fallback from one to the other.
 
-```csharp
-public enum ContainerProviderType
-{
-    Docker,      // default
-    Kubernetes
-}
+| `Type` | What spawns challenge instances | A&D feature set |
+| --- | --- | --- |
+| `Docker` (default) | the host docker socket (`/var/run/docker.sock`) | full — diffs, snapshots, in-place network move, KotH cooldown |
+| `Kubernetes` | an in-cluster ServiceAccount, pods in the `gzctf-challenges` namespace | exec-light — egress challenges, marker scoring, no snapshots |
 
-public class ContainerProvider
-{
-    public ContainerProviderType Type { get; set; } = ContainerProviderType.Docker;
-    // ...
-    public KubernetesConfig? KubernetesConfig { get; set; }
-    public DockerConfig? DockerConfig { get; set; }
+Both deploy paths live in the [platform template](https://github.com/TCP1P/gzctf-platform-template). Pick one before first boot:
+
+- **Docker** — the default. The wizard renders `compose/appsettings.json` with `ContainerProvider.Type` already set to `Docker`, and `make platform-up` brings up gzctf, the DB, cache, Traefik, WireGuard, and ssh-jump from the published image. This is the path the rest of the docs assume.
+- **Kubernetes** — apply the manifests under the template's `k8s/` directory in order (`00-namespace` → `10-postgres` → `20-redis` → `30-gzctf-config` → `40-gzctf` → `50-ingress`), then `kubectl -n gzctf rollout status deploy/gzctf`. The `appsettings.json` baked into `30-gzctf-config.yaml` already sets `ContainerProvider.Type` to `Kubernetes`. See `k8s/README.md` in the template for the full walkthrough.
+
+The config is plain JSON (the template puts every setting in `compose/appsettings.json`, rendered from `compose/appsettings.example.json`). The Docker default looks like this:
+
+```json
+// compose/appsettings.json
+"ContainerProvider": {
+  "Type": "Docker",
+  "PortMappingType": "PlatformProxy",
+  "EnableTrafficCapture": true,
+  "PublicEntry": "PUBLIC_ENTRY",
+  "DockerConfig": {
+    "SwarmMode": false,
+    "ChallengeNetwork": "challenges",
+    "Uri": "unix:///var/run/docker.sock"
+  },
+  "KubernetesConfig": {
+    "Namespace": "gzctf-challenges",
+    "AllowCIDR": [ "10.0.0.0/8" ],
+    "DNS": [ "8.8.8.8", "1.1.1.1" ]
+  }
 }
 ```
 
-If you set nothing, you get **Docker**. The wiring lives in `ContainerServiceExtension.cs`: at startup the `Type` switch registers exactly one provider/manager pair and never both — there is no runtime fallback from one to the other.
-
-| `Type` | Provider registered | Manager registered | Image builder / exec / checker |
-| --- | --- | --- | --- |
-| `Docker` | `DockerProvider` | `DockerManager` | `DockerChallengeImageBuilder`, `DockerContainerExecChannel`, `AdCheckerExecutor` |
-| `Kubernetes` | `KubernetesProvider` | `KubernetesManager` | `K8sChallengeImageBuilder`, `K8sContainerExecChannel`, `K8sAdCheckRunner` |
-
-In this deployment the value is set as a docker-compose environment variable (double-underscore = config nesting):
-
-```yaml
-# docker-compose.yml
-environment:
-  - ContainerProvider__Type=Docker
-  # Kubernetes-only keys are read only when Type=Kubernetes:
-  - ContainerProvider__KubernetesConfig__KubeConfig=/app/kube-config.yaml
-  - ContainerProvider__KubernetesConfig__Namespace=gzctf-challenges
-  - ContainerProvider__KubernetesConfig__ImagePullPolicy=IfNotPresent
-  - ContainerProvider__KubernetesConfig__AllowCidr__0=172.0.12.0/24
-  - Ad__FlagPullBaseUrl=http://172.0.12.1:8080
-```
+The `KubernetesConfig` block is read only when `Type` is `Kubernetes`; the `DockerConfig` block only when `Type` is `Docker`. To run on Kubernetes you flip `Type` to `"Kubernetes"` (already done for you in `k8s/30-gzctf-config.yaml`).
 
 See [/config/appsettings](/config/appsettings) for the full `ContainerProvider`, `DockerConfig`, and `KubernetesConfig` schemas.
 
 :::warning Switching providers relaunches every challenge container
-The provider is bound once, at process start, by DI. To switch you change `ContainerProvider:Type` and restart gzctf. The A&D reconcile loop (`AdContainerManager`, every 15 s) then sees the new backend with **no record of the old backend's containers**, so it launches a fresh container for every (team, challenge) and every KotH hill from the base image. Any in-flight game state that lived inside the containers — team patches, planted footholds, the `/koth/king` marker, accumulated filesystem changes — is wiped. Treat a provider switch as a hard reset of all live challenge instances; do not flip it mid-game.
+The provider is bound once, at process start, by DI. To switch you change `ContainerProvider.Type` in `compose/appsettings.json` and recreate gzctf (`make update-gzctf`, or `make platform-restart`). The A&D reconcile loop (`AdContainerManager`, every 15 s) then sees the new backend with **no record of the old backend's containers**, so it launches a fresh container for every (team, challenge) and every KotH hill from the base image. Any in-flight game state that lived inside the containers — team patches, planted footholds, the `/koth/king` marker, accumulated filesystem changes — is wiped. Treat a provider switch as a hard reset of all live challenge instances; do not flip it mid-game.
 :::
 
 ## What A&D gets on Docker
 
-Docker is the reference backend and the one this deployment runs. The provider (`DockerProvider`) eagerly creates the challenge bridges at boot via `EnsureNetworkCreated()`.
+Docker is the reference backend and the one the template's `compose/` path runs by default. The provider (`DockerProvider`) eagerly creates the challenge bridges at boot via `EnsureNetworkCreated()`.
 
 ### Networks ("per-team" bridges via Open / Isolated modes)
 
@@ -219,7 +216,7 @@ The result is the same containment guarantee on both backends: a fully-popped ch
 ## Capacity guidance
 
 :::info These are observed operational ceilings, not configured limits
-The numbers below come from stress-testing this deployment, not from a hard-coded cap in gzctf. Your mileage depends on subnet sizing, kernel, and host resources.
+The numbers below come from stress-testing the template's Docker path, not from a hard-coded cap in gzctf. Your mileage depends on subnet sizing, kernel, and host resources.
 :::
 
 On Docker, A&D scale is bounded by the shared challenge bridges:
