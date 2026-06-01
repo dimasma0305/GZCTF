@@ -247,16 +247,16 @@ const ARENA_CSS = `
     text-shadow:4px 0 #ff2350,-4px 0 #27e3ff,0 0 26px rgba(255,40,80,.9),0 0 60px rgba(255,40,80,.6)}
   .fb-sub{font-family:'Press Start 2P';font-size:clamp(9px,1.5vw,15px);color:#ffd0d6;opacity:0;
     letter-spacing:1px;text-shadow:0 0 10px rgba(255,80,110,.7)}
-  .fb-overlay.play .fb-dark{animation:fbDark 2.9s ease-out forwards}
-  .fb-overlay.play .fb-bar.t{animation:fbBarT 2.9s ease-out forwards}
-  .fb-overlay.play .fb-bar.b{animation:fbBarB 2.9s ease-out forwards}
-  .fb-overlay.play .fb-rays{animation:fbRays 2.9s ease-out forwards}
-  .fb-overlay.play .fb-splat{animation:fbSplat 2.9s cubic-bezier(.2,1.4,.3,1) forwards}
-  .fb-overlay.play .fb-crack{animation:fbCrack 2.9s ease-out forwards}
-  .fb-overlay.play .fb-flash{animation:fbFlash 2.9s linear forwards}
-  .fb-overlay.play .fb-kanji{animation:fbKanji 2.9s ease-out forwards}
-  .fb-overlay.play .fb-title{animation:fbTitle 2.9s cubic-bezier(.2,1.5,.3,1) forwards}
-  .fb-overlay.play .fb-sub{animation:fbSub 2.9s ease-out forwards}
+  .fb-overlay.play .fb-dark{animation:fbDark 5s ease-out forwards}
+  .fb-overlay.play .fb-bar.t{animation:fbBarT 5s ease-out forwards}
+  .fb-overlay.play .fb-bar.b{animation:fbBarB 5s ease-out forwards}
+  .fb-overlay.play .fb-rays{animation:fbRays 5s ease-out forwards}
+  .fb-overlay.play .fb-splat{animation:fbSplat 5s cubic-bezier(.2,1.4,.3,1) forwards}
+  .fb-overlay.play .fb-crack{animation:fbCrack 5s ease-out forwards}
+  .fb-overlay.play .fb-flash{animation:fbFlash 5s linear forwards}
+  .fb-overlay.play .fb-kanji{animation:fbKanji 5s ease-out forwards}
+  .fb-overlay.play .fb-title{animation:fbTitle 5s cubic-bezier(.2,1.5,.3,1) forwards}
+  .fb-overlay.play .fb-sub{animation:fbSub 5s ease-out forwards}
   @keyframes fbDark{0%{opacity:0}5%{opacity:.95}82%{opacity:.95}100%{opacity:0}}
   @keyframes fbBarT{0%{opacity:1;transform:translateY(-100%)}9%{transform:translateY(0)}84%{opacity:1;transform:translateY(0)}100%{opacity:1;transform:translateY(-100%)}}
   @keyframes fbBarB{0%{opacity:1;transform:translateY(100%)}9%{transform:translateY(0)}84%{opacity:1;transform:translateY(0)}100%{opacity:1;transform:translateY(100%)}}
@@ -279,10 +279,10 @@ const ARENA_CSS = `
   .fb-fighter.vic{transform:translateX(130vw)}
   .fb-slash{position:absolute;left:50%;top:50%;width:140vw;height:8px;transform:translate(-50%,-50%) rotate(-18deg) scaleX(0);
     background:linear-gradient(90deg,transparent,#fff,#ff3b5b,#fff,transparent);box-shadow:0 0 30px #ff3b5b;opacity:0}
-  .fb-overlay.play .fb-vs .fb-fighter.atk{animation:fbAtk 2.9s cubic-bezier(.2,1.3,.3,1) forwards}
-  .fb-overlay.play .fb-vs .fb-fighter.vic{animation:fbVic 2.9s cubic-bezier(.2,1.3,.3,1) forwards}
-  .fb-overlay.play .fb-vs-x{animation:fbVsx 2.9s ease-out forwards}
-  .fb-overlay.play .fb-slash{animation:fbSlash 2.9s ease-out forwards}
+  .fb-overlay.play .fb-vs .fb-fighter.atk{animation:fbAtk 5s cubic-bezier(.2,1.3,.3,1) forwards}
+  .fb-overlay.play .fb-vs .fb-fighter.vic{animation:fbVic 5s cubic-bezier(.2,1.3,.3,1) forwards}
+  .fb-overlay.play .fb-vs-x{animation:fbVsx 5s ease-out forwards}
+  .fb-overlay.play .fb-slash{animation:fbSlash 5s ease-out forwards}
   @keyframes fbAtk{0%{opacity:0;transform:translateX(-130vw)}9%{opacity:1;transform:translateX(-14px)}
     14%{transform:translateX(14px)}16%{transform:translateX(0)}80%{opacity:1;transform:translateX(0)}100%{opacity:0;transform:translateX(-22vw)}}
   @keyframes fbVic{0%{opacity:0;transform:translateX(130vw)}9%{opacity:1;transform:translateX(14px)}
@@ -296,13 +296,13 @@ const ARENA_CSS = `
      a pulsing "INCOMING …" banner — the centre stays clear so the scoreboard reads
      through. Durations track the JS FB.preroll via the --fbPre custom property. */
   .fb-tele{inset:0;overflow:hidden}
-  .fb-overlay.tele .fb-tele{animation:fbTele var(--fbPre,1700ms) ease-out forwards}
+  .fb-overlay.tele .fb-tele{animation:fbTele var(--fbPre,5000ms) ease-out forwards}
   .fb-tele-vig{position:absolute;inset:0;background:radial-gradient(circle at 50% 50%,transparent 40%,rgba(255,40,80,.34) 100%);opacity:0}
-  .fb-overlay.tele .fb-tele-vig{animation:fbTeleVig var(--fbPre,1700ms) ease-in-out forwards}
+  .fb-overlay.tele .fb-tele-vig{animation:fbTeleVig var(--fbPre,5000ms) ease-in-out forwards}
   .fb-tele-ban{position:absolute;left:50%;top:15vh;transform:translateX(-50%);display:flex;align-items:center;gap:14px;white-space:nowrap;opacity:0}
   .fb-tele-ban .fb-tele-jp{font-family:'DotGothic16';font-size:clamp(16px,3vw,34px);color:#ff5566;letter-spacing:.3em;text-shadow:0 0 14px rgba(255,59,91,.9)}
   .fb-tele-ban .fb-tele-txt{font-family:'Press Start 2P';font-size:clamp(13px,2.4vw,28px);color:#fff;letter-spacing:2px;text-shadow:0 0 16px rgba(255,59,91,.95)}
-  .fb-overlay.tele .fb-tele-ban{animation:fbTeleBan var(--fbPre,1700ms) ease-in-out forwards}
+  .fb-overlay.tele .fb-tele-ban{animation:fbTeleBan var(--fbPre,5000ms) ease-in-out forwards}
   @keyframes fbTele{0%{opacity:0}10%{opacity:1}100%{opacity:1}}
   @keyframes fbTeleVig{0%{opacity:0}30%{opacity:.45}100%{opacity:1}}
   @keyframes fbTeleBan{0%{opacity:0;transform:translateX(-50%) scale(1.25);letter-spacing:8px}
@@ -605,7 +605,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   const prevSvcState: Record<string, string> = {}
   // preroll = the attention-seeking telegraph (board stays visible, warning builds)
   // that plays BEFORE the slam cinematic; soundDelay/slam/total are relative to the slam.
-  const FB = { total: 3000, slam: 430, soundDelay: 0, preroll: 1700 }
+  // 5s telegraph + 5s slam = ~10s total. The slam length tracks the CSS anim duration
+  // (5s); the FIRST BLOOD title lands at ~15% (=750ms), so onImpact/shake fire at slam=750.
+  const FB = { total: 5000, slam: 750, soundDelay: 0, preroll: 5000 }
 
   // match clock + scoreboard freeze + winner.
   // live: gameEndMs = real EndTimeUtc; freeze driven by the board's isFrozenView.
@@ -1110,13 +1112,13 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     noiseBurst({ type: 'highpass', f: 5000, fEnd: 9000, dur: 0.1, vol: 0.045, delay: 0.13 })
   }
   function sfxIncoming() {
-    // First-blood build-up: a smooth rising tension swell that crescendos into the
-    // slam (where the firstblood.mp3 lands) — layered tones with a long swell-in, no
-    // staccato pings. Its own telegraph cue; the first-blood mp3 itself is unchanged.
+    // Smooth ~5s rising build-up that crescendos into the slam (where the firstblood.mp3
+    // lands): a low bed for constant presence, a mid pad, and a climbing whoosh. No
+    // staccato; its own telegraph cue — the first-blood mp3 itself is unchanged.
     if (!soundOn || !audio()) return
-    tone({ type: 'sine', f: 110, f2: 240, dur: 1.7, vol: 0.22, attack: 1.55, glide: 1.62 })
-    tone({ type: 'triangle', f: 220, f2: 480, dur: 1.7, vol: 0.12, attack: 1.58, glide: 1.62 })
-    tone({ type: 'sawtooth', f: 330, f2: 900, dur: 1.7, vol: 0.05, attack: 1.6, glide: 1.62 })
+    tone({ type: 'sine', f: 90, f2: 200, dur: 5.0, vol: 0.2, attack: 0.7, glide: 4.8 })
+    tone({ type: 'triangle', f: 180, f2: 420, dur: 5.0, vol: 0.1, attack: 1.6, glide: 4.8 })
+    tone({ type: 'sawtooth', f: 300, f2: 1000, dur: 5.0, vol: 0.06, attack: 4.6, glide: 4.8 })
   }
   function sfxFreeze() {
     if (!soundOn || !audio()) return
