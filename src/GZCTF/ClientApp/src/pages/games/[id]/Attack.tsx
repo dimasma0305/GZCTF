@@ -224,7 +224,7 @@ const ARENA_CSS = `
 
   /* ===== FIRST BLOOD CINEMATIC ===== */
   .fb-overlay{position:fixed;inset:0;z-index:95;pointer-events:none;visibility:hidden;overflow:hidden}
-  .fb-overlay.play{visibility:visible}
+  .fb-overlay.play,.fb-overlay.tele{visibility:visible}
   .fb-overlay>div{position:absolute;opacity:0}
   .fb-dark{inset:0;background:radial-gradient(circle at 50% 45%,rgba(40,2,12,.72),rgba(2,1,6,.97))}
   .fb-bar{left:0;width:100%;height:11vh;background:#040308;border-color:#ff3b5b}
@@ -290,6 +290,28 @@ const ARENA_CSS = `
   @keyframes fbVsx{0%,12%{opacity:0;transform:scale(2.4)}16%{opacity:1;transform:scale(1)}80%{opacity:1}100%{opacity:0}}
   @keyframes fbSlash{0%,12%{opacity:0;transform:translate(-50%,-50%) rotate(-18deg) scaleX(0)}
     15%{opacity:1;transform:translate(-50%,-50%) rotate(-18deg) scaleX(1)}26%{opacity:1}40%{opacity:0}100%{opacity:0}}
+
+  /* ===== FIRST-BLOOD TELEGRAPH (attention-seeking pre-roll; board stays visible) =====
+     Plays before the slam: only a transparent edge-vignette + a sweeping scan line +
+     a pulsing "INCOMING …" banner — the centre stays clear so the scoreboard reads
+     through. Durations track the JS FB.preroll via the --fbPre custom property. */
+  .fb-tele{inset:0;overflow:hidden}
+  .fb-overlay.tele .fb-tele{animation:fbTele var(--fbPre,1700ms) ease-out forwards}
+  .fb-tele-vig{position:absolute;inset:0;background:radial-gradient(circle at 50% 50%,transparent 40%,rgba(255,40,80,.34) 100%);opacity:0}
+  .fb-overlay.tele .fb-tele-vig{animation:fbTeleVig var(--fbPre,1700ms) ease-in forwards}
+  .fb-tele-scan{position:absolute;left:0;top:0;width:100%;height:2px;
+    background:linear-gradient(90deg,transparent,#ff3b5b,transparent);box-shadow:0 0 12px #ff3b5b;opacity:0}
+  .fb-overlay.tele .fb-tele-scan{animation:fbTeleScan var(--fbPre,1700ms) linear forwards}
+  .fb-tele-ban{position:absolute;left:50%;top:15vh;transform:translateX(-50%);display:flex;align-items:center;gap:14px;white-space:nowrap;opacity:0}
+  .fb-tele-ban .fb-tele-jp{font-family:'DotGothic16';font-size:clamp(16px,3vw,34px);color:#ff5566;letter-spacing:.3em;text-shadow:0 0 14px rgba(255,59,91,.9)}
+  .fb-tele-ban .fb-tele-txt{font-family:'Press Start 2P';font-size:clamp(13px,2.4vw,28px);color:#fff;letter-spacing:2px;text-shadow:0 0 16px rgba(255,59,91,.95)}
+  .fb-overlay.tele .fb-tele-ban{animation:fbTeleBan var(--fbPre,1700ms) ease-out forwards}
+  @keyframes fbTele{0%{opacity:0}10%{opacity:1}100%{opacity:1}}
+  @keyframes fbTeleVig{0%{opacity:0}20%{opacity:.5}100%{opacity:1}}
+  @keyframes fbTeleScan{0%{opacity:0;transform:translateY(-4px)}6%{opacity:1}50%{transform:translateY(50vh)}94%{opacity:1}100%{opacity:0;transform:translateY(100vh)}}
+  @keyframes fbTeleBan{0%{opacity:0;transform:translateX(-50%) scale(1.4);letter-spacing:10px}
+    14%{opacity:1;transform:translateX(-50%) scale(1);letter-spacing:2px}
+    30%{opacity:.4}42%{opacity:1}56%{opacity:.45}68%{opacity:1}82%{opacity:.55}92%{opacity:1}100%{opacity:1}}
 
   /* match countdown + freeze pills */
   .matchpill{font-family:'Press Start 2P';font-size:9px;color:var(--cyan);
@@ -472,6 +494,11 @@ const ARENA_BODY = `
   </div>
 
   <div class="fb-overlay" id="fbOverlay">
+    <div class="fb-tele">
+      <div class="fb-tele-vig"></div>
+      <div class="fb-tele-scan"></div>
+      <div class="fb-tele-ban"><i class="fb-tele-jp">警告</i><b class="fb-tele-txt">INCOMING STRIKE</b></div>
+    </div>
     <div class="fb-dark"></div>
     <div class="fb-rays"></div>
     <div class="fb-splat"></div>
@@ -581,7 +608,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   const speed = 1
   let petals = true
   const prevSvcState: Record<string, string> = {}
-  const FB = { total: 3000, slam: 430, soundDelay: 0 }
+  // preroll = the attention-seeking telegraph (board stays visible, warning builds)
+  // that plays BEFORE the slam cinematic; soundDelay/slam/total are relative to the slam.
+  const FB = { total: 3000, slam: 430, soundDelay: 0, preroll: 1700 }
 
   // match clock + scoreboard freeze + winner.
   // live: gameEndMs = real EndTimeUtc; freeze driven by the board's isFrozenView.
@@ -1085,6 +1114,18 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     tone({ type: 'triangle', f: 900, f2: 1500, dur: 0.18, vol: 0.11, delay: 0.13 })
     noiseBurst({ type: 'highpass', f: 5000, fEnd: 9000, dur: 0.1, vol: 0.045, delay: 0.13 })
   }
+  function sfxIncoming() {
+    // First-blood build-up alarm — three radar pings climbing in pitch over a low
+    // rising drone, resolving into the slam (where the firstblood.mp3 lands). This is
+    // its own telegraph cue; the first-blood mp3 itself is unchanged.
+    if (!soundOn || !audio()) return
+    ;[0, 0.42, 0.84].forEach((d, i) => {
+      tone({ type: 'square', f: 520 + i * 220, f2: 360 + i * 220, dur: 0.16, vol: 0.12, delay: d })
+      noiseBurst({ type: 'highpass', f: 3000, fEnd: 1200, dur: 0.08, vol: 0.04, delay: d })
+    })
+    tone({ type: 'sawtooth', f: 70, f2: 150, dur: 1.5, vol: 0.1, glide: 1.5 })
+    tone({ type: 'sine', f: 140, f2: 300, dur: 1.5, vol: 0.06, glide: 1.5 })
+  }
   function sfxFreeze() {
     if (!soundOn || !audio()) return
     makeReverb()
@@ -1119,9 +1160,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   // Per-kind first-blood theming. A&D = blood clash, Jeopardy = flag capture,
   // KotH = coronation ("FIRST CROWN").
   const FB_THEME: any = {
-    ad: { title: 'FIRST BLOOD', kanji: 'ファーストブラッド', accent: '#ff3b5b', accent2: '#ff2350', vs: 'VS', tag: 'A&D', announce: 'ファーストブラッド' },
-    jeopardy: { title: 'FIRST BLOOD', kanji: '初撃破', accent: '#ffc637', accent2: '#ff9a1f', vs: '⚑', tag: 'JEOPARDY', announce: 'ファーストブラッド' },
-    koth: { title: 'FIRST CROWN', kanji: '初戴冠', accent: '#9d6bff', accent2: '#b98bff', vs: '♛', tag: 'KOTH', announce: 'ファーストクラウン' },
+    ad: { title: 'FIRST BLOOD', kanji: 'ファーストブラッド', accent: '#ff3b5b', accent2: '#ff2350', vs: 'VS', tag: 'A&D', announce: 'ファーストブラッド', tele: 'INCOMING STRIKE' },
+    jeopardy: { title: 'FIRST BLOOD', kanji: '初撃破', accent: '#ffc637', accent2: '#ff9a1f', vs: '⚑', tag: 'JEOPARDY', announce: 'ファーストブラッド', tele: 'INCOMING BREACH' },
+    koth: { title: 'FIRST CROWN', kanji: '初戴冠', accent: '#9d6bff', accent2: '#b98bff', vs: '♛', tag: 'KOTH', announce: 'ファーストクラウン', tele: 'INCOMING SIEGE' },
   }
 
   // opt: { kind, oppName, oppColor, oppPortrait(html), beamTo, onImpact }
@@ -1142,19 +1183,37 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     $('fbVicPor').innerHTML = opt.oppPortrait || ''
     const an: any = $('fbAtkNm'); an.textContent = atkr.name; an.style.color = atkr.color
     const vn: any = $('fbVicNm'); vn.textContent = oppName; vn.style.color = oppColor
-    ov.classList.remove('play'); void ov.offsetWidth; ov.classList.add('play')
-    // First-blood stinger: the shipped /attack/firstblood.mp3 (unchanged).
+    // ---- PHASE 1: telegraph (attention-seeking pre-roll) ----
+    // The board stays FULLY VISIBLE while a warning builds (transparent edge
+    // vignette + a sweeping scan + a pulsing "INCOMING …" banner), so the room
+    // can read the scoreboard before the slam reveals FIRST BLOOD. The older
+    // arena did this with an "INCOMING STRIKE" banner; this restores that beat.
+    const teleTxt: any = root.querySelector('.fb-tele-txt'); if (teleTxt) { teleTxt.textContent = th.tele; teleTxt.style.textShadow = `0 0 16px ${th.accent}` }
+    const teleJp: any = root.querySelector('.fb-tele-jp'); if (teleJp) teleJp.style.color = th.accent
+    const teleVig: any = root.querySelector('.fb-tele-vig'); if (teleVig) teleVig.style.background = `radial-gradient(circle at 50% 50%,transparent 40%,${th.accent}3a 100%)`
+    const teleScan: any = root.querySelector('.fb-tele-scan'); if (teleScan) { teleScan.style.background = `linear-gradient(90deg,transparent,${th.accent},transparent)`; teleScan.style.boxShadow = `0 0 12px ${th.accent}` }
+    ov.style.setProperty('--fbPre', FB.preroll + 'ms')
+    ov.classList.remove('play', 'tele'); void ov.offsetWidth; ov.classList.add('tele')
+    sfxIncoming() // build-up alarm (separate from the first-blood mp3, which fires at the reveal)
+    // ---- PHASE 2: the slam cinematic, after the build-up ----
     setTimeout(() => {
-      if (!soundOn) return
-      const a: any = $('fbSound')
-      if (a && a.getAttribute('src')) { a.currentTime = 0; a.play().catch(() => {}) }
-    }, FB.soundDelay)
-    setTimeout(() => {
-      const sh: any = root.querySelector('.shell'); if (sh) { sh.classList.add('shake'); setTimeout(() => sh.classList.remove('shake'), 520) }
-      if (opt.onImpact) opt.onImpact()
-    }, FB.slam)
-    setTimeout(() => { if (opt.beamTo) { spawnBeam(atkr, opt.beamTo, th.accent, true); if (opt.beamTo.id && opt.beamTo.color) pulseBase(opt.beamTo, opt.beamTo.color) } }, FB.total - 680)
-    setTimeout(() => { ov.classList.remove('play'); cinema = false }, FB.total)
+      if (killed) return
+      ov.classList.remove('tele'); void ov.offsetWidth; ov.classList.add('play')
+      // First-blood stinger: the shipped /attack/firstblood.mp3 (unchanged) — now
+      // fires WITH the reveal so it punctuates the slam, not the build-up.
+      setTimeout(() => {
+        if (killed || !soundOn) return
+        const a: any = $('fbSound')
+        if (a && a.getAttribute('src')) { a.currentTime = 0; a.play().catch(() => {}) }
+      }, FB.soundDelay)
+      setTimeout(() => {
+        if (killed) return
+        const sh: any = root.querySelector('.shell'); if (sh) { sh.classList.add('shake'); setTimeout(() => sh.classList.remove('shake'), 520) }
+        if (opt.onImpact) opt.onImpact()
+      }, FB.slam)
+      setTimeout(() => { if (opt.beamTo) { spawnBeam(atkr, opt.beamTo, th.accent, true); if (opt.beamTo.id && opt.beamTo.color) pulseBase(opt.beamTo, opt.beamTo.color) } }, FB.total - 680)
+      setTimeout(() => { ov.classList.remove('play'); cinema = false }, FB.total)
+    }, FB.preroll)
   }
   function fbAd(atkr: any, vic: any, onImpact: () => void) {
     fbCinematic(atkr, { kind: 'ad', oppName: vic ? vic.name : 'THE FIELD', oppColor: vic ? vic.color : '#ff3b5b', oppPortrait: vic ? avatar(vic.look, vic.color) : '', beamTo: vic || { x: CX, y: CY }, onImpact })
