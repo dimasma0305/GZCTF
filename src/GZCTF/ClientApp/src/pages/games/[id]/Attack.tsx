@@ -298,20 +298,16 @@ const ARENA_CSS = `
   .fb-tele{inset:0;overflow:hidden}
   .fb-overlay.tele .fb-tele{animation:fbTele var(--fbPre,1700ms) ease-out forwards}
   .fb-tele-vig{position:absolute;inset:0;background:radial-gradient(circle at 50% 50%,transparent 40%,rgba(255,40,80,.34) 100%);opacity:0}
-  .fb-overlay.tele .fb-tele-vig{animation:fbTeleVig var(--fbPre,1700ms) ease-in forwards}
-  .fb-tele-scan{position:absolute;left:0;top:0;width:100%;height:2px;
-    background:linear-gradient(90deg,transparent,#ff3b5b,transparent);box-shadow:0 0 12px #ff3b5b;opacity:0}
-  .fb-overlay.tele .fb-tele-scan{animation:fbTeleScan var(--fbPre,1700ms) linear forwards}
+  .fb-overlay.tele .fb-tele-vig{animation:fbTeleVig var(--fbPre,1700ms) ease-in-out forwards}
   .fb-tele-ban{position:absolute;left:50%;top:15vh;transform:translateX(-50%);display:flex;align-items:center;gap:14px;white-space:nowrap;opacity:0}
   .fb-tele-ban .fb-tele-jp{font-family:'DotGothic16';font-size:clamp(16px,3vw,34px);color:#ff5566;letter-spacing:.3em;text-shadow:0 0 14px rgba(255,59,91,.9)}
   .fb-tele-ban .fb-tele-txt{font-family:'Press Start 2P';font-size:clamp(13px,2.4vw,28px);color:#fff;letter-spacing:2px;text-shadow:0 0 16px rgba(255,59,91,.95)}
-  .fb-overlay.tele .fb-tele-ban{animation:fbTeleBan var(--fbPre,1700ms) ease-out forwards}
+  .fb-overlay.tele .fb-tele-ban{animation:fbTeleBan var(--fbPre,1700ms) ease-in-out forwards}
   @keyframes fbTele{0%{opacity:0}10%{opacity:1}100%{opacity:1}}
-  @keyframes fbTeleVig{0%{opacity:0}20%{opacity:.5}100%{opacity:1}}
-  @keyframes fbTeleScan{0%{opacity:0;transform:translateY(-4px)}6%{opacity:1}50%{transform:translateY(50vh)}94%{opacity:1}100%{opacity:0;transform:translateY(100vh)}}
-  @keyframes fbTeleBan{0%{opacity:0;transform:translateX(-50%) scale(1.4);letter-spacing:10px}
-    14%{opacity:1;transform:translateX(-50%) scale(1);letter-spacing:2px}
-    30%{opacity:.4}42%{opacity:1}56%{opacity:.45}68%{opacity:1}82%{opacity:.55}92%{opacity:1}100%{opacity:1}}
+  @keyframes fbTeleVig{0%{opacity:0}30%{opacity:.45}100%{opacity:1}}
+  @keyframes fbTeleBan{0%{opacity:0;transform:translateX(-50%) scale(1.25);letter-spacing:8px}
+    18%{opacity:1;transform:translateX(-50%) scale(1);letter-spacing:2px}
+    55%{opacity:.74}82%{opacity:1}100%{opacity:1}}
 
   /* match countdown + freeze pills */
   .matchpill{font-family:'Press Start 2P';font-size:9px;color:var(--cyan);
@@ -496,7 +492,6 @@ const ARENA_BODY = `
   <div class="fb-overlay" id="fbOverlay">
     <div class="fb-tele">
       <div class="fb-tele-vig"></div>
-      <div class="fb-tele-scan"></div>
       <div class="fb-tele-ban"><i class="fb-tele-jp">警告</i><b class="fb-tele-txt">INCOMING STRIKE</b></div>
     </div>
     <div class="fb-dark"></div>
@@ -1115,16 +1110,13 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     noiseBurst({ type: 'highpass', f: 5000, fEnd: 9000, dur: 0.1, vol: 0.045, delay: 0.13 })
   }
   function sfxIncoming() {
-    // First-blood build-up alarm — three radar pings climbing in pitch over a low
-    // rising drone, resolving into the slam (where the firstblood.mp3 lands). This is
-    // its own telegraph cue; the first-blood mp3 itself is unchanged.
+    // First-blood build-up: a smooth rising tension swell that crescendos into the
+    // slam (where the firstblood.mp3 lands) — layered tones with a long swell-in, no
+    // staccato pings. Its own telegraph cue; the first-blood mp3 itself is unchanged.
     if (!soundOn || !audio()) return
-    ;[0, 0.42, 0.84].forEach((d, i) => {
-      tone({ type: 'square', f: 520 + i * 220, f2: 360 + i * 220, dur: 0.16, vol: 0.12, delay: d })
-      noiseBurst({ type: 'highpass', f: 3000, fEnd: 1200, dur: 0.08, vol: 0.04, delay: d })
-    })
-    tone({ type: 'sawtooth', f: 70, f2: 150, dur: 1.5, vol: 0.1, glide: 1.5 })
-    tone({ type: 'sine', f: 140, f2: 300, dur: 1.5, vol: 0.06, glide: 1.5 })
+    tone({ type: 'sine', f: 110, f2: 240, dur: 1.7, vol: 0.22, attack: 1.55, glide: 1.62 })
+    tone({ type: 'triangle', f: 220, f2: 480, dur: 1.7, vol: 0.12, attack: 1.58, glide: 1.62 })
+    tone({ type: 'sawtooth', f: 330, f2: 900, dur: 1.7, vol: 0.05, attack: 1.6, glide: 1.62 })
   }
   function sfxFreeze() {
     if (!soundOn || !audio()) return
@@ -1191,7 +1183,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const teleTxt: any = root.querySelector('.fb-tele-txt'); if (teleTxt) { teleTxt.textContent = th.tele; teleTxt.style.textShadow = `0 0 16px ${th.accent}` }
     const teleJp: any = root.querySelector('.fb-tele-jp'); if (teleJp) teleJp.style.color = th.accent
     const teleVig: any = root.querySelector('.fb-tele-vig'); if (teleVig) teleVig.style.background = `radial-gradient(circle at 50% 50%,transparent 40%,${th.accent}3a 100%)`
-    const teleScan: any = root.querySelector('.fb-tele-scan'); if (teleScan) { teleScan.style.background = `linear-gradient(90deg,transparent,${th.accent},transparent)`; teleScan.style.boxShadow = `0 0 12px ${th.accent}` }
     ov.style.setProperty('--fbPre', FB.preroll + 'ms')
     ov.classList.remove('play', 'tele'); void ov.offsetWidth; ov.classList.add('tele')
     sfxIncoming() // build-up alarm (separate from the first-blood mp3, which fires at the reveal)
