@@ -120,6 +120,10 @@ Both A&D-engine types share the same editor treatment in the UI: they run as man
 For the full schema of an A&D/KotH challenge — image, checker, exposed ports, network mode — see [/guide/authoring/challenge-yaml](/guide/authoring/challenge-yaml).
 :::
 
+:::tip Just want to try the A&D/KotH engine?
+Instead of authoring challenges by hand, point a **repo binding** at the public ready-to-run event **[github.com/TCP1P/TCP1PADTesting](https://github.com/TCP1P/TCP1PADTesting)** — two A&D services and two KotH hills that import and run end to end on a local deploy. Add it under **admin → Repo Bindings** (no token needed), hit **Scan now**, then unhide the imported game. See [/guide/authoring/repo-bindings](/guide/authoring/repo-bindings#worked-example-a-ready-to-run-ad--koth-event) for the walkthrough.
+:::
+
 ## A&D round settings live on the game's Info page
 
 The settings that govern the *rhythm* of an A&D/KotH event are **per-game**, not per-challenge, and they live in **admin → game → Info** (the `Info` tab of the game editor). The key fields and their defaults, straight from the editor:

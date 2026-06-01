@@ -352,6 +352,40 @@ The repo is public, so no token is needed:
 2. Wait one poll cycle (or hit **Scan now**). The `.gzevent` becomes the *Type×Category Mix Demo* game and all 72 `challenge.yaml` files are imported; `LastScanMessage` shows `games +1`, `challenges +72`, `failures 0`.
 3. Push a change to the repo; the next scan picks up the new commit SHA and re-imports just the changed challenges (unchanged scans short-circuit on the SHA).
 
+## Worked example: a ready-to-run A&D + KotH event
+
+If you just want to **try the Attack & Defense and King of the Hill engine on a local deploy** without authoring anything, point a binding at the public testing repo **[github.com/TCP1P/TCP1PADTesting](https://github.com/TCP1P/TCP1PADTesting)**. It's a focused four-challenge event — two A&D services and two KotH hills — that exercises the whole A&D/KotH pipeline end to end (round engine, per-team containers, the auto-built `./checker` images, the shared hill, scoring).
+
+### What's in it
+
+A single `.gzevent` under `events/tcp1p-testing/` defines the game; each challenge ships its service in `./src`, a functional SLA checker in `./checker` (auto-built on import — no `containerImage`/`checkerImage` to pin), and a reference `./solver`:
+
+```text
+TCP1PADTesting/
+└── events/tcp1p-testing/
+    ├── .gzevent                       # → one Game: "TCP1P A&D + KotH Testing"
+    ├── Web/
+    │   ├── owasp-portal/   # type: AttackDefense — OWASP Top-10 notes portal; every feature leaks the flag
+    │   └── koth-throne/    # type: KingOfTheHill  — OWASP web hill; write your token into /koth/king
+    └── Pwn/
+        ├── pwn-armory/     # type: AttackDefense — heap binary, ten memory-corruption bug classes
+        └── koth-pwn/       # type: KingOfTheHill  — binary hill; corrupt is_admin / ret2 do_crown()
+```
+
+The root `.gzevent` carries the event-wide `ad:` block (tick length, flag lifetime, warmup, reset cooldown) every challenge shares, and is imported **hidden** so you flip it visible in the admin UI when you're ready.
+
+### Bind it
+
+The repo is public, so no token is needed:
+
+1. **Admin → Repo Bindings → add**, with `RepoUrl = https://github.com/TCP1P/TCP1PADTesting`, an empty ref (default branch), and `IntervalSeconds = 60`.
+2. Wait one poll cycle (or hit **Scan now**). The `.gzevent` becomes the *TCP1P A&D + KotH Testing* game and the four `challenge.yml` files import; `LastScanMessage` shows `games +1`, `challenges +4`, `failures 0`. The four `./checker` images build automatically in the background (watch **admin → Builds**).
+3. The game imports **hidden** — open **admin → game → Info**, set your own start/end time, and unhide it. Those game-level settings are yours to edit afterward; a later sync keeps your challenges current but won't revert your Info-page changes.
+
+:::tip
+This is the fastest way to see a populated A&D/KotH scoreboard, the live attack feed (`/games/{id}/attack`), and the per-game cheat analysis with real data on a fresh local deploy. The checker images are local-only — if an aggressive `docker image prune` removes one, the platform rebuilds it from the persisted build context on the next tick.
+:::
+
 :::info
 For a **private** repo, the only difference is adding a PAT on the binding (and `Contents:write` if you want [`PushOnEdit`](#pushonedit-write-approved-edits-back-to-the-repo)). The layout, manifest, and challenge files are identical.
 :::
