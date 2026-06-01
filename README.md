@@ -135,6 +135,10 @@ Per-challenge A&D configuration — egress, self-reset, the auto-built checker i
 
 ![admin.ad.challenge.config.webp](assets/images/admin.ad.challenge.config.webp)
 
+Repo bindings — register a GitHub repo and the platform discovers every `.gzevent`, imports each event's challenges, and re-syncs on the configured cadence (the [TCP1PADTesting](https://github.com/TCP1P/TCP1PADTesting) repo is a ready-to-run A&D/KotH example):
+
+![admin.repo.bindings.webp](assets/images/admin.repo.bindings.webp)
+
 Mixed A&D / KotH challenges in one game, and the image-build history (checker images auto-build from `./checker` on import):
 
 ![admin.ad.challenges.webp](assets/images/admin.ad.challenges.webp)
