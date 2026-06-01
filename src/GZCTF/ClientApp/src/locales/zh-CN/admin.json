@@ -356,6 +356,20 @@
             "label": "SSH 需先夺得 flag",
             "description": "队伍必须先为本题提交至少一个有效的捕获 flag，才能 SSH 进入自己的服务容器。"
           }
+        },
+        "engine": {
+          "all": "全部",
+          "jeopardy": "解题",
+          "ad": "攻防",
+          "koth": "KotH"
+        },
+        "build_summary": {
+          "built": "镜像已构建",
+          "built_n": "已构建 {{count}}",
+          "building": "构建中或排队中",
+          "building_n": "构建中 {{count}}",
+          "failed": "构建失败 — 需要处理",
+          "failed_n": "失败 {{count}}"
         }
       },
       "divisions": {
@@ -887,6 +901,18 @@
         "status": "状态",
         "duration": "耗时",
         "detail": "结果"
+      },
+      "summary": {
+        "built": "已构建",
+        "building": "构建中",
+        "failed": "失败",
+        "not_applicable": "镜像"
+      },
+      "kind": {
+        "checker": "检查器",
+        "service": "服务",
+        "checker_help": "A&D/KotH 功能检查器镜像（由 ./checker 构建）",
+        "challenge_help": "题目自身的服务镜像"
       }
     },
     "review": {

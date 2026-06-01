@@ -8,6 +8,11 @@ namespace GZCTF.Services.Container.Build;
 /// <see cref="GZCTF.Models.Data.GameChallenge.AdCheckerImage"/>), and the queue
 /// dedups on (ChallengeId, Kind) so the two don't collide.
 /// </summary>
+// Serialize as a string ("Challenge"/"Checker") in API responses, matching the
+// sibling build enums (ChallengeBuildStatus, BuildTrigger) so the admin Builds UI
+// can compare kind === 'Checker' instead of a brittle numeric 0/1.
+[System.Text.Json.Serialization.JsonConverter(
+    typeof(System.Text.Json.Serialization.JsonStringEnumConverter<ChallengeBuildKind>))]
 public enum ChallengeBuildKind
 {
     /// <summary>The challenge's own service/container image.</summary>

@@ -352,6 +352,20 @@
             "label": "SSH requires a captured flag",
             "description": "Teams can only SSH into their service container after submitting at least one accepted captured flag for this challenge."
           }
+        },
+        "engine": {
+          "all": "All",
+          "jeopardy": "Jeopardy",
+          "ad": "A&D",
+          "koth": "KotH"
+        },
+        "build_summary": {
+          "built": "Image built",
+          "built_n": "{{count}} built",
+          "building": "Building or queued",
+          "building_n": "{{count}} building",
+          "failed": "Build failed — needs attention",
+          "failed_n": "{{count}} failed"
         }
       },
       "divisions": {
@@ -907,6 +921,18 @@
         "status": "Status",
         "duration": "Duration",
         "detail": "Result"
+      },
+      "summary": {
+        "built": "built",
+        "building": "building",
+        "failed": "failed",
+        "not_applicable": "registry"
+      },
+      "kind": {
+        "checker": "checker",
+        "service": "service",
+        "checker_help": "A&D/KotH functional checker image (built from ./checker)",
+        "challenge_help": "The challenge's own service image"
       }
     },
     "review": {

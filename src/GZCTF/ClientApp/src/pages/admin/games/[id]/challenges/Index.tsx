@@ -1,4 +1,4 @@
-import { ActionIcon, Alert, Button, Center, Checkbox, ComboboxItem, Group, Indicator, Modal, ScrollArea, Select, SimpleGrid, Stack, Text, TextInput, Title, Tooltip } from '@mantine/core'
+import { ActionIcon, Alert, Badge, Button, Center, Checkbox, ComboboxItem, Group, Indicator, Modal, ScrollArea, Select, SegmentedControl, SimpleGrid, Stack, Text, TextInput, Title, Tooltip } from '@mantine/core'
 import { useModals } from '@mantine/modals'
 import { showNotification } from '@mantine/notifications'
 import { mdiAlertCircleOutline, mdiCheck, mdiHammerWrench, mdiHexagonSlice6, mdiPauseCircleOutline, mdiPlayCircleOutline, mdiPlus, mdiRefresh, mdiTrashCanOutline } from '@mdi/js'
@@ -13,7 +13,19 @@ import { WithGameEditTab } from '@Components/admin/WithGameEditTab'
 import { showErrorMsg } from '@Utils/Shared'
 import { ChallengeCategoryItem, ChallengeCategoryList, useChallengeCategoryLabelMap } from '@Utils/Shared'
 import { useEditChallenges } from '@Hooks/useEdit'
-import api, { ChallengeInfoModel, ChallengeCategory } from '@Api'
+import api, { ChallengeInfoModel, ChallengeCategory, ChallengeType } from '@Api'
+
+// Engine = the scoring family, a separate filter axis from category (Web/Pwn/…).
+// Mirrors the public scoreboard's 3-way split. 'jeopardy' = every non-AD-engine type.
+type EngineFilter = 'all' | 'jeopardy' | 'ad' | 'koth'
+
+const matchesEngine = (type: ChallengeType | undefined, engine: EngineFilter): boolean => {
+  if (engine === 'all') return true
+  if (engine === 'ad') return type === ChallengeType.AttackDefense
+  if (engine === 'koth') return type === ChallengeType.KingOfTheHill
+  // jeopardy: anything that isn't an A&D-engine type
+  return type !== ChallengeType.AttackDefense && type !== ChallengeType.KingOfTheHill
+}
 
 const GameChallengeEdit: FC = () => {
   const { id } = useParams()
@@ -22,6 +34,7 @@ const GameChallengeEdit: FC = () => {
   const [createOpened, setCreateOpened] = useState(false)
   const [bonusOpened, setBonusOpened] = useState(false)
   const [category, setCategory] = useState<ChallengeCategory | null>(null)
+  const [engine, setEngine] = useState<EngineFilter>('all')
   const challengeCategoryLabelMap = useChallengeCategoryLabelMap()
   const [disabled, setDisabled] = useState(false)
 
@@ -29,7 +42,28 @@ const GameChallengeEdit: FC = () => {
 
   const { challenges, mutate } = useEditChallenges(numId)
 
-  const filteredChallenges = category && challenges ? challenges?.filter((c) => c.category === category) : challenges
+  // Two independent filter axes, both active at once: engine (scoring family)
+  // then category (Web/Pwn/…).
+  const filteredChallenges = useMemo(() => {
+    let list = challenges ?? []
+    if (engine !== 'all') list = list.filter((c) => matchesEngine(c.type, engine))
+    if (category) list = list.filter((c) => c.category === category)
+    return challenges ? list : challenges
+  }, [challenges, engine, category])
+
+  // At-a-glance build-state summary for the CURRENT filtered view — answers the
+  // organizer's "which are built / building / failed" without reading each card.
+  const buildSummary = useMemo(() => {
+    const buildable = (filteredChallenges ?? []).filter(
+      (c) => c.buildStatus && c.buildStatus !== 'None' && c.buildStatus !== 'NotApplicable',
+    )
+    return {
+      total: filteredChallenges?.length ?? 0,
+      built: buildable.filter((c) => c.buildStatus === 'Success').length,
+      building: buildable.filter((c) => c.buildStatus === 'Building' || c.buildStatus === 'Queued').length,
+      failed: buildable.filter((c) => c.buildStatus === 'Failed' || c.buildStatus === 'MissingDockerfile').length,
+    }
+  }, [filteredChallenges])
 
   const modals = useModals()
 
@@ -251,6 +285,19 @@ const GameChallengeEdit: FC = () => {
       head={
         <>
           <Group gap="sm" wrap="nowrap">
+            {/* Engine (scoring family) filter — separate axis from category below.
+                Mirrors the public scoreboard's Jeopardy / A&D / KotH split. */}
+            <SegmentedControl
+              size="xs"
+              value={engine}
+              onChange={(v) => setEngine(v as EngineFilter)}
+              data={[
+                { value: 'all', label: t('admin.content.games.challenges.engine.all', 'All') },
+                { value: 'jeopardy', label: t('admin.content.games.challenges.engine.jeopardy', 'Jeopardy') },
+                { value: 'ad', label: t('admin.content.games.challenges.engine.ad', 'A&D') },
+                { value: 'koth', label: t('admin.content.games.challenges.engine.koth', 'KotH') },
+              ]}
+            />
             <Select
               placeholder={t('admin.content.show_all')}
               clearable
@@ -265,6 +312,31 @@ const GameChallengeEdit: FC = () => {
                 return { value: cate, label: data?.name, ...data } as ComboboxItem
               })}
             />
+            {/* Build-state summary for the filtered set — shows built / building /
+                failed counts at a glance (only when something in view is buildable). */}
+            {buildSummary.built + buildSummary.building + buildSummary.failed > 0 && (
+              <Group gap={6} wrap="nowrap">
+                <Tooltip label={t('admin.content.games.challenges.build_summary.built', 'Image built')}>
+                  <Badge size="sm" color="teal" variant="light">
+                    {t('admin.content.games.challenges.build_summary.built_n', { count: buildSummary.built, defaultValue: '{{count}} built' })}
+                  </Badge>
+                </Tooltip>
+                {buildSummary.building > 0 && (
+                  <Tooltip label={t('admin.content.games.challenges.build_summary.building', 'Building or queued')}>
+                    <Badge size="sm" color="yellow" variant="light">
+                      {t('admin.content.games.challenges.build_summary.building_n', { count: buildSummary.building, defaultValue: '{{count}} building' })}
+                    </Badge>
+                  </Tooltip>
+                )}
+                {buildSummary.failed > 0 && (
+                  <Tooltip label={t('admin.content.games.challenges.build_summary.failed', 'Build failed — needs attention')}>
+                    <Badge size="sm" color="red" variant="filled">
+                      {t('admin.content.games.challenges.build_summary.failed_n', { count: buildSummary.failed, defaultValue: '{{count}} failed' })}
+                    </Badge>
+                  </Tooltip>
+                )}
+              </Group>
+            )}
             <Checkbox
               label={t('admin.button.challenges.select_all')}
               checked={allSelected}

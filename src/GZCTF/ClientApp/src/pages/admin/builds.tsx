@@ -104,6 +104,20 @@ const Builds: FC = () => {
     [history],
   )
 
+  // At-a-glance breakdown of the loaded history so the organizer sees how many
+  // built / are building / failed without reading every row. Clicking a chip
+  // sets the status filter (clicking the active one clears it).
+  const summary = useMemo(() => {
+    const h = history ?? []
+    const count = (...s: ChallengeBuildStatus[]) => h.filter((b) => s.includes(b.status)).length
+    return {
+      Success: count('Success'),
+      Building: count('Building', 'Queued'),
+      Failed: count('Failed', 'MissingDockerfile'),
+      NotApplicable: count('NotApplicable', 'None'),
+    }
+  }, [history])
+
   const allChecked = (history?.length ?? 0) > 0 && history!.every((b) => selected.has(b.id))
   const someChecked = (history?.length ?? 0) > 0 && history!.some((b) => selected.has(b.id))
 
@@ -304,6 +318,30 @@ const Builds: FC = () => {
             </Group>
           </Group>
 
+          {/* Status summary — click a chip to filter the table to that group. */}
+          <Group gap="xs" wrap="wrap">
+            {([
+              ['Success', 'teal', summary.Success, t('admin.content.builds.summary.built', 'built')],
+              ['Building', 'yellow', summary.Building, t('admin.content.builds.summary.building', 'building')],
+              ['Failed', 'red', summary.Failed, t('admin.content.builds.summary.failed', 'failed')],
+              ['NotApplicable', 'gray', summary.NotApplicable, t('admin.content.builds.summary.not_applicable', 'registry')],
+            ] as const).map(([key, color, n, label]) => {
+              const active = statusFilter === key
+              return (
+                <Badge
+                  key={key}
+                  size="lg"
+                  color={color}
+                  variant={active ? 'filled' : 'light'}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => setStatusFilter(active ? '' : (key as ChallengeBuildStatus))}
+                >
+                  {n} {label}
+                </Badge>
+              )
+            })}
+          </Group>
+
           <Stack gap={6}>
             <Title order={5}>{t('admin.content.builds.in_progress_title')}</Title>
             {!inProgress ? (
@@ -328,6 +366,11 @@ const Builds: FC = () => {
                         >
                           {b.slug}
                         </Anchor>
+                        {b.kind === 'Checker' && (
+                          <Badge size="xs" color="grape" variant="light">
+                            {t('admin.content.builds.kind.checker', 'checker')}
+                          </Badge>
+                        )}
                         <Badge size="xs" color="gray" variant="light">
                           {t('admin.content.builds.attempt', { n: b.attempt })}
                         </Badge>
@@ -398,14 +441,27 @@ const Builds: FC = () => {
                           </Stack>
                         </Table.Td>
                         <Table.Td>
-                          <Anchor
-                            component={Link}
-                            to={`/admin/games/${b.gameId}/challenges`}
-                            size="sm"
-                            fw="bold"
-                          >
-                            {b.challengeTitle || `#${b.challengeId}`}
-                          </Anchor>
+                          <Group gap={6} wrap="nowrap">
+                            <Anchor
+                              component={Link}
+                              to={`/admin/games/${b.gameId}/challenges`}
+                              size="sm"
+                              fw="bold"
+                            >
+                              {b.challengeTitle || `#${b.challengeId}`}
+                            </Anchor>
+                            <Tooltip
+                              label={b.kind === 'Checker'
+                                ? t('admin.content.builds.kind.checker_help', 'A&D/KotH functional checker image (built from ./checker)')
+                                : t('admin.content.builds.kind.challenge_help', "The challenge's own service image")}
+                            >
+                              <Badge size="xs" variant="light" color={b.kind === 'Checker' ? 'grape' : 'gray'}>
+                                {b.kind === 'Checker'
+                                  ? t('admin.content.builds.kind.checker', 'checker')
+                                  : t('admin.content.builds.kind.service', 'service')}
+                              </Badge>
+                            </Tooltip>
+                          </Group>
                         </Table.Td>
                         <Table.Td>
                           <Badge size="xs" color="gray" variant="light">{b.trigger}</Badge>

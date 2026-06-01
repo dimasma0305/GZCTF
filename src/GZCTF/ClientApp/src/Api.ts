@@ -1710,6 +1710,9 @@ export type ChallengeBuildStatus =
 export type BuildTrigger = "Import" | "Manual" | "AutoRetry" | "Bulk"
 
 /** One row of the /admin/builds history table */
+/** Which image a build attempt produced: the challenge's service image or its A&D/KotH checker image. */
+export type ChallengeBuildKind = "Challenge" | "Checker"
+
 export interface ChallengeBuildAuditModel {
   id: number
   challengeId: number
@@ -1719,6 +1722,8 @@ export interface ChallengeBuildAuditModel {
   startedAtUtc?: string | null
   finishedAtUtc?: string | null
   trigger: BuildTrigger
+  /** Service-image build vs A&D/KotH checker-image build. */
+  kind: ChallengeBuildKind
   attempt: number
   status: ChallengeBuildStatus
   digest?: string | null
@@ -1735,6 +1740,8 @@ export interface ChallengeBuildInProgressModel {
   slug: string
   attempt: number
   trigger: BuildTrigger
+  /** Service-image build vs A&D/KotH checker-image build. */
+  kind: ChallengeBuildKind
   startedAtUtc: string
 }
 
