@@ -13,7 +13,15 @@ services:
       # - "27017:27017"
       # - "9200:9200"
     environment:
-      - ASPNETCORE_ENVIRONMENT=Development
+      # Production so the DevDataSeeder no longer re-creates "Dev Test Game" +
+      # User1-4 on every restart, and self-registered users are NOT auto-promoted
+      # to admin (important now that the UI is public at tcp.1pc.tf). ADMIN_PASSWORD
+      # only seeds an Admin if one doesn't already exist — the current Admin account
+      # is preserved. NOTE: in Production, confirmation/reset emails are actually
+      # sent via SMTP; with no mailer configured here, self-registration (which
+      # requires email confirmation) is effectively closed — acceptable for this host.
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ADMIN_PASSWORD=${GZCTF_ADMIN_PASSWORD:-Admin@2022}
       - ConnectionStrings__Database=Host=postgres;Database=gzctf;Username=gzctf;Password=gzctf
       - ConnectionStrings__Redis=redis:6379,password=gzctf
       - XorKey=gzctf-xor-key
@@ -46,6 +54,10 @@ services:
       - ForwardedOptions__ForwardedHeaders=1
       - ForwardedOptions__ForwardLimit=1
       - ForwardedOptions__TrustedNetworks__0=172.0.4.0/24
+      # Trust the traefik reverse-proxy network so the real client IP from
+      # X-Forwarded-For is honoured when reached via tcp.1pc.tf (otherwise
+      # honeypot / cheat-detection would log traefik's address, not the player's).
+      - ForwardedOptions__TrustedNetworks__1=172.1.0.0/16
       - HoneypotConfig__Enabled=true
       - HoneypotConfig__ListenAddress=0.0.0.0
       - HoneypotConfig__Ports__0__Name=ssh
@@ -118,6 +130,19 @@ services:
       - default
       # Reach the k3d Kubernetes API (k3d-gzctf-serverlb:6443) in-network.
       - k3d
+      # Reverse-proxy network so traefik can route tcp.1pc.tf → :8080.
+      - traefik
+    labels:
+      # Publish the web UI at https://tcp.1pc.tf via the shared traefik proxy
+      # (LetsEncrypt over Cloudflare DNS, websecure entrypoint). The direct
+      # 8080:8080 host port above stays for local/IP access.
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
+      - "traefik.http.routers.gzctf.rule=Host(`tcp.1pc.tf`)"
+      - "traefik.http.routers.gzctf.entrypoints=websecure"
+      - "traefik.http.routers.gzctf.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.gzctf.service=gzctf"
+      - "traefik.http.services.gzctf.loadbalancer.server.port=8080"
 
   ssh-jump:
     build:
@@ -201,3 +226,7 @@ networks:
   k3d:
     external: true
     name: k3d-gzctf
+  # Shared reverse-proxy network (created by the top-level /homelab/compose.yml
+  # traefik stack). External so this compose project doesn't try to own it.
+  traefik:
+    external: true
