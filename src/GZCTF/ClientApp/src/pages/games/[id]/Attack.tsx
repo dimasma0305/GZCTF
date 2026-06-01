@@ -15,7 +15,7 @@
  * useEffect and tears itself down (WebSocket, timers, rAF) on unmount.
  */
 import { FC, useEffect, useRef } from 'react'
-import { useParams } from 'react-router'
+import { useParams, useSearchParams } from 'react-router'
 
 const FONTS_HREF =
   'https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=DotGothic16&display=swap'
@@ -405,7 +405,7 @@ const ARENA_BODY = `
 /* and returns a teardown function. Heavily uses `any` because this is a       */
 /* self-contained DOM/canvas scene, not app data flow.                        */
 /* -------------------------------------------------------------------------- */
-function runArena(root: ShadowRoot, gameId: string): () => void {
+function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => void {
   let killed = false
   const timers: number[] = []
   let raf = 0
@@ -441,6 +441,7 @@ function runArena(root: ShadowRoot, gameId: string): () => void {
 
   let TEAMS: any[] = [], SERVICES: any[] = [], HILLS: any[] = []
   let round = 0, totalFlags = 0, totalEvents = 0, cinema = false
+  let matchFirstBlood = false, sinceEvent = 0
   let tNow = Date.now(), tickLeft = 0, liveRoundEndsAt: number | null = null
   const speed = 1
   let petals = true
@@ -929,11 +930,31 @@ function runArena(root: ShadowRoot, gameId: string): () => void {
     if (killed) return
     const dt = Math.min((ts - lastTs) / 1000, 0.05); lastTs = ts
     drawFX(dt)
+    if (preview && !cinema && TEAMS.length) {
+      sinceEvent += dt * 1000
+      if (sinceEvent > rng(900, 1700) / speed) {
+        sinceEvent = 0
+        const r = Math.random()
+        if (r < 0.5) evFlag(); else if (r < 0.68) evDef(); else if (r < 0.84) evSla(); else evHill()
+      }
+    }
     raf = requestAnimationFrame(loop)
   }
   function tickClock() {
     tNow = Date.now()
     const cl = $('clock'); if (cl) cl.textContent = clk()
+    if (preview) {
+      tickLeft--
+      if (tickLeft <= 0) {
+        round++; tickLeft = 30
+        TEAMS.forEach((t) => { const owned = t.svc.filter((s: any) => s.status === 'def').length; t.score += owned * Math.floor(rng(6, 14)) })
+        HILLS.forEach((h) => { if (h.owner) h.owner.score += Math.floor(rng(10, 20)) })
+        addLog('ROUND', 'sys', `<span class="em">// ROUND ${round} START</span> :: passive + hold scoring`)
+        TEAMS.forEach(renderScore); refreshRank()
+      }
+      refreshStats()
+      return
+    }
     if (liveRoundEndsAt) {
       tickLeft = Math.max(0, Math.round((liveRoundEndsAt - Date.now()) / 1000))
       refreshStats()
@@ -1134,13 +1155,114 @@ function runArena(root: ShadowRoot, gameId: string): () => void {
     raf = requestAnimationFrame(loop)
   }
 
+  /* -------- preview: simulated battle (no WS / no poll) -------- */
+  const DEMO_TEAMS = [
+    { id: 'kpanic', name: 'KERNEL-PANIC', color: '#ff4d5e', hue: 354 },
+    { id: 'nullb', name: 'NULLBYTE', color: '#27e3ff', hue: 190 },
+    { id: 'segf', name: 'SEGFAULT', color: '#ffc637', hue: 44 },
+    { id: 'bshock', name: 'BINARY-SHOCK', color: '#ff39a8', hue: 330 },
+    { id: 'ronin', name: '0xRONIN', color: '#b9ff42', hue: 80 },
+    { id: 'heap', name: 'HEAP-OVERFLOW', color: '#ff7a3a', hue: 20 },
+    { id: 'ghost', name: 'GHOST-SHELL', color: '#9d6bff', hue: 262 },
+    { id: 'ice', name: 'ICE-BREAKER', color: '#4d8bff', hue: 218 },
+  ]
+  const DEMO_SERVICES = ['neko-db', 'torii-api', 'sakura-web', 'oni-auth']
+  const DEMO_HILLS = [{ id: 'ha', name: 'TORII-A', jp: '甲' }, { id: 'hb', name: 'TORII-B', jp: '乙' }, { id: 'hc', name: 'TORII-C', jp: '丙' }]
+  function bootDemoModel() {
+    SERVICES = [...DEMO_SERVICES]
+    TEAMS = DEMO_TEAMS.map((d: any, i: number) => {
+      const ang = (-90 + i * (360 / DEMO_TEAMS.length)) * Math.PI / 180
+      const t: any = {
+        ...d, idx: i, ang, x: CX + RING * Math.cos(ang), y: CY + RING * Math.sin(ang),
+        score: Math.floor(rng(400, 520)), atk: Math.floor(rng(2, 9)), def: Math.floor(rng(2, 9)), sla: Math.floor(rng(88, 100)),
+      }
+      t.svc = SERVICES.map((s: string) => ({ name: s, status: Math.random() < 0.82 ? 'def' : (Math.random() < 0.5 ? 'vuln' : 'down') }))
+      t.look = makeLook(t, i)
+      return t
+    })
+    HILLS = DEMO_HILLS.map((d: any, i: number) => {
+      const ang = (-90 + (i + 0.5) * (360 / DEMO_HILLS.length)) * Math.PI / 180
+      return { ...d, idx: i, ang, x: CX + HILLR * Math.cos(ang), y: CY + HILLR * Math.sin(ang), owner: null }
+    })
+  }
+  function evFlag(force?: string) {
+    const atkr = pick(TEAMS); let vic = pick(TEAMS); let g = 0
+    while (vic === atkr && g++ < 10) vic = pick(TEAMS)
+    if (vic === atkr) return
+    const svc = pick(vic.svc.filter((s: any) => s.status !== 'down')) || pick(vic.svc)
+    const pts = Math.floor(rng(35, 95))
+    const isFB = force === 'fb' || !matchFirstBlood
+    if (isFB) { if (cinema) return; matchFirstBlood = true; fbCinematic(atkr, vic, () => resolveFlag(atkr, vic, svc, pts, true)); return }
+    fireShot(atkr, vic, atkr.color)
+    setTimeout(() => { if (!killed) resolveFlag(atkr, vic, svc, pts, false) }, 380 / speed + 120)
+  }
+  function evDef() {
+    const t = pick(TEAMS)
+    const s = t.svc.find((x: any) => x.status === 'vuln') || t.svc.find((x: any) => x.status === 'down') || pick(t.svc)
+    s.status = 'def'; t.def++; t.score += Math.floor(rng(10, 28))
+    renderSvc(t); renderScore(t); pulseBase(t, SVC_COLOR.def); spawnShield(t.x, t.y, SVC_COLOR.def)
+    floatText(t.x, t.y - 66, 'PATCHED', SVC_COLOR.def)
+    addLog('DEFEND', 'def', `<span class="who">${esc(t.name)}</span> shielded <span class="svc">${esc(s.name)}</span>`)
+    totalEvents++; refreshRank(); refreshStats()
+  }
+  function evSla() {
+    const t = pick(TEAMS)
+    const s = pick(t.svc.filter((x: any) => x.status !== 'down')) || pick(t.svc)
+    s.status = 'down'; t.sla = Math.max(40, t.sla - Math.floor(rng(2, 6))); t.score = Math.max(0, t.score - Math.floor(rng(8, 20)))
+    renderSvc(t); renderScore(t); spawnDown(t.x, t.y, '#ff3b5b')
+    const g = $('base-' + t.id); if (g) { g.classList.remove('node-down'); void g.offsetWidth; g.classList.add('node-down'); setTimeout(() => g.classList.remove('node-down'), 1300) }
+    floatText(t.x, t.y - 66, '▼ DOWN', '#ff5b6e')
+    addLog('SLA', 'sla', `<span class="who">${esc(t.name)}</span> :: <span class="svc">${esc(s.name)}</span> went <span class="em">DOWN</span>`)
+    setTimeout(() => { if (s.status === 'down') { s.status = 'def'; t.sla = Math.min(100, t.sla + 2); renderSvc(t) } }, rng(4000, 9000))
+    totalEvents++; refreshStats()
+  }
+  function evHill() {
+    if (!HILLS.length) return
+    const h = pick(HILLS); let atkr = pick(TEAMS); let g = 0
+    while (h.owner === atkr && g++ < 8) atkr = pick(TEAMS)
+    const contested = h.owner && h.owner !== atkr
+    h.owner = atkr; renderHill(h); spawnCapture(atkr, h, atkr.color); atkr.score += Math.floor(rng(20, 45)); renderScore(atkr)
+    floatText(h.x, h.y - 30, contested ? 'SEIZED' : 'CAPTURED', atkr.color)
+    addLog('HILL', 'hill', `<span class="who">${esc(atkr.name)}</span> ${contested ? 'seized' : 'captured'} <span class="svc">${esc(h.name)}</span>`)
+    totalEvents++; refreshRank(); refreshStats()
+  }
+  async function startPreview() {
+    // use the game's real teams if it has an A&D board; otherwise demo teams
+    let ad: any = null
+    try { ad = await fetchJSON(`/api/Game/${gameId}/Ad/Scoreboard`) } catch (e) {}
+    if (killed) return
+    let title: string | null = null
+    if (ad) {
+      let koth: any = null; try { koth = await fetchJSON(`/api/Game/${gameId}/Ad/Koth/Scoreboard`) } catch (e) {}
+      try { const gi = await fetchJSON(`/api/Game/${gameId}`); title = gi && gi.title } catch (e) {}
+      if (killed) return
+      buildLiveModel(ad, koth, title)
+    }
+    if (!TEAMS.length) bootDemoModel()
+    liveRoundEndsAt = null; round = 1; tickLeft = 30
+    buildArena()
+    $('teamCount').textContent = '攻防 // ' + TEAMS.length + ' TEAMS'
+    const lb: any = $('liveBadge'); if (lb) { lb.classList.remove('off'); lb.style.color = 'var(--amber)'; lb.childNodes[1].nodeValue = 'PREVIEW' }
+    const ns = $('netStat'); if (ns) ns.textContent = 'SIGNAL // PREVIEW (SIMULATED)'
+    refreshRank(); refreshStats(); buildTicker((title ? title + ' ' : '') + '— PREVIEW')
+    sizeCanvas()
+    addLog('SYS', 'sys', `<span class="em">// PREVIEW MODE</span> :: simulated battle — ${TEAMS.length} teams`)
+    timers.push(window.setInterval(tickClock, 1000))
+    raf = requestAnimationFrame(loop)
+    timers.push(window.setTimeout(() => evFlag('fb'), 1200))
+    timers.push(window.setTimeout(() => evHill(), 4200))
+    timers.push(window.setTimeout(() => evDef(), 4800))
+    timers.push(window.setTimeout(() => evHill(), 5400))
+    timers.push(window.setTimeout(() => evFlag(), 6000))
+  }
+
   /* -------- viewer toggles -------- */
   const petalBtn: any = $('petalBtn')
   if (petalBtn) petalBtn.onclick = function () { petals = !petals; petalBtn.classList.toggle('on', petals) }
   const scanBtn: any = $('scanBtn')
   if (scanBtn) scanBtn.onclick = function () { const offNow = $('scan').classList.toggle('off'); scanBtn.classList.toggle('on', !offNow) }
 
-  start()
+  if (preview) startPreview(); else start()
 
   /* -------- teardown -------- */
   return () => {
@@ -1157,6 +1279,8 @@ function runArena(root: ShadowRoot, gameId: string): () => void {
 
 const Attack: FC = () => {
   const { id } = useParams()
+  const [searchParams] = useSearchParams()
+  const preview = searchParams.has('preview')
   const hostRef = useRef<HTMLDivElement>(null)
   const cleanupRef = useRef<null | (() => void)>(null)
 
@@ -1177,13 +1301,13 @@ const Attack: FC = () => {
 
     const shadow = host.shadowRoot ?? host.attachShadow({ mode: 'open' })
     shadow.innerHTML = `<style>${ARENA_CSS}</style>${ARENA_BODY}`
-    cleanupRef.current = runArena(shadow, id)
+    cleanupRef.current = runArena(shadow, id, preview)
 
     return () => {
       cleanupRef.current?.()
       cleanupRef.current = null
     }
-  }, [id])
+  }, [id, preview])
 
   return <div ref={hostRef} style={{ position: 'fixed', inset: 0, zIndex: 100 }} />
 }
