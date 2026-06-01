@@ -391,7 +391,12 @@ public sealed class RepoBindingDiscoveryService(
         existing.Title = manifest.Title!;
         existing.Summary = manifest.Summary ?? existing.Summary;
         existing.Content = manifest.Content ?? existing.Content;
-        if (manifest.Hidden is { } hidden) existing.Hidden = hidden;
+        // Hidden is intentionally NOT re-applied on update — it's a CREATE-ONLY
+        // default (the manifest's `hidden: true` makes a freshly-imported game start
+        // hidden). Once the game exists, visibility is operator-owned: the admin flips
+        // it in the UI, and a later sync must not clobber that back to the manifest
+        // value (re-hiding the game on every scan — the exact opposite of the
+        // manifest's own "keep hidden until you flip it in the admin UI" intent).
         if (manifest.PracticeMode is { } pm) existing.PracticeMode = pm;
         if (manifest.AcceptWithoutReview is { } awr) existing.AcceptWithoutReview = awr;
         if (manifest.InviteCode is { } ic) existing.InviteCode = string.IsNullOrEmpty(ic) ? null : ic;
