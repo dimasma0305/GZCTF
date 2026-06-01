@@ -25,7 +25,7 @@ const FONTS_HREF =
 /* -------------------------------------------------------------------------- */
 const ARENA_CSS = `
   :host{
-    --bg:#06050f; --bg2:#0b0918; --panel:rgba(13,10,28,0.72);
+    --bg:#06050f; --bg2:#0b0918; --panel:rgba(13,10,28,0.9);
     --line:rgba(132,98,238,0.16); --line2:rgba(132,98,238,0.32);
     --text:#e9e6ff; --dim:#7d78ad; --dimmer:#4f4a78;
     --cyan:#27e3ff; --magenta:#ff39a8; --lime:#b9ff42; --amber:#ffc637;
@@ -66,8 +66,7 @@ const ARENA_CSS = `
 
   .topbar{display:flex;align-items:center;justify-content:space-between;
     padding:8px 16px;border:1px solid var(--line2);background:var(--panel);
-    clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,14px 100%,0 calc(100% - 14px));
-    backdrop-filter:blur(3px)}
+    clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,14px 100%,0 calc(100% - 14px))}
   .brand{display:flex;align-items:baseline;gap:14px}
   .brand .logo{font-family:'Press Start 2P';font-size:15px;letter-spacing:1px;
     color:#fff;text-shadow:var(--glow) var(--magenta),0 0 4px var(--magenta)}
@@ -90,7 +89,7 @@ const ARENA_CSS = `
     text-shadow:0 0 6px rgba(255,198,55,.6)}
 
   .panel{position:relative;border:1px solid var(--line2);background:var(--panel);
-    backdrop-filter:blur(3px);display:flex;flex-direction:column;min-height:0;min-width:0;
+    display:flex;flex-direction:column;min-height:0;min-width:0;
     clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px))}
   .panel::before{content:"";position:absolute;inset:0;pointer-events:none;
     border-top:1px solid rgba(255,255,255,.04)}
@@ -179,7 +178,7 @@ const ARENA_CSS = `
   .legend i{width:9px;height:9px;display:inline-block}
 
   .devbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:8px 14px;
-    border:1px solid var(--line2);background:var(--panel);backdrop-filter:blur(3px);
+    border:1px solid var(--line2);background:var(--panel);
     clip-path:polygon(14px 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%,0 14px)}
   .devbar .label{font-family:'Press Start 2P';font-size:8px;color:var(--violet);
     letter-spacing:1px;margin-right:4px}
@@ -716,7 +715,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   let SC = 1
   function sizeCanvas() {
     const r = arena.getBoundingClientRect()
-    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    const dpr = 1 // FX particle layer; the SVG stays vector-crisp regardless
     fx.width = r.width * dpr; fx.height = r.height * dpr
     SC = (r.width / 1000) * dpr; ctx.setTransform(SC, 0, 0, SC, 0, 0)
   }
@@ -725,7 +724,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
 
   const shots: any[] = [], sparks: any[] = [], fxq: any[] = []
   let petalArr: any[] = []
-  function spawnPetals() { petalArr = []; for (let i = 0; i < 26; i++) petalArr.push({ x: rng(0, 1000), y: rng(0, 1000), s: rng(3, 6), vy: rng(8, 20), vx: rng(-6, 6), rot: rng(0, 6.28), vr: rng(-1, 1), hue: pick([330, 262, 190, 80]) }) }
+  function spawnPetals() { petalArr = []; for (let i = 0; i < 16; i++) petalArr.push({ x: rng(0, 1000), y: rng(0, 1000), s: rng(3, 6), vy: rng(8, 20), vx: rng(-6, 6), rot: rng(0, 6.28), vr: rng(-1, 1), hue: pick([330, 262, 190, 80]) }) }
   spawnPetals()
 
   function fireShot(from: any, to: any, col: string) {
