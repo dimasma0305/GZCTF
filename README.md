@@ -144,6 +144,15 @@ Game settings with the A&D engine knobs (tick length, flag lifetime, warmup, Kot
 
 ![admin.game.info.ad.webp](assets/images/admin.game.info.ad.webp)
 
+Bulk-import participants from a CSV and mail each their credentials — a 5-step wizard (upload / map columns / edit & review / options / result) with per-recipient send results and resend-failed:
+
+![admin.users.import.webp](assets/images/admin.users.import.webp)
+![admin.users.import.modal.webp](assets/images/admin.users.import.modal.webp)
+
+Anti-cheat: logins blocked by the global / per-team IP + browser-fingerprint policy, showing the conflicting teammate and value, with one-click clear for false positives:
+
+![admin.anti.cheat.webp](assets/images/admin.anti.cheat.webp)
+
 ### Jeopardy platform (upstream)
 
 ![index.webp](assets/images/index.webp)
