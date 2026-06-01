@@ -51,10 +51,28 @@ public class AdScoreboardRepository(
         => cacheHelper.GetAsync<AdScoreTimelineModel>(
             frozen ? CacheKey.AdTimelineFrozen(gameId) : CacheKey.AdTimeline(gameId), token);
 
-    public async Task<AdScoreboardModel> GenScoreboardAsync(int gameId, DateTimeOffset? cutoff, CancellationToken token = default)
+    public async Task<AdScoreboardModel> GenScoreboardAsync(int gameId, DateTimeOffset? passedCutoff, CancellationToken token = default)
     {
-        var freeze = await Context.Games
-            .Where(g => g.Id == gameId).Select(g => g.FreezeTimeUtc).FirstOrDefaultAsync(token);
+        var gameRow = await Context.Games
+            .Where(g => g.Id == gameId)
+            .Select(g => new { g.FreezeTimeUtc, g.EndTimeUtc })
+            .FirstOrDefaultAsync(token);
+        if (gameRow is null)
+            return new AdScoreboardModel { IsFrozenView = passedCutoff != null };
+        var freeze = gameRow.FreezeTimeUtc;
+
+        // Render-time end-clamp: scoring NEVER counts past EndTimeUtc. Compose with the
+        // ICPC freeze cutoff (when present) by taking the earlier instant. So a game that
+        // was shortened stops counting post-end submissions/checks immediately — but the
+        // rows stay in the DB, so re-extending EndTimeUtc later brings them back on the
+        // next regen (this method re-reads EndTimeUtc every time). The clamp lives HERE
+        // (not just in the controller) so the background cache handlers — which call this
+        // with cutoff=null — also produce an end-clamped board.
+        var now = DateTimeOffset.UtcNow;
+        var ended = now >= gameRow.EndTimeUtc;
+        var cutoff = passedCutoff is { } pc && pc < gameRow.EndTimeUtc ? pc : (DateTimeOffset?)null;
+        if (ended && (cutoff is null || cutoff > gameRow.EndTimeUtc))
+            cutoff = gameRow.EndTimeUtc;
 
         var latestRoundRow = await Context.AdRounds
             .Where(r => r.GameId == gameId && (cutoff == null || r.StartedAt <= cutoff))
@@ -122,9 +140,13 @@ public class AdScoreboardRepository(
             .ToDictionary(g => g.Key,
                 g => (Flags: g.Select(r => r.AdFlagId).Distinct().Count(), Times: g.Count()));
 
-        // SLA credit SUM per (team, challenge). Live view reads the per-service
-        // running total (O(teams), no scan of the unbounded check table); the
-        // frozen view must sum the rows as-of the cutoff.
+        // SLA credit SUM per (team, challenge). A truly-live board (no freeze, not
+        // ended → cutoff is null here) reads the per-service running total
+        // (SlaCreditTotal) — O(teams), no scan of the unbounded check table. A frozen
+        // OR end-clamped board (cutoff non-null) MUST sum the rows as-of the cutoff
+        // instead: the running total is never time-filtered, so it would otherwise
+        // include post-cutoff (e.g. post-end) ticks. `cutoff` was already clamped to
+        // EndTimeUtc above for an ended game, so this branch handles both cases.
         Dictionary<(int, int), double> slaLookup;
         if (cutoff == null)
         {
@@ -226,15 +248,27 @@ public class AdScoreboardRepository(
             LatestRound = latestRound,
             CurrentRoundEndsAt = currentRoundEndsAt,
             TickSeconds = tickSeconds,
-            IsFrozenView = cutoff != null,
+            // "Frozen view" = the ICPC freeze snapshot, NOT the end-clamp (which
+            // applies to everyone once the game ends). Key off the caller's freeze
+            // cutoff, not the end-derived one.
+            IsFrozenView = passedCutoff != null,
             Freeze = freeze,
             Challenges = challenges,
             Teams = rows
         };
     }
 
-    public async Task<AdScoreTimelineModel> GenTimelineAsync(int gameId, DateTimeOffset? cutoff, CancellationToken token = default)
+    public async Task<AdScoreTimelineModel> GenTimelineAsync(int gameId, DateTimeOffset? passedCutoff, CancellationToken token = default)
     {
+        // Same render-time end-clamp as GenScoreboardAsync: the timeline never plots
+        // scoring past EndTimeUtc (composed with the freeze cutoff if any), but the
+        // rows remain in the DB so re-extending the end time replots them.
+        var endTime = await Context.Games
+            .Where(g => g.Id == gameId).Select(g => (DateTimeOffset?)g.EndTimeUtc).FirstOrDefaultAsync(token);
+        var cutoff = passedCutoff is { } pc && (endTime is null || pc < endTime) ? pc : (DateTimeOffset?)null;
+        if (endTime is { } end && DateTimeOffset.UtcNow >= end && (cutoff is null || cutoff > end))
+            cutoff = end;
+
         var rounds = await Context.AdRounds
             .Where(r => r.GameId == gameId && (cutoff == null || r.StartedAt <= cutoff))
             .OrderBy(r => r.Number)
@@ -370,10 +404,23 @@ public class AdScoreboardRepository(
     /// rather than per-row scan) so it scales the same way.
     /// </summary>
     public async Task<KothScoreboardModel> GenKothScoreboardAsync(
-        int gameId, DateTimeOffset? cutoff, CancellationToken token = default)
+        int gameId, DateTimeOffset? passedCutoff, CancellationToken token = default)
     {
-        var freeze = await Context.Games
-            .Where(g => g.Id == gameId).Select(g => g.FreezeTimeUtc).FirstOrDefaultAsync(token);
+        var gameRow = await Context.Games
+            .Where(g => g.Id == gameId)
+            .Select(g => new { g.FreezeTimeUtc, g.EndTimeUtc })
+            .FirstOrDefaultAsync(token);
+        if (gameRow is null)
+            return new KothScoreboardModel { IsFrozenView = passedCutoff != null };
+        var freeze = gameRow.FreezeTimeUtc;
+
+        // Render-time end-clamp (see GenScoreboardAsync): KotH hold/penalty scoring
+        // never counts past EndTimeUtc; composed with the freeze cutoff. KothControlResults
+        // stay in the DB, so re-extending EndTimeUtc replays them on the next regen.
+        var ended = DateTimeOffset.UtcNow >= gameRow.EndTimeUtc;
+        var cutoff = passedCutoff is { } pc && pc < gameRow.EndTimeUtc ? pc : (DateTimeOffset?)null;
+        if (ended && (cutoff is null || cutoff > gameRow.EndTimeUtc))
+            cutoff = gameRow.EndTimeUtc;
 
         var latestRoundRow = await Context.AdRounds
             .Where(r => r.GameId == gameId && (cutoff == null || r.StartedAt <= cutoff))
@@ -403,7 +450,8 @@ public class AdScoreboardRepository(
             LatestRound = latestRound,
             CurrentRoundEndsAt = currentRoundEndsAt,
             TickSeconds = tickSeconds,
-            IsFrozenView = cutoff != null,
+            // Freeze snapshot, not the end-clamp (which applies to everyone post-end).
+            IsFrozenView = passedCutoff != null,
             Freeze = freeze,
         };
 
@@ -551,8 +599,15 @@ public class AdScoreboardRepository(
     /// scoreboard total. Downsampled to MaxTimelinePoints points/team.
     /// </summary>
     public async Task<AdScoreTimelineModel> GenKothTimelineAsync(
-        int gameId, DateTimeOffset? cutoff, CancellationToken token = default)
+        int gameId, DateTimeOffset? passedCutoff, CancellationToken token = default)
     {
+        // Render-time end-clamp (see GenScoreboardAsync), composed with the freeze cutoff.
+        var endTime = await Context.Games
+            .Where(g => g.Id == gameId).Select(g => (DateTimeOffset?)g.EndTimeUtc).FirstOrDefaultAsync(token);
+        var cutoff = passedCutoff is { } pc && (endTime is null || pc < endTime) ? pc : (DateTimeOffset?)null;
+        if (endTime is { } end && DateTimeOffset.UtcNow >= end && (cutoff is null || cutoff > end))
+            cutoff = end;
+
         var rounds = await Context.AdRounds
             .Where(r => r.GameId == gameId && (cutoff == null || r.StartedAt <= cutoff))
             .OrderBy(r => r.Number)

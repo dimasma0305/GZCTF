@@ -273,8 +273,26 @@ public class EditController(
             return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Game_NotFound)],
                 StatusCodes.Status404NotFound));
 
+        // Capture the time window before the mutation so we can tell whether
+        // the A&D/KotH render-time clamp/freeze needs a cache flush below.
+        var oldEnd = game.EndTimeUtc;
+        var oldFreeze = game.FreezeTimeUtc;
+
         game.Update(model);
         await gameRepository.UpdateGame(game, token);
+
+        // The A&D/KotH scoreboard clamps scoring at EndTimeUtc at render time and
+        // freezes at FreezeTimeUtc. Both are baked into the cached board, so moving
+        // either (e.g. shortening the game, then later re-extending it to recount the
+        // submissions that are still in the DB) must invalidate the cache — otherwise
+        // the public board keeps showing the stale window until the next background
+        // regen. Cheap no-op for games without an A&D/KotH challenge.
+        if ((game.EndTimeUtc != oldEnd || game.FreezeTimeUtc != oldFreeze)
+            && await dbContext.GameChallenges.AnyAsync(
+                c => c.GameId == id
+                     && (c.Type == ChallengeType.AttackDefense || c.Type == ChallengeType.KingOfTheHill),
+                token))
+            await cacheHelper.FlushAdScoreboardCacheIncludingFrozen(id, token);
 
         return Ok(GameInfoModel.FromGame(game));
     }
