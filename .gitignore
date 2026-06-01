@@ -271,3 +271,6 @@ kube-config.k3d.yaml
 # editor / merge backup litter
 *.orig
 *.bak
+
+# Claude Code session artifacts (scheduled-task lock written by ScheduleWakeup, etc.)
+.claude/
