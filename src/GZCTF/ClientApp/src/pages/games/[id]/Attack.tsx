@@ -473,7 +473,6 @@ const ARENA_BODY = `
     </div>
     <div class="devbar">
       <span class="label">// VIEW</span>
-      <button class="btn ghost on" id="petalBtn">PETALS</button>
       <button class="btn ghost on" id="scanBtn">SCANLINE</button>
       <button class="btn ghost on" id="soundBtn">SOUND</button>
       <span id="fbBtns" style="display:none">
@@ -602,7 +601,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   let matchFirstBlood = false, firstCrown = false, sinceEvent = 0
   let tNow = Date.now(), tickLeft = 0, liveRoundEndsAt: number | null = null
   const speed = 1
-  let petals = true
   const prevSvcState: Record<string, string> = {}
   // preroll = the attention-seeking telegraph (board stays visible, warning builds)
   // that plays BEFORE the slam cinematic; soundDelay/slam/total are relative to the slam.
@@ -891,9 +889,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   window.addEventListener('resize', onResize)
 
   const shots: any[] = [], sparks: any[] = [], fxq: any[] = []
-  let petalArr: any[] = []
-  function spawnPetals() { petalArr = []; for (let i = 0; i < 16; i++) petalArr.push({ x: rng(0, 1000), y: rng(0, 1000), s: rng(3, 6), vy: rng(8, 20), vx: rng(-6, 6), rot: rng(0, 6.28), vr: rng(-1, 1), hue: pick([330, 262, 190, 80]) }) }
-  spawnPetals()
 
   function fireShot(from: any, to: any, col: string) {
     if (frozen) return
@@ -924,15 +919,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
 
   function drawFX(dt: number) {
     ctx.clearRect(0, 0, 1000, 1000)
-    if (petals) {
-      for (const p of petalArr) {
-        p.y += p.vy * dt; p.x += p.vx * dt; p.rot += p.vr * dt
-        if (p.y > 1010) { p.y = -10; p.x = rng(0, 1000) }
-        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot)
-        ctx.fillStyle = `hsla(${p.hue},90%,72%,0.5)`
-        ctx.beginPath(); ctx.ellipse(0, 0, p.s, p.s * 0.55, 0, 0, 6.28); ctx.fill(); ctx.restore()
-      }
-    }
     for (let i = shots.length - 1; i >= 0; i--) {
       const s = shots[i]; s.t += s.sp * dt * 60
       const x = bez(s.fx, s.cx, s.tx, Math.min(s.t, 1))
@@ -1702,8 +1688,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   }
 
   /* -------- viewer toggles -------- */
-  const petalBtn: any = $('petalBtn')
-  if (petalBtn) petalBtn.onclick = function () { petals = !petals; petalBtn.classList.toggle('on', petals) }
   const scanBtn: any = $('scanBtn')
   if (scanBtn) scanBtn.onclick = function () { const offNow = $('scan').classList.toggle('off'); scanBtn.classList.toggle('on', !offNow) }
 
