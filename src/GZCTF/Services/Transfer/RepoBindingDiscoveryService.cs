@@ -387,28 +387,18 @@ public sealed class RepoBindingDiscoveryService(
             return (created, true);
         }
 
-        // Update in place.
-        existing.Title = manifest.Title!;
-        existing.Summary = manifest.Summary ?? existing.Summary;
-        existing.Content = manifest.Content ?? existing.Content;
-        // Hidden is intentionally NOT re-applied on update — it's a CREATE-ONLY
-        // default (the manifest's `hidden: true` makes a freshly-imported game start
-        // hidden). Once the game exists, visibility is operator-owned: the admin flips
-        // it in the UI, and a later sync must not clobber that back to the manifest
-        // value (re-hiding the game on every scan — the exact opposite of the
-        // manifest's own "keep hidden until you flip it in the admin UI" intent).
-        if (manifest.PracticeMode is { } pm) existing.PracticeMode = pm;
-        if (manifest.AcceptWithoutReview is { } awr) existing.AcceptWithoutReview = awr;
-        if (manifest.InviteCode is { } ic) existing.InviteCode = string.IsNullOrEmpty(ic) ? null : ic;
-        if (manifest.Start is { } start) existing.StartTimeUtc = Utc(start);
-        if (manifest.End is { } end) existing.EndTimeUtc = Utc(end);
-        if (manifest.WriteupDeadline is { } wd) existing.WriteupDeadline = Utc(wd);
-        if (manifest.WriteupRequired is { } wr) existing.WriteupRequired = wr;
-        if (manifest.WriteupNote is { } wn) existing.WriteupNote = wn;
-        if (manifest.TeamMemberCountLimit is { } tml) existing.TeamMemberCountLimit = tml;
-        if (manifest.ContainerCountLimit is { } ccl) existing.ContainerCountLimit = ccl;
-        if (manifest.BloodBonus is { } bb) existing.BloodBonus = BloodBonus.FromValue(bb);
-        ApplyAd(existing, manifest.Ad);
+        // Update in place — but game-level SETTINGS are CREATE-ONLY from the
+        // manifest. They seed a freshly-imported game (the create branch above);
+        // once the game exists, the admin owns them via the Info page and a repo
+        // sync must NOT re-apply the manifest value over a live operator edit.
+        // Re-applying clobbered admin changes back on every ~30s scan — that's why
+        // edits to the end time (and previously Hidden) "kept reverting". The
+        // binding's ongoing job is keeping CHALLENGES in sync (those have their own
+        // PushOnEdit for bidirectional editing); the game shell is operator-owned
+        // after import. To change game settings from git, edit the .gzevent and
+        // re-create the game. EventManifestPath is the lone exception: it's internal
+        // bookkeeping (where the .gzevent lives), kept current if the file moves.
+        existing.EventManifestPath = manifestRel;
         await context.SaveChangesAsync(token);
         return (existing, false);
     }
