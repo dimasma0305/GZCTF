@@ -149,7 +149,11 @@ Bulk-import participants from a CSV and mail each their credentials — a 5-step
 ![admin.users.import.webp](assets/images/admin.users.import.webp)
 ![admin.users.import.modal.webp](assets/images/admin.users.import.modal.webp)
 
-Anti-cheat: logins blocked by the global / per-team IP + browser-fingerprint policy, showing the conflicting teammate and value, with one-click clear for false positives:
+Per-game cheat analysis (`/games/{id}/monitor/CheatCheck`) — behavioral suspicion scoring, IP/fingerprint anomalies, abnormal-solve and collusion-ring detection, with a per-team suspicion ranking and a filterable global search:
+
+![monitor.cheat.analysis.webp](assets/images/monitor.cheat.analysis.webp)
+
+Anti-cheat block log: logins blocked by the global / per-team IP + browser-fingerprint policy, showing the conflicting teammate and value, with one-click clear for false positives:
 
 ![admin.anti.cheat.webp](assets/images/admin.anti.cheat.webp)
 
