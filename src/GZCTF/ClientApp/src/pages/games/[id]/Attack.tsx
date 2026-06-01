@@ -514,6 +514,7 @@ const ARENA_BODY = `
     <div class="fb-flash"></div>
   </div>
   <audio id="fbSound" preload="auto" src="/attack/firstblood.mp3"></audio>
+  <audio id="incomingSound" preload="auto" src="/attack/incoming.mp3"></audio>
 
   <!-- ===== SCOREBOARD FREEZE CINEMATIC ===== -->
   <div class="fz-overlay" id="fzOverlay">
@@ -1111,15 +1112,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     tone({ type: 'triangle', f: 900, f2: 1500, dur: 0.18, vol: 0.11, delay: 0.13 })
     noiseBurst({ type: 'highpass', f: 5000, fEnd: 9000, dur: 0.1, vol: 0.045, delay: 0.13 })
   }
-  function sfxIncoming() {
-    // Smooth ~5s rising build-up that crescendos into the slam (where the firstblood.mp3
-    // lands): a low bed for constant presence, a mid pad, and a climbing whoosh. No
-    // staccato; its own telegraph cue — the first-blood mp3 itself is unchanged.
-    if (!soundOn || !audio()) return
-    tone({ type: 'sine', f: 90, f2: 200, dur: 5.0, vol: 0.2, attack: 0.7, glide: 4.8 })
-    tone({ type: 'triangle', f: 180, f2: 420, dur: 5.0, vol: 0.1, attack: 1.6, glide: 4.8 })
-    tone({ type: 'sawtooth', f: 300, f2: 1000, dur: 5.0, vol: 0.06, attack: 4.6, glide: 4.8 })
-  }
   function sfxFreeze() {
     if (!soundOn || !audio()) return
     makeReverb()
@@ -1187,10 +1179,13 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const teleVig: any = root.querySelector('.fb-tele-vig'); if (teleVig) teleVig.style.background = `radial-gradient(circle at 50% 50%,transparent 40%,${th.accent}3a 100%)`
     ov.style.setProperty('--fbPre', FB.preroll + 'ms')
     ov.classList.remove('play', 'tele'); void ov.offsetWidth; ov.classList.add('tele')
-    sfxIncoming() // build-up alarm (separate from the first-blood mp3, which fires at the reveal)
+    // Build-up "incoming attack" alarm (real sample /attack/incoming.mp3, ~5s, crescendos
+    // into the slam). Separate from the first-blood mp3, which still lands at the reveal.
+    if (soundOn) { const ia: any = $('incomingSound'); if (ia && ia.getAttribute('src')) { try { ia.currentTime = 0; ia.volume = 1 } catch (e) {} ; ia.play().catch(() => {}) } }
     // ---- PHASE 2: the slam cinematic, after the build-up ----
     setTimeout(() => {
       if (killed) return
+      const iaStop: any = $('incomingSound'); if (iaStop) { try { iaStop.pause(); iaStop.currentTime = 0 } catch (e) {} }
       ov.classList.remove('tele'); void ov.offsetWidth; ov.classList.add('play')
       // First-blood stinger: the shipped /attack/firstblood.mp3 (unchanged) — now
       // fires WITH the reveal so it punctuates the slam, not the build-up.
@@ -1716,6 +1711,10 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   // autoplay until then — so the auto-played seed/live stinger stays silent
   // until the viewer interacts; any of the buttons below also count).
   const primeAudio = () => {
+    // Priming ONE element on the gesture grants the document sticky activation, so the
+    // other audio (incomingSound) can play() later without its own prime — priming it
+    // here would race: its play()->pause() can resolve after the telegraph starts it
+    // and silence the alarm.
     unlockAudio()
     const a: any = $('fbSound')
     if (a) { a.play().then(() => { a.pause(); a.currentTime = 0 }).catch(() => {}) }
@@ -1730,7 +1729,10 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     soundOn = !soundOn
     soundBtn.classList.toggle('on', soundOn)
     if (soundOn) unlockAudio()
-    else if ('speechSynthesis' in window) { try { speechSynthesis.cancel() } catch (e) {} }
+    else {
+      ;['fbSound', 'incomingSound'].forEach((id) => { const a: any = $(id); if (a) { try { a.pause(); a.currentTime = 0 } catch (e) {} } })
+      if ('speechSynthesis' in window) { try { speechSynthesis.cancel() } catch (e) {} }
+    }
   }
 
   // Preview-only: manually trigger each first-blood variant.
