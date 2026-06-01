@@ -19,8 +19,9 @@ namespace GZCTF.Services;
 /// pushes <b>one JSON object per text frame</b>; the client sends nothing. Every frame
 /// has a <c>kind</c> field: <c>"hello"</c> (once, on connect), <c>"ping"</c> (keepalive,
 /// ~every 25s), <c>"attack"</c> (a flag submission — same shape as
-/// <see cref="AttackEvent"/>), or <c>"koth"</c> (a hill control change — same shape as
-/// <see cref="KothControlEvent"/>). Same public-but-not-Hidden gate as the SignalR hub
+/// <see cref="AttackEvent"/>), <c>"koth"</c> (a hill control change — same shape as
+/// <see cref="KothControlEvent"/>), or <c>"patch"</c> (a team's service files changed —
+/// same shape as <see cref="PatchEvent"/>). Same public-but-not-Hidden gate as the SignalR hub
 /// (Hidden/draft games are monitor-only).</para>
 ///
 /// <para>The SignalR broadcast sites call <see cref="PublishAttack"/> /
@@ -42,6 +43,9 @@ public sealed class AttackStreamService
 
     /// <summary>Fan a KotH control-change event out to this game's raw-WS subscribers.</summary>
     public void PublishKoth(int gameId, KothControlEvent evt) => Publish(gameId, "koth", evt);
+
+    /// <summary>Fan a "team patched their service" event out to this game's raw-WS subscribers.</summary>
+    public void PublishPatch(int gameId, PatchEvent evt) => Publish(gameId, "patch", evt);
 
     private void Publish(int gameId, string kind, object payload)
     {
@@ -99,7 +103,7 @@ public sealed class AttackStreamService
 
         // Greeting so a client knows it connected and what frame kinds to expect.
         ch.Writer.TryWrite(JsonSerializer.Serialize(
-            new { kind = "hello", game = gameId, events = new[] { "attack", "koth" } }, JsonOpts));
+            new { kind = "hello", game = gameId, events = new[] { "attack", "koth", "patch" } }, JsonOpts));
 
         try
         {

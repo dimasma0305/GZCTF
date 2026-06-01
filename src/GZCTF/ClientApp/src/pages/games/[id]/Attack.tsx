@@ -113,6 +113,7 @@ const ARENA_CSS = `
     vertical-align:middle}
   .tag.flag{color:#fff;background:rgba(255,77,94,.18);border:1px solid var(--red)}
   .tag.def{color:#fff;background:rgba(61,255,176,.14);border:1px solid var(--good)}
+  .tag.patch{color:#fff;background:rgba(39,227,255,.16);border:1px solid var(--cyan)}
   .tag.sla{color:#fff;background:rgba(255,210,58,.14);border:1px solid var(--warn)}
   .tag.fb{color:#fff;background:rgba(255,57,168,.2);border:1px solid var(--magenta)}
   .tag.sys{color:var(--dim);border:1px solid var(--line2)}
@@ -193,6 +194,7 @@ const ARENA_CSS = `
   .btn.fb-ad{background:var(--red);box-shadow:0 0 14px rgba(255,77,94,.5)}
   .btn.fb-jeo{background:var(--amber);box-shadow:0 0 14px rgba(255,198,55,.5)}
   .btn.fb-koth{background:#9d6bff;color:#0a0612;box-shadow:0 0 14px rgba(157,107,255,.5)}
+  .btn.patch{background:#27e3ff;color:#06121a;box-shadow:0 0 14px rgba(39,227,255,.5)}
   #fbBtns{display:inline-flex;gap:10px}
   .sp{flex:1}
   .ticker{overflow:hidden;white-space:nowrap;max-width:46%}
@@ -376,6 +378,7 @@ const ARENA_BODY = `
         <button class="btn fb-ad" id="fbAdBtn">FB A&amp;D</button>
         <button class="btn fb-jeo" id="fbJeoBtn">FB JEO</button>
         <button class="btn fb-koth" id="fbKothBtn">FB KOTH</button>
+        <button class="btn patch" id="patchBtn">PATCH</button>
       </span>
       <span class="sp"></span>
       <div class="ticker"><span class="run" id="ticker"></span></div>
@@ -856,7 +859,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     try {
       if (!AC) {
         AC = new (window.AudioContext || (window as any).webkitAudioContext)()
-        masterGain = AC.createGain(); masterGain.gain.value = 0.5
+        masterGain = AC.createGain(); masterGain.gain.value = 1.6 // louder; compressor below tames peaks
         const comp = AC.createDynamicsCompressor()
         comp.threshold.value = -16; comp.ratio.value = 12; comp.attack.value = 0.003; comp.release.value = 0.25
         masterGain.connect(comp); comp.connect(AC.destination)
@@ -924,6 +927,14 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     if (!soundOn || !audio()) return
     ;[392, 523, 659, 784].forEach((f, i) => tone({ type: 'triangle', f, f2: f, dur: 0.16, vol: 0.12, delay: i * 0.05 }))
     noiseBurst({ type: 'highpass', f: 3000, fEnd: 8000, dur: 0.2, vol: 0.05, delay: 0.05 })
+  }
+  function sfxPatch() {
+    if (!soundOn || !audio()) return
+    // ratchet tighten + confirming ping
+    tone({ type: 'square', f: 360, f2: 520, dur: 0.05, vol: 0.13 })
+    tone({ type: 'square', f: 520, f2: 720, dur: 0.05, vol: 0.13, delay: 0.06 })
+    tone({ type: 'triangle', f: 900, f2: 1500, dur: 0.18, vol: 0.11, delay: 0.13 })
+    noiseBurst({ type: 'highpass', f: 5000, fEnd: 9000, dur: 0.1, vol: 0.045, delay: 0.13 })
   }
   function resolveFlag(atkr: any, vic: any, svc: any, pts: number, isFB: boolean) {
     if (!isFB) sfxAttack()
@@ -1050,7 +1061,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       if (sinceEvent > rng(900, 1700) / speed) {
         sinceEvent = 0
         const r = Math.random()
-        if (r < 0.5) evFlag(); else if (r < 0.68) evDef(); else if (r < 0.84) evSla(); else evHill()
+        if (r < 0.46) evFlag(); else if (r < 0.6) evDef(); else if (r < 0.74) evSla(); else if (r < 0.88) evHill(); else evPatch()
       }
     }
     raf = requestAnimationFrame(loop)
@@ -1206,6 +1217,16 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     }
     totalEvents++; refreshStats()
   }
+  // a team modified their service files — "patched". Cyan hardening pulse on their node.
+  function patchEffect(t: any, challengeTitle: string, changeCount: number) {
+    if (!t) return
+    spawnShield(t.x, t.y, '#27e3ff'); pulseBase(t, '#27e3ff'); sfxPatch()
+    floatText(t.x, t.y - 66, '🔧 PATCH', '#27e3ff')
+    const files = changeCount ? ` <span class="em">(${changeCount} file${changeCount === 1 ? '' : 's'})</span>` : ''
+    addLog('PATCH', 'patch', `<span class="who">${esc(t.name)}</span> hardened <span class="svc">${esc(challengeTitle)}</span>${files}`)
+    totalEvents++; refreshStats()
+  }
+  function livePatch(f: any) { patchEffect(teamByName(f.teamName), f.challengeTitle, f.changeCount || 0) }
 
   function setLiveBadge(connected: boolean) {
     const b: any = $('liveBadge'); if (!b) return
@@ -1224,6 +1245,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       if (!f || !f.kind) return
       if (f.kind === 'attack') liveAttack(f)
       else if (f.kind === 'koth') liveKoth(f)
+      else if (f.kind === 'patch') livePatch(f)
     }
     ws.onclose = () => {
       if (killed) return
@@ -1343,6 +1365,11 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     addLog('HILL', 'hill', `<span class="who">${esc(atkr.name)}</span> ${contested ? 'seized' : 'captured'} <span class="svc">${esc(h.name)}</span>`)
     totalEvents++; refreshRank(); refreshStats()
   }
+  function evPatch() {
+    if (!TEAMS.length) return
+    const t = pick(TEAMS); const svc = pick(t.svc)
+    patchEffect(t, svc ? svc.name : (SERVICES[0] || 'service'), Math.floor(rng(1, 9)))
+  }
   async function startPreview() {
     // use the game's real teams if it has an A&D board; otherwise demo teams
     let ad: any = null
@@ -1434,6 +1461,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       totalEvents++; refreshRank(); refreshStats()
     })
   }
+  const patchBtn: any = $('patchBtn')
+  if (patchBtn) patchBtn.onclick = () => { if (TEAMS.length) evPatch() }
 
   if (preview) startPreview(); else start()
 

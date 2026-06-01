@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using GZCTF.Models;
 using GZCTF.Models.Data;
+using GZCTF.Models.Request.Game;
 using GZCTF.Utils;
 using Microsoft.EntityFrameworkCore;
 
@@ -27,6 +28,7 @@ namespace GZCTF.Services;
 /// </remarks>
 public sealed class AdSnapshotService(
     IServiceScopeFactory scopeFactory,
+    AttackStreamService attackStream,
     ILogger<AdSnapshotService> logger) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(30);
@@ -103,6 +105,7 @@ public sealed class AdSnapshotService(
                     && ts.Challenge.IsEnabled)
                 .Include(ts => ts.Container)
                 .Include(ts => ts.Challenge)
+                .Include(ts => ts.Participation).ThenInclude(p => p.Team)
                 .AsNoTracking()
                 .ToListAsync(token);
         }
@@ -120,14 +123,14 @@ public sealed class AdSnapshotService(
         var tasks = due.Select(async ts =>
         {
             await gate.WaitAsync(token);
-            try { await CaptureServiceAsync(manager, ts, roundId, roundNumber, token); }
+            try { await CaptureServiceAsync(manager, gameId, ts, roundId, roundNumber, token); }
             finally { gate.Release(); }
         });
         await Task.WhenAll(tasks);
     }
 
     private async Task CaptureServiceAsync(
-        AdContainerManager manager, AdTeamService ts, int roundId, int roundNumber, CancellationToken token)
+        AdContainerManager manager, int gameId, AdTeamService ts, int roundId, int roundNumber, CancellationToken token)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var sp = scope.ServiceProvider;
@@ -174,5 +177,17 @@ public sealed class AdSnapshotService(
             ManifestJson = manifest
         });
         await db.SaveChangesAsync(token);
+
+        // A new, non-empty manifest means the team actually changed files on their
+        // service since the last snapshot — i.e. they patched. Broadcast it to the
+        // live battle map (purely cosmetic; the empty baseline has Count 0 and is
+        // skipped). No-ops cheaply when the game has no raw-WS subscribers.
+        if (changes.Count > 0)
+        {
+            var teamName = ts.Participation?.Team?.Name;
+            if (!string.IsNullOrEmpty(teamName))
+                attackStream.PublishPatch(gameId,
+                    new PatchEvent(teamName, ts.ChallengeId, ts.Challenge.Title, roundNumber, changes.Count));
+        }
     }
 }
