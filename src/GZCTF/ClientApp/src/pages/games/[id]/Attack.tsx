@@ -328,8 +328,6 @@ const ARENA_CSS = `
   .fz-dark{inset:0;background:radial-gradient(circle at 50% 46%,rgba(12,36,72,.95),rgba(2,8,22,.99))}
   .fz-frost{inset:0;background:radial-gradient(circle at 50% 50%,transparent 30%,rgba(170,220,255,.28) 100%);
     box-shadow:inset 0 0 160px rgba(180,225,255,.5),inset 0 0 60px rgba(220,240,255,.55)}
-  .fz-crack{left:50%;top:46%;width:90vmin;height:90vmin;transform:translate(-50%,-50%);mix-blend-mode:screen;
-    background:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20200%20200'%20stroke='%23dff1ff'%20fill='none'%20stroke-width='1'%3E%3Cpath%20d='M100%20100%20L44%2030%20L60%2046'/%3E%3Cpath%20d='M100%20100%20L170%2042%20L150%2058'/%3E%3Cpath%20d='M100%20100%20L182%20118%20L160%20116'/%3E%3Cpath%20d='M100%20100%20L150%20180%20L138%20158'/%3E%3Cpath%20d='M100%20100%20L60%20184%20L72%20158'/%3E%3Cpath%20d='M100%20100%20L18%20140%20L42%20126'/%3E%3Cpath%20d='M100%20100%20L22%2076%20L46%2086'/%3E%3C/svg%3E") center/contain no-repeat}
   .fz-flash{inset:0;background:#dff1ff}
   .fz-overlay .fz-core{inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.3vh;text-align:center;opacity:1}
   .fz-kanji{font-family:'DotGothic16';font-size:clamp(18px,3.6vw,44px);color:#bfe9ff;letter-spacing:.3em;text-shadow:0 0 18px rgba(150,210,255,.9)}
@@ -343,10 +341,8 @@ const ARENA_CSS = `
   .fz-count{font-family:'VT323';font-size:clamp(20px,3vw,34px);color:#eaf7ff;letter-spacing:2px;margin-top:6px;text-shadow:0 0 12px rgba(150,210,255,.85)}
   .fz-overlay.show>div{opacity:1}
   .fz-overlay.show .fz-title{animation:fzTitleIn .7s cubic-bezier(.2,1.5,.3,1)}
-  .fz-overlay.show .fz-crack{animation:fzCrackIn 1.3s ease-out}
   .fz-overlay.show .fz-flash{animation:fzFlashIn .9s linear;opacity:0}
   @keyframes fzTitleIn{0%{opacity:0;transform:scale(2.6);filter:blur(9px)}60%{opacity:1;transform:scale(1)}100%{opacity:1}}
-  @keyframes fzCrackIn{0%{opacity:0;transform:translate(-50%,-50%) scale(.6)}30%{opacity:.85;transform:translate(-50%,-50%) scale(1)}100%{opacity:.45;transform:translate(-50%,-50%) scale(1.05)}}
   @keyframes fzFlashIn{0%{opacity:0}12%{opacity:.85}30%{opacity:0}100%{opacity:0}}
 
   /* ===== MATCH WINNER SCREEN ===== */
@@ -514,7 +510,6 @@ const ARENA_BODY = `
   <div class="fz-overlay" id="fzOverlay">
     <div class="fz-dark"></div>
     <div class="fz-frost"></div>
-    <div class="fz-crack"></div>
     <div class="fz-snow" id="fzSnow"></div>
     <div class="fz-core">
       <svg class="fz-lock" viewBox="0 0 64 64" fill="none">
