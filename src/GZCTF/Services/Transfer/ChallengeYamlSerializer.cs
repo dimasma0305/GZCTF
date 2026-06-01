@@ -82,7 +82,14 @@ public static class ChallengeYamlSerializer
         {
             model.Container = new ChallengeYamlModel.ContainerSection
             {
-                ContainerImage = ch.ContainerImage,
+                // Never write back a platform-AUTO-BUILT tag (gzctf-auto/{game}/{slug}:{sha}).
+                // The repo omits containerImage on purpose so the importer auto-builds
+                // ./src/Dockerfile; baking the built tag into the pushed yaml would make the
+                // next sync see a "registry image", flip BuildStatus to NotApplicable, and
+                // stop the challenge from ever rebuilding. Omit it so the build intent
+                // round-trips. A genuine operator-pinned registry ref (nginx:alpine,
+                // ghcr.io/...) is preserved.
+                ContainerImage = IsAutoBuiltTag(ch.ContainerImage) ? null : ch.ContainerImage,
                 MemoryLimit = ch.MemoryLimit,
                 CpuCount = ch.CPUCount,
                 StorageLimit = ch.StorageLimit,
@@ -106,16 +113,31 @@ public static class ChallengeYamlSerializer
         {
             var ad = new ChallengeYamlModel.AdSection
             {
-                CheckerImage = string.IsNullOrEmpty(ch.AdCheckerImage) ? null : ch.AdCheckerImage,
+                // Same as the service image: an auto-built checker (gzctf-auto/.../-checker:sha,
+                // built from ./checker on import) must NOT be pinned back into the yaml, or the
+                // next sync stops auto-building it. A pinned registry checker is preserved.
+                CheckerImage = (string.IsNullOrEmpty(ch.AdCheckerImage) || IsAutoBuiltTag(ch.AdCheckerImage))
+                    ? null : ch.AdCheckerImage,
                 AllowEgress = ch.AdAllowEgress ? null : false,
                 AllowSelfReset = ch.AdAllowSelfReset ? null : false,
+                SshRequiresFlag = ch.AdSshRequiresFlag ? true : null,
             };
-            if (ad.CheckerImage is not null || ad.AllowEgress is not null || ad.AllowSelfReset is not null)
+            if (ad.CheckerImage is not null || ad.AllowEgress is not null
+                || ad.AllowSelfReset is not null || ad.SshRequiresFlag is not null)
                 model.Ad = ad;
         }
 
         return YamlSerializer.Serialize(model);
     }
+
+    /// <summary>
+    /// True for a platform auto-built image tag (<c>gzctf-auto/{game}/{slug}[-checker]:{sha}</c>).
+    /// These are generated from a Dockerfile in the package on every import and are not part of
+    /// the authored source, so they must never be serialized back into the pushed yaml — doing so
+    /// turns a "build me" challenge into a "pull this registry image" one on the next sync.
+    /// </summary>
+    private static bool IsAutoBuiltTag(string? image) =>
+        !string.IsNullOrEmpty(image) && image.StartsWith("gzctf-auto/", StringComparison.Ordinal);
 
     /// <summary>
     /// The importer prepends <c>"Author: **X**\n\n"</c> to the
