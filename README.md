@@ -113,6 +113,39 @@ If you are interested in contributing to the translation, please refer to the [C
 
 ## Demo 🗿
 
+### Attack & Defense + King of the Hill (this fork)
+
+The A&D scoreboard — per-service Attack / SLA / Defense-loss columns under the rarity-pool scoring model, a live score timeline, and a current-round + "next tick" countdown:
+
+![game.ad.scoreboard.webp](assets/images/game.ad.scoreboard.webp)
+
+The King-of-the-Hill scoreboard — per-hill hold points, ticks held, and the current holder, with the same round/tick indicator:
+
+![game.koth.scoreboard.webp](assets/images/game.koth.scoreboard.webp)
+
+The public live attack feed (`/games/{id}/attack`) — every capture and hill takeover animates in real time; also consumable as a plain WebSocket for bots and overlays:
+
+![game.attack.feed.webp](assets/images/game.attack.feed.webp)
+
+The A&D / KotH operator console — round control, container health, flag cycle, and per-team service status:
+
+![admin.ad.ops.webp](assets/images/admin.ad.ops.webp)
+
+Per-challenge A&D configuration — egress, self-reset, the auto-built checker image, and the SSH-requires-a-captured-flag gate:
+
+![admin.ad.challenge.config.webp](assets/images/admin.ad.challenge.config.webp)
+
+Mixed A&D / KotH challenges in one game, and the image-build history (checker images auto-build from `./checker` on import):
+
+![admin.ad.challenges.webp](assets/images/admin.ad.challenges.webp)
+![admin.builds.webp](assets/images/admin.builds.webp)
+
+Game settings with the A&D engine knobs (tick length, flag lifetime, warmup, KotH hold points, …):
+
+![admin.game.info.ad.webp](assets/images/admin.game.info.ad.webp)
+
+### Jeopardy platform (upstream)
+
 ![index.webp](assets/images/index.webp)
 ![game.list.webp](assets/images/game.list.webp)
 ![game.challenges.webp](assets/images/game.challenges.webp)
