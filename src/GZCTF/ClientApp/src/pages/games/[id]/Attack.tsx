@@ -237,8 +237,6 @@ const ARENA_CSS = `
   .fb-splat{left:50%;top:47%;width:44vmin;height:44vmin;transform:translate(-50%,-50%);
     background:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20200%20200'%3E%3Cg%20fill='%23a30f24'%3E%3Ccircle%20cx='100'%20cy='100'%20r='44'/%3E%3Ccircle%20cx='58'%20cy='66'%20r='15'/%3E%3Ccircle%20cx='150'%20cy='78'%20r='13'/%3E%3Ccircle%20cx='70'%20cy='150'%20r='17'/%3E%3Ccircle%20cx='142'%20cy='146'%20r='12'/%3E%3Ccircle%20cx='38'%20cy='118'%20r='8'/%3E%3Ccircle%20cx='168'%20cy='120'%20r='7'/%3E%3Ccircle%20cx='112'%20cy='36'%20r='9'/%3E%3Ccircle%20cx='30'%20cy='80'%20r='5'/%3E%3Ccircle%20cx='175'%20cy='150'%20r='5'/%3E%3C/g%3E%3Ccircle%20cx='100'%20cy='100'%20r='28'%20fill='%23d11630'/%3E%3C/svg%3E") center/contain no-repeat;
     filter:drop-shadow(0 0 22px rgba(209,22,48,.45))}
-  .fb-crack{left:50%;top:47%;width:80vmin;height:80vmin;transform:translate(-50%,-50%);mix-blend-mode:screen;
-    background:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20200%20200'%20stroke='%23fff'%20fill='none'%20stroke-width='1.1'%3E%3Cpath%20d='M100%20100%20L44%2030%20L60%2046'/%3E%3Cpath%20d='M100%20100%20L170%2042%20L150%2058'/%3E%3Cpath%20d='M100%20100%20L182%20118%20L160%20116'/%3E%3Cpath%20d='M100%20100%20L150%20180%20L138%20158'/%3E%3Cpath%20d='M100%20100%20L60%20184%20L72%20158'/%3E%3Cpath%20d='M100%20100%20L18%20140%20L42%20126'/%3E%3Cpath%20d='M100%20100%20L22%2076%20L46%2086'/%3E%3C/svg%3E") center/contain no-repeat}
   .fb-flash{inset:0;background:#fff}
   .fb-overlay .fb-core{inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.4vh;text-align:center;opacity:1}
   .fb-kanji{font-family:'DotGothic16';font-size:clamp(20px,4.4vw,52px);color:#ff5566;letter-spacing:.3em;
@@ -252,7 +250,6 @@ const ARENA_CSS = `
   .fb-overlay.play .fb-bar.b{animation:fbBarB 5s ease-out forwards}
   .fb-overlay.play .fb-rays{animation:fbRays 5s ease-out forwards}
   .fb-overlay.play .fb-splat{animation:fbSplat 5s cubic-bezier(.2,1.4,.3,1) forwards}
-  .fb-overlay.play .fb-crack{animation:fbCrack 5s ease-out forwards}
   .fb-overlay.play .fb-flash{animation:fbFlash 5s linear forwards}
   .fb-overlay.play .fb-kanji{animation:fbKanji 5s ease-out forwards}
   .fb-overlay.play .fb-title{animation:fbTitle 5s cubic-bezier(.2,1.5,.3,1) forwards}
@@ -262,7 +259,6 @@ const ARENA_CSS = `
   @keyframes fbBarB{0%{opacity:1;transform:translateY(100%)}9%{transform:translateY(0)}84%{opacity:1;transform:translateY(0)}100%{opacity:1;transform:translateY(100%)}}
   @keyframes fbRays{0%,12%{opacity:0;transform:rotate(0deg) scale(.6)}16%{opacity:.75;transform:rotate(5deg) scale(1)}82%{opacity:.5}100%{opacity:0;transform:rotate(38deg) scale(1.12)}}
   @keyframes fbSplat{0%,12%{opacity:0;transform:translate(-50%,-50%) scale(.25)}16%{opacity:.6;transform:translate(-50%,-50%) scale(1.08)}22%{transform:translate(-50%,-50%) scale(1)}82%{opacity:.5}100%{opacity:0;transform:translate(-50%,-50%) scale(1.06)}}
-  @keyframes fbCrack{0%,13%{opacity:0}16%{opacity:.9}82%{opacity:.45}100%{opacity:0}}
   @keyframes fbFlash{0%,11%{opacity:0}13%{opacity:.95}16%{opacity:0}18%{opacity:.5}21%{opacity:0}100%{opacity:0}}
   @keyframes fbKanji{0%,8%{opacity:0;letter-spacing:1.4em;filter:blur(8px)}16%{opacity:1;letter-spacing:.3em;filter:blur(0)}80%{opacity:.95}100%{opacity:0;transform:translateY(-12px)}}
   @keyframes fbTitle{0%{opacity:0;transform:scale(4.2);filter:blur(12px)}11%{opacity:.25}15%{opacity:1;transform:scale(.92);filter:blur(0)}19%{transform:scale(1.05)}24%{transform:scale(1)}45%{transform:scale(1.015)}65%{transform:scale(1)}80%{opacity:1}100%{opacity:0;transform:scale(1.7);filter:blur(7px)}}
@@ -496,7 +492,6 @@ const ARENA_BODY = `
     <div class="fb-dark"></div>
     <div class="fb-rays"></div>
     <div class="fb-splat"></div>
-    <div class="fb-crack"></div>
     <div class="fb-bar t"></div>
     <div class="fb-bar b"></div>
     <div class="fb-slash"></div>
