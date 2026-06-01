@@ -291,6 +291,88 @@ const ARENA_CSS = `
   @keyframes fbSlash{0%,12%{opacity:0;transform:translate(-50%,-50%) rotate(-18deg) scaleX(0)}
     15%{opacity:1;transform:translate(-50%,-50%) rotate(-18deg) scaleX(1)}26%{opacity:1}40%{opacity:0}100%{opacity:0}}
 
+  /* match countdown + freeze pills */
+  .matchpill{font-family:'Press Start 2P';font-size:9px;color:var(--cyan);
+    border:1px solid rgba(39,227,255,.4);padding:6px 9px;text-shadow:0 0 6px rgba(39,227,255,.6)}
+  .matchpill.warn{color:#ff7a8c;border-color:rgba(255,90,110,.6);text-shadow:0 0 8px rgba(255,90,110,.8);animation:freezePulse 1.2s ease-in-out infinite}
+  .freezepill{display:none;font-family:'Press Start 2P';font-size:9px;color:#bfe9ff;
+    border:1px solid rgba(120,200,255,.5);padding:6px 9px;background:rgba(120,200,255,.1);
+    text-shadow:0 0 8px rgba(120,200,255,.8);animation:freezePulse 1.6s ease-in-out infinite}
+  .freezepill.show{display:block}
+  @keyframes freezePulse{50%{box-shadow:0 0 14px rgba(120,200,255,.5)}}
+  .panel.rank.frozen{box-shadow:inset 0 0 34px rgba(120,200,255,.16);border-color:rgba(120,200,255,.45)}
+  .panel.rank.frozen .phead .t{color:#bfe9ff}
+  .panel.rank.frozen .phead .jp::after{content:" \\2744";color:#bfe9ff}
+  .panel.rank.frozen .rk{filter:saturate(.85)}
+  .btn.end{background:#ff5b6e;color:#1a0508;box-shadow:0 0 14px rgba(255,91,110,.5)}
+  .btn.frz{background:#7fd7ff;color:#06121a;box-shadow:0 0 14px rgba(127,215,255,.5)}
+
+  /* ===== SCOREBOARD FREEZE CINEMATIC ===== */
+  .fz-overlay{position:fixed;inset:0;z-index:96;pointer-events:none;visibility:hidden;overflow:hidden}
+  .fz-overlay.show{visibility:visible}
+  .fz-overlay>div{position:absolute;opacity:0;transition:opacity .5s}
+  .fz-dark{inset:0;background:radial-gradient(circle at 50% 46%,rgba(12,36,72,.95),rgba(2,8,22,.99))}
+  .fz-frost{inset:0;background:radial-gradient(circle at 50% 50%,transparent 30%,rgba(170,220,255,.28) 100%);
+    box-shadow:inset 0 0 160px rgba(180,225,255,.5),inset 0 0 60px rgba(220,240,255,.55)}
+  .fz-crack{left:50%;top:46%;width:90vmin;height:90vmin;transform:translate(-50%,-50%);mix-blend-mode:screen;
+    background:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20200%20200'%20stroke='%23dff1ff'%20fill='none'%20stroke-width='1'%3E%3Cpath%20d='M100%20100%20L44%2030%20L60%2046'/%3E%3Cpath%20d='M100%20100%20L170%2042%20L150%2058'/%3E%3Cpath%20d='M100%20100%20L182%20118%20L160%20116'/%3E%3Cpath%20d='M100%20100%20L150%20180%20L138%20158'/%3E%3Cpath%20d='M100%20100%20L60%20184%20L72%20158'/%3E%3Cpath%20d='M100%20100%20L18%20140%20L42%20126'/%3E%3Cpath%20d='M100%20100%20L22%2076%20L46%2086'/%3E%3C/svg%3E") center/contain no-repeat}
+  .fz-flash{inset:0;background:#dff1ff}
+  .fz-overlay .fz-core{inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.3vh;text-align:center;opacity:1}
+  .fz-kanji{font-family:'DotGothic16';font-size:clamp(18px,3.6vw,44px);color:#bfe9ff;letter-spacing:.3em;text-shadow:0 0 18px rgba(150,210,255,.9)}
+  .fz-title{font-family:'Press Start 2P';font-size:clamp(20px,5vw,62px);color:#eaf7ff;line-height:1.18;
+    text-shadow:0 0 22px rgba(150,210,255,.9),3px 0 #59c3ff,-3px 0 #bdffff}
+  .fz-sub{font-family:'Press Start 2P';font-size:clamp(8px,1.3vw,13px);color:#bfe9ff;letter-spacing:1px;text-shadow:0 0 10px rgba(150,210,255,.7)}
+  .fz-overlay .fz-snow{inset:0;overflow:hidden}
+  .fz-snow i{position:absolute;top:-18px;color:#dff1ff;text-shadow:0 0 8px rgba(180,225,255,.9);animation:fzSnow linear infinite}
+  @keyframes fzSnow{to{transform:translateY(106vh) rotate(180deg)}}
+  .fz-lock{width:clamp(54px,7vw,88px);height:auto;filter:drop-shadow(0 0 18px rgba(150,210,255,.85))}
+  .fz-count{font-family:'VT323';font-size:clamp(20px,3vw,34px);color:#eaf7ff;letter-spacing:2px;margin-top:6px;text-shadow:0 0 12px rgba(150,210,255,.85)}
+  .fz-overlay.show>div{opacity:1}
+  .fz-overlay.show .fz-title{animation:fzTitleIn .7s cubic-bezier(.2,1.5,.3,1)}
+  .fz-overlay.show .fz-crack{animation:fzCrackIn 1.3s ease-out}
+  .fz-overlay.show .fz-flash{animation:fzFlashIn .9s linear;opacity:0}
+  @keyframes fzTitleIn{0%{opacity:0;transform:scale(2.6);filter:blur(9px)}60%{opacity:1;transform:scale(1)}100%{opacity:1}}
+  @keyframes fzCrackIn{0%{opacity:0;transform:translate(-50%,-50%) scale(.6)}30%{opacity:.85;transform:translate(-50%,-50%) scale(1)}100%{opacity:.45;transform:translate(-50%,-50%) scale(1.05)}}
+  @keyframes fzFlashIn{0%{opacity:0}12%{opacity:.85}30%{opacity:0}100%{opacity:0}}
+
+  /* ===== MATCH WINNER SCREEN ===== */
+  .win-overlay{position:fixed;inset:0;z-index:97;pointer-events:none;opacity:0;visibility:hidden;overflow:hidden;
+    background:radial-gradient(circle at 50% 42%,rgba(60,44,8,.7),rgba(3,2,8,.97));transition:opacity .5s}
+  .win-overlay.show{opacity:1;visibility:visible;pointer-events:auto}
+  .win-rays{position:absolute;inset:-25%;mix-blend-mode:screen;opacity:.5;
+    background:repeating-conic-gradient(from 0deg at 50% 45%,rgba(255,255,255,0) 0deg 4deg,rgba(255,198,55,.16) 4deg 5deg);
+    -webkit-mask:radial-gradient(circle at 50% 45%,transparent 8%,#000 45%,transparent 82%);
+            mask:radial-gradient(circle at 50% 45%,transparent 8%,#000 45%,transparent 82%);
+    animation:winRays 26s linear infinite}
+  @keyframes winRays{to{transform:rotate(360deg)}}
+  .win-core{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;text-align:center;padding:18px}
+  .win-overlay.show .win-core{animation:winIn .7s cubic-bezier(.2,1.3,.3,1) both}
+  @keyframes winIn{0%{opacity:0;transform:translateY(24px) scale(.92)}100%{opacity:1;transform:none}}
+  .win-eyebrow{font-family:'Press Start 2P';font-size:clamp(8px,1.2vw,12px);color:var(--amber);letter-spacing:2px;text-shadow:0 0 10px rgba(255,198,55,.6)}
+  .champ{position:relative;margin:4px 0}
+  .champ-por{width:clamp(116px,17vw,186px);height:clamp(116px,17vw,186px);border-radius:50%;overflow:hidden;
+    border:4px solid var(--amber);box-shadow:0 0 50px rgba(255,198,55,.7),inset 0 0 20px rgba(0,0,0,.4);background:#0a0818}
+  .champ-por svg{display:block;width:100%;height:100%}
+  .crown{position:absolute;top:-28px;left:50%;transform:translateX(-50%);font-size:clamp(26px,4vw,44px);
+    color:var(--amber);text-shadow:0 0 16px rgba(255,198,55,.9);animation:crownBob 2.4s ease-in-out infinite}
+  @keyframes crownBob{50%{transform:translateX(-50%) translateY(-6px)}}
+  .win-title{font-family:'Press Start 2P';font-size:clamp(22px,5vw,58px);color:#fff;line-height:1;
+    text-shadow:0 0 24px rgba(255,198,55,.8),3px 0 var(--amber),-3px 0 #ff7a3a}
+  .champ-name{font-family:'Press Start 2P';font-size:clamp(12px,2vw,22px);text-shadow:0 0 12px currentColor;margin-top:4px}
+  .champ-score{font-family:'VT323';font-size:clamp(28px,4vw,46px);color:#fff;line-height:1}
+  .win-kanji{font-family:'DotGothic16';font-size:clamp(16px,2.4vw,28px);color:var(--amber);letter-spacing:.3em;opacity:.85}
+  .podium{display:flex;gap:clamp(10px,2vw,26px);align-items:flex-end;margin-top:12px}
+  .pod{display:flex;flex-direction:column;align-items:center;gap:5px;opacity:.92}
+  .pod .pav{width:clamp(40px,5vw,58px);height:clamp(40px,5vw,58px);border-radius:8px;overflow:hidden;border:1px solid var(--line2);background:#0a0818}
+  .pod .pav svg{display:block;width:100%;height:100%}
+  .pod .pn{font-family:'Press Start 2P';font-size:7px}
+  .pod .ps{font-family:'VT323';font-size:18px;color:#fff}
+  .pod .pr{font-family:'Press Start 2P';font-size:10px;color:var(--dim)}
+  .btn.rematch{margin-top:16px;pointer-events:auto;font-size:11px;padding:12px 22px;background:var(--amber);color:#1c1400;box-shadow:0 0 20px rgba(255,198,55,.6)}
+  .confetti{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+  .confetti i{position:absolute;top:-22px;width:9px;height:14px;opacity:.95;border-radius:1px;animation:confFall linear infinite}
+  @keyframes confFall{0%{transform:translateY(-22px) rotate(0)}100%{transform:translateY(104vh) rotate(560deg)}}
+
   @media (max-width:900px){
     :host{overflow-y:auto;position:absolute}
     .shell{height:auto;min-height:100vh}
@@ -332,6 +414,8 @@ const ARENA_BODY = `
         <div class="jp">サイバー攻防戦</div>
       </div>
       <div class="topright">
+        <div class="matchpill" id="matchPill">T- --:--</div>
+        <div class="freezepill" id="freezeTag">&#10052; FROZEN</div>
         <div class="roundpill" id="roundPill">ROUND 00</div>
         <div class="clock" id="clock">00:00:00</div>
         <div class="live off" id="liveBadge"><span class="dot"></span>OFFLINE</div>
@@ -379,6 +463,8 @@ const ARENA_BODY = `
         <button class="btn fb-jeo" id="fbJeoBtn">FB JEO</button>
         <button class="btn fb-koth" id="fbKothBtn">FB KOTH</button>
         <button class="btn patch" id="patchBtn">PATCH</button>
+        <button class="btn frz" id="freezeBtn">FREEZE</button>
+        <button class="btn end" id="endBtn">END</button>
       </span>
       <span class="sp"></span>
       <div class="ticker"><span class="run" id="ticker"></span></div>
@@ -406,6 +492,43 @@ const ARENA_BODY = `
     <div class="fb-flash"></div>
   </div>
   <audio id="fbSound" preload="auto" src="/attack/firstblood.mp3"></audio>
+
+  <!-- ===== SCOREBOARD FREEZE CINEMATIC ===== -->
+  <div class="fz-overlay" id="fzOverlay">
+    <div class="fz-dark"></div>
+    <div class="fz-frost"></div>
+    <div class="fz-crack"></div>
+    <div class="fz-snow" id="fzSnow"></div>
+    <div class="fz-core">
+      <svg class="fz-lock" viewBox="0 0 64 64" fill="none">
+        <path d="M20 30 V22 a12 12 0 0 1 24 0 V30" stroke="#bfe9ff" stroke-width="5" stroke-linecap="round"/>
+        <rect x="13" y="30" width="38" height="27" rx="5" fill="#9fd6ff" stroke="#eaf7ff" stroke-width="2"/>
+        <circle cx="32" cy="41" r="4" fill="#0a1830"/>
+        <rect x="30" y="43" width="4" height="9" rx="2" fill="#0a1830"/>
+      </svg>
+      <div class="fz-kanji">スコア凍結</div>
+      <div class="fz-title">SCOREBOARD<br>FROZEN</div>
+      <div class="fz-sub">PUBLIC BOARD LOCKED // RESULTS AT MATCH END</div>
+      <div class="fz-count" id="fzCount"></div>
+    </div>
+    <div class="fz-flash"></div>
+  </div>
+
+  <!-- ===== MATCH WINNER SCREEN ===== -->
+  <div class="win-overlay" id="winOverlay">
+    <div class="win-rays"></div>
+    <div class="confetti" id="confetti"></div>
+    <div class="win-core">
+      <div class="win-eyebrow">// MATCH COMPLETE &nbsp; 試合終了</div>
+      <div class="champ"><div class="champ-por" id="champPor"></div><div class="crown">&#9819;</div></div>
+      <div class="win-title">CHAMPION</div>
+      <div class="champ-name" id="champName">TEAM</div>
+      <div class="champ-score" id="champScore">0</div>
+      <div class="win-kanji">優勝</div>
+      <div class="podium" id="podium"></div>
+      <button class="btn rematch" id="rematchBtn" style="display:none">&#8635; REMATCH</button>
+    </div>
+  </div>
 
   <div class="scan" id="scan"></div>
   <div class="grain"></div>
@@ -459,6 +582,18 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   let petals = true
   const prevSvcState: Record<string, string> = {}
   const FB = { total: 3000, slam: 430, soundDelay: 0 }
+
+  // match clock + scoreboard freeze + winner.
+  // live: gameEndMs = real EndTimeUtc; freeze driven by the board's isFrozenView.
+  // preview: gameEndMs = boot + MATCH_SECONDS; freeze in the final FREEZE_SECONDS.
+  const MATCH_SECONDS = 360, FREEZE_SECONDS = 90
+  let frozen = false, matchOver = false, gameEndMs: number | null = null
+  // while frozen the board shows the snapshot taken at freeze; real values keep updating underneath.
+  const dispScore = (t: any) => (frozen && t.shown != null ? t.shown : t.score)
+  const dispSla = (t: any) => (frozen && t.shownSla != null ? t.shownSla : t.sla)
+  const dispAtk = (t: any) => (frozen && t.shownAtk != null ? t.shownAtk : t.atk)
+  const dispDef = (t: any) => (frozen && t.shownDef != null ? t.shownDef : t.def)
+  const fmtMS = (s: number) => { const m = Math.floor(s / 60), x = Math.floor(s % 60); return m + ':' + String(x).padStart(2, '0') }
 
   const teamByName = (n: any) => TEAMS.find((t) => t.name === n)
   function makeLook(t: any, i: number) {
@@ -603,6 +738,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     return g
   }
   function renderHill(h: any) {
+    if (frozen) return
     const g = $('hill-' + h.id); if (!g) return
     g.style.color = h.owner ? h.owner.color : '#7b78a6'
     const own = $('hown-' + h.id); if (own) own.textContent = h.owner ? h.owner.name : 'NEUTRAL'
@@ -708,8 +844,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       g.appendChild(r)
     })
   }
-  function renderScore(t: any) { const e = $('sc-' + t.id); if (e) e.textContent = t.score }
+  function renderScore(t: any) { const e = $('sc-' + t.id); if (e) e.textContent = dispScore(t) }
   function pulseBase(t: any, col: string) {
+    if (frozen) return
     const g = $('base-' + t.id); if (!g) return
     g.style.transition = 'none'; g.style.filter = `drop-shadow(0 0 10px ${col})`
     requestAnimationFrame(() => { g.style.transition = 'filter .6s'; g.style.filter = 'none' })
@@ -732,6 +869,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   spawnPetals()
 
   function fireShot(from: any, to: any, col: string) {
+    if (frozen) return
     const cx = (from.x + to.x) / 2, cy = (from.y + to.y) / 2
     const dx = to.x - from.x, dy = to.y - from.y
     const px = -dy, py = dx, len = Math.hypot(px, py) || 1
@@ -745,15 +883,17 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   }
   function hexPath(x: number, y: number, r: number) { ctx.beginPath(); for (let i = 0; i < 6; i++) { const a = (60 * i - 90) * Math.PI / 180; const px = x + r * Math.cos(a), py = y + r * Math.sin(a); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py) } ctx.closePath() }
   function spawnShield(x: number, y: number, col: string) {
+    if (frozen) return
     fxq.push({ kind: 'shield', x, y, col, t: 0, dur: 0.95 })
     for (let i = 0; i < 10; i++) { const a = -1.57 + rng(-1, 1); const v = rng(70, 150); sparks.push({ x: x + rng(-14, 14), y: y + 10, vx: Math.cos(a) * v * 0.4, vy: -Math.abs(v), life: 1, col }) }
   }
   function spawnDown(x: number, y: number, col: string) {
+    if (frozen) return
     fxq.push({ kind: 'down', x, y, col, t: 0, dur: 1.0 })
     for (let i = 0; i < 14; i++) { const v = rng(60, 180); sparks.push({ x: x + rng(-12, 12), y: y - 6, vx: rng(-40, 40), vy: Math.abs(v), life: 1, col }) }
   }
-  function spawnBeam(from: any, to: any, col: string, big: boolean) { fxq.push({ kind: 'beam', fx: from.x, fy: from.y, tx: to.x, ty: to.y, col, t: 0, dur: big ? 0.6 : 0.42, big: !!big }) }
-  function spawnCapture(from: any, hill: any, col: string) { spawnBeam(from, hill, col, false); fxq.push({ kind: 'shield', x: hill.x, y: hill.y, col, t: 0, dur: 0.9 }) }
+  function spawnBeam(from: any, to: any, col: string, big: boolean) { if (frozen) return; fxq.push({ kind: 'beam', fx: from.x, fy: from.y, tx: to.x, ty: to.y, col, t: 0, dur: big ? 0.6 : 0.42, big: !!big }) }
+  function spawnCapture(from: any, hill: any, col: string) { if (frozen) return; spawnBeam(from, hill, col, false); fxq.push({ kind: 'shield', x: hill.x, y: hill.y, col, t: 0, dur: 0.9 }) }
 
   function drawFX(dt: number) {
     ctx.clearRect(0, 0, 1000, 1000)
@@ -835,6 +975,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   }
 
   function floatText(wx: number, wy: number, txt: string, col: string) {
+    if (frozen) return
     const r = arena.getBoundingClientRect()
     const px = (wx / 1000) * r.width, py = (wy / 1000) * r.height
     const d = document.createElement('div')
@@ -846,6 +987,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   /* -------- log -------- */
   const clk = () => new Date(tNow).toUTCString().slice(17, 25)
   function addLog(tag: string, cls: string, html: string) {
+    if (frozen && cls !== 'sys') return // public board redacted during freeze; keep system lines
     const row = document.createElement('div'); row.className = 'lg'
     row.innerHTML = `<span class="ts">${clk()}</span><span class="tag ${cls}">${tag}</span>${html}`
     logEl.appendChild(row)
@@ -867,6 +1009,13 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       if (AC.state === 'suspended') AC.resume()
       return AC
     } catch (e) { return null }
+  }
+  function makeReverb() {
+    const ac = audio(); if (!ac || reverb) return
+    const len = Math.floor(ac.sampleRate * 2.8), buf = ac.createBuffer(2, len, ac.sampleRate)
+    for (let ch = 0; ch < 2; ch++) { const d = buf.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.8) }
+    reverb = ac.createConvolver(); reverb.buffer = buf
+    const rg = ac.createGain(); rg.gain.value = 0.95; reverb.connect(rg); rg.connect(masterGain)
   }
   function unlockAudio() {
     const ac = audio(); if (ac && ac.state === 'suspended') ac.resume()
@@ -935,6 +1084,21 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     tone({ type: 'square', f: 520, f2: 720, dur: 0.05, vol: 0.13, delay: 0.06 })
     tone({ type: 'triangle', f: 900, f2: 1500, dur: 0.18, vol: 0.11, delay: 0.13 })
     noiseBurst({ type: 'highpass', f: 5000, fEnd: 9000, dur: 0.1, vol: 0.045, delay: 0.13 })
+  }
+  function sfxFreeze() {
+    if (!soundOn || !audio()) return
+    makeReverb()
+    ;[1568, 1318, 1046, 880].forEach((f, i) => tone({ type: 'sine', f, f2: f, dur: 0.3, vol: 0.08, delay: i * 0.06, rev: 0.5 }))
+    noiseBurst({ type: 'highpass', f: 8000, fEnd: 3000, dur: 0.6, vol: 0.06, rev: 0.6 })
+    tone({ type: 'sine', f: 200, f2: 80, dur: 0.5, vol: 0.12, delay: 0.1 })
+  }
+  function sfxVictory() {
+    if (!soundOn || !audio()) return
+    makeReverb()
+    ;[392, 523, 659, 784, 1046].forEach((f, i) => tone({ type: 'triangle', f, f2: f, dur: 0.5, vol: 0.16, delay: i * 0.12, rev: 0.4 }))
+    ;[523, 659, 784].forEach((f) => tone({ type: 'sawtooth', f, f2: f, dur: 1.3, vol: 0.08, delay: 0.62, rev: 0.5 }))
+    tone({ type: 'sine', f: 130, f2: 64, dur: 1.5, vol: 0.5, delay: 0.58 })
+    noiseBurst({ type: 'highpass', f: 5000, fEnd: 9000, dur: 1.7, vol: 0.18, delay: 0.58, rev: 0.85 })
   }
   function resolveFlag(atkr: any, vic: any, svc: any, pts: number, isFB: boolean) {
     if (!isFB) sfxAttack()
@@ -1020,16 +1184,92 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   }
   function refreshRank() {
     if (!rankInit) rebuildRank()
-    const sorted = [...TEAMS].sort((a, b) => b.score - a.score)
+    const sorted = [...TEAMS].sort((a, b) => dispScore(b) - dispScore(a))
     sorted.forEach((t, i) => {
       const div = $('rk-' + t.id); if (!div) return
       div.className = 'rk p' + (i + 1)
       div.style.order = String(i)
       div.querySelector('.pos').textContent = (i + 1 < 10 ? '0' : '') + (i + 1)
-      $('ba-' + t.id).style.flex = String(Math.max(t.atk, 1))
-      $('bd-' + t.id).style.flex = String(Math.max(t.def, 1))
-      $('rsc-' + t.id).innerHTML = `${t.score}<small>${t.sla}% SLA</small>`
+      $('ba-' + t.id).style.flex = String(Math.max(dispAtk(t), 1))
+      $('bd-' + t.id).style.flex = String(Math.max(dispDef(t), 1))
+      $('rsc-' + t.id).innerHTML = `${dispScore(t)}<small>${dispSla(t)}% SLA</small>`
     })
+  }
+  const renderAllScores = () => TEAMS.forEach(renderScore)
+
+  /* -------- scoreboard freeze + match winner -------- */
+  const secsLeft = () => (gameEndMs != null ? Math.max(0, Math.round((gameEndMs - Date.now()) / 1000)) : 0)
+  function spawnSnow() {
+    const c: any = $('fzSnow'); if (!c) return; c.innerHTML = ''
+    for (let i = 0; i < 28; i++) {
+      const s = document.createElement('i'); s.textContent = '❄'
+      s.style.left = rng(0, 100) + '%'; s.style.fontSize = ((rng(8, 20)) | 0) + 'px'
+      s.style.animationDuration = rng(1.6, 3).toFixed(2) + 's'; s.style.animationDelay = rng(0, 1).toFixed(2) + 's'
+      c.appendChild(s)
+    }
+  }
+  function spawnConfetti() {
+    const c: any = $('confetti'); if (!c) return; c.innerHTML = ''
+    const cols = ['#ffc637', '#ff39a8', '#27e3ff', '#b9ff42', '#fff', '#ff7a3a', '#9d6bff']
+    for (let i = 0; i < 54; i++) {
+      const s = document.createElement('i')
+      s.style.left = rng(0, 100) + '%'; s.style.background = pick(cols)
+      s.style.animationDelay = rng(0, 3).toFixed(2) + 's'; s.style.animationDuration = rng(2.4, 4.8).toFixed(2) + 's'
+      s.style.width = (rng(6, 11) | 0) + 'px'; s.style.height = (rng(10, 18) | 0) + 'px'
+      c.appendChild(s)
+    }
+  }
+  const clearConfetti = () => { const c: any = $('confetti'); if (c) c.innerHTML = '' }
+  function enterFreeze() {
+    if (frozen) return; frozen = true
+    TEAMS.forEach((t) => { t.shown = t.score; t.shownSla = t.sla; t.shownAtk = t.atk; t.shownDef = t.def })
+    const tag = $('freezeTag'); if (tag) tag.classList.add('show')
+    const rp = root.querySelector('.panel.rank'); if (rp) rp.classList.add('frozen')
+    const fb = $('freezeBtn'); if (fb) fb.classList.add('on')
+    addLog('FREEZE', 'sys', `<span class="em">// SCOREBOARD FROZEN</span> :: public board locked, map redacted`)
+    const ov = $('fzOverlay'); if (ov) { ov.classList.remove('show'); void ov.offsetWidth; ov.classList.add('show'); spawnSnow() }
+    const fc = $('fzCount'); if (fc) fc.textContent = 'RESULTS IN T- ' + fmtMS(secsLeft())
+    sfxFreeze(); refreshRank()
+  }
+  function unfreeze() {
+    if (!frozen) return; frozen = false
+    const tag = $('freezeTag'); if (tag) tag.classList.remove('show')
+    const rp = root.querySelector('.panel.rank'); if (rp) rp.classList.remove('frozen')
+    const fb = $('freezeBtn'); if (fb) fb.classList.remove('on')
+    const ov = $('fzOverlay'); if (ov) ov.classList.remove('show')
+    const sn = $('fzSnow'); if (sn) sn.innerHTML = ''
+    HILLS.forEach((h) => renderHill(h)); renderAllScores(); refreshRank()
+  }
+  function endMatch() {
+    if (matchOver) return; matchOver = true; unfreeze()
+    const sorted = [...TEAMS].sort((a, b) => b.score - a.score)
+    const champ = sorted[0]; if (!champ) return
+    $('champPor').innerHTML = avatar(champ.look, champ.color)
+    const nm: any = $('champName'); nm.textContent = champ.name; nm.style.color = champ.color
+    $('champScore').textContent = champ.score + ' PTS'
+    const order = [sorted[1], sorted[0], sorted[2]].filter(Boolean); const ranks = [2, 1, 3]
+    $('podium').innerHTML = order.map((t: any, i: number) =>
+      `<div class="pod"><div class="pr">0${ranks[i]}</div>
+         <div class="pav" style="border-color:${t.color}">${avatar(t.look, t.color)}</div>
+         <div class="pn" style="color:${t.color}">${esc(t.name)}</div><div class="ps">${t.score}</div></div>`).join('')
+    const ov = $('winOverlay'); if (ov) ov.classList.add('show')
+    if (preview) { const rb = $('rematchBtn'); if (rb) rb.style.display = '' }
+    spawnConfetti(); sfxVictory()
+    addLog('MATCH', 'sys', `<span class="em">// MATCH OVER</span> :: <span class="who">${esc(champ.name)}</span> wins with <span class="em">${champ.score}</span>`)
+  }
+  function resetMatch() {
+    matchOver = false; round = 1; tickLeft = 30; matchFirstBlood = false; firstCrown = false
+    gameEndMs = Date.now() + MATCH_SECONDS * 1000
+    TEAMS.forEach((t) => {
+      t.score = Math.floor(rng(380, 520)); t.atk = Math.floor(rng(2, 9)); t.def = Math.floor(rng(2, 9)); t.sla = Math.floor(rng(88, 100))
+      t.shown = t.shownSla = t.shownAtk = t.shownDef = null
+      t.svc.forEach((s: any) => { s.status = Math.random() < 0.85 ? 'def' : 'vuln' }); renderSvc(t)
+    })
+    HILLS.forEach((h) => { h.owner = null; renderHill(h) })
+    totalFlags = 0; totalEvents = 0
+    renderAllScores(); refreshRank(); refreshStats()
+    const ov = $('winOverlay'); if (ov) ov.classList.remove('show'); clearConfetti()
+    addLog('SYS', 'sys', `<span class="em">// REMATCH</span> :: arena reset`)
   }
   function refreshStats() {
     const up = TEAMS.reduce((a, t) => a + t.svc.filter((s: any) => s.status === 'def').length, 0)
@@ -1069,6 +1309,14 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   function tickClock() {
     tNow = Date.now()
     const cl = $('clock'); if (cl) cl.textContent = clk()
+    // match countdown to game end (live: real EndTimeUtc; preview: boot + MATCH_SECONDS)
+    if (gameEndMs != null && !matchOver) {
+      const left = secsLeft()
+      const mp = $('matchPill'); if (mp) { mp.textContent = 'T- ' + fmtMS(left); mp.classList.toggle('warn', left <= FREEZE_SECONDS) }
+      if (preview && left <= FREEZE_SECONDS && !frozen) enterFreeze() // live freeze comes from the board's isFrozenView
+      if (frozen) { const fc = $('fzCount'); if (fc) fc.textContent = 'RESULTS IN T- ' + fmtMS(left) }
+      if (left <= 0) { endMatch(); return }
+    }
     if (preview) {
       tickLeft--
       if (tickLeft <= 0) {
@@ -1171,6 +1419,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     })
     round = ad.latestRound || round
     liveRoundEndsAt = ad.currentRoundEndsAt ? new Date(ad.currentRoundEndsAt).getTime() : liveRoundEndsAt
+    // public ICPC freeze drives the lock screen
+    if (ad.isFrozenView && !frozen) enterFreeze()
+    else if (!ad.isFrozenView && frozen && !matchOver) unfreeze()
     refreshRank(); refreshStats()
   }
 
@@ -1274,7 +1525,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       return
     }
     let koth: any = null; try { koth = await fetchJSON(`/api/Game/${gameId}/Ad/Koth/Scoreboard`) } catch (e) {}
-    let title: string | null = null; try { const gi = await fetchJSON(`/api/Game/${gameId}`); title = gi && gi.title } catch (e) {}
+    let title: string | null = null
+    try { const gi = await fetchJSON(`/api/Game/${gameId}`); title = gi && gi.title; if (gi && gi.end) gameEndMs = new Date(gi.end).getTime() } catch (e) {}
     if (killed) return
 
     buildLiveModel(ad, koth, title)
@@ -1286,6 +1538,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     $('teamCount').textContent = '攻防 // ' + TEAMS.length + ' TEAMS'
     refreshRank(); refreshStats(); buildTicker(title)
     sizeCanvas()
+    if (ad.isFrozenView) enterFreeze() // board already frozen when we connect
     addLog('SYS', 'sys', `<span class="em">// ARENA ONLINE</span> :: ${TEAMS.length} teams // ${SERVICES.length} services // live feed`)
 
     connectWS()
@@ -1383,7 +1636,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       buildLiveModel(ad, koth, title)
     }
     if (!TEAMS.length) bootDemoModel()
-    liveRoundEndsAt = null; round = 1; tickLeft = 30
+    liveRoundEndsAt = null; round = 1; tickLeft = 30; gameEndMs = Date.now() + MATCH_SECONDS * 1000
     buildArena()
     $('teamCount').textContent = '攻防 // ' + TEAMS.length + ' TEAMS'
     const lb: any = $('liveBadge'); if (lb) { lb.classList.remove('off'); lb.style.color = 'var(--amber)'; lb.childNodes[1].nodeValue = 'PREVIEW' }
@@ -1463,6 +1716,12 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   }
   const patchBtn: any = $('patchBtn')
   if (patchBtn) patchBtn.onclick = () => { if (TEAMS.length) evPatch() }
+  const freezeBtn: any = $('freezeBtn')
+  if (freezeBtn) freezeBtn.onclick = () => { if (frozen) unfreeze(); else enterFreeze() }
+  const endBtn: any = $('endBtn')
+  if (endBtn) endBtn.onclick = () => endMatch()
+  const rematchBtn: any = $('rematchBtn')
+  if (rematchBtn) rematchBtn.onclick = () => { if (preview) resetMatch() }
 
   if (preview) startPreview(); else start()
 
