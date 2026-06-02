@@ -593,7 +593,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
 
   let TEAMS: any[] = [], SERVICES: any[] = [], HILLS: any[] = []
   let round = 0, totalFlags = 0, totalEvents = 0, cinema = false, slamCovering = false
-  let sinceEvent = 0
   // hill ownership + FIRST CROWN latch/deferral live in this pure model (see kothCapture.ts)
   const kothDir = new KothDirector()
   let tNow = Date.now(), tickLeft = 0, liveRoundEndsAt: number | null = null
@@ -895,6 +894,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   }
   const onResize = () => sizeCanvas()
   window.addEventListener('resize', onResize)
+  // keep audio alive when the tab is backgrounded (some browsers suspend the context)
+  const onVis = () => { try { if (AC && AC.state === 'suspended') AC.resume() } catch (e) {} }
+  document.addEventListener('visibilitychange', onVis)
 
   const shots: any[] = [], sparks: any[] = [], fxq: any[] = []
 
@@ -945,7 +947,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   }
 
   function fireShot(from: any, to: any, col: string, miss = false) {
-    if (frozen) return
+    if (frozen || document.hidden) return
     const cx = (from.x + to.x) / 2, cy = (from.y + to.y) / 2
     const dx = to.x - from.x, dy = to.y - from.y
     const px = -dy, py = dx, len = Math.hypot(px, py) || 1
@@ -954,22 +956,23 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   }
   const bez = (a: number, c: number, b: number, t: number) => { const u = 1 - t; return u * u * a + 2 * u * t * c + t * t * b }
   function addSpark(x: number, y: number, col: string) {
+    if (document.hidden) return
     for (let i = 0; i < 16; i++) { const a = rng(0, 6.28), v = rng(60, 260); sparks.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 1, col }) }
     sparks.push({ x, y, ring: true, r: 4, life: 1, col })
   }
   function hexPath(x: number, y: number, r: number) { ctx.beginPath(); for (let i = 0; i < 6; i++) { const a = (60 * i - 90) * Math.PI / 180; const px = x + r * Math.cos(a), py = y + r * Math.sin(a); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py) } ctx.closePath() }
   function spawnShield(x: number, y: number, col: string) {
-    if (frozen) return
+    if (frozen || document.hidden) return
     fxq.push({ kind: 'shield', x, y, col, t: 0, dur: 0.95 })
     for (let i = 0; i < 10; i++) { const a = -1.57 + rng(-1, 1); const v = rng(70, 150); sparks.push({ x: x + rng(-14, 14), y: y + 10, vx: Math.cos(a) * v * 0.4, vy: -Math.abs(v), life: 1, col }) }
   }
   function spawnDown(x: number, y: number, col: string) {
-    if (frozen) return
+    if (frozen || document.hidden) return
     fxq.push({ kind: 'down', x, y, col, t: 0, dur: 1.0 })
     for (let i = 0; i < 14; i++) { const v = rng(60, 180); sparks.push({ x: x + rng(-12, 12), y: y - 6, vx: rng(-40, 40), vy: Math.abs(v), life: 1, col }) }
   }
-  function spawnBeam(from: any, to: any, col: string, big: boolean) { if (frozen) return; fxq.push({ kind: 'beam', fx: from.x, fy: from.y, tx: to.x, ty: to.y, col, t: 0, dur: big ? 0.6 : 0.42, big: !!big }) }
-  function spawnCapture(from: any, hill: any, col: string) { if (frozen) return; spawnBeam(from, hill, col, false); fxq.push({ kind: 'shield', x: hill.x, y: hill.y, col, t: 0, dur: 0.9 }) }
+  function spawnBeam(from: any, to: any, col: string, big: boolean) { if (frozen || document.hidden) return; fxq.push({ kind: 'beam', fx: from.x, fy: from.y, tx: to.x, ty: to.y, col, t: 0, dur: big ? 0.6 : 0.42, big: !!big }) }
+  function spawnCapture(from: any, hill: any, col: string) { if (frozen || document.hidden) return; spawnBeam(from, hill, col, false); fxq.push({ kind: 'shield', x: hill.x, y: hill.y, col, t: 0, dur: 0.9 }) }
 
   function drawFX(dt: number) {
     fxClock += dt
@@ -1404,15 +1407,19 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     // a first-crown owed but deferred past a running cinematic — fire it once free
     const pc = kothDir.takePendingCrown(cinema)
     if (pc) { const ph = HILLS.find((x) => x.id === pc.hill); const po = TEAMS.find((t) => t.id === pc.owner); if (ph && po) fbKoth(po, ph, () => {}) }
-    if (preview && !cinema && TEAMS.length) {
-      sinceEvent += dt * 1000
-      if (sinceEvent > rng(900, 1700) / speed) {
-        sinceEvent = 0
-        const r = Math.random()
-        if (r < 0.30) evFlag(); else if (r < 0.46) evJeopardy(); else if (r < 0.58) evMiss(); else if (r < 0.70) evDef(); else if (r < 0.80) evSla(); else if (r < 0.90) evHill(); else evPatch()
-      }
-    }
     raf = requestAnimationFrame(loop)
+  }
+  // Preview event generator runs on a self-rescheduling setTimeout (NOT the rAF loop):
+  // background tabs pause requestAnimationFrame, which would silence the simulated
+  // battle; setTimeout keeps firing (throttled to ~1s) so the SFX still play out of tab.
+  let evTimer = 0
+  function scheduleEvent() {
+    if (killed || !preview) return
+    if (!cinema && TEAMS.length) {
+      const r = Math.random()
+      if (r < 0.30) evFlag(); else if (r < 0.46) evJeopardy(); else if (r < 0.58) evMiss(); else if (r < 0.70) evDef(); else if (r < 0.80) evSla(); else if (r < 0.90) evHill(); else evPatch()
+    }
+    evTimer = window.setTimeout(scheduleEvent, rng(900, 1700) / Math.max(speed, 1))
   }
   function tickClock() {
     tNow = Date.now()
@@ -1899,6 +1906,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     timers.push(window.setTimeout(() => evDef(), 4800))
     timers.push(window.setTimeout(() => evHill(), 5400))
     timers.push(window.setTimeout(() => evFlag(), 6000))
+    evTimer = window.setTimeout(scheduleEvent, 1800) // recurring generator (survives background tabs)
   }
 
   /* -------- viewer toggles -------- */
@@ -2007,8 +2015,10 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     killed = true
     timers.forEach((id) => clearInterval(id))
     timers.forEach((id) => clearTimeout(id))
+    clearTimeout(evTimer)
     if (raf) cancelAnimationFrame(raf)
     window.removeEventListener('resize', onResize)
+    document.removeEventListener('visibilitychange', onVis)
     document.removeEventListener('pointerdown', primeAudio)
     document.removeEventListener('keydown', primeAudio)
     if ('speechSynthesis' in window) { try { speechSynthesis.cancel() } catch (e) {} }
