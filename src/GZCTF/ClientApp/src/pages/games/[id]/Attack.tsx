@@ -72,7 +72,6 @@ const ARENA_CSS = `
   .brand .logo b{color:var(--cyan);text-shadow:var(--glow) var(--cyan)}
   .brand .mode{font-family:'Press Start 2P';font-size:9px;color:var(--dim);
     border:1px solid var(--line2);padding:5px 8px}
-  .brand .jp{font-family:'DotGothic16';font-size:14px;color:var(--violet);opacity:.85}
   .topright{display:flex;align-items:center;gap:18px;font-size:19px}
   .live{display:flex;align-items:center;gap:7px;color:var(--good);
     font-family:'Press Start 2P';font-size:9px;letter-spacing:1px}
@@ -96,7 +95,6 @@ const ARENA_CSS = `
     padding:7px 12px;border-bottom:1px solid var(--line);
     background:linear-gradient(90deg,rgba(157,107,255,.10),transparent)}
   .phead .t{font-family:'Press Start 2P';font-size:9px;letter-spacing:1px;color:#fff}
-  .phead .jp{font-family:'DotGothic16';font-size:12px;color:var(--dim)}
   .accent-c{box-shadow:inset 3px 0 0 var(--cyan)}
   .accent-m{box-shadow:inset 3px 0 0 var(--magenta)}
   .accent-v{box-shadow:inset 3px 0 0 var(--violet)}
@@ -232,8 +230,6 @@ const ARENA_CSS = `
     background:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20200%20200'%3E%3Cg%20fill='%23a30f24'%3E%3Ccircle%20cx='100'%20cy='100'%20r='44'/%3E%3Ccircle%20cx='58'%20cy='66'%20r='15'/%3E%3Ccircle%20cx='150'%20cy='78'%20r='13'/%3E%3Ccircle%20cx='70'%20cy='150'%20r='17'/%3E%3Ccircle%20cx='142'%20cy='146'%20r='12'/%3E%3Ccircle%20cx='38'%20cy='118'%20r='8'/%3E%3Ccircle%20cx='168'%20cy='120'%20r='7'/%3E%3Ccircle%20cx='112'%20cy='36'%20r='9'/%3E%3Ccircle%20cx='30'%20cy='80'%20r='5'/%3E%3Ccircle%20cx='175'%20cy='150'%20r='5'/%3E%3C/g%3E%3Ccircle%20cx='100'%20cy='100'%20r='28'%20fill='%23d11630'/%3E%3C/svg%3E") center/contain no-repeat}
   .fb-flash{inset:0;background:#fff}
   .fb-overlay .fb-core{inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.4vh;text-align:center;opacity:1}
-  .fb-kanji{font-family:'DotGothic16';font-size:clamp(20px,4.4vw,52px);color:#ff5566;letter-spacing:.3em;
-    text-shadow:0 0 18px rgba(255,59,91,.9);opacity:0}
   .fb-title{font-family:'Press Start 2P';font-size:clamp(26px,7vw,86px);color:#fff;line-height:1;opacity:0;
     text-shadow:4px 0 #ff2350,-4px 0 #27e3ff,0 0 26px rgba(255,40,80,.9),0 0 60px rgba(255,40,80,.6)}
   .fb-sub{font-family:'Press Start 2P';font-size:clamp(9px,1.5vw,15px);color:#ffd0d6;opacity:0;
@@ -244,7 +240,6 @@ const ARENA_CSS = `
   .fb-overlay.play .fb-rays{animation:fbRays 5s ease-out forwards}
   .fb-overlay.play .fb-splat{animation:fbSplat 5s cubic-bezier(.2,1.4,.3,1) forwards}
   .fb-overlay.play .fb-flash{animation:fbFlash 5s linear forwards}
-  .fb-overlay.play .fb-kanji{animation:fbKanji 5s ease-out forwards}
   .fb-overlay.play .fb-title{animation:fbTitle 5s cubic-bezier(.2,1.5,.3,1) forwards}
   .fb-overlay.play .fb-sub{animation:fbSub 5s ease-out forwards}
   @keyframes fbDark{0%{opacity:0}5%{opacity:.95}82%{opacity:.95}100%{opacity:0}}
@@ -253,7 +248,6 @@ const ARENA_CSS = `
   @keyframes fbRays{0%,12%{opacity:0}16%{opacity:.7}82%{opacity:.45}100%{opacity:0}}
   @keyframes fbSplat{0%,12%{opacity:0;transform:translate(-50%,-50%) scale(.25)}16%{opacity:.6;transform:translate(-50%,-50%) scale(1.08)}22%{transform:translate(-50%,-50%) scale(1)}82%{opacity:.5}100%{opacity:0;transform:translate(-50%,-50%) scale(1.06)}}
   @keyframes fbFlash{0%,11%{opacity:0}13%{opacity:.95}16%{opacity:0}18%{opacity:.5}21%{opacity:0}100%{opacity:0}}
-  @keyframes fbKanji{0%,8%{opacity:0}16%{opacity:1}80%{opacity:.95}100%{opacity:0;transform:translateY(-12px)}}
   @keyframes fbTitle{0%{opacity:0;transform:scale(4.2)}11%{opacity:.25}15%{opacity:1;transform:scale(.92)}19%{transform:scale(1.05)}24%{transform:scale(1)}45%{transform:scale(1.015)}65%{transform:scale(1)}80%{opacity:1}100%{opacity:0;transform:scale(1.7)}}
   @keyframes fbSub{0%,21%{opacity:0;transform:translateY(16px)}29%{opacity:1;transform:translateY(0)}82%{opacity:1}100%{opacity:0}}
   .fb-overlay .fb-vs{display:flex;align-items:center;justify-content:center;gap:clamp(18px,7vw,90px);opacity:1}
@@ -284,7 +278,6 @@ const ARENA_CSS = `
   .fb-tele-vig{position:absolute;inset:0;background:radial-gradient(circle at 50% 50%,transparent 40%,rgba(255,40,80,.34) 100%);opacity:0}
   .fb-overlay.tele .fb-tele-vig{animation:fbTeleVig var(--fbPre,5000ms) ease-in-out forwards}
   .fb-tele-ban{position:absolute;left:50%;top:15vh;transform:translateX(-50%);display:flex;align-items:center;gap:14px;white-space:nowrap;opacity:0}
-  .fb-tele-ban .fb-tele-jp{font-family:'DotGothic16';font-size:clamp(16px,3vw,34px);color:#ff5566;letter-spacing:.3em;text-shadow:0 0 14px rgba(255,59,91,.9)}
   .fb-tele-ban .fb-tele-txt{font-family:'Press Start 2P';font-size:clamp(13px,2.4vw,28px);color:#fff;letter-spacing:2px;text-shadow:0 0 16px rgba(255,59,91,.95)}
   .fb-overlay.tele .fb-tele-ban{animation:fbTeleBan var(--fbPre,5000ms) ease-in-out forwards}
   @keyframes fbTele{0%{opacity:0}10%{opacity:1}100%{opacity:1}}
@@ -304,7 +297,6 @@ const ARENA_CSS = `
   @keyframes freezePulse{50%{box-shadow:0 0 14px rgba(120,200,255,.5)}}
   .panel.rank.frozen{box-shadow:inset 0 0 34px rgba(120,200,255,.16);border-color:rgba(120,200,255,.45)}
   .panel.rank.frozen .phead .t{color:#bfe9ff}
-  .panel.rank.frozen .phead .jp::after{content:" \\2744";color:#bfe9ff}
   .panel.rank.frozen .rk{filter:saturate(.85)}
   .btn.end{background:#ff5b6e;color:#1a0508;box-shadow:0 0 14px rgba(255,91,110,.5)}
   .btn.frz{background:#7fd7ff;color:#06121a;box-shadow:0 0 14px rgba(127,215,255,.5)}
@@ -318,7 +310,6 @@ const ARENA_CSS = `
     box-shadow:inset 0 0 160px rgba(180,225,255,.5),inset 0 0 60px rgba(220,240,255,.55)}
   .fz-flash{inset:0;background:#dff1ff}
   .fz-overlay .fz-core{inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.3vh;text-align:center;opacity:1}
-  .fz-kanji{font-family:'DotGothic16';font-size:clamp(18px,3.6vw,44px);color:#bfe9ff;letter-spacing:.3em;text-shadow:0 0 18px rgba(150,210,255,.9)}
   .fz-title{font-family:'Press Start 2P';font-size:clamp(20px,5vw,62px);color:#eaf7ff;line-height:1.18;
     text-shadow:0 0 22px rgba(150,210,255,.9),3px 0 #59c3ff,-3px 0 #bdffff}
   .fz-sub{font-family:'Press Start 2P';font-size:clamp(8px,1.3vw,13px);color:#bfe9ff;letter-spacing:1px;text-shadow:0 0 10px rgba(150,210,255,.7)}
@@ -352,7 +343,6 @@ const ARENA_CSS = `
     text-shadow:0 0 24px rgba(255,198,55,.8),3px 0 var(--amber),-3px 0 #ff7a3a}
   .champ-name{font-family:'Press Start 2P';font-size:clamp(12px,2vw,22px);text-shadow:0 0 12px currentColor;margin-top:4px}
   .champ-score{font-family:'VT323';font-size:clamp(28px,4vw,46px);color:#fff;line-height:1}
-  .win-kanji{font-family:'DotGothic16';font-size:clamp(16px,2.4vw,28px);color:var(--amber);letter-spacing:.3em;opacity:.85}
   .podium{display:flex;gap:clamp(10px,2vw,26px);align-items:flex-end;margin-top:12px}
   .pod{display:flex;flex-direction:column;align-items:center;gap:5px;opacity:.92}
   .pod .pav{width:clamp(40px,5vw,58px);height:clamp(40px,5vw,58px);border-radius:8px;overflow:hidden;border:1px solid var(--line2);background:#0a0818}
@@ -380,7 +370,7 @@ const ARENA_CSS = `
   @media (max-width:680px){
     .shell{padding:8px;gap:8px}
     .topbar{flex-wrap:wrap;gap:8px;padding:8px 12px}
-    .brand{gap:9px}.brand .logo{font-size:12px}.brand .jp{display:none}
+    .brand{gap:9px}.brand .logo{font-size:12px}
     .clock{font-size:18px}.topright{gap:11px}
     .devbar{flex-wrap:wrap;gap:7px;justify-content:center}
     .btn{font-size:7px;padding:7px 8px}
@@ -401,8 +391,7 @@ const ARENA_BODY = `
     <div class="topbar">
       <div class="brand">
         <div class="logo" id="brandLogo">CYBER<b>A/D</b>.ARENA</div>
-        <div class="mode">// A/D + KOTH</div>
-        <div class="jp">サイバー攻防戦</div>
+        <div class="mode">A/D + KOTH</div>
       </div>
       <div class="topright">
         <div class="matchpill" id="matchPill">T- --:--</div>
@@ -414,14 +403,13 @@ const ARENA_BODY = `
     </div>
     <div class="midrow">
       <div class="panel log-panel">
-        <div class="phead accent-m"><span class="t">// BATTLE LOG</span><span class="jp">バトルログ</span></div>
+        <div class="phead accent-m"><span class="t">BATTLE LOG</span></div>
         <div id="log"></div>
       </div>
       <div class="panel arena-wrap accent-v">
-        <div class="corner-tag ct-tl">// LIVE MAP</div>
-        <div class="corner-tag ct-tr" id="teamCount">攻防 // 0 TEAMS</div>
-        <div class="corner-tag ct-bl" id="netStat">SIGNAL // CONNECTING</div>
-        <div class="corner-tag ct-br">攻防戦</div>
+        <div class="corner-tag ct-tl">LIVE MAP</div>
+        <div class="corner-tag ct-tr" id="teamCount">0 TEAMS</div>
+        <div class="corner-tag ct-bl" id="netStat">CONNECTING</div>
         <div class="arena" id="arena">
           <canvas id="fxbg" width="870" height="870"></canvas>
           <svg id="svg" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid meet"></svg>
@@ -430,11 +418,11 @@ const ARENA_BODY = `
       </div>
       <div class="rightcol">
         <div class="panel rank">
-          <div class="phead accent-c"><span class="t">// RANKING</span><span class="jp">ランキング</span></div>
+          <div class="phead accent-c"><span class="t">RANKING</span></div>
           <div id="ranklist"></div>
         </div>
         <div class="panel">
-          <div class="phead accent-c"><span class="t">// STATS</span><span class="jp">ステータス</span></div>
+          <div class="phead accent-c"><span class="t">STATS</span></div>
           <div id="stats"></div>
           <div class="legend">
             <span><i style="background:var(--good)"></i>DEFENDED</span>
@@ -445,7 +433,7 @@ const ARENA_BODY = `
       </div>
     </div>
     <div class="devbar">
-      <span class="label">// VIEW</span>
+      <span class="label">VIEW</span>
       <button class="btn ghost on" id="scanBtn">SCANLINE</button>
       <button class="btn ghost on" id="soundBtn">SOUND</button>
       <span id="fbBtns" style="display:none">
@@ -463,7 +451,7 @@ const ARENA_BODY = `
   <div class="fb-overlay" id="fbOverlay">
     <div class="fb-tele">
       <div class="fb-tele-vig"></div>
-      <div class="fb-tele-ban"><i class="fb-tele-jp">警告</i><b class="fb-tele-txt">INCOMING STRIKE</b></div>
+      <div class="fb-tele-ban"><b class="fb-tele-txt">INCOMING STRIKE</b></div>
     </div>
     <div class="fb-dark"></div>
     <div class="fb-rays"></div>
@@ -471,7 +459,6 @@ const ARENA_BODY = `
     <div class="fb-bar t"></div>
     <div class="fb-bar b"></div>
     <div class="fb-core">
-      <div class="fb-kanji">ファーストブラッド</div>
       <div class="fb-vs">
         <div class="fb-fighter atk"><div class="por" id="fbAtkPor"></div><div class="nm" id="fbAtkNm"></div></div>
         <div class="fb-vs-x">VS</div>
@@ -497,9 +484,8 @@ const ARENA_BODY = `
         <circle cx="32" cy="41" r="4" fill="#0a1830"/>
         <rect x="30" y="43" width="4" height="9" rx="2" fill="#0a1830"/>
       </svg>
-      <div class="fz-kanji">スコア凍結</div>
       <div class="fz-title">SCOREBOARD<br>FROZEN</div>
-      <div class="fz-sub">PUBLIC BOARD LOCKED // RESULTS AT MATCH END</div>
+      <div class="fz-sub">PUBLIC BOARD LOCKED, RESULTS AT MATCH END</div>
       <div class="fz-count" id="fzCount"></div>
     </div>
     <div class="fz-flash"></div>
@@ -509,12 +495,11 @@ const ARENA_BODY = `
   <div class="win-overlay" id="winOverlay">
     <div class="confetti" id="confetti"></div>
     <div class="win-core">
-      <div class="win-eyebrow">// MATCH COMPLETE &nbsp; 試合終了</div>
+      <div class="win-eyebrow">MATCH COMPLETE</div>
       <div class="champ"><div class="champ-por" id="champPor"></div><div class="crown">&#9819;</div></div>
       <div class="win-title">CHAMPION</div>
       <div class="champ-name" id="champName">TEAM</div>
       <div class="champ-score" id="champScore">0</div>
-      <div class="win-kanji">優勝</div>
       <div class="podium" id="podium"></div>
       <button class="btn rematch" id="rematchBtn" style="display:none">&#8635; REMATCH</button>
     </div>
@@ -695,7 +680,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     }
     svg.appendChild(mk(CY - 10, '#0a0818', 15, "'Press Start 2P'", 'SCORE'))
     svg.appendChild(mk(CY + 12, '#0a0818', 15, "'Press Start 2P'", 'CORE'))
-    svg.appendChild(mk(CY + 34, '#1a1040', 15, "'DotGothic16'", '中枢'))
 
     HILLS.forEach((h) => svg.appendChild(buildHill(h)))
     TEAMS.forEach((t) => svg.appendChild(buildBase(t)))
@@ -1155,9 +1139,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   // Per-kind first-blood theming. A&D = blood clash, Jeopardy = flag capture,
   // KotH = coronation ("FIRST CROWN").
   const FB_THEME: any = {
-    ad: { title: 'FIRST BLOOD', kanji: 'ファーストブラッド', accent: '#ff3b5b', accent2: '#ff2350', vs: 'VS', tag: 'A&D', announce: 'ファーストブラッド', tele: 'INCOMING STRIKE' },
-    jeopardy: { title: 'FIRST BLOOD', kanji: '初撃破', accent: '#ffc637', accent2: '#ff9a1f', vs: '⚑', tag: 'JEOPARDY', announce: 'ファーストブラッド', tele: 'INCOMING BREACH' },
-    koth: { title: 'FIRST CROWN', kanji: '初戴冠', accent: '#9d6bff', accent2: '#b98bff', vs: '♛', tag: 'KOTH', announce: 'ファーストクラウン', tele: 'INCOMING SIEGE' },
+    ad: { title: 'FIRST BLOOD', accent: '#ff3b5b', accent2: '#ff2350', vs: 'VS', tag: 'A&D', tele: 'INCOMING STRIKE' },
+    jeopardy: { title: 'FIRST BLOOD', accent: '#ffc637', accent2: '#ff9a1f', vs: '⚑', tag: 'JEOPARDY', tele: 'INCOMING BREACH' },
+    koth: { title: 'FIRST CROWN', accent: '#9d6bff', accent2: '#b98bff', vs: '♛', tag: 'KOTH', tele: 'INCOMING SIEGE' },
   }
 
   // opt: { kind, oppName, oppColor, oppPortrait(html), beamTo, onImpact }
@@ -1169,10 +1153,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const ov: any = $('fbOverlay')
     const ttl: any = root.querySelector('.fb-title')
     if (ttl) { ttl.textContent = th.title; ttl.style.textShadow = `4px 0 ${th.accent2}, -4px 0 #27e3ff, 0 0 26px ${th.accent}, 0 0 60px ${th.accent}` }
-    const kj: any = root.querySelector('.fb-kanji'); if (kj) { kj.textContent = th.kanji; kj.style.color = th.accent; kj.style.textShadow = `0 0 18px ${th.accent}` }
     const vsx: any = root.querySelector('.fb-vs-x'); if (vsx) { vsx.textContent = th.vs; vsx.style.textShadow = `0 0 14px ${th.accent},2px 0 ${th.accent2},-2px 0 #27e3ff` }
     root.querySelectorAll('.fb-fighter .por').forEach((p: any) => { p.style.boxShadow = `0 0 26px ${th.accent}` })
-    $('fbSub').innerHTML = `<span style="color:${atkr.color}">${esc(atkr.name)}</span> &nbsp;&#9656;&nbsp; <span style="color:${oppColor}">${esc(oppName)}</span> &nbsp;<span style="color:${th.accent};opacity:.85">// ${th.tag}</span>`
+    $('fbSub').innerHTML = `<span style="color:${atkr.color}">${esc(atkr.name)}</span> &nbsp;&#9656;&nbsp; <span style="color:${oppColor}">${esc(oppName)}</span> &nbsp;<span style="color:${th.accent};opacity:.85">${th.tag}</span>`
     $('fbAtkPor').innerHTML = avatar(atkr.look, atkr.color)
     $('fbVicPor').innerHTML = opt.oppPortrait || ''
     const an: any = $('fbAtkNm'); an.textContent = atkr.name; an.style.color = atkr.color
@@ -1183,7 +1166,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     // can read the scoreboard before the slam reveals FIRST BLOOD. The older
     // arena did this with an "INCOMING STRIKE" banner; this restores that beat.
     const teleTxt: any = root.querySelector('.fb-tele-txt'); if (teleTxt) { teleTxt.textContent = th.tele; teleTxt.style.textShadow = `0 0 16px ${th.accent}` }
-    const teleJp: any = root.querySelector('.fb-tele-jp'); if (teleJp) teleJp.style.color = th.accent
     const teleVig: any = root.querySelector('.fb-tele-vig'); if (teleVig) teleVig.style.background = `radial-gradient(circle at 50% 50%,transparent 40%,${th.accent}3a 100%)`
     ov.style.setProperty('--fbPre', FB.preroll + 'ms')
     ov.classList.remove('play', 'tele'); void ov.offsetWidth; ov.classList.add('tele')
@@ -1282,7 +1264,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const tag = $('freezeTag'); if (tag) tag.classList.add('show')
     const rp = root.querySelector('.panel.rank'); if (rp) rp.classList.add('frozen')
     const fb = $('freezeBtn'); if (fb) fb.classList.add('on')
-    addLog('FREEZE', 'sys', `<span class="em">// SCOREBOARD FROZEN</span> :: public board locked, map redacted`)
+    addLog('FREEZE', 'sys', `<span class="em">SCOREBOARD FROZEN</span> :: public board locked, map redacted`)
     const ov = $('fzOverlay'); if (ov) { ov.classList.remove('show'); void ov.offsetWidth; ov.classList.add('show'); spawnSnow() }
     const fc = $('fzCount'); if (fc) fc.textContent = 'RESULTS IN T- ' + fmtMS(secsLeft())
     sfxFreeze(); refreshRank()
@@ -1311,7 +1293,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const ov = $('winOverlay'); if (ov) ov.classList.add('show')
     if (preview) { const rb = $('rematchBtn'); if (rb) rb.style.display = '' }
     spawnConfetti(); sfxVictory()
-    addLog('MATCH', 'sys', `<span class="em">// MATCH OVER</span> :: <span class="who">${esc(champ.name)}</span> wins with <span class="em">${champ.score}</span>`)
+    addLog('MATCH', 'sys', `<span class="em">MATCH OVER</span> :: <span class="who">${esc(champ.name)}</span> wins with <span class="em">${champ.score}</span>`)
   }
   function resetMatch() {
     matchOver = false; round = 1; tickLeft = 30; kothDir.reset()
@@ -1325,15 +1307,15 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     totalFlags = 0; totalEvents = 0
     renderAllScores(); refreshRank(); refreshStats()
     const ov = $('winOverlay'); if (ov) ov.classList.remove('show'); clearConfetti()
-    addLog('SYS', 'sys', `<span class="em">// REMATCH</span> :: arena reset`)
+    addLog('SYS', 'sys', `<span class="em">REMATCH</span> :: arena reset`)
   }
   function refreshStats() {
     const up = TEAMS.reduce((a, t) => a + t.svc.filter((s: any) => s.status === 'def').length, 0)
     const tot = TEAMS.length * SERVICES.length
     $('roundPill').textContent = 'ROUND ' + String(round).padStart(2, '0')
     statsEl.innerHTML = `
-      <div class="strow"><span class="k">攻 ATTACK FLAGS</span><span class="v acc">${totalFlags}</span></div>
-      <div class="strow"><span class="k">守 SVC ONLINE</span><span class="v">${up} / ${tot}</span></div>
+      <div class="strow"><span class="k">ATTACK FLAGS</span><span class="v acc">${totalFlags}</span></div>
+      <div class="strow"><span class="k">SVC ONLINE</span><span class="v">${up} / ${tot}</span></div>
       <div class="strow"><span class="k">EVENTS</span><span class="v">${totalEvents}</span></div>
       <div class="strow"><span class="k">TEAMS</span><span class="v">${TEAMS.length}</span></div>
       <div class="strow"><span class="k">SERVICES</span><span class="v">${SERVICES.length}</span></div>
@@ -1383,7 +1365,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
         round++; tickLeft = 30
         TEAMS.forEach((t) => { const owned = t.svc.filter((s: any) => s.status === 'def').length; t.score += owned * Math.floor(rng(6, 14)) })
         HILLS.forEach((h) => { if (h.owner) h.owner.score += Math.floor(rng(10, 20)) })
-        addLog('ROUND', 'sys', `<span class="em">// ROUND ${round} START</span> :: passive + hold scoring`)
+        addLog('ROUND', 'sys', `<span class="em">ROUND ${round} START</span> :: passive + hold scoring`)
         TEAMS.forEach(renderScore); refreshRank()
       }
       refreshStats()
@@ -1576,7 +1558,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const b: any = $('liveBadge'); if (!b) return
     b.classList.toggle('off', !connected)
     b.childNodes[1].nodeValue = connected ? 'LIVE' : 'OFFLINE'
-    const ns = $('netStat'); if (ns) ns.textContent = connected ? 'SIGNAL // LIVE FEED' : 'SIGNAL // RECONNECTING'
+    const ns = $('netStat'); if (ns) ns.textContent = connected ? 'LIVE FEED' : 'RECONNECTING'
   }
   function connectWS() {
     if (killed) return
@@ -1610,10 +1592,10 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       ad = await fetchJSON(`/api/Game/${gameId}/Ad/Scoreboard`)
     } catch (e) {
       if (killed) return
-      const ns = $('netStat'); if (ns) ns.textContent = 'SIGNAL // NO A&D DATA'
+      const ns = $('netStat'); if (ns) ns.textContent = 'NO A&D DATA'
       const lb = $('liveBadge'); if (lb) lb.childNodes[1].nodeValue = 'NO DATA'
       showNote('NO LIVE A&amp;D DATA<br/>this game has no Attack &amp; Defense<br/>or King of the Hill challenges')
-      addLog('SYS', 'sys', `<span class="em">// NO A&amp;D / KOTH SCOREBOARD</span> for this game`)
+      addLog('SYS', 'sys', `<span class="em">NO A&amp;D / KOTH SCOREBOARD</span> for this game`)
       tNow = Date.now(); timers.push(window.setInterval(tickClock, 1000)); raf = requestAnimationFrame(loop)
       return
     }
@@ -1628,11 +1610,11 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     TEAMS.forEach((t) => t.svc.forEach((sv: any) => { prevSvcState[t.id + ':' + sv.cid] = sv.status }))
 
     buildArena()
-    $('teamCount').textContent = '攻防 // ' + TEAMS.length + ' TEAMS'
+    $('teamCount').textContent = TEAMS.length + ' TEAMS'
     refreshRank(); refreshStats()
     sizeCanvas()
     if (ad.isFrozenView) enterFreeze() // board already frozen when we connect
-    addLog('SYS', 'sys', `<span class="em">// ARENA ONLINE</span> :: ${TEAMS.length} teams // ${SERVICES.length} services // live feed`)
+    addLog('SYS', 'sys', `<span class="em">ARENA ONLINE</span> :: ${TEAMS.length} teams, ${SERVICES.length} services, live feed`)
 
     connectWS()
     timers.push(window.setInterval(pollLive, 15000))
@@ -1652,7 +1634,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     { id: 'ice', name: 'ICE-BREAKER', color: '#4d8bff', hue: 218 },
   ]
   const DEMO_SERVICES = ['neko-db', 'torii-api', 'sakura-web', 'oni-auth']
-  const DEMO_HILLS = [{ id: 'ha', name: 'TORII-A', jp: '甲' }, { id: 'hb', name: 'TORII-B', jp: '乙' }, { id: 'hc', name: 'TORII-C', jp: '丙' }]
+  const DEMO_HILLS = [{ id: 'ha', name: 'TORII-A' }, { id: 'hb', name: 'TORII-B' }, { id: 'hc', name: 'TORII-C' }]
   function bootDemoModel() {
     SERVICES = [...DEMO_SERVICES]
     TEAMS = DEMO_TEAMS.map((d: any, i: number) => {
@@ -1741,13 +1723,13 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     if (!TEAMS.length) bootDemoModel()
     liveRoundEndsAt = null; round = 1; tickLeft = 30; gameEndMs = Date.now() + MATCH_SECONDS * 1000
     buildArena()
-    $('teamCount').textContent = '攻防 // ' + TEAMS.length + ' TEAMS'
+    $('teamCount').textContent = TEAMS.length + ' TEAMS'
     const lb: any = $('liveBadge'); if (lb) { lb.classList.remove('off'); lb.style.color = 'var(--amber)'; lb.childNodes[1].nodeValue = 'PREVIEW' }
-    const ns = $('netStat'); if (ns) ns.textContent = 'SIGNAL // PREVIEW (SIMULATED)'
+    const ns = $('netStat'); if (ns) ns.textContent = 'PREVIEW (SIMULATED)'
     const fbb: any = $('fbBtns'); if (fbb) fbb.style.display = ''
     refreshRank(); refreshStats()
     sizeCanvas()
-    addLog('SYS', 'sys', `<span class="em">// PREVIEW MODE</span> :: simulated battle — ${TEAMS.length} teams`)
+    addLog('SYS', 'sys', `<span class="em">PREVIEW MODE</span> :: simulated battle — ${TEAMS.length} teams`)
     timers.push(window.setInterval(tickClock, 1000))
     raf = requestAnimationFrame(loop)
     timers.push(window.setTimeout(() => evFlag(), 1200))
