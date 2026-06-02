@@ -270,19 +270,14 @@ const ARENA_CSS = `
     text-shadow:0 0 14px #ff3b5b,2px 0 #ff2350,-2px 0 #27e3ff}
   .fb-fighter.atk{transform:translateX(-130vw)}
   .fb-fighter.vic{transform:translateX(130vw)}
-  .fb-slash{position:absolute;left:50%;top:50%;width:140vw;height:8px;transform:translate(-50%,-50%) rotate(-18deg) scaleX(0);
-    background:linear-gradient(90deg,transparent,#fff,#ff3b5b,#fff,transparent);box-shadow:0 0 30px #ff3b5b;opacity:0}
   .fb-overlay.play .fb-vs .fb-fighter.atk{animation:fbAtk 5s cubic-bezier(.2,1.3,.3,1) forwards}
   .fb-overlay.play .fb-vs .fb-fighter.vic{animation:fbVic 5s cubic-bezier(.2,1.3,.3,1) forwards}
   .fb-overlay.play .fb-vs-x{animation:fbVsx 5s ease-out forwards}
-  .fb-overlay.play .fb-slash{animation:fbSlash 5s ease-out forwards}
   @keyframes fbAtk{0%{opacity:0;transform:translateX(-130vw)}9%{opacity:1;transform:translateX(-14px)}
     14%{transform:translateX(14px)}16%{transform:translateX(0)}80%{opacity:1;transform:translateX(0)}100%{opacity:0;transform:translateX(-22vw)}}
   @keyframes fbVic{0%{opacity:0;transform:translateX(130vw)}9%{opacity:1;transform:translateX(14px)}
     14%{transform:translateX(26px) rotate(6deg)}16%{transform:translateX(20px) rotate(4deg)}80%{opacity:1;transform:translateX(20px) rotate(4deg)}100%{opacity:0;transform:translateX(22vw)}}
   @keyframes fbVsx{0%,12%{opacity:0;transform:scale(2.4)}16%{opacity:1;transform:scale(1)}80%{opacity:1}100%{opacity:0}}
-  @keyframes fbSlash{0%,12%{opacity:0;transform:translate(-50%,-50%) rotate(-18deg) scaleX(0)}
-    15%{opacity:1;transform:translate(-50%,-50%) rotate(-18deg) scaleX(1)}26%{opacity:1}40%{opacity:0}100%{opacity:0}}
 
   /* ===== FIRST-BLOOD TELEGRAPH (attention-seeking pre-roll; board stays visible) =====
      Plays before the slam: only a transparent edge-vignette + a sweeping scan line +
@@ -346,12 +341,6 @@ const ARENA_CSS = `
   .win-overlay{position:fixed;inset:0;z-index:97;pointer-events:none;opacity:0;visibility:hidden;overflow:hidden;
     background:radial-gradient(circle at 50% 42%,rgba(60,44,8,.7),rgba(3,2,8,.97));transition:opacity .5s}
   .win-overlay.show{opacity:1;visibility:visible;pointer-events:auto}
-  .win-rays{position:absolute;inset:-25%;mix-blend-mode:screen;opacity:.5;
-    background:repeating-conic-gradient(from 0deg at 50% 45%,rgba(255,255,255,0) 0deg 4deg,rgba(255,198,55,.16) 4deg 5deg);
-    -webkit-mask:radial-gradient(circle at 50% 45%,transparent 8%,#000 45%,transparent 82%);
-            mask:radial-gradient(circle at 50% 45%,transparent 8%,#000 45%,transparent 82%);
-    animation:winRays 26s linear infinite}
-  @keyframes winRays{to{transform:rotate(360deg)}}
   .win-core{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;text-align:center;padding:18px}
   .win-overlay.show .win-core{animation:winIn .7s cubic-bezier(.2,1.3,.3,1) both}
   @keyframes winIn{0%{opacity:0;transform:translateY(24px) scale(.92)}100%{opacity:1;transform:none}}
@@ -488,7 +477,6 @@ const ARENA_BODY = `
     <div class="fb-splat"></div>
     <div class="fb-bar t"></div>
     <div class="fb-bar b"></div>
-    <div class="fb-slash"></div>
     <div class="fb-core">
       <div class="fb-kanji">ファーストブラッド</div>
       <div class="fb-vs">
@@ -526,7 +514,6 @@ const ARENA_BODY = `
 
   <!-- ===== MATCH WINNER SCREEN ===== -->
   <div class="win-overlay" id="winOverlay">
-    <div class="win-rays"></div>
     <div class="confetti" id="confetti"></div>
     <div class="win-core">
       <div class="win-eyebrow">// MATCH COMPLETE &nbsp; 試合終了</div>
@@ -1177,7 +1164,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     if (ttl) { ttl.textContent = th.title; ttl.style.textShadow = `4px 0 ${th.accent2}, -4px 0 #27e3ff, 0 0 26px ${th.accent}, 0 0 60px ${th.accent}` }
     const kj: any = root.querySelector('.fb-kanji'); if (kj) { kj.textContent = th.kanji; kj.style.color = th.accent; kj.style.textShadow = `0 0 18px ${th.accent}` }
     const vsx: any = root.querySelector('.fb-vs-x'); if (vsx) { vsx.textContent = th.vs; vsx.style.textShadow = `0 0 14px ${th.accent},2px 0 ${th.accent2},-2px 0 #27e3ff` }
-    const slash: any = root.querySelector('.fb-slash'); if (slash) { slash.style.background = `linear-gradient(90deg,transparent,#fff,${th.accent},#fff,transparent)`; slash.style.boxShadow = `0 0 30px ${th.accent}` }
     root.querySelectorAll('.fb-fighter .por').forEach((p: any) => { p.style.boxShadow = `0 0 26px ${th.accent}` })
     $('fbSub').innerHTML = `<span style="color:${atkr.color}">${esc(atkr.name)}</span> &nbsp;&#9656;&nbsp; <span style="color:${oppColor}">${esc(oppName)}</span> &nbsp;<span style="color:${th.accent};opacity:.85">// ${th.tag}</span>`
     $('fbAtkPor').innerHTML = avatar(atkr.look, atkr.color)
