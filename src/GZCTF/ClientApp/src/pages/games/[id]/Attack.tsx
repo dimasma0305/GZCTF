@@ -130,6 +130,7 @@ const ARENA_CSS = `
   .arena-wrap{position:relative;display:flex;align-items:center;justify-content:center;
     min-height:0;min-width:0;overflow:hidden}
   .arena{position:relative;aspect-ratio:1/1;height:100%;max-height:100%;max-width:100%}
+  #fxbg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
   #svg{position:absolute;inset:0;width:100%;height:100%}
   #fx{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
   .arena-note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
@@ -209,8 +210,7 @@ const ARENA_CSS = `
     20%{opacity:1;transform:translateY(-2px) scale(1.1)}
     100%{opacity:0;transform:translateY(-30px) scale(1)}}
 
-  .u-float{animation:bob 2.8s ease-in-out infinite}
-  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3.5px)}}
+  /* avatar idle motion lives on the #fxbg canvas now (see drawAmbient) — the SVG stays static */
 
   @keyframes shake{
     0%,100%{transform:translate(0,0)}
@@ -443,6 +443,7 @@ const ARENA_BODY = `
         <div class="corner-tag ct-bl" id="netStat">SIGNAL // CONNECTING</div>
         <div class="corner-tag ct-br">攻防戦</div>
         <div class="arena" id="arena">
+          <canvas id="fxbg" width="870" height="870"></canvas>
           <svg id="svg" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid meet"></svg>
           <canvas id="fx" width="870" height="870"></canvas>
         </div>
@@ -659,6 +660,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   const svg: any = $('svg')
   const fx: any = $('fx')
   const ctx: any = fx.getContext('2d')
+  const fxbg: any = $('fxbg')
+  const ctxbg: any = fxbg.getContext('2d')
   const arena: any = $('arena')
   const logEl: any = $('log')
   const rankEl: any = $('ranklist')
@@ -694,12 +697,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
 
     const ringG = el('g', {})
     ringG.appendChild(el('circle', { cx: CX, cy: CY, r: 470, fill: 'none', stroke: 'var(--line2)', 'stroke-width': 1.2 }))
-    const dash = el('circle', { cx: CX, cy: CY, r: 455, fill: 'none', stroke: '#9d6bff', 'stroke-width': 1.4, 'stroke-dasharray': '3 16', 'stroke-opacity': 0.55 })
-    dash.innerHTML = `<animateTransform attributeName="transform" type="rotate" from="0 ${CX} ${CY}" to="360 ${CX} ${CY}" dur="60s" repeatCount="indefinite"/>`
-    ringG.appendChild(dash)
-    const dash2 = el('circle', { cx: CX, cy: CY, r: 300, fill: 'none', stroke: '#27e3ff', 'stroke-width': 1, 'stroke-dasharray': '2 10', 'stroke-opacity': 0.4 })
-    dash2.innerHTML = `<animateTransform attributeName="transform" type="rotate" from="360 ${CX} ${CY}" to="0 ${CX} ${CY}" dur="44s" repeatCount="indefinite"/>`
-    ringG.appendChild(dash2)
+    // the two rotating dashed rings (r=455, r=300) are drawn + spun on the #fxbg canvas now
     ringG.appendChild(el('circle', { cx: CX, cy: CY, r: RING, fill: 'none', stroke: 'var(--line)', 'stroke-width': 1, 'stroke-dasharray': '1 7' }))
     svg.appendChild(ringG)
 
@@ -710,10 +708,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     })
 
     const coreG = el('g', { filter: 'url(#glow)' })
-    const halo = el('circle', { cx: CX, cy: CY, r: CORE + 22, fill: 'none', stroke: '#9d6bff', 'stroke-width': 2, 'stroke-opacity': 0.5 })
-    halo.innerHTML = `<animate attributeName="r" values="${CORE + 18};${CORE + 30};${CORE + 18}" dur="3.4s" repeatCount="indefinite"/>
-      <animate attributeName="stroke-opacity" values="0.5;0.15;0.5" dur="3.4s" repeatCount="indefinite"/>`
-    coreG.appendChild(halo)
+    // the pulsing core halo is drawn on the #fxbg canvas now (see drawAmbient)
     coreG.appendChild(el('polygon', { points: hexPts(CX, CY, CORE), fill: 'url(#coreG)', stroke: '#cfe9ff', 'stroke-width': 2 }))
     coreG.appendChild(el('polygon', { points: hexPts(CX, CY, CORE - 16), fill: 'none', stroke: '#0a0818', 'stroke-width': 2, 'stroke-opacity': 0.5 }))
     svg.appendChild(coreG)
@@ -743,10 +738,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
         <rect x="-19" y="-9" width="38" height="4" stroke-width="0"/>
         <rect x="-2" y="-13" width="4" height="6" stroke-width="0"/>
       </g>
-      <circle cx="0" cy="0" r="27" fill="none" stroke="currentColor" stroke-width="1.5" stroke-opacity="0.5" stroke-dasharray="3 6">
-        <animateTransform attributeName="transform" type="rotate" from="0 0 0" to="360 0 0" dur="14s" repeatCount="indefinite"/>
-      </circle>
-      <circle cx="0" cy="-1" r="6.5" fill="currentColor"><animate attributeName="opacity" values="1;.45;1" dur="2.2s" repeatCount="indefinite"/></circle>
+      <circle cx="0" cy="0" r="27" fill="none" stroke="currentColor" stroke-width="1.5" stroke-opacity="0.5" stroke-dasharray="3 6"/>
+      <circle cx="0" cy="-1" r="6.5" fill="currentColor"/>
       <circle cx="-2" cy="-3" r="1.8" fill="#fff" opacity="0.85"/>
       <text x="0" y="42" text-anchor="middle" fill="#cfd2ee" font-family="'Press Start 2P'" font-size="8" paint-order="stroke" stroke="#06050f" stroke-width="3.5">${esc(h.name)}</text>
       <text id="hown-${h.id}" x="0" y="55" text-anchor="middle" fill="currentColor" font-family="'VT323'" font-size="15" paint-order="stroke" stroke="#06050f" stroke-width="3">${owned ? esc(h.owner.name) : 'NEUTRAL'}</text>`
@@ -777,7 +770,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       <path d="M-13 0 Q-13 -3 -9 -3 L9 -3 Q13 -3 13 0 L13 14 Q13 18 9 18 L-9 18 Q-13 18 -13 14 Z" fill="#1b1838" stroke="${c}" stroke-width="2"/>
       <path d="M-13 0 Q-13 -3 -9 -3 L0 -3 L0 18 L-9 18 Q-13 18 -13 14 Z" fill="${c}" opacity="0.8"/>
       <path d="M-9 -3 L0 5 L9 -3 Z" fill="#0c0a1c"/>
-      <circle cx="0" cy="8" r="3" fill="${c}"><animate attributeName="opacity" values="1;.4;1" dur="1.8s" repeatCount="indefinite"/></circle>
+      <circle cx="0" cy="8" r="3" fill="${c}"/>
       <rect x="-17" y="2" width="5" height="12" rx="2.5" fill="#14122e" stroke="${c}" stroke-width="1.2"/>
       <rect x="12" y="2" width="5" height="12" rx="2.5" fill="#14122e" stroke="${c}" stroke-width="1.2"/>`
     let back = ''
@@ -786,7 +779,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     if (L.style === 'twin') back += `<path d="M-14 -14 Q-22 -2 -18 12 Q-15 2 -10 -4 Z" fill="${hair}"/><path d="M14 -14 Q22 -2 18 12 Q15 2 10 -4 Z" fill="${hair}"/>`
     if (L.prop === 'katana') back += `<g transform="rotate(-26)"><rect x="13" y="-32" width="2.6" height="34" rx="1.2" fill="#e6ecff"/><rect x="11" y="0" width="7" height="3" rx="1" fill="${c}"/><rect x="13.4" y="3" width="2" height="9" rx="1" fill="#2a2740"/></g>`
     let props = ''
-    if (L.prop === 'orb') props += `<circle cx="21" cy="7" r="8" fill="none" stroke="${c}" stroke-width="0.9" opacity="0.5"/><circle cx="21" cy="7" r="4.6" fill="${c}"><animate attributeName="r" values="4.6;5.6;4.6" dur="2s" repeatCount="indefinite"/></circle><circle cx="19.4" cy="5.6" r="1.4" fill="#fff" opacity="0.8"/>`
+    if (L.prop === 'orb') props += `<circle cx="21" cy="7" r="8" fill="none" stroke="${c}" stroke-width="0.9" opacity="0.5"/><circle cx="21" cy="7" r="4.6" fill="${c}"/><circle cx="19.4" cy="5.6" r="1.4" fill="#fff" opacity="0.8"/>`
     if (L.prop === 'gaunt') props += `<rect x="13" y="9" width="11" height="10" rx="2.5" fill="#1b1838" stroke="${c}" stroke-width="1.6"/><rect x="14.5" y="10.5" width="8" height="2.4" fill="${c}"/>`
     if (L.prop === 'kunai') props += `<g transform="rotate(28 20 8)"><path d="M20 0 L24 7 L20 9 L16 7 Z" fill="#dfe6ff"/><rect x="19" y="9" width="2" height="6" fill="#2a2740"/><circle cx="20" cy="16" r="2.2" fill="none" stroke="#dfe6ff" stroke-width="1.2"/></g>`
     if (L.prop === 'shield') props += `<g transform="translate(-20 4)"><path d="M0 -7 L8 -4 Q8 7 0 13 Q-8 7 -8 -4 Z" fill="#1b1838" stroke="${c}" stroke-width="1.6"/><circle cx="0" cy="1" r="2.4" fill="${c}"/></g>`
@@ -855,7 +848,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     t.svc.forEach((s: any, i: number) => {
       const x = start + i * (w + gap)
       const r = el('rect', { x, y: 0, width: w, height: 11, rx: 2, fill: SVC_COLOR[s.status], stroke: '#06050f', 'stroke-width': 1 })
-      if (s.status === 'vuln') r.innerHTML = `<animate attributeName="opacity" values="1;0.25;1" dur="0.5s" repeatCount="indefinite"/>`
       g.appendChild(r)
     })
   }
@@ -871,14 +863,63 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   let SC = 1
   function sizeCanvas() {
     const r = arena.getBoundingClientRect()
-    const dpr = 1 // FX particle layer; the SVG stays vector-crisp regardless
+    const dpr = 1 // FX particle layers; the SVG stays vector-crisp regardless
     fx.width = r.width * dpr; fx.height = r.height * dpr
-    SC = (r.width / 1000) * dpr; ctx.setTransform(SC, 0, 0, SC, 0, 0)
+    fxbg.width = r.width * dpr; fxbg.height = r.height * dpr
+    SC = (r.width / 1000) * dpr
+    ctx.setTransform(SC, 0, 0, SC, 0, 0)
+    ctxbg.setTransform(SC, 0, 0, SC, 0, 0)
   }
   const onResize = () => sizeCanvas()
   window.addEventListener('resize', onResize)
 
   const shots: any[] = [], sparks: any[] = [], fxq: any[] = []
+
+  // Ambient idle motion lives on the #fxbg background canvas (behind the SVG) instead
+  // of animating the SVG DOM every frame: rotating recon rings, the core-halo pulse, and
+  // a soft breathing aura behind each (static, crisp) SVG avatar. This is what keeps the
+  // arena smooth — the SVG now only repaints on real events (scores, status, ownership).
+  let fxClock = 0
+  // Pre-render each team-colour glow once and blit it, instead of building a radial
+  // gradient every frame (gradient creation is the only pricey per-frame canvas op).
+  const glowCache: Record<string, any> = {}
+  function glowSprite(color: string) {
+    let c = glowCache[color]
+    if (!c) {
+      c = document.createElement('canvas'); c.width = c.height = 64
+      const g = c.getContext('2d')
+      const grd = g.createRadialGradient(32, 32, 1, 32, 32, 32)
+      grd.addColorStop(0, color); grd.addColorStop(1, 'transparent')
+      g.fillStyle = grd; g.fillRect(0, 0, 64, 64)
+      glowCache[color] = c
+    }
+    return c
+  }
+  function drawAmbient(T: number) {
+    const TAU = 6.2832
+    ctxbg.clearRect(0, 0, 1000, 1000)
+    // two counter-rotating dashed recon rings
+    ctxbg.save(); ctxbg.translate(CX, CY); ctxbg.rotate((T / 60) * TAU)
+    ctxbg.globalAlpha = 0.55; ctxbg.strokeStyle = '#9d6bff'; ctxbg.lineWidth = 1.4; ctxbg.setLineDash([3, 16])
+    ctxbg.beginPath(); ctxbg.arc(0, 0, 455, 0, TAU); ctxbg.stroke(); ctxbg.restore()
+    ctxbg.save(); ctxbg.translate(CX, CY); ctxbg.rotate(-(T / 44) * TAU)
+    ctxbg.globalAlpha = 0.4; ctxbg.strokeStyle = '#27e3ff'; ctxbg.lineWidth = 1; ctxbg.setLineDash([2, 10])
+    ctxbg.beginPath(); ctxbg.arc(0, 0, 300, 0, TAU); ctxbg.stroke(); ctxbg.restore()
+    ctxbg.setLineDash([]); ctxbg.globalAlpha = 1
+    // core halo pulse
+    const hp = (Math.sin(T * TAU / 3.4) + 1) / 2
+    ctxbg.globalAlpha = 0.5 - 0.35 * hp; ctxbg.strokeStyle = '#9d6bff'; ctxbg.lineWidth = 2
+    ctxbg.beginPath(); ctxbg.arc(CX, CY, CORE + 18 + 12 * hp, 0, TAU); ctxbg.stroke()
+    ctxbg.globalAlpha = 1
+    // soft breathing aura behind each avatar (replaces the per-avatar SVG bob)
+    for (const t of TEAMS) {
+      const p = (Math.sin(T * TAU / 2.8 + t.idx * 0.7) + 1) / 2
+      const rad = 24 + 5 * p
+      ctxbg.globalAlpha = 0.18 + 0.13 * p
+      ctxbg.drawImage(glowSprite(t.color), t.x - rad, t.y - 4 - rad, rad * 2, rad * 2)
+    }
+    ctxbg.globalAlpha = 1
+  }
 
   function fireShot(from: any, to: any, col: string) {
     if (frozen) return
@@ -908,6 +949,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   function spawnCapture(from: any, hill: any, col: string) { if (frozen) return; spawnBeam(from, hill, col, false); fxq.push({ kind: 'shield', x: hill.x, y: hill.y, col, t: 0, dur: 0.9 }) }
 
   function drawFX(dt: number) {
+    fxClock += dt
+    drawAmbient(fxClock)
     ctx.clearRect(0, 0, 1000, 1000)
     for (let i = shots.length - 1; i >= 0; i--) {
       const s = shots[i]; s.t += s.sp * dt * 60
