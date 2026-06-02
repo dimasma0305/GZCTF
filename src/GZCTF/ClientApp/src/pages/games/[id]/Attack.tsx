@@ -176,6 +176,10 @@ const ARENA_CSS = `
     font-family:'Press Start 2P';font-size:7px;color:var(--dim);flex-wrap:wrap}
   .legend span{display:inline-flex;align-items:center;gap:5px}
   .legend i{width:9px;height:9px;display:inline-block}
+  .slegend{display:flex;flex-wrap:wrap;gap:6px 10px;padding:8px 0 2px;margin-top:4px;
+    border-top:1px dashed var(--line);font-family:'Press Start 2P';font-size:7px;color:var(--dim)}
+  .slegend span{display:inline-flex;align-items:center;gap:5px}
+  .slegend i{width:8px;height:8px;display:inline-block;border-radius:2px;border:1px solid #06050f}
 
   .devbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:8px 14px;
     border:1px solid var(--line2);background:var(--panel);
@@ -573,6 +577,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   let TEAMS: any[] = [], SERVICES: any[] = [], HILLS: any[] = []
   let round = 0, totalFlags = 0, totalEvents = 0, cinema = false, slamCovering = false
   let matchFirstBlood = false, firstCrown = false, sinceEvent = 0
+  let crownPending: any = null // first-crown owed but deferred past a running cinematic
   let tNow = Date.now(), tickLeft = 0, liveRoundEndsAt: number | null = null
   const speed = 1
   const prevSvcState: Record<string, string> = {}
@@ -724,7 +729,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       <circle cx="0" cy="0" r="27" fill="none" stroke="currentColor" stroke-width="1.5" stroke-opacity="0.5" stroke-dasharray="3 6"/>
       <circle cx="0" cy="-1" r="6.5" fill="currentColor"/>
       <circle cx="-2" cy="-3" r="1.8" fill="#fff" opacity="0.85"/>
-      <text x="0" y="42" text-anchor="middle" fill="#cfd2ee" font-family="'Press Start 2P'" font-size="8" paint-order="stroke" stroke="#06050f" stroke-width="3.5">${esc(h.name)}</text>
+      <rect id="hstat-${h.id}" x="-9" y="29" width="18" height="5" rx="2.5" fill="${SVC_COLOR[h.status] || SVC_COLOR.none}" stroke="#06050f" stroke-width="1"/>
+      <text x="0" y="44" text-anchor="middle" fill="#cfd2ee" font-family="'Press Start 2P'" font-size="8" paint-order="stroke" stroke="#06050f" stroke-width="3.5">${esc(h.name)}</text>
       <text id="hown-${h.id}" x="0" y="55" text-anchor="middle" fill="currentColor" font-family="'VT323'" font-size="15" paint-order="stroke" stroke="#06050f" stroke-width="3">${owned ? esc(h.owner.name) : 'NEUTRAL'}</text>`
     return g
   }
@@ -733,6 +739,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const g = $('hill-' + h.id); if (!g) return
     g.style.color = h.owner ? h.owner.color : '#7b78a6'
     const own = $('hown-' + h.id); if (own) own.textContent = h.owner ? h.owner.name : 'NEUTRAL'
+    const st = $('hstat-' + h.id); if (st) st.setAttribute('fill', SVC_COLOR[h.status] || SVC_COLOR.none)
   }
 
   function labelOffset(t: any) {
@@ -823,14 +830,20 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     return g
   }
 
-  const SVC_COLOR: any = { def: '#3dffb0', vuln: '#ff3b5b', down: '#4f4a78' }
+  // service status → colour. def=Ok(green) vuln=Mumble(amber) down=Offline(grey)
+  // error=InternalError(violet) none=never-checked(dim). pwned=transient red flash on capture.
+  const SVC_COLOR: any = { def: '#3dffb0', vuln: '#ffb020', down: '#4f4a78', error: '#9d6bff', none: '#2f2c44', pwned: '#ff3b5b' }
   function renderSvc(t: any) {
     const g = $('svc-' + t.id); if (!g) return
     g.innerHTML = ''
+    const now = Date.now()
     const n = t.svc.length, w = 11, gap = 4, tot = n * w + (n - 1) * gap, start = -tot / 2
     t.svc.forEach((s: any, i: number) => {
       const x = start + i * (w + gap)
-      const r = el('rect', { x, y: 0, width: w, height: 11, rx: 2, fill: SVC_COLOR[s.status], stroke: '#06050f', 'stroke-width': 1 })
+      // a freshly-pwned service flashes red for a few seconds; otherwise it shows its
+      // SLA check verdict colour (Ok / Mumble / Offline / InternalError).
+      const fill = s.pwnUntil && s.pwnUntil > now ? SVC_COLOR.pwned : (SVC_COLOR[s.status] || SVC_COLOR.none)
+      const r = el('rect', { x, y: 0, width: w, height: 11, rx: 2, fill, stroke: '#06050f', 'stroke-width': 1 })
       g.appendChild(r)
     })
   }
@@ -1132,7 +1145,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   function resolveFlag(atkr: any, vic: any, svc: any, pts: number, isFB: boolean) {
     if (!isFB) sfxAttack()
     atkr.score += pts; atkr.atk++
-    if (vic && svc && svc.status === 'def') { svc.status = 'vuln'; setTimeout(() => { if (svc.status === 'vuln') { svc.status = 'def'; renderSvc(vic) } }, rng(3000, 7000)) }
+    if (vic && svc) { svc.pwnUntil = Date.now() + 5000; setTimeout(() => { if (!killed) renderSvc(vic) }, 5200) }
     renderScore(atkr); if (vic) { renderSvc(vic); pulseBase(vic, vic.color) }
     floatText(atkr.x, atkr.y - 66, '+' + pts, atkr.color)
     if (vic) floatText(vic.x, vic.y - 66, isFB ? 'FIRST BLOOD' : 'PWNED', vic.color)
@@ -1330,7 +1343,14 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       <div class="strow"><span class="k">EVENTS</span><span class="v">${totalEvents}</span></div>
       <div class="strow"><span class="k">TEAMS</span><span class="v">${TEAMS.length}</span></div>
       <div class="strow"><span class="k">SERVICES</span><span class="v">${SERVICES.length}</span></div>
-      <div class="strow"><span class="k">TICK</span><span class="v acc">${tickLeft}s</span></div>`
+      <div class="strow"><span class="k">TICK</span><span class="v acc">${tickLeft}s</span></div>
+      <div class="slegend">
+        <span><i style="background:${SVC_COLOR.def}"></i>OK</span>
+        <span><i style="background:${SVC_COLOR.vuln}"></i>MUMBLE</span>
+        <span><i style="background:${SVC_COLOR.down}"></i>OFFLINE</span>
+        <span><i style="background:${SVC_COLOR.error}"></i>ERROR</span>
+        <span><i style="background:${SVC_COLOR.pwned}"></i>PWNED</span>
+      </div>`
   }
 
   function buildTicker(title: string | null) {
@@ -1345,6 +1365,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     if (killed) return
     const dt = Math.min((ts - lastTs) / 1000, 0.05); lastTs = ts
     if (!slamCovering) drawFX(dt) // skip the arena draw while the slam overlay covers it
+    // a first-crown owed but deferred past a running cinematic — fire it once free
+    if (crownPending && !cinema && !firstCrown) { firstCrown = true; const c = crownPending; crownPending = null; fbKoth(c.o, c.h, () => {}) }
     if (preview && !cinema && TEAMS.length) {
       sinceEvent += dt * 1000
       if (sinceEvent > rng(900, 1700) / speed) {
@@ -1385,7 +1407,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   }
 
   /* -------- live data -------- */
-  const statusFromCheck = (cs: any) => (cs === 'Ok' ? 'def' : cs === 'Mumble' ? 'vuln' : 'down')
+  const statusFromCheck = (cs: any) => (cs === 'Ok' ? 'def' : cs === 'Mumble' ? 'vuln' : cs === 'InternalError' ? 'error' : cs === 'Offline' ? 'down' : cs == null ? 'none' : 'down')
   async function fetchJSON(url: string): Promise<any> {
     const r = await fetch(url, { headers: { Accept: 'application/json' } })
     if (!r.ok) throw new Error(url + ' -> ' + r.status)
@@ -1408,7 +1430,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
         def: Math.max(1, (row.services || []).filter((s: any) => s.lastCheckStatus === 'Ok').length),
       }
       const byId: any = {}; (row.services || []).forEach((s: any) => { byId[s.challengeId] = s })
-      t.svc = svcIds.map((cid: any, j: number) => { const s = byId[cid]; return { name: SERVICES[j], cid, status: s ? statusFromCheck(s.lastCheckStatus) : 'def' } })
+      t.svc = svcIds.map((cid: any, j: number) => { const s = byId[cid]; return { name: SERVICES[j], cid, status: s ? statusFromCheck(s.lastCheckStatus) : 'none' } })
       const ok = t.svc.filter((s: any) => s.status === 'def').length
       t.sla = t.svc.length ? Math.round(100 * ok / t.svc.length) : 100
       return t
@@ -1421,7 +1443,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       t.look = makeLook(t, i)
     })
 
-    HILLS = kothHills.map((h: any) => ({ id: 'h' + h.challengeId, cid: h.challengeId, name: h.title, jp: '', owner: h.currentHolderTeamName ? (teamByName(h.currentHolderTeamName) || null) : null }))
+    HILLS = kothHills.map((h: any) => ({ id: 'h' + h.challengeId, cid: h.challengeId, name: h.title, jp: '', status: statusFromCheck(h.lastCheckStatus), owner: h.currentHolderTeamName ? (teamByName(h.currentHolderTeamName) || null) : null }))
     HILLS.forEach((h, i) => {
       const ang = (-90 + (i + 0.5) * (360 / HILLS.length)) * Math.PI / 180
       h.idx = i; h.ang = ang
@@ -1441,7 +1463,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       t.score = Math.round(row.total || 0)
       const byId: any = {}; (row.services || []).forEach((s: any) => { byId[s.challengeId] = s })
       t.svc.forEach((sv: any) => {
-        const s = byId[sv.cid]; const ns = s ? statusFromCheck(s.lastCheckStatus) : 'def'
+        const s = byId[sv.cid]; const ns = s ? statusFromCheck(s.lastCheckStatus) : 'none'
         const key = t.id + ':' + sv.cid; const old = prevSvcState[key]
         if (old && old !== ns) {
           if (ns === 'down' && old !== 'down') {
@@ -1450,7 +1472,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
             const g = $('base-' + t.id)
             if (g) { g.classList.remove('node-down'); void g.offsetWidth; g.classList.add('node-down'); setTimeout(() => g.classList.remove('node-down'), 1300) }
             totalEvents++
-          } else if (ns === 'def' && old === 'down') {
+          } else if (ns === 'vuln' && old !== 'vuln') {
+            addLog('SLA', 'sla', `<span class="who">${esc(t.name)}</span> :: <span class="svc">${esc(sv.name)}</span> is <span class="em">MUMBLE</span>`)
+          } else if (ns === 'def' && old !== 'def') {
             addLog('DEFEND', 'def', `<span class="who">${esc(t.name)}</span> restored <span class="svc">${esc(sv.name)}</span>`)
             spawnShield(t.x, t.y, SVC_COLOR.def); sfxDefend(); totalEvents++
           }
@@ -1464,7 +1488,14 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     kothHills.forEach((kh: any) => {
       const h = HILLS.find((x) => x.cid === kh.challengeId); if (!h) return
       const newOwner = kh.currentHolderTeamName ? (teamByName(kh.currentHolderTeamName) || null) : null
-      if ((h.owner && h.owner.id) !== (newOwner && newOwner.id)) { h.owner = newOwner; renderHill(h) }
+      const ns = statusFromCheck(kh.lastCheckStatus)
+      const changed = (h.owner && h.owner.id) !== (newOwner && newOwner.id)
+      const contested = !!(h.owner && newOwner && h.owner !== newOwner)
+      if (!changed && h.status === ns) return
+      h.owner = newOwner; h.status = ns; renderHill(h)
+      // backstop: if the WS koth frame was missed, fire the capture/crown here so the
+      // FIRST CROWN cinematic still plays instead of the holder silently appearing.
+      if (changed && !matchOver) onHillCapture(h, newOwner, contested)
     })
     round = ad.latestRound || round
     liveRoundEndsAt = ad.currentRoundEndsAt ? new Date(ad.currentRoundEndsAt).getTime() : liveRoundEndsAt
@@ -1502,20 +1533,29 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     if (vic) fireShot(atkr, vic, atkr.color)
     setTimeout(() => { if (!killed) resolveFlag(atkr, vic, svc, pts, false) }, (vic ? 320 : 0) / Math.max(speed, 1) + (vic ? 120 : 0))
   }
+  // Hill ownership is driven by BOTH the WS koth frame (instant) and the 15s poll
+  // (reliable backstop) — whichever sees the change first; the other dedups because
+  // h.owner is already updated. The FIRST CROWN cinematic fires once; if an A&D
+  // cinematic is mid-play it's deferred (crownPending) and fired from loop().
+  function onHillCapture(h: any, newOwner: any, contested: boolean) {
+    if (!newOwner) { addLog('HILL', 'hill', `<span class="svc">${esc(h.name)}</span> went <span class="em">NEUTRAL</span>`); totalEvents++; refreshStats(); return }
+    if (!firstCrown) {
+      if (!cinema) { firstCrown = true; fbKoth(newOwner, h, () => {}) }
+      else crownPending = { o: newOwner, h }
+    } else { spawnCapture(newOwner, h, newOwner.color); sfxCapture() }
+    floatText(h.x, h.y - 30, contested ? 'SEIZED' : 'CAPTURED', newOwner.color)
+    addLog('HILL', 'hill', `<span class="who">${esc(newOwner.name)}</span> ${contested ? 'seized' : 'captured'} <span class="svc">${esc(h.name)}</span>`)
+    totalEvents++; refreshStats()
+  }
   function liveKoth(f: any) {
     const h = HILLS.find((x) => x.cid === f.challengeId); if (!h) return
+    if (f.status) h.status = statusFromCheck(f.status)
     const newOwner = f.holderTeamName ? (teamByName(f.holderTeamName) || null) : null
-    const contested = h.owner && newOwner && h.owner !== newOwner
+    const changed = (h.owner && h.owner.id) !== (newOwner && newOwner.id)
+    const contested = !!(h.owner && newOwner && h.owner !== newOwner)
     h.owner = newOwner; renderHill(h)
-    if (newOwner) {
-      if (!firstCrown && !cinema) { firstCrown = true; fbKoth(newOwner, h, () => {}) }
-      spawnCapture(newOwner, h, newOwner.color); sfxCapture()
-      floatText(h.x, h.y - 30, contested ? 'SEIZED' : 'CAPTURED', newOwner.color)
-      addLog('HILL', 'hill', `<span class="who">${esc(newOwner.name)}</span> ${contested ? 'seized' : 'captured'} <span class="svc">${esc(h.name)}</span>`)
-    } else {
-      addLog('HILL', 'hill', `<span class="svc">${esc(h.name)}</span> went <span class="em">NEUTRAL</span>`)
-    }
-    totalEvents++; refreshStats()
+    if (changed) onHillCapture(h, newOwner, contested)
+    else renderHill(h)
   }
   // a team modified their service files — "patched". Cyan hardening pulse on their node.
   function patchEffect(t: any, challengeTitle: string, changeCount: number) {
