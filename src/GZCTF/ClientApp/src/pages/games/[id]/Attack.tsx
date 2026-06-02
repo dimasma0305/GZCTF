@@ -95,6 +95,11 @@ const ARENA_CSS = `
     padding:7px 12px;border-bottom:1px solid var(--line);
     background:linear-gradient(90deg,rgba(157,107,255,.10),transparent)}
   .phead .t{font-family:'Press Start 2P';font-size:9px;letter-spacing:1px;color:#fff}
+  .rank-tabs{display:inline-flex;gap:3px}
+  .rank-tabs button{font-family:'Press Start 2P';font-size:7px;color:var(--dim);background:transparent;
+    border:1px solid var(--line2);padding:4px 5px;border-radius:3px;cursor:pointer;line-height:1}
+  .rank-tabs button:hover{color:#fff;border-color:var(--cyan)}
+  .rank-tabs button.on{color:#06050f;background:var(--cyan);border-color:var(--cyan)}
   .accent-c{box-shadow:inset 3px 0 0 var(--cyan)}
   .accent-m{box-shadow:inset 3px 0 0 var(--magenta)}
   .accent-v{box-shadow:inset 3px 0 0 var(--violet)}
@@ -418,7 +423,7 @@ const ARENA_BODY = `
       </div>
       <div class="rightcol">
         <div class="panel rank">
-          <div class="phead accent-c"><span class="t">RANKING</span></div>
+          <div class="phead accent-c"><span class="t">RANKING</span><span class="rank-tabs" id="rankTabs"><button data-rm="ad" class="on">A&amp;D</button><button data-rm="koth">KOTH</button><button data-rm="jeopardy">JEO</button></span></div>
           <div id="ranklist"></div>
         </div>
         <div class="panel">
@@ -568,7 +573,10 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   const MATCH_SECONDS = 360, FREEZE_SECONDS = 90
   let frozen = false, matchOver = false, gameEndMs: number | null = null
   // while frozen the board shows the snapshot taken at freeze; real values keep updating underneath.
-  const dispScore = (t: any) => (frozen && t.shown != null ? t.shown : t.score)
+  // RANKING panel mode — switchable between the three score boards.
+  let rankMode: 'ad' | 'koth' | 'jeopardy' = 'ad'
+  const adScore = (t: any) => (frozen && t.shown != null ? t.shown : t.score)
+  const dispScore = (t: any) => (rankMode === 'koth' ? t.kothScore || 0 : rankMode === 'jeopardy' ? t.jpScore || 0 : adScore(t))
   const dispSla = (t: any) => (frozen && t.shownSla != null ? t.shownSla : t.sla)
   const dispAtk = (t: any) => (frozen && t.shownAtk != null ? t.shownAtk : t.atk)
   const dispDef = (t: any) => (frozen && t.shownDef != null ? t.shownDef : t.def)
@@ -822,7 +830,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       g.appendChild(r)
     })
   }
-  function renderScore(t: any) { const e = $('sc-' + t.id); if (e) e.textContent = dispScore(t) }
+  function renderScore(t: any) { const e = $('sc-' + t.id); if (e) e.textContent = adScore(t) }
   function pulseBase(t: any, col: string) {
     if (frozen) return
     const g = $('base-' + t.id); if (!g) return
@@ -1122,7 +1130,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   }
   function resolveFlag(atkr: any, vic: any, svc: any, pts: number, isFB: boolean) {
     if (!isFB) sfxAttack()
-    atkr.score += pts; atkr.atk++
+    // A&D capture credits the attack/defense board; a jeopardy solve (no victim)
+    // credits the jeopardy board instead. Both are corrected by the next poll.
+    if (vic) { atkr.score += pts; atkr.atk++ } else { atkr.jpScore = (atkr.jpScore || 0) + pts; atkr.jpSolved = (atkr.jpSolved || 0) + 1 }
     if (vic && svc) { svc.pwnUntil = Date.now() + 5000; setTimeout(() => { if (!killed) renderSvc(vic) }, 5200) }
     renderScore(atkr); if (vic) { renderSvc(vic); pulseBase(vic, vic.color) }
     floatText(atkr.x, atkr.y - 66, '+' + pts, atkr.color)
@@ -1213,7 +1223,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       div.innerHTML = `<div class="pos"></div>
         <div class="av">${avatar(t.look, t.color)}</div>
         <div class="body"><div class="nm" style="color:${t.color}">${esc(t.name)}</div>
-          <div class="bars"><i id="ba-${t.id}" style="background:#27e3ff"></i><i id="bd-${t.id}" style="background:#3dffb0"></i></div></div>
+          <div class="bars" id="bars-${t.id}"><i id="ba-${t.id}" style="background:#27e3ff"></i><i id="bd-${t.id}" style="background:#3dffb0"></i></div></div>
         <div class="sc" id="rsc-${t.id}"></div>`
       rankEl.appendChild(div)
     })
@@ -1228,9 +1238,20 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       div.className = 'rk p' + (i + 1)
       div.style.order = String(i)
       div.querySelector('.pos').textContent = (i + 1 < 10 ? '0' : '') + (i + 1)
-      $('ba-' + t.id).style.flex = String(Math.max(dispAtk(t), 1))
-      $('bd-' + t.id).style.flex = String(Math.max(dispDef(t), 1))
-      $('rsc-' + t.id).innerHTML = `${dispScore(t)}<small>${dispSla(t)}% SLA</small>`
+      const bars: any = $('bars-' + t.id)
+      if (rankMode === 'ad') {
+        if (bars) bars.style.display = ''
+        $('ba-' + t.id).style.flex = String(Math.max(dispAtk(t), 1))
+        $('bd-' + t.id).style.flex = String(Math.max(dispDef(t), 1))
+        $('rsc-' + t.id).innerHTML = `${dispScore(t)}<small>${dispSla(t)}% SLA</small>`
+      } else if (rankMode === 'koth') {
+        if (bars) bars.style.display = 'none'
+        const held = HILLS.filter((h) => h.owner && h.owner.id === t.id).length
+        $('rsc-' + t.id).innerHTML = `${dispScore(t)}<small>${held} hill${held === 1 ? '' : 's'}</small>`
+      } else {
+        if (bars) bars.style.display = 'none'
+        $('rsc-' + t.id).innerHTML = `${dispScore(t)}<small>${t.jpSolved || 0} solved</small>`
+      }
     })
   }
   const renderAllScores = () => TEAMS.forEach(renderScore)
@@ -1343,7 +1364,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       if (sinceEvent > rng(900, 1700) / speed) {
         sinceEvent = 0
         const r = Math.random()
-        if (r < 0.40) evFlag(); else if (r < 0.54) evMiss(); else if (r < 0.66) evDef(); else if (r < 0.78) evSla(); else if (r < 0.90) evHill(); else evPatch()
+        if (r < 0.30) evFlag(); else if (r < 0.46) evJeopardy(); else if (r < 0.58) evMiss(); else if (r < 0.70) evDef(); else if (r < 0.80) evSla(); else if (r < 0.90) evHill(); else evPatch()
       }
     }
     raf = requestAnimationFrame(loop)
@@ -1364,7 +1385,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       if (tickLeft <= 0) {
         round++; tickLeft = 30
         TEAMS.forEach((t) => { const owned = t.svc.filter((s: any) => s.status === 'def').length; t.score += owned * Math.floor(rng(6, 14)) })
-        HILLS.forEach((h) => { if (h.owner) h.owner.score += Math.floor(rng(10, 20)) })
+        HILLS.forEach((h) => { if (h.owner) h.owner.kothScore = (h.owner.kothScore || 0) + Math.floor(rng(10, 20)) })
         addLog('ROUND', 'sys', `<span class="em">ROUND ${round} START</span> :: passive + hold scoring`)
         TEAMS.forEach(renderScore); refreshRank()
       }
@@ -1384,7 +1405,18 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     return r.json()
   }
 
-  function buildLiveModel(ad: any, koth: any, title: string | null) {
+  // Fold the KotH per-team totals (koth.teams, by participationId) and the standard
+  // jeopardy scoreboard (jp.items, by team name) onto the arena teams, for the two
+  // non-A&D ranking modes. A&D score stays t.score from the A&D board.
+  function applyAuxScores(koth: any, jp: any) {
+    const kById: any = {}; ((koth && koth.teams) || []).forEach((r: any) => { kById['p' + r.participationId] = r })
+    const jByName: any = {}; ((jp && jp.items) || []).forEach((r: any) => { jByName[r.name] = r })
+    TEAMS.forEach((t) => {
+      const k = kById[t.id]; if (k) t.kothScore = Math.round(k.total || 0)
+      const j = jByName[t.name]; if (j) { t.jpScore = Math.round(j.score || 0); t.jpSolved = j.solvedCount || 0 }
+    })
+  }
+  function buildLiveModel(ad: any, koth: any, jp: any, title: string | null) {
     const kothHills = koth && koth.hills ? koth.hills : []
     const kothIds = new Set(kothHills.map((h: any) => h.challengeId))
     const svcDefs = (ad.challenges || []).filter((c: any) => !kothIds.has(c.challengeId))
@@ -1396,6 +1428,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       const t: any = {
         id: 'p' + row.participationId, pid: row.participationId, name: row.teamName,
         color, hue: Math.round((i * 137.508) % 360), score: Math.round(row.total || 0),
+        kothScore: 0, jpScore: 0, jpSolved: 0,
         atk: Math.max(1, Math.round(row.flagsCaptured || 0)),
         def: Math.max(1, (row.services || []).filter((s: any) => s.lastCheckStatus === 'Ok').length),
       }
@@ -1423,12 +1456,14 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       h.x = CX + HILLR * Math.cos(ang); h.y = CY + HILLR * Math.sin(ang)
     })
 
+    applyAuxScores(koth, jp)
     round = ad.latestRound || (koth && koth.latestRound) || 0
     liveRoundEndsAt = ad.currentRoundEndsAt ? new Date(ad.currentRoundEndsAt).getTime() : null
     if (title) $('brandLogo').textContent = title.toUpperCase().slice(0, 22)
   }
 
-  function applyLivePoll(ad: any, koth: any) {
+  function applyLivePoll(ad: any, koth: any, jp: any) {
+    applyAuxScores(koth, jp)
     const kothHills = koth && koth.hills ? koth.hills : []
     const adById: any = {}; (ad.teams || []).forEach((r: any) => { adById['p' + r.participationId] = r })
     TEAMS.forEach((t) => {
@@ -1484,7 +1519,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     try {
       const ad = await fetchJSON(`/api/Game/${gameId}/Ad/Scoreboard`)
       let koth: any = null; try { koth = await fetchJSON(`/api/Game/${gameId}/Ad/Koth/Scoreboard`) } catch (e) {}
-      if (!killed) applyLivePoll(ad, koth)
+      let jp: any = null; try { jp = await fetchJSON(`/api/Game/${gameId}/Scoreboard`) } catch (e) {}
+      if (!killed) applyLivePoll(ad, koth, jp)
     } catch (e) { /* transient */ }
   }
 
@@ -1600,11 +1636,12 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       return
     }
     let koth: any = null; try { koth = await fetchJSON(`/api/Game/${gameId}/Ad/Koth/Scoreboard`) } catch (e) {}
+    let jp: any = null; try { jp = await fetchJSON(`/api/Game/${gameId}/Scoreboard`) } catch (e) {}
     let title: string | null = null
     try { const gi = await fetchJSON(`/api/Game/${gameId}`); title = gi && gi.title; if (gi && gi.end) gameEndMs = new Date(gi.end).getTime() } catch (e) {}
     if (killed) return
 
-    buildLiveModel(ad, koth, title)
+    buildLiveModel(ad, koth, jp, title)
     if (!TEAMS.length) { showNote('NO TEAMS ON THE A&amp;D BOARD YET'); tNow = Date.now(); timers.push(window.setInterval(tickClock, 1000)); raf = requestAnimationFrame(loop); return }
 
     TEAMS.forEach((t) => t.svc.forEach((sv: any) => { prevSvcState[t.id + ':' + sv.cid] = sv.status }))
@@ -1642,6 +1679,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       const t: any = {
         ...d, idx: i, ang, x: CX + RING * Math.cos(ang), y: CY + RING * Math.sin(ang),
         score: Math.floor(rng(400, 520)), atk: Math.floor(rng(2, 9)), def: Math.floor(rng(2, 9)), sla: Math.floor(rng(88, 100)),
+        kothScore: Math.floor(rng(40, 220)), jpScore: Math.floor(rng(150, 900)), jpSolved: Math.floor(rng(2, 14)),
       }
       t.svc = SERVICES.map((s: string) => ({ name: s, status: Math.random() < 0.82 ? 'def' : (Math.random() < 0.5 ? 'vuln' : 'down') }))
       t.look = makeLook(t, i)
@@ -1689,7 +1727,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const h = pick(HILLS); let atkr = pick(TEAMS); let g = 0
     while (h.owner === atkr && g++ < 8) atkr = pick(TEAMS)
     const contested = h.owner && h.owner !== atkr
-    h.owner = atkr; renderHill(h); spawnCapture(atkr, h, atkr.color); sfxCapture(); atkr.score += Math.floor(rng(20, 45)); renderScore(atkr)
+    h.owner = atkr; renderHill(h); spawnCapture(atkr, h, atkr.color); sfxCapture(); atkr.kothScore = (atkr.kothScore || 0) + Math.floor(rng(20, 45))
     floatText(h.x, h.y - 30, contested ? 'SEIZED' : 'CAPTURED', atkr.color)
     addLog('HILL', 'hill', `<span class="who">${esc(atkr.name)}</span> ${contested ? 'seized' : 'captured'} <span class="svc">${esc(h.name)}</span>`)
     totalEvents++; refreshRank(); refreshStats()
@@ -1698,6 +1736,20 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     if (!TEAMS.length) return
     const t = pick(TEAMS); const svc = pick(t.svc)
     patchEffect(t, svc ? svc.name : (SERVICES[0] || 'service'), Math.floor(rng(1, 9)))
+  }
+  // a jeopardy solve — no victim, tracer to the CORE, credits the jeopardy board
+  const DEMO_JP = ['web-portal', 'crypto-rng', 'pwn-heap', 'rev-vm', 'forensics-01', 'misc-jail', 'osint-2', 'blockchain-1']
+  function evJeopardy() {
+    const atkr = pick(TEAMS); if (!atkr) return
+    const ch = pick(DEMO_JP); const pts = Math.floor(rng(50, 150))
+    fireShot(atkr, { x: CX, y: CY }, atkr.color)
+    setTimeout(() => {
+      if (killed) return
+      atkr.jpScore = (atkr.jpScore || 0) + pts; atkr.jpSolved = (atkr.jpSolved || 0) + 1
+      floatText(atkr.x, atkr.y - 66, '+' + pts, atkr.color)
+      addLog('SOLVE', 'flag', `<span class="who">${esc(atkr.name)}</span> solved <span class="svc">${esc(ch)}</span> <span class="em">+${pts}</span>`)
+      totalFlags++; refreshRank(); refreshStats()
+    }, 380 / speed + 120)
   }
   // a rejected flag attempt — soft MISS tracer (jeopardy aims at the CORE, A&D at a rival)
   function evMiss() {
@@ -1716,9 +1768,10 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     let title: string | null = null
     if (ad) {
       let koth: any = null; try { koth = await fetchJSON(`/api/Game/${gameId}/Ad/Koth/Scoreboard`) } catch (e) {}
+      let jp: any = null; try { jp = await fetchJSON(`/api/Game/${gameId}/Scoreboard`) } catch (e) {}
       try { const gi = await fetchJSON(`/api/Game/${gameId}`); title = gi && gi.title } catch (e) {}
       if (killed) return
-      buildLiveModel(ad, koth, title)
+      buildLiveModel(ad, koth, jp, title)
     }
     if (!TEAMS.length) bootDemoModel()
     liveRoundEndsAt = null; round = 1; tickLeft = 30; gameEndMs = Date.now() + MATCH_SECONDS * 1000
@@ -1733,6 +1786,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     timers.push(window.setInterval(tickClock, 1000))
     raf = requestAnimationFrame(loop)
     timers.push(window.setTimeout(() => evFlag(), 1200))
+    timers.push(window.setTimeout(() => evJeopardy(), 2600))
     timers.push(window.setTimeout(() => evHill(), 4200))
     timers.push(window.setTimeout(() => evDef(), 4800))
     timers.push(window.setTimeout(() => evHill(), 5400))
@@ -1742,6 +1796,14 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   /* -------- viewer toggles -------- */
   const scanBtn: any = $('scanBtn')
   if (scanBtn) scanBtn.onclick = function () { const offNow = $('scan').classList.toggle('off'); scanBtn.classList.toggle('on', !offNow) }
+  const rankTabs: any = $('rankTabs')
+  if (rankTabs) rankTabs.querySelectorAll('button').forEach((b: any) => {
+    b.onclick = () => {
+      rankMode = b.getAttribute('data-rm')
+      rankTabs.querySelectorAll('button').forEach((x: any) => x.classList.toggle('on', x === b))
+      refreshRank()
+    }
+  })
 
   // Unlock the first-blood audio on the first user gesture (browsers block
   // autoplay until then — so the auto-played seed/live stinger stays silent
