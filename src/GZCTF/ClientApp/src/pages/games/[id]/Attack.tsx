@@ -835,6 +835,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   // service status → colour. def=Ok(green) vuln=Mumble(amber) down=Offline(grey)
   // error=InternalError(violet) none=never-checked(dim). pwned=transient red flash on capture.
   const SVC_COLOR: any = { def: '#3dffb0', vuln: '#ffb020', down: '#4f4a78', error: '#9d6bff', none: '#2f2c44', pwned: '#ff3b5b' }
+  const MISS_COL = '#8c5663' // rejected-flag (wrong answer) tracer — muted blood-grey
   function renderSvc(t: any) {
     const g = $('svc-' + t.id); if (!g) return
     g.innerHTML = ''
@@ -919,13 +920,13 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     ctxbg.globalAlpha = 1
   }
 
-  function fireShot(from: any, to: any, col: string) {
+  function fireShot(from: any, to: any, col: string, miss = false) {
     if (frozen) return
     const cx = (from.x + to.x) / 2, cy = (from.y + to.y) / 2
     const dx = to.x - from.x, dy = to.y - from.y
     const px = -dy, py = dx, len = Math.hypot(px, py) || 1
     const bow = rng(40, 90) * (Math.random() < 0.5 ? 1 : -1)
-    shots.push({ x: from.x, y: from.y, fx: from.x, fy: from.y, tx: to.x, ty: to.y, cx: cx + px / len * bow, cy: cy + py / len * bow, t: 0, sp: rng(0.018, 0.028) * speed, col, trail: [] })
+    shots.push({ x: from.x, y: from.y, fx: from.x, fy: from.y, tx: to.x, ty: to.y, cx: cx + px / len * bow, cy: cy + py / len * bow, t: 0, sp: rng(0.018, 0.028) * speed, col, miss, trail: [] })
   }
   const bez = (a: number, c: number, b: number, t: number) => { const u = 1 - t; return u * u * a + 2 * u * t * c + t * t * b }
   function addSpark(x: number, y: number, col: string) {
@@ -956,15 +957,18 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       const y = bez(s.fy, s.cy, s.ty, Math.min(s.t, 1))
       s.trail.push({ x, y }); if (s.trail.length > 14) s.trail.shift()
       ctx.lineCap = 'round'
+      // a rejected-flag tracer ('miss') is dimmer + thinner and fizzles with no impact
+      const aMul = s.miss ? 0.32 : 0.9, wMul = s.miss ? 0.45 : 1
       for (let j = 1; j < s.trail.length; j++) {
-        ctx.globalAlpha = (j / s.trail.length) * 0.9
-        ctx.strokeStyle = s.col; ctx.lineWidth = 2 + (j / s.trail.length) * 5
+        ctx.globalAlpha = (j / s.trail.length) * aMul
+        ctx.strokeStyle = s.col; ctx.lineWidth = (2 + (j / s.trail.length) * 5) * wMul
         ctx.beginPath(); ctx.moveTo(s.trail[j - 1].x, s.trail[j - 1].y); ctx.lineTo(s.trail[j].x, s.trail[j].y); ctx.stroke()
       }
+      ctx.globalAlpha = s.miss ? 0.55 : 1
+      ctx.fillStyle = s.miss ? s.col : '#fff'; ctx.shadowColor = s.col; ctx.shadowBlur = s.miss ? 6 : 16
+      ctx.beginPath(); ctx.arc(x, y, s.miss ? 3 : 5, 0, 6.28); ctx.fill(); ctx.shadowBlur = 0
       ctx.globalAlpha = 1
-      ctx.fillStyle = '#fff'; ctx.shadowColor = s.col; ctx.shadowBlur = 16
-      ctx.beginPath(); ctx.arc(x, y, 5, 0, 6.28); ctx.fill(); ctx.shadowBlur = 0
-      if (s.t >= 1) { addSpark(s.tx, s.ty, s.col); shots.splice(i, 1) }
+      if (s.t >= 1) { if (!s.miss) addSpark(s.tx, s.ty, s.col); shots.splice(i, 1) }
     }
     for (let i = sparks.length - 1; i >= 0; i--) {
       const sp = sparks[i]
@@ -1375,7 +1379,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       if (sinceEvent > rng(900, 1700) / speed) {
         sinceEvent = 0
         const r = Math.random()
-        if (r < 0.46) evFlag(); else if (r < 0.6) evDef(); else if (r < 0.74) evSla(); else if (r < 0.88) evHill(); else evPatch()
+        if (r < 0.40) evFlag(); else if (r < 0.54) evMiss(); else if (r < 0.66) evDef(); else if (r < 0.78) evSla(); else if (r < 0.90) evHill(); else evPatch()
       }
     }
     raf = requestAnimationFrame(loop)
@@ -1521,9 +1525,17 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   }
 
   function liveAttack(f: any) {
-    if (f.type === 'Unaccepted') return
     const atkr = teamByName(f.teamName); if (!atkr) return
     const vic = f.victimTeamName ? teamByName(f.victimTeamName) : null
+    // jeopardy solves / rejected attempts have no victim node — aim at the CORE.
+    const target = vic || { x: CX, y: CY }
+    // Rejected flag (wrong answer): a soft "MISS" tracer to the target — no score, no
+    // impact, not logged (mirrors the old map's wrong-flag mapping). Capped so a
+    // flag-spam burst can't flood the canvas.
+    if (f.type === 'Unaccepted') {
+      if (!frozen && shots.filter((s: any) => s.miss).length < 6) fireShot(atkr, target, MISS_COL, true)
+      return
+    }
     let svc: any = null
     if (vic) svc = vic.svc.find((s: any) => s.name === f.challengeTitle) || pick(vic.svc)
     let pts = 0
@@ -1536,8 +1548,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       else fbJeopardy(atkr, f.challengeTitle || 'a challenge', () => resolveFlag(atkr, null, null, pts, true))
       return
     }
-    if (vic) fireShot(atkr, vic, atkr.color)
-    setTimeout(() => { if (!killed) resolveFlag(atkr, vic, svc, pts, false) }, (vic ? 320 : 0) / Math.max(speed, 1) + (vic ? 120 : 0))
+    // normal solve — A&D fires at the victim, jeopardy fires at the CORE
+    fireShot(atkr, target, atkr.color)
+    setTimeout(() => { if (!killed) resolveFlag(atkr, vic, svc, pts, false) }, 320 / Math.max(speed, 1) + 120)
   }
   // Hill ownership is driven by BOTH the WS koth frame (instant) and the 15s poll
   // (reliable backstop) — whichever sees the change first; the other dedups via the
@@ -1721,6 +1734,15 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     if (!TEAMS.length) return
     const t = pick(TEAMS); const svc = pick(t.svc)
     patchEffect(t, svc ? svc.name : (SERVICES[0] || 'service'), Math.floor(rng(1, 9)))
+  }
+  // a rejected flag attempt — soft MISS tracer (jeopardy aims at the CORE, A&D at a rival)
+  function evMiss() {
+    const atkr = pick(TEAMS); if (!atkr) return
+    let target: any = { x: CX, y: CY }
+    if ((HILLS.length ? Math.random() < 0.5 : Math.random() < 0.7) && TEAMS.length > 1) {
+      let v = pick(TEAMS); let g = 0; while (v === atkr && g++ < 8) v = pick(TEAMS); if (v !== atkr) target = v
+    }
+    if (!frozen && shots.filter((s: any) => s.miss).length < 6) fireShot(atkr, target, MISS_COL, true)
   }
   async function startPreview() {
     // use the game's real teams if it has an A&D board; otherwise demo teams
