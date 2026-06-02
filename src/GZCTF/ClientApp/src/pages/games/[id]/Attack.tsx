@@ -577,7 +577,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
 
   let TEAMS: any[] = [], SERVICES: any[] = [], HILLS: any[] = []
   let round = 0, totalFlags = 0, totalEvents = 0, cinema = false, slamCovering = false
-  let matchFirstBlood = false, sinceEvent = 0
+  let sinceEvent = 0
   // hill ownership + FIRST CROWN latch/deferral live in this pure model (see kothCapture.ts)
   const kothDir = new KothDirector()
   let tNow = Date.now(), tickLeft = 0, liveRoundEndsAt: number | null = null
@@ -1322,7 +1322,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     addLog('MATCH', 'sys', `<span class="em">// MATCH OVER</span> :: <span class="who">${esc(champ.name)}</span> wins with <span class="em">${champ.score}</span>`)
   }
   function resetMatch() {
-    matchOver = false; round = 1; tickLeft = 30; matchFirstBlood = false; kothDir.reset()
+    matchOver = false; round = 1; tickLeft = 30; kothDir.reset()
     gameEndMs = Date.now() + MATCH_SECONDS * 1000
     TEAMS.forEach((t) => {
       t.score = Math.floor(rng(380, 520)); t.atk = Math.floor(rng(2, 9)); t.def = Math.floor(rng(2, 9)); t.sla = Math.floor(rng(88, 100))
@@ -1675,14 +1675,15 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       return { ...d, idx: i, ang, x: CX + HILLR * Math.cos(ang), y: CY + HILLR * Math.sin(ang), owner: null }
     })
   }
-  function evFlag(force?: string) {
+  // Preview flags are always normal hits — the demo no longer auto-plays a
+  // first-blood cinematic at the start. Use the FB A&D / FB JEO / FB KOTH buttons
+  // to showcase first blood on demand.
+  function evFlag() {
     const atkr = pick(TEAMS); let vic = pick(TEAMS); let g = 0
     while (vic === atkr && g++ < 10) vic = pick(TEAMS)
     if (vic === atkr) return
     const svc = pick(vic.svc.filter((s: any) => s.status !== 'down')) || pick(vic.svc)
     const pts = Math.floor(rng(35, 95))
-    const isFB = force === 'fb' || !matchFirstBlood
-    if (isFB) { if (cinema) return; matchFirstBlood = true; fbAd(atkr, vic, () => resolveFlag(atkr, vic, svc, pts, true)); return }
     fireShot(atkr, vic, atkr.color)
     setTimeout(() => { if (!killed) resolveFlag(atkr, vic, svc, pts, false) }, 380 / speed + 120)
   }
@@ -1745,7 +1746,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     addLog('SYS', 'sys', `<span class="em">// PREVIEW MODE</span> :: simulated battle — ${TEAMS.length} teams`)
     timers.push(window.setInterval(tickClock, 1000))
     raf = requestAnimationFrame(loop)
-    timers.push(window.setTimeout(() => evFlag('fb'), 1200))
+    timers.push(window.setTimeout(() => evFlag(), 1200))
     timers.push(window.setTimeout(() => evHill(), 4200))
     timers.push(window.setTimeout(() => evDef(), 4800))
     timers.push(window.setTimeout(() => evHill(), 5400))
