@@ -7,6 +7,7 @@
     "dev": "vite",
     "lint": "oxlint --fix",
     "check": "tsc --noEmit --strict --project tsconfig.app.json",
+    "test": "node scripts/run-tests.mjs",
     "build": "pnpm check && vite build",
     "preview": "vite preview",
     "prettier": "prettier --write src --write plugins --write *.mjs --write *.mts",

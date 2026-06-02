@@ -16,6 +16,7 @@
  */
 import { FC, useEffect, useRef } from 'react'
 import { useParams, useSearchParams } from 'react-router'
+import { KothDirector, statusFromCheck, type CaptureResult } from './kothCapture'
 
 const FONTS_HREF =
   'https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=DotGothic16&display=swap'
@@ -576,8 +577,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
 
   let TEAMS: any[] = [], SERVICES: any[] = [], HILLS: any[] = []
   let round = 0, totalFlags = 0, totalEvents = 0, cinema = false, slamCovering = false
-  let matchFirstBlood = false, firstCrown = false, sinceEvent = 0
-  let crownPending: any = null // first-crown owed but deferred past a running cinematic
+  let matchFirstBlood = false, sinceEvent = 0
+  // hill ownership + FIRST CROWN latch/deferral live in this pure model (see kothCapture.ts)
+  const kothDir = new KothDirector()
   let tNow = Date.now(), tickLeft = 0, liveRoundEndsAt: number | null = null
   const speed = 1
   const prevSvcState: Record<string, string> = {}
@@ -1320,7 +1322,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     addLog('MATCH', 'sys', `<span class="em">// MATCH OVER</span> :: <span class="who">${esc(champ.name)}</span> wins with <span class="em">${champ.score}</span>`)
   }
   function resetMatch() {
-    matchOver = false; round = 1; tickLeft = 30; matchFirstBlood = false; firstCrown = false
+    matchOver = false; round = 1; tickLeft = 30; matchFirstBlood = false; kothDir.reset()
     gameEndMs = Date.now() + MATCH_SECONDS * 1000
     TEAMS.forEach((t) => {
       t.score = Math.floor(rng(380, 520)); t.atk = Math.floor(rng(2, 9)); t.def = Math.floor(rng(2, 9)); t.sla = Math.floor(rng(88, 100))
@@ -1366,7 +1368,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const dt = Math.min((ts - lastTs) / 1000, 0.05); lastTs = ts
     if (!slamCovering) drawFX(dt) // skip the arena draw while the slam overlay covers it
     // a first-crown owed but deferred past a running cinematic — fire it once free
-    if (crownPending && !cinema && !firstCrown) { firstCrown = true; const c = crownPending; crownPending = null; fbKoth(c.o, c.h, () => {}) }
+    const pc = kothDir.takePendingCrown(cinema)
+    if (pc) { const ph = HILLS.find((x) => x.id === pc.hill); const po = TEAMS.find((t) => t.id === pc.owner); if (ph && po) fbKoth(po, ph, () => {}) }
     if (preview && !cinema && TEAMS.length) {
       sinceEvent += dt * 1000
       if (sinceEvent > rng(900, 1700) / speed) {
@@ -1407,7 +1410,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   }
 
   /* -------- live data -------- */
-  const statusFromCheck = (cs: any) => (cs === 'Ok' ? 'def' : cs === 'Mumble' ? 'vuln' : cs === 'InternalError' ? 'error' : cs === 'Offline' ? 'down' : cs == null ? 'none' : 'down')
   async function fetchJSON(url: string): Promise<any> {
     const r = await fetch(url, { headers: { Accept: 'application/json' } })
     if (!r.ok) throw new Error(url + ' -> ' + r.status)
@@ -1444,6 +1446,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     })
 
     HILLS = kothHills.map((h: any) => ({ id: 'h' + h.challengeId, cid: h.challengeId, name: h.title, jp: '', status: statusFromCheck(h.lastCheckStatus), owner: h.currentHolderTeamName ? (teamByName(h.currentHolderTeamName) || null) : null }))
+    // seed the director so a hill already held when the viewer arrives is NOT mistaken
+    // for a fresh capture on the first poll/WS frame (no spurious FIRST CROWN).
+    HILLS.forEach((h) => kothDir.seed(h.id, h.owner ? h.owner.id : null))
     HILLS.forEach((h, i) => {
       const ang = (-90 + (i + 0.5) * (360 / HILLS.length)) * Math.PI / 180
       h.idx = i; h.ang = ang
@@ -1489,13 +1494,14 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       const h = HILLS.find((x) => x.cid === kh.challengeId); if (!h) return
       const newOwner = kh.currentHolderTeamName ? (teamByName(kh.currentHolderTeamName) || null) : null
       const ns = statusFromCheck(kh.lastCheckStatus)
-      const changed = (h.owner && h.owner.id) !== (newOwner && newOwner.id)
-      const contested = !!(h.owner && newOwner && h.owner !== newOwner)
-      if (!changed && h.status === ns) return
-      h.owner = newOwner; h.status = ns; renderHill(h)
-      // backstop: if the WS koth frame was missed, fire the capture/crown here so the
-      // FIRST CROWN cinematic still plays instead of the holder silently appearing.
-      if (changed && !matchOver) onHillCapture(h, newOwner, contested)
+      // backstop: if the WS koth frame was missed, the director fires the capture/crown
+      // here so the FIRST CROWN cinematic still plays instead of the holder silently
+      // appearing. Deduped against the WS frame by the director's owner ledger.
+      const res = kothDir.applyCapture(h.id, newOwner ? newOwner.id : null, cinema)
+      if (!res.changed && h.status === ns) return
+      if (res.changed) h.owner = newOwner
+      h.status = ns; renderHill(h)
+      if (res.changed && !matchOver) onHillCapture(h, newOwner, res)
     })
     round = ad.latestRound || round
     liveRoundEndsAt = ad.currentRoundEndsAt ? new Date(ad.currentRoundEndsAt).getTime() : liveRoundEndsAt
@@ -1534,28 +1540,31 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     setTimeout(() => { if (!killed) resolveFlag(atkr, vic, svc, pts, false) }, (vic ? 320 : 0) / Math.max(speed, 1) + (vic ? 120 : 0))
   }
   // Hill ownership is driven by BOTH the WS koth frame (instant) and the 15s poll
-  // (reliable backstop) — whichever sees the change first; the other dedups because
-  // h.owner is already updated. The FIRST CROWN cinematic fires once; if an A&D
-  // cinematic is mid-play it's deferred (crownPending) and fired from loop().
-  function onHillCapture(h: any, newOwner: any, contested: boolean) {
-    if (!newOwner) { addLog('HILL', 'hill', `<span class="svc">${esc(h.name)}</span> went <span class="em">NEUTRAL</span>`); totalEvents++; refreshStats(); return }
-    if (!firstCrown) {
-      if (!cinema) { firstCrown = true; fbKoth(newOwner, h, () => {}) }
-      else crownPending = { o: newOwner, h }
-    } else { spawnCapture(newOwner, h, newOwner.color); sfxCapture() }
-    floatText(h.x, h.y - 30, contested ? 'SEIZED' : 'CAPTURED', newOwner.color)
-    addLog('HILL', 'hill', `<span class="who">${esc(newOwner.name)}</span> ${contested ? 'seized' : 'captured'} <span class="svc">${esc(h.name)}</span>`)
+  // (reliable backstop) — whichever sees the change first; the other dedups via the
+  // director's owner ledger (kothCapture.ts). The FIRST CROWN cinematic fires once;
+  // if an A&D cinematic is mid-play it's deferred and fired from loop().
+  // Render the FX implied by a director CaptureResult (caller has already updated
+  // h.owner). 'crown' plays the cinematic now; 'defer' lets loop() fire it once the
+  // running cinematic clears; 'capture' is a normal seize; 'neutral' just logs.
+  function onHillCapture(h: any, newOwner: any, res: CaptureResult) {
+    if (res.kind === 'neutral' || !newOwner) {
+      addLog('HILL', 'hill', `<span class="svc">${esc(h.name)}</span> went <span class="em">NEUTRAL</span>`); totalEvents++; refreshStats(); return
+    }
+    if (res.kind === 'crown') fbKoth(newOwner, h, () => {})
+    else if (res.kind === 'capture') { spawnCapture(newOwner, h, newOwner.color); sfxCapture() }
+    // 'defer' → the crown is owed; loop() fires it when the cinematic clears.
+    floatText(h.x, h.y - 30, res.contested ? 'SEIZED' : 'CAPTURED', newOwner.color)
+    addLog('HILL', 'hill', `<span class="who">${esc(newOwner.name)}</span> ${res.contested ? 'seized' : 'captured'} <span class="svc">${esc(h.name)}</span>`)
     totalEvents++; refreshStats()
   }
   function liveKoth(f: any) {
     const h = HILLS.find((x) => x.cid === f.challengeId); if (!h) return
     if (f.status) h.status = statusFromCheck(f.status)
     const newOwner = f.holderTeamName ? (teamByName(f.holderTeamName) || null) : null
-    const changed = (h.owner && h.owner.id) !== (newOwner && newOwner.id)
-    const contested = !!(h.owner && newOwner && h.owner !== newOwner)
-    h.owner = newOwner; renderHill(h)
-    if (changed) onHillCapture(h, newOwner, contested)
-    else renderHill(h)
+    const res = kothDir.applyCapture(h.id, newOwner ? newOwner.id : null, cinema)
+    if (res.changed) h.owner = newOwner
+    renderHill(h)
+    if (res.changed) onHillCapture(h, newOwner, res)
   }
   // a team modified their service files — "patched". Cyan hardening pulse on their node.
   function patchEffect(t: any, challengeTitle: string, changeCount: number) {

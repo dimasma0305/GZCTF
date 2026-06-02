@@ -25,5 +25,5 @@
     "types": []
   },
   "include": ["src"],
-  "exclude": ["src/lib/creepjs"]
+  "exclude": ["src/lib/creepjs", "src/**/*.test.ts"]
 }
