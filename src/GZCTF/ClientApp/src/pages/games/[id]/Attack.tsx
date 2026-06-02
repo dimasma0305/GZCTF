@@ -121,10 +121,6 @@ const ARENA_CSS = `
   .lg .vic{color:var(--magenta)}
   .lg .svc{color:var(--amber)}
   .lg .em{color:#fff}
-  .prompt{color:var(--good);font-size:17px;padding:2px 10px 8px;border-top:1px solid var(--line)}
-  .prompt b{color:var(--cyan)}
-  .cur{display:inline-block;width:8px;height:14px;background:var(--good);
-    margin-left:3px;vertical-align:-2px;animation:blink .9s steps(2) infinite}
 
   .arena-wrap{position:relative;display:flex;align-items:center;justify-content:center;
     min-height:0;min-width:0;overflow:hidden}
@@ -420,7 +416,6 @@ const ARENA_BODY = `
       <div class="panel log-panel">
         <div class="phead accent-m"><span class="t">// BATTLE LOG</span><span class="jp">バトルログ</span></div>
         <div id="log"></div>
-        <div class="prompt">$ <b>arena</b>.watch()<span class="cur"></span></div>
       </div>
       <div class="panel arena-wrap accent-v">
         <div class="corner-tag ct-tl">// LIVE MAP</div>
