@@ -213,6 +213,12 @@ const ARENA_CSS = `
     clip-path:polygon(14px 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%,0 14px)}
   .devbar .label{font-family:'Press Start 2P';font-size:8px;color:var(--violet);
     letter-spacing:1px;margin-right:4px}
+  #cfgBtns{display:inline-flex;gap:7px;flex-wrap:wrap}
+  .cfg{display:inline-flex;align-items:center;gap:5px;font-family:'Press Start 2P';font-size:7px;
+    color:var(--dim);border:1px solid var(--line2);padding:4px 6px;border-radius:4px}
+  .cfg input{width:38px;background:#0a0818;border:1px solid var(--line2);color:#fff;
+    font-family:'VT323';font-size:15px;padding:2px 4px;border-radius:3px;text-align:center}
+  .cfg input:focus{outline:none;border-color:var(--cyan)}
   .btn{font-family:'Press Start 2P';font-size:8px;letter-spacing:.5px;color:#0a0612;
     border:0;padding:8px 11px;cursor:pointer;position:relative;
     clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%,0 6px);
@@ -473,6 +479,12 @@ const ARENA_BODY = `
       <button class="btn ghost" id="speedBtn">SPEED 1X</button>
       <button class="btn ghost on" id="scanBtn">SCANLINE</button>
       <button class="btn ghost on" id="soundBtn">SOUND</button>
+      <span id="cfgBtns" style="display:none">
+        <label class="cfg">TEAMS<input id="cfgTeams" type="number" min="2" max="20" value="8"></label>
+        <label class="cfg">A&amp;D<input id="cfgAd" type="number" min="0" max="10" value="4"></label>
+        <label class="cfg">KOTH<input id="cfgKoth" type="number" min="0" max="12" value="3"></label>
+        <label class="cfg">JEOP<input id="cfgJeop" type="number" min="0" max="40" value="24"></label>
+      </span>
       <span id="fbBtns" style="display:none">
         <button class="btn fb-ad" id="fbAdBtn">FB A&amp;D</button>
         <button class="btn fb-jeo" id="fbJeoBtn">FB JEO</button>
@@ -592,6 +604,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   const kothDir = new KothDirector()
   let tNow = Date.now(), tickLeft = 0, liveRoundEndsAt: number | null = null
   let speed = 1
+  // preview-only knobs: how many teams / A&D services / KotH hills / jeopardy challenges
+  let cfgTeams = 8, cfgAd = 4, cfgKoth = 3, cfgJeop = 24
   const prevSvcState: Record<string, string> = {}
   // preroll = the attention-seeking telegraph (board stays visible, warning builds)
   // that plays BEFORE the slam cinematic; soundDelay/slam/total are relative to the slam.
@@ -1734,12 +1748,31 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     { id: 'ghost', name: 'GHOST-SHELL', color: '#9d6bff', hue: 262 },
     { id: 'ice', name: 'ICE-BREAKER', color: '#4d8bff', hue: 218 },
   ]
-  const DEMO_SERVICES = ['neko-db', 'torii-api', 'sakura-web', 'oni-auth']
-  const DEMO_HILLS = [{ id: 'ha', name: 'TORII-A' }, { id: 'hb', name: 'TORII-B' }, { id: 'hc', name: 'TORII-C' }]
+  // ---- procedural demo generators (driven by the preview count knobs) ----
+  const SVC_POOL = ['neko-db', 'torii-api', 'sakura-web', 'oni-auth', 'kitsune-cache', 'ronin-gw', 'sake-queue', 'tanuki-fs', 'koi-mail', 'yuki-ml', 'hanabi-rng', 'shoji-proxy']
+  const JEOP_CAT_NAMES = ['Web', 'Pwn', 'Crypto', 'Reverse', 'Forensics', 'Misc', 'Blockchain', 'Hardware']
+  function genDemoServices(n: number) { return Array.from({ length: Math.max(0, n) }, (_, i) => SVC_POOL[i] || 'svc-' + String(i + 1).padStart(2, '0')) }
+  function genDemoHills(n: number) { return Array.from({ length: Math.max(0, n) }, (_, i) => ({ id: 'h' + i, name: 'TORII-' + (i < 26 ? String.fromCharCode(65 + i) : 'X' + (i + 1)) })) }
+  function genDemoTeams(n: number) {
+    return Array.from({ length: Math.max(0, n) }, (_, i) => DEMO_TEAMS[i] || { id: 'demo' + i, name: 'TEAM-' + String(i + 1).padStart(2, '0'), color: PALETTE[i % PALETTE.length], hue: (i * 47) % 360 })
+  }
+  // distribute n jeopardy challenges round-robin across categories (~5 per category)
+  function genJeopCats(n: number): JeopCategory[] {
+    if (n <= 0) return []
+    const nCats = Math.min(JEOP_CAT_NAMES.length, Math.max(1, Math.round(n / 5)))
+    const cats: any[] = JEOP_CAT_NAMES.slice(0, nCats).map((c) => ({ id: c, name: c.toUpperCase(), color: CATEGORY_COLOR[c] || '#7fd7ff', challenges: [] }))
+    let id = 9000
+    for (let i = 0; i < n; i++) {
+      const cat = cats[i % cats.length], k = cat.challenges.length
+      cat.challenges.push({ id: id++, name: cat.id.toLowerCase() + '-' + String(k + 1).padStart(2, '0'), base: [100, 150, 200, 300, 400, 500][k % 6], solveCount: 0, solvers: [] })
+    }
+    return cats.filter((c) => c.challenges.length)
+  }
   function bootDemoModel() {
-    SERVICES = [...DEMO_SERVICES]
-    TEAMS = DEMO_TEAMS.map((d: any, i: number) => {
-      const ang = (-90 + i * (360 / DEMO_TEAMS.length)) * Math.PI / 180
+    SERVICES = genDemoServices(cfgAd)
+    const teamDefs = genDemoTeams(cfgTeams)
+    TEAMS = teamDefs.map((d: any, i: number) => {
+      const ang = (-90 + i * (360 / Math.max(teamDefs.length, 1))) * Math.PI / 180
       const t: any = {
         ...d, idx: i, ang, x: CX + RING * Math.cos(ang), y: CY + RING * Math.sin(ang),
         score: Math.floor(rng(400, 520)), atk: Math.floor(rng(150, 900)), def: Math.floor(rng(1500, 7000)), defLoss: Math.floor(rng(0, 700)), sla: Math.floor(rng(88, 100)),
@@ -1749,27 +1782,27 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       t.look = makeLook(t, i)
       return t
     })
-    HILLS = DEMO_HILLS.map((d: any, i: number) => {
-      const ang = (-90 + (i + 0.5) * (360 / DEMO_HILLS.length)) * Math.PI / 180
+    const hillDefs = genDemoHills(cfgKoth)
+    HILLS = hillDefs.map((d: any, i: number) => {
+      const ang = (-90 + (i + 0.5) * (360 / Math.max(hillDefs.length, 1))) * Math.PI / 180
       return { ...d, idx: i, ang, x: CX + HILLR * Math.cos(ang), y: CY + HILLR * Math.sin(ang), owner: null }
     })
-    jeop.setData(buildDemoCats()); jeop.initHover()
+    jeop.setData(genJeopCats(cfgJeop)); jeop.initHover()
   }
-  // demo jeopardy constellation for preview mode (no live scoreboard)
-  function buildDemoCats(): JeopCategory[] {
-    const defs: any = {
-      Web: [['graphql-leak', 500], ['proto-pollute', 400], ['ssti-soup', 300], ['jwt-confuse', 200], ['robots-txt', 100]],
-      Pwn: [['kernel-rop', 500], ['heap-feng', 400], ['fmt-string', 300], ['ret2win', 100]],
-      Crypto: [['lattice-cve', 500], ['ecb-oracle', 400], ['rsa-lowe', 300], ['xor-rev', 200], ['base-soup', 100]],
-      Reverse: [['vm-bytecode', 500], ['packed-elf', 400], ['anti-debug', 300], ['xor-strings', 100]],
-      Forensics: [['ntfs-ghost', 500], ['stego-cat', 400], ['mem-dump', 300], ['pcap-hunt', 200]],
-      Misc: [['sanity-check', 100], ['qr-maze', 250], ['esolang', 350], ['audio-stego', 500]],
-    }
-    let id = 9000
-    return Object.keys(defs).map((cat) => ({
-      id: cat, name: cat.toUpperCase(), color: CATEGORY_COLOR[cat] || '#7fd7ff',
-      challenges: defs[cat].map(([name, base]: any) => ({ id: id++, name, base, solveCount: 0, solvers: [] })),
-    }))
+  // rebuild the whole preview model + arena for the current count knobs
+  function rebuildPreview() {
+    if (!preview) return
+    cinema = false; matchOver = false
+    if (frozen) unfreeze()
+    const wo: any = $('winOverlay'); if (wo) wo.classList.remove('show')
+    bootDemoModel(); kothDir.reset()
+    liveRoundEndsAt = null; round = 1; tickLeft = 30; gameEndMs = Date.now() + MATCH_SECONDS * 1000
+    totalFlags = 0; totalEvents = 0
+    buildArena()
+    $('teamCount').textContent = TEAMS.length + ' TEAMS'
+    TEAMS.forEach((t) => renderSvc(t))
+    rankInit = false; refreshRank(); refreshStats(); sizeCanvas()
+    addLog('SYS', 'sys', `<span class="em">PREVIEW REBUILT</span> :: ${TEAMS.length} teams · ${SERVICES.length} A&amp;D · ${HILLS.length} KotH · ${cfgJeop} jeopardy`)
   }
   // Preview flags are always normal hits — the demo no longer auto-plays a
   // first-blood cinematic at the start. Use the FB A&D / FB JEO / FB KOTH buttons
@@ -1784,7 +1817,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     setTimeout(() => { if (!killed) resolveFlag(atkr, vic, svc, pts, false) }, 380 / speed + 120)
   }
   function evDef() {
-    const t = pick(TEAMS)
+    const t = pick(TEAMS); if (!t || !t.svc.length) return
     const s = t.svc.find((x: any) => x.status === 'vuln') || t.svc.find((x: any) => x.status === 'down') || pick(t.svc)
     s.status = 'def'; t.def++; t.score += Math.floor(rng(10, 28))
     renderSvc(t); renderScore(t); pulseBase(t, SVC_COLOR.def); spawnShield(t.x, t.y, SVC_COLOR.def); sfxDefend()
@@ -1793,8 +1826,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     totalEvents++; refreshRank(); refreshStats()
   }
   function evSla() {
-    const t = pick(TEAMS)
+    const t = pick(TEAMS); if (!t || !t.svc.length) return
     const s = pick(t.svc.filter((x: any) => x.status !== 'down')) || pick(t.svc)
+    if (!s) return
     s.status = 'down'; t.sla = Math.max(40, t.sla - Math.floor(rng(2, 6))); t.score = Math.max(0, t.score - Math.floor(rng(8, 20)))
     renderSvc(t); renderScore(t); spawnDown(t.x, t.y, '#ff3b5b'); sfxDown()
     const g = $('base-' + t.id); if (g) { g.classList.remove('node-down'); void g.offsetWidth; g.classList.add('node-down'); setTimeout(() => g.classList.remove('node-down'), 1300) }
@@ -1864,6 +1898,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const lb: any = $('liveBadge'); if (lb) { lb.classList.remove('off'); lb.style.color = 'var(--amber)'; lb.childNodes[1].nodeValue = 'PREVIEW' }
     const ns = $('netStat'); if (ns) ns.textContent = 'PREVIEW (SIMULATED)'
     const fbb: any = $('fbBtns'); if (fbb) fbb.style.display = ''
+    const cfg: any = $('cfgBtns'); if (cfg) cfg.style.display = ''
     refreshRank(); refreshStats()
     sizeCanvas()
     addLog('SYS', 'sys', `<span class="em">PREVIEW MODE</span> :: simulated battle — ${TEAMS.length} teams`)
@@ -1882,6 +1917,15 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   if (scanBtn) scanBtn.onclick = function () { const offNow = $('scan').classList.toggle('off'); scanBtn.classList.toggle('on', !offNow) }
   const speedBtn: any = $('speedBtn')
   if (speedBtn) speedBtn.onclick = function () { speed = speed === 1 ? 2 : speed === 2 ? 4 : 1; speedBtn.textContent = 'SPEED ' + speed + 'X'; speedBtn.classList.toggle('on', speed !== 1) }
+  // preview count knobs — clamp + rebuild the demo on change
+  const cfgWire: [string, (v: number) => void, number, number][] = [
+    ['cfgTeams', (v) => (cfgTeams = v), 2, 20], ['cfgAd', (v) => (cfgAd = v), 0, 10],
+    ['cfgKoth', (v) => (cfgKoth = v), 0, 12], ['cfgJeop', (v) => (cfgJeop = v), 0, 40],
+  ]
+  cfgWire.forEach(([cid, set, lo, hi]) => {
+    const inp: any = $(cid); if (!inp) return
+    inp.onchange = () => { let v = Math.round(+inp.value || 0); v = Math.max(lo, Math.min(hi, v)); inp.value = String(v); set(v); rebuildPreview() }
+  })
   // fullscreen the battle map (recompute wheel + constellations for the new size)
   const fsWrap: any = root.querySelector('.arena-wrap')
   const onFsChange = () => { const fs = document.fullscreenElement === fsWrap; const b = $('fsBtn'); if (b) b.textContent = fs ? '✕' : '⛶'; sizeCanvas() }
