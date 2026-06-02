@@ -53,10 +53,6 @@ const ARENA_CSS = `
     background-position:-1px -1px,-1px -1px,-1px -1px,-1px -1px;
     mask-image:radial-gradient(1100px 700px at 50% 45%,#000 30%,transparent 85%);
   }
-  .scan{position:absolute;inset:0;z-index:60;pointer-events:none;
-    background:repeating-linear-gradient(0deg,rgba(0,0,0,0.16) 0px,rgba(0,0,0,0.16) 1px,transparent 2px,transparent 3px);
-    mix-blend-mode:multiply;opacity:.55;transition:opacity .2s}
-  .scan.off{opacity:0}
   .grain{position:absolute;inset:0;z-index:61;pointer-events:none;opacity:.05;
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
 
@@ -308,9 +304,9 @@ const ARENA_CSS = `
   @keyframes fbVsx{0%,12%{opacity:0;transform:scale(2.4)}16%{opacity:1;transform:scale(1)}80%{opacity:1}100%{opacity:0}}
 
   /* ===== FIRST-BLOOD TELEGRAPH (attention-seeking pre-roll; board stays visible) =====
-     Plays before the slam: only a transparent edge-vignette + a sweeping scan line +
-     a pulsing "INCOMING …" banner — the centre stays clear so the scoreboard reads
-     through. Durations track the JS FB.preroll via the --fbPre custom property. */
+     Plays before the slam: a transparent edge-vignette + a pulsing "INCOMING …"
+     banner — the centre stays clear so the scoreboard reads through. Durations track
+     the JS FB.preroll via the --fbPre custom property. */
   .fb-tele{inset:0;overflow:hidden}
   .fb-overlay.tele .fb-tele{animation:fbTele var(--fbPre,5000ms) ease-out forwards}
   .fb-tele-vig{position:absolute;inset:0;background:radial-gradient(circle at 50% 50%,transparent 40%,rgba(255,40,80,.34) 100%);opacity:0}
@@ -477,7 +473,6 @@ const ARENA_BODY = `
     <div class="devbar">
       <span class="label">VIEW</span>
       <button class="btn ghost" id="speedBtn">SPEED 1X</button>
-      <button class="btn ghost on" id="scanBtn">SCANLINE</button>
       <button class="btn ghost on" id="soundBtn">SOUND</button>
       <span id="cfgBtns" style="display:none">
         <label class="cfg">TEAMS<input id="cfgTeams" type="number" min="2" max="20" value="8"></label>
@@ -554,7 +549,6 @@ const ARENA_BODY = `
     </div>
   </div>
 
-  <div class="scan" id="scan"></div>
   <div class="grain"></div>
 `
 
@@ -1222,7 +1216,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const vn: any = $('fbVicNm'); vn.textContent = oppName; vn.style.color = oppColor
     // ---- PHASE 1: telegraph (attention-seeking pre-roll) ----
     // The board stays FULLY VISIBLE while a warning builds (transparent edge
-    // vignette + a sweeping scan + a pulsing "INCOMING …" banner), so the room
+    // vignette + a pulsing "INCOMING …" banner), so the room
     // can read the scoreboard before the slam reveals FIRST BLOOD. The older
     // arena did this with an "INCOMING STRIKE" banner; this restores that beat.
     const teleTxt: any = root.querySelector('.fb-tele-txt'); if (teleTxt) { teleTxt.textContent = th.tele; teleTxt.style.textShadow = `0 0 16px ${th.accent}` }
@@ -1913,8 +1907,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   }
 
   /* -------- viewer toggles -------- */
-  const scanBtn: any = $('scanBtn')
-  if (scanBtn) scanBtn.onclick = function () { const offNow = $('scan').classList.toggle('off'); scanBtn.classList.toggle('on', !offNow) }
   const speedBtn: any = $('speedBtn')
   if (speedBtn) speedBtn.onclick = function () { speed = speed === 1 ? 2 : speed === 2 ? 4 : 1; speedBtn.textContent = 'SPEED ' + speed + 'X'; speedBtn.classList.toggle('on', speed !== 1) }
   // preview count knobs — clamp + rebuild the demo on change
