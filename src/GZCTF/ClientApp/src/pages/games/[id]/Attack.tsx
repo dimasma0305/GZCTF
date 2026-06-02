@@ -1873,19 +1873,14 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     if (!frozen && shots.filter((s: any) => s.miss).length < 6) fireShot(atkr, target, MISS_COL, true)
   }
   async function startPreview() {
-    // use the game's real teams if it has an A&D board; otherwise demo teams
-    let ad: any = null
-    try { ad = await fetchJSON(`/api/Game/${gameId}/Ad/Scoreboard`) } catch (e) {}
-    if (killed) return
+    // Preview is a fully simulated battle driven by the TEAMS / A&D / KOTH / JEOP
+    // knobs — it does NOT mirror live game data (use the non-preview view for that),
+    // so the on-screen counts always match the inputs from the start.
     let title: string | null = null
-    if (ad) {
-      let koth: any = null; try { koth = await fetchJSON(`/api/Game/${gameId}/Ad/Koth/Scoreboard`) } catch (e) {}
-      let jp: any = null; try { jp = await fetchJSON(`/api/Game/${gameId}/Scoreboard`) } catch (e) {}
-      try { const gi = await fetchJSON(`/api/Game/${gameId}`); title = gi && gi.title } catch (e) {}
-      if (killed) return
-      buildLiveModel(ad, koth, jp, title)
-    }
-    if (!TEAMS.length) bootDemoModel()
+    try { const gi = await fetchJSON(`/api/Game/${gameId}`); title = gi && gi.title } catch (e) {}
+    if (killed) return
+    bootDemoModel()
+    if (title) $('brandLogo').textContent = title.toUpperCase().slice(0, 22)
     liveRoundEndsAt = null; round = 1; tickLeft = 30; gameEndMs = Date.now() + MATCH_SECONDS * 1000
     buildArena()
     $('teamCount').textContent = TEAMS.length + ' TEAMS'
