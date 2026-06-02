@@ -57,8 +57,6 @@ const ARENA_CSS = `
   .scan.off{opacity:0}
   .grain{position:absolute;inset:0;z-index:61;pointer-events:none;opacity:.05;
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
-  .vignette{position:absolute;inset:0;z-index:59;pointer-events:none;
-    box-shadow:inset 0 0 240px 60px rgba(0,0,0,.85)}
 
   .shell{position:relative;z-index:5;height:100vh;display:grid;
     grid-template-rows:auto 1fr auto;gap:10px;padding:12px}
@@ -235,8 +233,7 @@ const ARENA_CSS = `
     -webkit-mask:radial-gradient(circle at 50% 47%,transparent 11%,#000 40%,transparent 78%);
             mask:radial-gradient(circle at 50% 47%,transparent 11%,#000 40%,transparent 78%)}
   .fb-splat{left:50%;top:47%;width:44vmin;height:44vmin;transform:translate(-50%,-50%);
-    background:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20200%20200'%3E%3Cg%20fill='%23a30f24'%3E%3Ccircle%20cx='100'%20cy='100'%20r='44'/%3E%3Ccircle%20cx='58'%20cy='66'%20r='15'/%3E%3Ccircle%20cx='150'%20cy='78'%20r='13'/%3E%3Ccircle%20cx='70'%20cy='150'%20r='17'/%3E%3Ccircle%20cx='142'%20cy='146'%20r='12'/%3E%3Ccircle%20cx='38'%20cy='118'%20r='8'/%3E%3Ccircle%20cx='168'%20cy='120'%20r='7'/%3E%3Ccircle%20cx='112'%20cy='36'%20r='9'/%3E%3Ccircle%20cx='30'%20cy='80'%20r='5'/%3E%3Ccircle%20cx='175'%20cy='150'%20r='5'/%3E%3C/g%3E%3Ccircle%20cx='100'%20cy='100'%20r='28'%20fill='%23d11630'/%3E%3C/svg%3E") center/contain no-repeat;
-    filter:drop-shadow(0 0 22px rgba(209,22,48,.45))}
+    background:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20200%20200'%3E%3Cg%20fill='%23a30f24'%3E%3Ccircle%20cx='100'%20cy='100'%20r='44'/%3E%3Ccircle%20cx='58'%20cy='66'%20r='15'/%3E%3Ccircle%20cx='150'%20cy='78'%20r='13'/%3E%3Ccircle%20cx='70'%20cy='150'%20r='17'/%3E%3Ccircle%20cx='142'%20cy='146'%20r='12'/%3E%3Ccircle%20cx='38'%20cy='118'%20r='8'/%3E%3Ccircle%20cx='168'%20cy='120'%20r='7'/%3E%3Ccircle%20cx='112'%20cy='36'%20r='9'/%3E%3Ccircle%20cx='30'%20cy='80'%20r='5'/%3E%3Ccircle%20cx='175'%20cy='150'%20r='5'/%3E%3C/g%3E%3Ccircle%20cx='100'%20cy='100'%20r='28'%20fill='%23d11630'/%3E%3C/svg%3E") center/contain no-repeat}
   .fb-flash{inset:0;background:#fff}
   .fb-overlay .fb-core{inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.4vh;text-align:center;opacity:1}
   .fb-kanji{font-family:'DotGothic16';font-size:clamp(20px,4.4vw,52px);color:#ff5566;letter-spacing:.3em;
@@ -257,11 +254,11 @@ const ARENA_CSS = `
   @keyframes fbDark{0%{opacity:0}5%{opacity:.95}82%{opacity:.95}100%{opacity:0}}
   @keyframes fbBarT{0%{opacity:1;transform:translateY(-100%)}9%{transform:translateY(0)}84%{opacity:1;transform:translateY(0)}100%{opacity:1;transform:translateY(-100%)}}
   @keyframes fbBarB{0%{opacity:1;transform:translateY(100%)}9%{transform:translateY(0)}84%{opacity:1;transform:translateY(0)}100%{opacity:1;transform:translateY(100%)}}
-  @keyframes fbRays{0%,12%{opacity:0;transform:rotate(0deg) scale(.6)}16%{opacity:.75;transform:rotate(5deg) scale(1)}82%{opacity:.5}100%{opacity:0;transform:rotate(38deg) scale(1.12)}}
+  @keyframes fbRays{0%,12%{opacity:0}16%{opacity:.7}82%{opacity:.45}100%{opacity:0}}
   @keyframes fbSplat{0%,12%{opacity:0;transform:translate(-50%,-50%) scale(.25)}16%{opacity:.6;transform:translate(-50%,-50%) scale(1.08)}22%{transform:translate(-50%,-50%) scale(1)}82%{opacity:.5}100%{opacity:0;transform:translate(-50%,-50%) scale(1.06)}}
   @keyframes fbFlash{0%,11%{opacity:0}13%{opacity:.95}16%{opacity:0}18%{opacity:.5}21%{opacity:0}100%{opacity:0}}
-  @keyframes fbKanji{0%,8%{opacity:0;letter-spacing:1.4em;filter:blur(8px)}16%{opacity:1;letter-spacing:.3em;filter:blur(0)}80%{opacity:.95}100%{opacity:0;transform:translateY(-12px)}}
-  @keyframes fbTitle{0%{opacity:0;transform:scale(4.2);filter:blur(12px)}11%{opacity:.25}15%{opacity:1;transform:scale(.92);filter:blur(0)}19%{transform:scale(1.05)}24%{transform:scale(1)}45%{transform:scale(1.015)}65%{transform:scale(1)}80%{opacity:1}100%{opacity:0;transform:scale(1.7);filter:blur(7px)}}
+  @keyframes fbKanji{0%,8%{opacity:0}16%{opacity:1}80%{opacity:.95}100%{opacity:0;transform:translateY(-12px)}}
+  @keyframes fbTitle{0%{opacity:0;transform:scale(4.2)}11%{opacity:.25}15%{opacity:1;transform:scale(.92)}19%{transform:scale(1.05)}24%{transform:scale(1)}45%{transform:scale(1.015)}65%{transform:scale(1)}80%{opacity:1}100%{opacity:0;transform:scale(1.7)}}
   @keyframes fbSub{0%,21%{opacity:0;transform:translateY(16px)}29%{opacity:1;transform:translateY(0)}82%{opacity:1}100%{opacity:0}}
   .fb-overlay .fb-vs{display:flex;align-items:center;justify-content:center;gap:clamp(18px,7vw,90px);opacity:1}
   .fb-fighter{display:flex;flex-direction:column;align-items:center;gap:6px;opacity:0}
@@ -545,7 +542,6 @@ const ARENA_BODY = `
 
   <div class="scan" id="scan"></div>
   <div class="grain"></div>
-  <div class="vignette"></div>
 `
 
 /* -------------------------------------------------------------------------- */
@@ -588,7 +584,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   ]
 
   let TEAMS: any[] = [], SERVICES: any[] = [], HILLS: any[] = []
-  let round = 0, totalFlags = 0, totalEvents = 0, cinema = false
+  let round = 0, totalFlags = 0, totalEvents = 0, cinema = false, slamCovering = false
   let matchFirstBlood = false, firstCrown = false, sinceEvent = 0
   let tNow = Date.now(), tickLeft = 0, liveRoundEndsAt: number | null = null
   const speed = 1
@@ -1206,6 +1202,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       if (killed) return
       const iaStop: any = $('incomingSound'); if (iaStop) { try { iaStop.pause(); iaStop.currentTime = 0 } catch (e) {} }
       ov.classList.remove('tele'); void ov.offsetWidth; ov.classList.add('play')
+      slamCovering = true // the dark slam overlay covers the board — pause the arena draw underneath
       // First-blood stinger: the shipped /attack/firstblood.mp3 (unchanged) — now
       // fires WITH the reveal so it punctuates the slam, not the build-up.
       setTimeout(() => {
@@ -1219,7 +1216,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
         if (opt.onImpact) opt.onImpact()
       }, FB.slam)
       setTimeout(() => { if (opt.beamTo) { spawnBeam(atkr, opt.beamTo, th.accent, true); if (opt.beamTo.id && opt.beamTo.color) pulseBase(opt.beamTo, opt.beamTo.color) } }, FB.total - 680)
-      setTimeout(() => { ov.classList.remove('play'); cinema = false }, FB.total)
+      setTimeout(() => { ov.classList.remove('play'); cinema = false; slamCovering = false }, FB.total)
     }, FB.preroll)
   }
   function fbAd(atkr: any, vic: any, onImpact: () => void) {
@@ -1361,7 +1358,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   function loop(ts: number) {
     if (killed) return
     const dt = Math.min((ts - lastTs) / 1000, 0.05); lastTs = ts
-    drawFX(dt)
+    if (!slamCovering) drawFX(dt) // skip the arena draw while the slam overlay covers it
     if (preview && !cinema && TEAMS.length) {
       sinceEvent += dt * 1000
       if (sinceEvent > rng(900, 1700) / speed) {
