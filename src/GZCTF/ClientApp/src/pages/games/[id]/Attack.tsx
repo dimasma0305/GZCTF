@@ -17,6 +17,7 @@
 import { FC, useEffect, useRef } from 'react'
 import { useParams, useSearchParams } from 'react-router'
 import { KothDirector, statusFromCheck, type CaptureResult } from './kothCapture'
+import { createJeopardy, type JeopCategory } from './arenaJeopardy'
 
 const FONTS_HREF =
   'https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=DotGothic16&display=swap'
@@ -136,8 +137,34 @@ const ARENA_CSS = `
     line-height:2;padding:20px;z-index:8}
   .corner-tag{position:absolute;font-family:'Press Start 2P';font-size:8px;
     color:var(--dim);z-index:6;opacity:.7}
-  .ct-tl{top:6px;left:6px}.ct-tr{top:6px;right:6px;text-align:right}
+  .ct-tl{top:6px;left:6px}.ct-tr{top:6px;right:42px;text-align:right}
   .ct-bl{bottom:6px;left:6px}.ct-br{bottom:6px;right:6px;text-align:right}
+  /* ---- jeopardy constellation overlay (side bands beside the square wheel) ---- */
+  #jeop{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:4}
+  #jeopSpace{display:none}
+  @keyframes jtwk{0%,100%{opacity:var(--o,1)}50%{opacity:var(--o2,.6)}}
+  #jeop .twk{animation:jtwk var(--d,3s) ease-in-out infinite;animation-delay:var(--dl,0s);will-change:opacity}
+  #jeop .chhit{pointer-events:all;cursor:pointer}
+  .jtip{position:absolute;z-index:9;pointer-events:none;opacity:0;transform:translateY(4px);
+    transition:opacity .12s ease,transform .12s ease;min-width:140px;max-width:230px;padding:8px 10px;border-radius:7px;
+    background:rgba(8,10,22,.96);border:1px solid rgba(120,140,200,.35);box-shadow:0 8px 28px rgba(0,0,0,.6);font-family:'VT323',monospace}
+  .jtip.show{opacity:1;transform:translateY(0)}
+  .jtip .jt-name{font-size:17px;color:#e7ebf7;line-height:1.1}
+  .jtip .jt-meta{font-size:14px;color:#8b93b4;margin:1px 0 6px}
+  .jtip .jt-row{display:flex;align-items:center;gap:6px;font-size:15px;color:#d4dcef;margin:2px 0}
+  .jtip .jt-dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto;box-shadow:0 0 5px currentColor}
+  .jtip .jt-rank{margin-left:auto;font-size:12px;font-family:'Press Start 2P';letter-spacing:.4px}
+  .jtip .jt-none{font-size:15px;color:#6f7794}
+  /* ---- fullscreen battle-map button ---- */
+  .fs-btn{position:absolute;top:6px;right:8px;z-index:9;width:28px;height:28px;display:flex;
+    align-items:center;justify-content:center;font-size:14px;line-height:1;color:#b6c0df;
+    background:rgba(12,16,30,.72);border:1px solid rgba(120,140,200,.42);border-radius:7px;cursor:pointer;
+    opacity:.55;box-shadow:0 2px 10px rgba(0,0,0,.45);transition:opacity .18s,background .15s,border-color .15s,color .15s,transform .1s}
+  .arena-wrap:hover .fs-btn{opacity:1}
+  .fs-btn:hover{background:rgba(46,60,108,.96);border-color:rgba(150,180,255,.85);color:#fff}
+  .fs-btn:active{transform:scale(.92)}
+  .arena-wrap:fullscreen{background:radial-gradient(120% 120% at 50% 40%,#0b0f1e 0%,#06070f 70%,#04050b 100%);padding:0}
+  .arena-wrap:fullscreen .arena{height:100%}
 
   .rightcol{display:flex;flex-direction:column;gap:12px;min-height:0;min-width:0}
   .panel.rank{flex:1;min-height:0}
@@ -415,11 +442,15 @@ const ARENA_BODY = `
         <div class="corner-tag ct-tl">LIVE MAP</div>
         <div class="corner-tag ct-tr" id="teamCount">0 TEAMS</div>
         <div class="corner-tag ct-bl" id="netStat">CONNECTING</div>
+        <button id="fsBtn" class="fs-btn" title="Fullscreen battle map" aria-label="Fullscreen">⛶</button>
+        <svg id="jeop" preserveAspectRatio="xMidYMid meet"></svg>
         <div class="arena" id="arena">
           <canvas id="fxbg" width="870" height="870"></canvas>
           <svg id="svg" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid meet"></svg>
           <canvas id="fx" width="870" height="870"></canvas>
         </div>
+        <div id="jeopSpace"></div>
+        <div id="jtip" class="jtip"></div>
       </div>
       <div class="rightcol">
         <div class="panel rank">
@@ -439,6 +470,7 @@ const ARENA_BODY = `
     </div>
     <div class="devbar">
       <span class="label">VIEW</span>
+      <button class="btn ghost" id="speedBtn">SPEED 1X</button>
       <button class="btn ghost on" id="scanBtn">SCANLINE</button>
       <button class="btn ghost on" id="soundBtn">SOUND</button>
       <span id="fbBtns" style="display:none">
@@ -559,7 +591,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   // hill ownership + FIRST CROWN latch/deferral live in this pure model (see kothCapture.ts)
   const kothDir = new KothDirector()
   let tNow = Date.now(), tickLeft = 0, liveRoundEndsAt: number | null = null
-  const speed = 1
+  let speed = 1
   const prevSvcState: Record<string, string> = {}
   // preroll = the attention-seeking telegraph (board stays visible, warning builds)
   // that plays BEFORE the slam cinematic; soundDelay/slam/total are relative to the slam.
@@ -635,6 +667,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   const fxbg: any = $('fxbg')
   const ctxbg: any = fxbg.getContext('2d')
   const arena: any = $('arena')
+  const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+  const jeop = createJeopardy({ root, arena, isFrozen: () => frozen, isTouch })
   const logEl: any = $('log')
   const rankEl: any = $('ranklist')
   const statsEl: any = $('stats')
@@ -849,6 +883,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     SC = (r.width / 1000) * dpr
     ctx.setTransform(SC, 0, 0, SC, 0, 0)
     ctxbg.setTransform(SC, 0, 0, SC, 0, 0)
+    jeop.layout() // re-place the jeopardy constellations for the new panel size
   }
   const onResize = () => sizeCanvas()
   window.addEventListener('resize', onResize)
@@ -1407,6 +1442,31 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     return r.json()
   }
 
+  // Jeopardy categories for the constellation overlay: every challenge on the standard
+  // scoreboard that is NOT an A&D service or KotH hill, grouped by category, with the
+  // live (dynamic) point value and the blood solvers (gold/silver/bronze, ordered).
+  const CATEGORY_COLOR: any = {
+    Misc: '#46e3a0', Crypto: '#ffc637', Pwn: '#ff4d6a', Web: '#34e3ff', Reverse: '#a06bff',
+    Blockchain: '#ff8c42', Forensics: '#ff5bd0', Hardware: '#8bd450', Mobile: '#5b8cff',
+    PPC: '#ff6f91', AI: '#2ee6c0', Pentest: '#e0b24a', OSINT: '#b07bff',
+  }
+  function buildJeopCats(ad: any, jp: any): JeopCategory[] {
+    const adIds = new Set(((ad && ad.challenges) || []).map((c: any) => c.challengeId))
+    const ch = (jp && jp.challenges) || {}
+    const out: JeopCategory[] = []
+    Object.keys(ch).forEach((catName) => {
+      const list = (ch[catName] || []).filter((c: any) => !adIds.has(c.id))
+      if (!list.length) return
+      out.push({
+        id: catName, name: catName.toUpperCase(), color: CATEGORY_COLOR[catName] || '#7fd7ff',
+        challenges: list.map((c: any) => ({
+          id: c.id, name: c.title, base: Math.round(c.score || 0), solveCount: c.solved || 0,
+          solvers: (c.bloods || []).map((b: any) => { const tm = teamByName(b.name); return { name: b.name || '', color: tm ? tm.color : '#7fd7ff' } }),
+        })),
+      })
+    })
+    return out
+  }
   // Fold the KotH per-team totals (koth.teams, by participationId) and the standard
   // jeopardy scoreboard (jp.items, by team name) onto the arena teams, for the two
   // non-A&D ranking modes. A&D score stays t.score from the A&D board.
@@ -1459,6 +1519,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     })
 
     applyAuxScores(koth, jp)
+    jeop.setData(buildJeopCats(ad, jp)); jeop.initHover()
     round = ad.latestRound || (koth && koth.latestRound) || 0
     liveRoundEndsAt = ad.currentRoundEndsAt ? new Date(ad.currentRoundEndsAt).getTime() : null
     if (title) $('brandLogo').textContent = title.toUpperCase().slice(0, 22)
@@ -1466,6 +1527,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
 
   function applyLivePoll(ad: any, koth: any, jp: any) {
     applyAuxScores(koth, jp)
+    jeop.setData(buildJeopCats(ad, jp))
     const kothHills = koth && koth.hills ? koth.hills : []
     const adById: any = {}; (ad.teams || []).forEach((r: any) => { adById['p' + r.participationId] = r })
     TEAMS.forEach((t) => {
@@ -1530,13 +1592,10 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   function liveAttack(f: any) {
     const atkr = teamByName(f.teamName); if (!atkr) return
     const vic = f.victimTeamName ? teamByName(f.victimTeamName) : null
-    // jeopardy solves / rejected attempts have no victim node — aim at the CORE.
-    const target = vic || { x: CX, y: CY }
-    // Rejected flag (wrong answer): a soft "MISS" tracer to the target — no score, no
-    // impact, not logged (mirrors the old map's wrong-flag mapping). Capped so a
-    // flag-spam burst can't flood the canvas.
+    // Rejected flag (wrong answer): a soft "MISS" tracer (jeopardy aims at the CORE),
+    // no score, no impact, not logged. Capped so a flag-spam burst can't flood.
     if (f.type === 'Unaccepted') {
-      if (!frozen && shots.filter((s: any) => s.miss).length < 6) fireShot(atkr, target, MISS_COL, true)
+      if (!frozen && shots.filter((s: any) => s.miss).length < 6) fireShot(atkr, vic || { x: CX, y: CY }, MISS_COL, true)
       return
     }
     let svc: any = null
@@ -1551,8 +1610,10 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       else fbJeopardy(atkr, f.challengeTitle || 'a challenge', () => resolveFlag(atkr, null, null, pts, true))
       return
     }
-    // normal solve — A&D fires at the victim, jeopardy fires at the CORE
-    fireShot(atkr, target, atkr.color)
+    // normal solve — A&D shoots the victim; a jeopardy solve lasers the actual
+    // challenge star in the constellation (falls back to the CORE if not mapped).
+    if (vic) fireShot(atkr, vic, atkr.color)
+    else if (!jeop.solveByTitle(atkr.x, atkr.y, f.challengeTitle || '', { name: atkr.name, color: atkr.color })) fireShot(atkr, { x: CX, y: CY }, atkr.color)
     setTimeout(() => { if (!killed) resolveFlag(atkr, vic, svc, pts, false) }, 320 / Math.max(speed, 1) + 120)
   }
   // Hill ownership is driven by BOTH the WS koth frame (instant) and the 15s poll
@@ -1692,6 +1753,23 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       const ang = (-90 + (i + 0.5) * (360 / DEMO_HILLS.length)) * Math.PI / 180
       return { ...d, idx: i, ang, x: CX + HILLR * Math.cos(ang), y: CY + HILLR * Math.sin(ang), owner: null }
     })
+    jeop.setData(buildDemoCats()); jeop.initHover()
+  }
+  // demo jeopardy constellation for preview mode (no live scoreboard)
+  function buildDemoCats(): JeopCategory[] {
+    const defs: any = {
+      Web: [['graphql-leak', 500], ['proto-pollute', 400], ['ssti-soup', 300], ['jwt-confuse', 200], ['robots-txt', 100]],
+      Pwn: [['kernel-rop', 500], ['heap-feng', 400], ['fmt-string', 300], ['ret2win', 100]],
+      Crypto: [['lattice-cve', 500], ['ecb-oracle', 400], ['rsa-lowe', 300], ['xor-rev', 200], ['base-soup', 100]],
+      Reverse: [['vm-bytecode', 500], ['packed-elf', 400], ['anti-debug', 300], ['xor-strings', 100]],
+      Forensics: [['ntfs-ghost', 500], ['stego-cat', 400], ['mem-dump', 300], ['pcap-hunt', 200]],
+      Misc: [['sanity-check', 100], ['qr-maze', 250], ['esolang', 350], ['audio-stego', 500]],
+    }
+    let id = 9000
+    return Object.keys(defs).map((cat) => ({
+      id: cat, name: cat.toUpperCase(), color: CATEGORY_COLOR[cat] || '#7fd7ff',
+      challenges: defs[cat].map(([name, base]: any) => ({ id: id++, name, base, solveCount: 0, solvers: [] })),
+    }))
   }
   // Preview flags are always normal hits — the demo no longer auto-plays a
   // first-blood cinematic at the start. Use the FB A&D / FB JEO / FB KOTH buttons
@@ -1744,8 +1822,11 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   const DEMO_JP = ['web-portal', 'crypto-rng', 'pwn-heap', 'rev-vm', 'forensics-01', 'misc-jail', 'osint-2', 'blockchain-1']
   function evJeopardy() {
     const atkr = pick(TEAMS); if (!atkr) return
-    const ch = pick(DEMO_JP); const pts = Math.floor(rng(50, 150))
-    fireShot(atkr, { x: CX, y: CY }, atkr.color)
+    // laser the actual constellation star if one is free; else a CORE tracer
+    const hit = jeop.solveRandom(atkr.x, atkr.y, { name: atkr.name, color: atkr.color })
+    const ch = hit ? hit.name : pick(DEMO_JP)
+    const pts = hit ? hit.base : Math.floor(rng(50, 150))
+    if (!hit) fireShot(atkr, { x: CX, y: CY }, atkr.color)
     setTimeout(() => {
       if (killed) return
       atkr.jpScore = (atkr.jpScore || 0) + pts; atkr.jpSolved = (atkr.jpSolved || 0) + 1
@@ -1799,6 +1880,16 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   /* -------- viewer toggles -------- */
   const scanBtn: any = $('scanBtn')
   if (scanBtn) scanBtn.onclick = function () { const offNow = $('scan').classList.toggle('off'); scanBtn.classList.toggle('on', !offNow) }
+  const speedBtn: any = $('speedBtn')
+  if (speedBtn) speedBtn.onclick = function () { speed = speed === 1 ? 2 : speed === 2 ? 4 : 1; speedBtn.textContent = 'SPEED ' + speed + 'X'; speedBtn.classList.toggle('on', speed !== 1) }
+  // fullscreen the battle map (recompute wheel + constellations for the new size)
+  const fsWrap: any = root.querySelector('.arena-wrap')
+  const onFsChange = () => { const fs = document.fullscreenElement === fsWrap; const b = $('fsBtn'); if (b) b.textContent = fs ? '✕' : '⛶'; sizeCanvas() }
+  const fsBtn: any = $('fsBtn')
+  if (fsBtn && fsWrap) {
+    fsBtn.onclick = () => { if (document.fullscreenElement) document.exitFullscreen?.(); else (fsWrap.requestFullscreen || fsWrap.webkitRequestFullscreen || (() => {})).call(fsWrap) }
+    document.addEventListener('fullscreenchange', onFsChange)
+  }
   const rankTabs: any = $('rankTabs')
   if (rankTabs) rankTabs.querySelectorAll('button').forEach((b: any) => {
     b.onclick = () => {
@@ -1891,6 +1982,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     document.removeEventListener('keydown', primeAudio)
     if ('speechSynthesis' in window) { try { speechSynthesis.cancel() } catch (e) {} }
     if (AC) { try { AC.close() } catch (e) {} AC = null }
+    document.removeEventListener('fullscreenchange', onFsChange)
+    jeop.destroy()
     if (ws) { try { ws.onclose = null; ws.close() } catch (e) {} ws = null }
   }
 }
