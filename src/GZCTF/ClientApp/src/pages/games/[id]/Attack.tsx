@@ -631,7 +631,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       </radialGradient></defs>
       <rect width="64" height="64" fill="url(#bg_${gid})"/>
       ${ears}
-      <ellipse cx="32" cy="44" rx="15" ry="15.5" fill="${skin}"/>
+      <ellipse cx="32" cy="37" rx="16" ry="18.5" fill="${skin}"/>
       <ellipse cx="22" cy="48" rx="3.2" ry="2.2" fill="${color}" opacity=".35"/>
       <ellipse cx="42" cy="48" rx="3.2" ry="2.2" fill="${color}" opacity=".35"/>
       ${eyes}
