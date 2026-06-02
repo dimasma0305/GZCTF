@@ -84,6 +84,7 @@ public sealed class AdSnapshotService(
     private async Task CaptureGameAsync(AdContainerManager manager, int gameId, CancellationToken token)
     {
         int roundId, roundNumber;
+        bool inFreeze;
         List<AdTeamService> services;
 
         await using (var scope = scopeFactory.CreateAsyncScope())
@@ -97,6 +98,15 @@ public sealed class AdSnapshotService(
             if (latest is null) return; // warmup — no round yet
             roundId = latest.Id;
             roundNumber = latest.Number;
+
+            // ICPC freeze: during [FreezeTimeUtc, EndTimeUtc) the public board is frozen,
+            // so suppress the cosmetic "patched" broadcast (mirrors SubmissionRepository's
+            // attack-feed gate). The snapshot row is still recorded for admin/audit — only
+            // the live broadcast to the arena feed is gated.
+            var gw = await db.Games.AsNoTracking().Where(g => g.Id == gameId)
+                .Select(g => new { g.FreezeTimeUtc, g.EndTimeUtc }).FirstOrDefaultAsync(token);
+            var nowUtc = DateTimeOffset.UtcNow;
+            inFreeze = gw is { FreezeTimeUtc: { } fz } && nowUtc >= fz && nowUtc < gw.EndTimeUtc;
 
             services = await db.AdTeamServices
                 .Where(ts => ts.Participation.GameId == gameId
@@ -123,14 +133,14 @@ public sealed class AdSnapshotService(
         var tasks = due.Select(async ts =>
         {
             await gate.WaitAsync(token);
-            try { await CaptureServiceAsync(manager, gameId, ts, roundId, roundNumber, token); }
+            try { await CaptureServiceAsync(manager, gameId, ts, roundId, roundNumber, inFreeze, token); }
             finally { gate.Release(); }
         });
         await Task.WhenAll(tasks);
     }
 
     private async Task CaptureServiceAsync(
-        AdContainerManager manager, int gameId, AdTeamService ts, int roundId, int roundNumber, CancellationToken token)
+        AdContainerManager manager, int gameId, AdTeamService ts, int roundId, int roundNumber, bool inFreeze, CancellationToken token)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var sp = scope.ServiceProvider;
@@ -181,8 +191,9 @@ public sealed class AdSnapshotService(
         // A new, non-empty manifest means the team actually changed files on their
         // service since the last snapshot — i.e. they patched. Broadcast it to the
         // live battle map (purely cosmetic; the empty baseline has Count 0 and is
-        // skipped). No-ops cheaply when the game has no raw-WS subscribers.
-        if (changes.Count > 0)
+        // skipped). No-ops cheaply when the game has no raw-WS subscribers. Suppressed
+        // during the ICPC freeze so nothing leaks onto the public feed while frozen.
+        if (!inFreeze && changes.Count > 0)
         {
             var teamName = ts.Participation?.Team?.Name;
             if (!string.IsNullOrEmpty(teamName))
