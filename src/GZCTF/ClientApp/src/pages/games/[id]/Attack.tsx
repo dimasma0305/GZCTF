@@ -201,11 +201,6 @@ const ARENA_CSS = `
   .btn.patch{background:#27e3ff;color:#06121a;box-shadow:0 0 14px rgba(39,227,255,.5)}
   #fbBtns{display:inline-flex;gap:10px}
   .sp{flex:1}
-  .ticker{overflow:hidden;white-space:nowrap;max-width:46%}
-  .ticker .run{display:inline-block;padding-left:100%;animation:run 26s linear infinite;
-    font-size:17px;color:var(--dim)}
-  .ticker .run b{color:var(--cyan)}.ticker .run em{color:var(--magenta);font-style:normal}
-  @keyframes run{to{transform:translateX(-100%)}}
 
   .float{position:absolute;font-family:'Press Start 2P';font-size:9px;pointer-events:none;
     z-index:7;text-shadow:0 0 6px currentColor;animation:floatUp 1.1s ease-out forwards}
@@ -385,7 +380,6 @@ const ARENA_CSS = `
     #log{height:30vh;flex:none}
     .panel.rank{flex:none}
     #ranklist{max-height:48vh;overflow-y:auto}
-    .ticker{display:none}
   }
   @media (max-width:680px){
     .shell{padding:8px;gap:8px}
@@ -468,7 +462,6 @@ const ARENA_BODY = `
         <button class="btn end" id="endBtn">END</button>
       </span>
       <span class="sp"></span>
-      <div class="ticker"><span class="run" id="ticker"></span></div>
     </div>
   </div>
 
@@ -1359,12 +1352,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       </div>`
   }
 
-  function buildTicker(title: string | null) {
-    const t: any = $('ticker')
-    const head = title ? `<b>// ${esc(title)}</b>` : `<b>// CYBER A/D ARENA</b>`
-    t.innerHTML = `${head} attack/defense + king of the hill &nbsp;//&nbsp; capture flags off enemy services &nbsp;//&nbsp; hold the <em>torii</em> gates &nbsp;//&nbsp; keep your own patched &nbsp;//&nbsp; SLA down = score bleed &nbsp;//&nbsp; <b>arena.watch()</b> &nbsp;//&nbsp; 攻防戦 &nbsp;//&nbsp; signal nominal &nbsp;//&nbsp; `
-  }
-
   /* -------- loop / clock -------- */
   let lastTs = performance.now()
   function loop(ts: number) {
@@ -1647,7 +1634,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
 
     buildArena()
     $('teamCount').textContent = '攻防 // ' + TEAMS.length + ' TEAMS'
-    refreshRank(); refreshStats(); buildTicker(title)
+    refreshRank(); refreshStats()
     sizeCanvas()
     if (ad.isFrozenView) enterFreeze() // board already frozen when we connect
     addLog('SYS', 'sys', `<span class="em">// ARENA ONLINE</span> :: ${TEAMS.length} teams // ${SERVICES.length} services // live feed`)
@@ -1763,7 +1750,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const lb: any = $('liveBadge'); if (lb) { lb.classList.remove('off'); lb.style.color = 'var(--amber)'; lb.childNodes[1].nodeValue = 'PREVIEW' }
     const ns = $('netStat'); if (ns) ns.textContent = 'SIGNAL // PREVIEW (SIMULATED)'
     const fbb: any = $('fbBtns'); if (fbb) fbb.style.display = ''
-    refreshRank(); refreshStats(); buildTicker((title ? title + ' ' : '') + '— PREVIEW')
+    refreshRank(); refreshStats()
     sizeCanvas()
     addLog('SYS', 'sys', `<span class="em">// PREVIEW MODE</span> :: simulated battle — ${TEAMS.length} teams`)
     timers.push(window.setInterval(tickClock, 1000))
