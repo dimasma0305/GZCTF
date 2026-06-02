@@ -580,6 +580,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   const dispSla = (t: any) => (frozen && t.shownSla != null ? t.shownSla : t.sla)
   const dispAtk = (t: any) => (frozen && t.shownAtk != null ? t.shownAtk : t.atk)
   const dispDef = (t: any) => (frozen && t.shownDef != null ? t.shownDef : t.def)
+  const fmtPts = (n: number) => { const r = Math.round(n || 0); return r >= 10000 ? (r / 1000).toFixed(1) + 'k' : String(r) }
   const fmtMS = (s: number) => { const m = Math.floor(s / 60), x = Math.floor(s % 60); return m + ':' + String(x).padStart(2, '0') }
 
   const teamByName = (n: any) => TEAMS.find((t) => t.name === n)
@@ -1241,9 +1242,10 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       const bars: any = $('bars-' + t.id)
       if (rankMode === 'ad') {
         if (bars) bars.style.display = ''
-        $('ba-' + t.id).style.flex = String(Math.max(dispAtk(t), 1))
-        $('bd-' + t.id).style.flex = String(Math.max(dispDef(t), 1))
-        $('rsc-' + t.id).innerHTML = `${dispScore(t)}<small>${dispSla(t)}% SLA</small>`
+        $('ba-' + t.id).style.flex = String(Math.max(dispAtk(t), 1)) // attack points
+        $('bd-' + t.id).style.flex = String(Math.max(dispDef(t), 1)) // SLA points
+        const dl = t.defLoss || 0
+        $('rsc-' + t.id).innerHTML = `${dispScore(t)}<small class="${dl > 0 ? 'dn' : ''}">${dl > 0 ? '−' + fmtPts(dl) : '0'} DEF</small>`
       } else if (rankMode === 'koth') {
         if (bars) bars.style.display = 'none'
         const held = HILLS.filter((h) => h.owner && h.owner.id === t.id).length
@@ -1429,8 +1431,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
         id: 'p' + row.participationId, pid: row.participationId, name: row.teamName,
         color, hue: Math.round((i * 137.508) % 360), score: Math.round(row.total || 0),
         kothScore: 0, jpScore: 0, jpSolved: 0,
-        atk: Math.max(1, Math.round(row.flagsCaptured || 0)),
-        def: Math.max(1, (row.services || []).filter((s: any) => s.lastCheckStatus === 'Ok').length),
+        // atk/def bars = real attack/SLA point components; defLoss = defense points lost
+        atk: Math.round(row.attackPoints || 0), def: Math.round(row.slaPoints || 0), defLoss: Math.round(row.defenseLoss || 0),
       }
       const byId: any = {}; (row.services || []).forEach((s: any) => { byId[s.challengeId] = s })
       t.svc = svcIds.map((cid: any, j: number) => { const s = byId[cid]; return { name: SERVICES[j], cid, status: s ? statusFromCheck(s.lastCheckStatus) : 'none' } })
@@ -1469,6 +1471,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     TEAMS.forEach((t) => {
       const row = adById[t.id]; if (!row) return
       t.score = Math.round(row.total || 0)
+      t.atk = Math.round(row.attackPoints || 0); t.def = Math.round(row.slaPoints || 0); t.defLoss = Math.round(row.defenseLoss || 0)
       const byId: any = {}; (row.services || []).forEach((s: any) => { byId[s.challengeId] = s })
       t.svc.forEach((sv: any) => {
         const s = byId[sv.cid]; const ns = s ? statusFromCheck(s.lastCheckStatus) : 'none'
@@ -1678,7 +1681,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       const ang = (-90 + i * (360 / DEMO_TEAMS.length)) * Math.PI / 180
       const t: any = {
         ...d, idx: i, ang, x: CX + RING * Math.cos(ang), y: CY + RING * Math.sin(ang),
-        score: Math.floor(rng(400, 520)), atk: Math.floor(rng(2, 9)), def: Math.floor(rng(2, 9)), sla: Math.floor(rng(88, 100)),
+        score: Math.floor(rng(400, 520)), atk: Math.floor(rng(150, 900)), def: Math.floor(rng(1500, 7000)), defLoss: Math.floor(rng(0, 700)), sla: Math.floor(rng(88, 100)),
         kothScore: Math.floor(rng(40, 220)), jpScore: Math.floor(rng(150, 900)), jpSolved: Math.floor(rng(2, 14)),
       }
       t.svc = SERVICES.map((s: string) => ({ name: s, status: Math.random() < 0.82 ? 'def' : (Math.random() < 0.5 ? 'vuln' : 'down') }))
