@@ -104,6 +104,9 @@ export function createJeopardy(deps: JeopDeps) {
     const W = r.width, H = r.height, wx0 = ar.left - r.left, wy0 = ar.top - r.top
     jWheelX = wx0; jWheelY = wy0; jWheelSize = wsize
     js.setAttribute('viewBox', `0 0 ${W.toFixed(0)} ${H.toFixed(0)}`)
+    // Pixi path (desktop) stretches with the canvas → 'none' keeps SVG text aligned; when the SVG
+    // itself draws the stars (mobile/dense) 'meet' avoids non-uniform stretch on a transient resize.
+    js.setAttribute('preserveAspectRatio', usePixi() ? 'none' : 'meet')
     if (!mobile && Math.min(leftBand, rightBand) < 70) { CATEGORIES.forEach((c) => (c.ch = [])); jeopReady = false; js.innerHTML = ''; deps.onStars?.([], true); return }
 
     if (mobile) {

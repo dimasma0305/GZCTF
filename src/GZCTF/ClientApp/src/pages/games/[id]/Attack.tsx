@@ -151,11 +151,8 @@ const ARENA_CSS = `
   .arena-wrap:hover .fs-btn{opacity:1}
   .fs-btn:hover{background:rgba(46,60,108,.96);border-color:rgba(150,180,255,.85);color:#fff}
   .fs-btn:active{transform:scale(.92)}
-  .arena-wrap:fullscreen{background:radial-gradient(120% 120% at 50% 40%,#0b0f1e 0%,#06070f 70%,#04050b 100%);padding:0;align-items:flex-start}
-  /* Keep the wheel a SQUARE that fits the screen (not height:100%, which the mobile media query's
-     width:96vw would overconstrain into a tall rectangle → jeopardy stars overlapping the wheel).
-     Top-aligned so the mobile "stack below the wheel" constellations get the room below it. */
-  .arena-wrap:fullscreen .arena{width:min(100vw,100vh);height:auto;max-width:100vw;max-height:100vh}
+  .arena-wrap:fullscreen{background:radial-gradient(120% 120% at 50% 40%,#0b0f1e 0%,#06070f 70%,#04050b 100%);padding:0}
+  .arena-wrap:fullscreen .arena{height:100%}
 
   .rightcol{display:flex;flex-direction:column;gap:12px;min-height:0;min-width:0}
   .panel.rank{flex:1;min-height:0}
@@ -390,8 +387,12 @@ const ARENA_CSS = `
     :host{overflow-y:auto;position:absolute}
     .shell{height:auto;min-height:100vh}
     .midrow{display:flex;flex-direction:column;gap:12px}
-    .arena-wrap{order:-1;height:auto;padding:8px}
-    .arena{width:min(92vw,560px);height:auto;max-height:none}
+    /* stack the wheel + the jeopardy constellations in normal flow and let the page scroll;
+       no fullscreen on mobile (the square wheel + below-stack don't fit a phone fullscreen) */
+    .arena-wrap{order:-1;height:auto;padding:8px;flex-direction:column;justify-content:flex-start;overflow:visible}
+    .arena{width:min(92vw,560px);height:auto;max-height:none;flex:0 0 auto}
+    #jeopSpace{display:block;width:100%}
+    .fs-btn{display:none}
     .panel.log-panel,.rightcol{display:flex}
     .panel.log-panel{order:1}.rightcol{order:2}
     #log{height:30vh;flex:none}
