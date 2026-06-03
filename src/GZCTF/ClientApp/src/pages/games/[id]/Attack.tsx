@@ -120,9 +120,15 @@ const ARENA_CSS = `
 
   .arena-wrap{position:relative;display:flex;align-items:center;justify-content:center;
     min-height:0;min-width:0;overflow:hidden}
-  .arena{position:relative;aspect-ratio:1/1;height:100%;max-height:100%;max-width:100%}
+  /* z-index:5 lifts the wheel (and its edge team-name labels that overflow the square) ABOVE the
+     jeopardy constellation canvas (z-index:4) so the names aren't cropped/covered by the "space". */
+  .arena{position:relative;aspect-ratio:1/1;height:100%;max-height:100%;max-width:100%;z-index:5}
   #fxbg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
-  #svg{position:absolute;inset:0;width:100%;height:100%}
+  /* overflow:visible so the outer team-name labels (offset past the 1000 viewBox edge) aren't clipped */
+  #svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+  /* central spark core: gentle twinkle (transform-box:view-box so transform-origin is in viewBox units) */
+  #svg .core-twk{transform-box:view-box;transform-origin:500px 500px;animation:coreTwk 3.4s ease-in-out infinite}
+  @keyframes coreTwk{0%,100%{transform:scale(.95);opacity:.92}50%{transform:scale(1.05);opacity:1}}
   #fx{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
   .arena-note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     text-align:center;font-family:'Press Start 2P';font-size:11px;color:var(--dim);
@@ -180,12 +186,6 @@ const ARENA_CSS = `
   .rk .sc small{display:block;font-size:11px;color:var(--good);margin-top:1px}
   .rk .sc small.dn{color:var(--bad)}
 
-  .leg{padding:9px 12px;display:flex;flex-direction:column;gap:8px}
-  .lgrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px 11px}
-  .lglbl{width:100%;color:var(--dim);font-family:'Press Start 2P';font-size:8px;letter-spacing:1px}
-  .lgi{display:inline-flex;align-items:center;gap:5px;color:#cfcce6;font-family:'DotGothic16';font-size:14px}
-  .lgi i{width:9px;height:9px;display:inline-block;border-radius:2px;border:1px solid #06050f}
-  .lgi b{font-size:14px;line-height:1}
   .strow{display:flex;justify-content:space-between;padding:3px 0;
     border-bottom:1px dashed var(--line)}
   .strow:last-child{border-bottom:0}
@@ -366,8 +366,9 @@ const ARENA_CSS = `
     text-shadow:0 0 22px rgba(150,210,255,.9),3px 0 #59c3ff,-3px 0 #bdffff}
   .fz-sub{font-family:'Press Start 2P';font-size:clamp(8px,1.3vw,13px);color:#bfe9ff;letter-spacing:1px;text-shadow:0 0 10px rgba(150,210,255,.7)}
   .fz-overlay .fz-snow{inset:0;overflow:hidden}
-  .fz-snow i{position:absolute;top:-18px;color:#dff1ff;text-shadow:0 0 8px rgba(180,225,255,.9);animation:fzSnow linear infinite}
-  @keyframes fzSnow{to{transform:translateY(106vh) rotate(180deg)}}
+  /* in-place frost shimmer (NOT falling): suspended ice crystals that glint/breathe where they sit */
+  .fz-snow i{position:absolute;color:#dff1ff;text-shadow:0 0 8px rgba(180,225,255,.9);transform-origin:center;will-change:transform,opacity;animation:fzGlint ease-in-out infinite}
+  @keyframes fzGlint{0%,100%{opacity:.12;transform:scale(.55) rotate(-8deg)}50%{opacity:.95;transform:scale(1.12) rotate(8deg)}}
   .fz-lock{width:clamp(54px,7vw,88px);height:auto;filter:drop-shadow(0 0 18px rgba(150,210,255,.85))}
   .fz-count{font-family:'VT323';font-size:clamp(20px,3vw,34px);color:#eaf7ff;letter-spacing:2px;margin-top:6px;text-shadow:0 0 12px rgba(150,210,255,.85)}
   .fz-overlay.show>div{opacity:1}
@@ -403,9 +404,6 @@ const ARENA_CSS = `
   .pod .ps{font-family:'VT323';font-size:18px;color:#fff}
   .pod .pr{font-family:'Press Start 2P';font-size:10px;color:var(--dim)}
   .btn.rematch{margin-top:16px;pointer-events:auto;font-size:11px;padding:12px 22px;background:var(--amber);color:#1c1400;box-shadow:0 0 20px rgba(255,198,55,.6)}
-  .confetti{position:absolute;inset:0;overflow:hidden;pointer-events:none}
-  .confetti i{position:absolute;top:-22px;width:9px;height:14px;opacity:.95;border-radius:1px;animation:confFall linear infinite}
-  @keyframes confFall{0%{transform:translateY(-22px) rotate(0)}100%{transform:translateY(104vh) rotate(560deg)}}
 
   @media (max-width:900px){
     :host{overflow-y:auto;position:absolute}
@@ -473,14 +471,6 @@ const ARENA_BODY = `
         <div class="panel rank">
           <div class="phead accent-c"><span class="t">RANKING</span><span class="rank-tabs" id="rankTabs"><button data-rm="ad" class="on">A&amp;D</button><button data-rm="koth">KOTH</button><button data-rm="jeopardy">JEO</button></span></div>
           <div id="ranklist"></div>
-        </div>
-        <div class="panel">
-          <div class="phead accent-c"><span class="t">LEGEND</span></div>
-          <div id="stats" class="leg">
-            <div class="lgrow"><span class="lglbl">SERVICE</span><span class="lgi"><i style="background:#3dffb0"></i>OK</span><span class="lgi"><i style="background:#ffb020"></i>MUMBLE</span><span class="lgi"><i style="background:#4f4a78"></i>DOWN</span><span class="lgi"><i style="background:#9d6bff"></i>ERROR</span><span class="lgi"><i style="background:#ff3b5b"></i>PWNED</span></div>
-            <div class="lgrow"><span class="lglbl">TEAM</span><span class="lgi"><i style="background:var(--good)"></i>DEFENDED</span><span class="lgi"><i style="background:var(--bad)"></i>EXPLOITED</span><span class="lgi"><i style="background:var(--dimmer)"></i>SLA DOWN</span></div>
-            <div class="lgrow"><span class="lglbl">MAP</span><span class="lgi"><b style="color:var(--cyan)">⚔</b>ATTACK</span><span class="lgi"><b style="color:var(--amber)">♛</b>HILL</span><span class="lgi"><b style="color:var(--amber)">★</b>JEOPARDY</span></div>
-          </div>
         </div>
       </div>
     </div>
@@ -552,7 +542,6 @@ const ARENA_BODY = `
 
   <!-- ===== MATCH WINNER SCREEN ===== -->
   <div class="win-overlay" id="winOverlay">
-    <div class="confetti" id="confetti"></div>
     <div class="win-core">
       <div class="win-eyebrow">MATCH COMPLETE</div>
       <div class="champ"><div class="champ-por" id="champPor"></div><div class="crown">&#9819;</div></div>
@@ -713,11 +702,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   const logEl: any = $('log')
   const rankEl: any = $('ranklist')
 
-  function hexPts(cx: number, cy: number, r: number) {
-    const p: string[] = []
-    for (let i = 0; i < 6; i++) { const a = (60 * i - 90) * Math.PI / 180; p.push((cx + r * Math.cos(a)).toFixed(1) + ',' + (cy + r * Math.sin(a)).toFixed(1)) }
-    return p.join(' ')
-  }
 
   function buildArena() {
     svg.innerHTML = ''
@@ -728,7 +712,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
         <stop offset="60%" stop-color="#9d6bff"/><stop offset="100%" stop-color="#1a1040"/>
       </radialGradient>
       <filter id="soft"><feGaussianBlur stdDeviation="3"/></filter>
-      <filter id="glow"><feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>`
+      <filter id="glow"><feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      <radialGradient id="sparkG" cx="50%" cy="50%" r="60%"><stop offset="0%" stop-color="#ffffff"/><stop offset="45%" stop-color="#9fefff"/><stop offset="100%" stop-color="#27e3ff"/></radialGradient>
+      <filter id="coreblur"><feGaussianBlur stdDeviation="10"/></filter>`
     svg.appendChild(defs)
 
     const step = 360 / TEAMS.length, R = 470
@@ -753,16 +739,15 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       svg.appendChild(el('line', { x1: ix, y1: iy, x2: ox, y2: oy, stroke: t.color, 'stroke-width': 1, 'stroke-opacity': 0.16, 'stroke-dasharray': '4 6' }))
     })
 
-    const coreG = el('g', { filter: 'url(#glow)' })
-    // the pulsing core halo is drawn on the #fxbg canvas now (see drawAmbient)
-    coreG.appendChild(el('polygon', { points: hexPts(CX, CY, CORE), fill: 'url(#coreG)', stroke: '#cfe9ff', 'stroke-width': 2 }))
-    coreG.appendChild(el('polygon', { points: hexPts(CX, CY, CORE - 16), fill: 'none', stroke: '#0a0818', 'stroke-width': 2, 'stroke-opacity': 0.5 }))
+    // central SCORE core: a clean 4-point spark (replaces the hexagon) — glows + gently twinkles,
+    // tying into the jeopardy constellations. The pulsing halo is on #fxbg (see drawAmbient).
+    const coreG = el('g', {})
+    coreG.appendChild(el('path', { d: 'M500 368 Q516 484 632 500 Q516 516 500 632 Q484 516 368 500 Q484 484 500 368 Z', fill: 'url(#sparkG)', opacity: 0.4, filter: 'url(#coreblur)' }))
+    const spark = el('g', { class: 'core-twk', filter: 'url(#glow)' })
+    spark.appendChild(el('path', { d: 'M500 395 Q511 489 605 500 Q511 511 500 605 Q489 511 395 500 Q489 489 500 395 Z', fill: 'url(#sparkG)', stroke: '#eaffff', 'stroke-width': 1.5 }))
+    spark.appendChild(el('circle', { cx: CX, cy: CY, r: 18, fill: '#fff' }))
+    coreG.appendChild(spark)
     svg.appendChild(coreG)
-    const mk = (y: number, fill: string, fs: number, fam: string, txt: string) => {
-      const e = el('text', { x: CX, y, 'text-anchor': 'middle', fill, 'font-family': fam, 'font-size': fs, 'font-weight': 'bold' }); e.textContent = txt; return e
-    }
-    svg.appendChild(mk(CY - 10, '#0a0818', 15, "'Press Start 2P'", 'SCORE'))
-    svg.appendChild(mk(CY + 12, '#0a0818', 15, "'Press Start 2P'", 'CORE'))
 
     HILLS.forEach((h) => svg.appendChild(buildHill(h)))
     TEAMS.forEach((t) => svg.appendChild(buildBase(t)))
@@ -1270,27 +1255,19 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
 
   /* -------- scoreboard freeze + match winner -------- */
   const secsLeft = () => (gameEndMs != null ? Math.max(0, Math.round((gameEndMs - Date.now()) / 1000)) : 0)
+  // freeze ambience: suspended frost crystals that glint IN PLACE (no falling) — a frozen field
+  // that matches the "scoreboard FROZEN / locked" state.
   function spawnSnow() {
     const c: any = $('fzSnow'); if (!c) return; c.innerHTML = ''
-    for (let i = 0; i < 28; i++) {
-      const s = document.createElement('i'); s.textContent = '❄'
-      s.style.left = rng(0, 100) + '%'; s.style.fontSize = ((rng(8, 20)) | 0) + 'px'
-      s.style.animationDuration = rng(1.6, 3).toFixed(2) + 's'; s.style.animationDelay = rng(0, 1).toFixed(2) + 's'
+    const glyphs = ['❄', '❅', '✦', '❄', '❅']
+    for (let i = 0; i < 26; i++) {
+      const s = document.createElement('i'); s.textContent = pick(glyphs)
+      s.style.left = rng(2, 98) + '%'; s.style.top = rng(2, 96) + '%'
+      s.style.fontSize = ((rng(7, 20)) | 0) + 'px'
+      s.style.animationDuration = rng(2.2, 4.6).toFixed(2) + 's'; s.style.animationDelay = rng(0, 3).toFixed(2) + 's'
       c.appendChild(s)
     }
   }
-  function spawnConfetti() {
-    const c: any = $('confetti'); if (!c) return; c.innerHTML = ''
-    const cols = ['#ffc637', '#ff39a8', '#27e3ff', '#b9ff42', '#fff', '#ff7a3a', '#9d6bff']
-    for (let i = 0; i < 54; i++) {
-      const s = document.createElement('i')
-      s.style.left = rng(0, 100) + '%'; s.style.background = pick(cols)
-      s.style.animationDelay = rng(0, 3).toFixed(2) + 's'; s.style.animationDuration = rng(2.4, 4.8).toFixed(2) + 's'
-      s.style.width = (rng(6, 11) | 0) + 'px'; s.style.height = (rng(10, 18) | 0) + 'px'
-      c.appendChild(s)
-    }
-  }
-  const clearConfetti = () => { const c: any = $('confetti'); if (c) c.innerHTML = '' }
   function enterFreeze() {
     if (frozen) return; frozen = true
     TEAMS.forEach((t) => { t.shown = t.score; t.shownSla = t.sla; t.shownAtk = t.atk; t.shownDef = t.def })
@@ -1325,7 +1302,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
          <div class="pn" style="color:${t.color}">${esc(t.name)}</div><div class="ps">${t.score}</div></div>`).join('')
     const ov = $('winOverlay'); if (ov) ov.classList.add('show')
     if (preview) { const rb = $('rematchBtn'); if (rb) rb.style.display = '' }
-    spawnConfetti(); snd.sfxVictory()
+    snd.sfxVictory()
     addLog('MATCH', 'sys', `<span class="em">MATCH OVER</span> :: <span class="who">${esc(champ.name)}</span> wins with <span class="em">${champ.score}</span>`)
   }
   function resetMatch() {
@@ -1339,7 +1316,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     HILLS.forEach((h) => { h.owner = null; renderHill(h) })
     totalFlags = 0; totalEvents = 0
     renderAllScores(); refreshRank(); refreshStats()
-    const ov = $('winOverlay'); if (ov) ov.classList.remove('show'); clearConfetti()
+    const ov = $('winOverlay'); if (ov) ov.classList.remove('show')
     addLog('SYS', 'sys', `<span class="em">REMATCH</span> :: arena reset`)
   }
   // Coalesce the heavy DOM rebuilds: events just mark dirty (refreshRank), and the rAF loop
