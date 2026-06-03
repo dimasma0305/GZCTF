@@ -131,10 +131,6 @@ const ARENA_CSS = `
   .arena-note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     text-align:center;font-family:'Press Start 2P';font-size:11px;color:var(--dim);
     line-height:2;padding:20px;z-index:8}
-  .corner-tag{position:absolute;font-family:'Press Start 2P';font-size:8px;
-    color:var(--dim);z-index:6;opacity:.7}
-  .ct-tl{top:6px;left:6px}.ct-tr{top:6px;right:42px;text-align:right}
-  .ct-bl{bottom:6px;left:6px}.ct-br{bottom:6px;right:6px;text-align:right}
   /* ---- jeopardy constellation overlay (side bands beside the square wheel) ---- */
   #jeop{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:4}
   #jeopSpace{display:none}
@@ -410,7 +406,6 @@ const ARENA_CSS = `
     .btn{font-size:7px;padding:7px 8px}
     .arena{width:96vw}
     #log{font-size:13px;height:25vh}
-    .corner-tag{font-size:7px}
     .sp{display:none}
   }
 `
@@ -425,7 +420,6 @@ const ARENA_BODY = `
     <div class="topbar">
       <div class="brand">
         <div class="logo" id="brandLogo">CYBER<b>A/D</b>.ARENA</div>
-        <div class="mode">A/D + KOTH</div>
       </div>
       <div class="topright">
         <div class="matchpill" id="matchPill">T- --:--</div>
@@ -441,9 +435,6 @@ const ARENA_BODY = `
         <div id="log"></div>
       </div>
       <div class="panel arena-wrap accent-v">
-        <div class="corner-tag ct-tl">LIVE MAP</div>
-        <div class="corner-tag ct-tr" id="teamCount">0 TEAMS</div>
-        <div class="corner-tag ct-bl" id="netStat">CONNECTING</div>
         <button id="fsBtn" class="fs-btn" title="Fullscreen battle map" aria-label="Fullscreen">⛶</button>
         <svg id="jeop" preserveAspectRatio="xMidYMid meet"></svg>
         <div class="arena" id="arena">
@@ -1208,8 +1199,14 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     makeReverb()
     ;[880, 1046, 1318, 1568].forEach((f, i) => tone({ type: 'sine', f, f2: f, dur: 0.22, vol: 0.07, delay: i * 0.05, rev: 0.4 }))
   }
+  function sfxSolve() { // a jeopardy challenge solved (laser hits the star) — bright chime
+    if (!soundOn || !audio()) return
+    ;[784, 1046, 1318].forEach((f, i) => tone({ type: 'triangle', f, f2: f, dur: 0.13, vol: 0.11, delay: i * 0.05 }))
+    noiseBurst({ type: 'highpass', f: 4500, fEnd: 9000, dur: 0.16, vol: 0.045, delay: 0.05 })
+  }
   function resolveFlag(atkr: any, vic: any, svc: any, pts: number, isFB: boolean) {
-    if (!isFB) sfxAttack()
+    // A&D capture → attack SFX at impact; jeopardy solve plays sfxSolve at the laser instead
+    if (!isFB && vic) sfxAttack()
     // A&D capture credits the attack/defense board; a jeopardy solve (no victim)
     // credits the jeopardy board instead. Both are corrected by the next poll.
     if (vic) { atkr.score += pts; atkr.atk++ } else { atkr.jpScore = (atkr.jpScore || 0) + pts; atkr.jpSolved = (atkr.jpSolved || 0) + 1 }
@@ -1669,7 +1666,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     // normal solve — A&D shoots the victim; a jeopardy solve lasers the actual
     // challenge star in the constellation (falls back to the CORE if not mapped).
     if (vic) fireShot(atkr, vic, atkr.color)
-    else if (!jeop.solveByTitle(atkr.x, atkr.y, f.challengeTitle || '', { name: atkr.name, color: atkr.color })) fireShot(atkr, { x: CX, y: CY }, atkr.color)
+    else { if (!jeop.solveByTitle(atkr.x, atkr.y, f.challengeTitle || '', { name: atkr.name, color: atkr.color })) fireShot(atkr, { x: CX, y: CY }, atkr.color); sfxSolve() }
     setTimeout(() => { if (!killed) resolveFlag(atkr, vic, svc, pts, false) }, 320 / Math.max(speed, 1) + 120)
   }
   // Hill ownership is driven by BOTH the WS koth frame (instant) and the 15s poll
@@ -1714,7 +1711,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const b: any = $('liveBadge'); if (!b) return
     b.classList.toggle('off', !connected)
     b.childNodes[1].nodeValue = connected ? 'LIVE' : 'OFFLINE'
-    const ns = $('netStat'); if (ns) ns.textContent = connected ? 'LIVE FEED' : 'RECONNECTING'
   }
   function connectWS() {
     if (killed) return
@@ -1748,7 +1744,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       ad = await fetchJSON(`/api/Game/${gameId}/Ad/Scoreboard`)
     } catch (e) {
       if (killed) return
-      const ns = $('netStat'); if (ns) ns.textContent = 'NO A&D DATA'
       const lb = $('liveBadge'); if (lb) lb.childNodes[1].nodeValue = 'NO DATA'
       showNote('NO LIVE A&amp;D DATA<br/>this game has no Attack &amp; Defense<br/>or King of the Hill challenges')
       addLog('SYS', 'sys', `<span class="em">NO A&amp;D / KOTH SCOREBOARD</span> for this game`)
@@ -1767,7 +1762,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     TEAMS.forEach((t) => t.svc.forEach((sv: any) => { prevSvcState[t.id + ':' + sv.cid] = sv.status }))
 
     buildArena()
-    $('teamCount').textContent = TEAMS.length + ' TEAMS'
     refreshRank(); refreshStats()
     sizeCanvas()
     if (ad.isFrozenView) enterFreeze() // board already frozen when we connect
@@ -1841,7 +1835,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     liveRoundEndsAt = null; round = 1; tickLeft = 30; gameEndMs = Date.now() + MATCH_SECONDS * 1000
     totalFlags = 0; totalEvents = 0
     buildArena()
-    $('teamCount').textContent = TEAMS.length + ' TEAMS'
     TEAMS.forEach((t) => renderSvc(t))
     rankInit = false; refreshRank(); refreshStats(); sizeCanvas()
     addLog('SYS', 'sys', `<span class="em">PREVIEW REBUILT</span> :: ${TEAMS.length} teams · ${SERVICES.length} A&amp;D · ${HILLS.length} KotH · ${cfgJeop} jeopardy`)
@@ -1903,6 +1896,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const ch = hit ? hit.name : pick(DEMO_JP)
     const pts = hit ? hit.base : Math.floor(rng(50, 150))
     if (!hit) fireShot(atkr, { x: CX, y: CY }, atkr.color)
+    sfxSolve()
     setTimeout(() => {
       if (killed) return
       atkr.jpScore = (atkr.jpScore || 0) + pts; atkr.jpSolved = (atkr.jpSolved || 0) + 1
@@ -1931,9 +1925,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     if (title) $('brandLogo').textContent = title.toUpperCase().slice(0, 22)
     liveRoundEndsAt = null; round = 1; tickLeft = 30; gameEndMs = Date.now() + MATCH_SECONDS * 1000
     buildArena()
-    $('teamCount').textContent = TEAMS.length + ' TEAMS'
     const lb: any = $('liveBadge'); if (lb) { lb.classList.remove('off'); lb.style.color = 'var(--amber)'; lb.childNodes[1].nodeValue = 'PREVIEW' }
-    const ns = $('netStat'); if (ns) ns.textContent = 'PREVIEW (SIMULATED)'
     const fbb: any = $('fbBtns'); if (fbb) fbb.style.display = ''
     const cfg: any = $('cfgBtns'); if (cfg) cfg.style.display = ''
     refreshRank(); refreshStats()
