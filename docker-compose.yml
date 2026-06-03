@@ -51,6 +51,15 @@ services:
       - CheatDetectionConfig__LogContainerAccess=true
       - CheatDetectionConfig__DelayedSubmissionThresholdMinutes=1
       - RequestLogging=true
+      # --- Observability (TEMP: bottleneck investigation) ---
+      # GZCTF ships full OpenTelemetry (ASP.NET/EF/Npgsql/Redis spans + runtime
+      # metrics) + a Prometheus exporter on :3000, gated by this Telemetry section.
+      # Push traces+metrics+logs to the all-in-one otel-lgtm (Grafana/Tempo/Loki/Prom).
+      - Telemetry__Enable=true
+      - Telemetry__Prometheus__Enable=true
+      - Telemetry__OpenTelemetry__Enable=true
+      - Telemetry__OpenTelemetry__Protocol=Grpc
+      - Telemetry__OpenTelemetry__EndpointUri=http://otel-lgtm:4317
       - ForwardedOptions__ForwardedHeaders=1
       - ForwardedOptions__ForwardLimit=1
       - ForwardedOptions__TrustedNetworks__0=172.0.4.0/24
@@ -194,6 +203,16 @@ services:
 
   postgres:
     image: postgres:16-alpine
+    # TEMP (bottleneck investigation): load pg_stat_statements so we can rank the
+    # slowest queries by total exec time. Requires a postgres restart + CREATE EXTENSION.
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_preload_libraries=pg_stat_statements"
+      - "-c"
+      - "pg_stat_statements.track=all"
+      - "-c"
+      - "pg_stat_statements.max=10000"
     environment:
       - POSTGRES_DB=gzctf
       - POSTGRES_USER=gzctf
@@ -206,6 +225,16 @@ services:
     command: redis-server --requirepass gzctf
     volumes:
       - redis_data:/data
+
+  # TEMP (bottleneck investigation): Grafana's all-in-one OTLP backend — receives
+  # OTLP push from gzctf and stores traces (Tempo) / metrics (Prometheus) / logs
+  # (Loki), all explorable in Grafana. Remove this + the Telemetry__* env after.
+  otel-lgtm:
+    image: grafana/otel-lgtm
+    ports:
+      - "127.0.0.1:3001:3000"   # Grafana UI → http://127.0.0.1:3001 (explore traces/metrics/logs)
+    networks:
+      - default
 
 volumes:
   postgres_data:

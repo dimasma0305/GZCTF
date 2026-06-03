@@ -257,8 +257,16 @@ const ARENA_CSS = `
     background:repeating-conic-gradient(from 0deg at 50% 47%,rgba(255,255,255,0) 0deg 3.4deg,rgba(255,90,110,.24) 3.4deg 4deg);
     -webkit-mask:radial-gradient(circle at 50% 47%,transparent 11%,#000 40%,transparent 78%);
             mask:radial-gradient(circle at 50% 47%,transparent 11%,#000 40%,transparent 78%)}
-  .fb-splat{left:50%;top:47%;width:44vmin;height:44vmin;transform:translate(-50%,-50%);
-    background:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20200%20200'%3E%3Cg%20fill='%23a30f24'%3E%3Ccircle%20cx='100'%20cy='100'%20r='44'/%3E%3Ccircle%20cx='58'%20cy='66'%20r='15'/%3E%3Ccircle%20cx='150'%20cy='78'%20r='13'/%3E%3Ccircle%20cx='70'%20cy='150'%20r='17'/%3E%3Ccircle%20cx='142'%20cy='146'%20r='12'/%3E%3Ccircle%20cx='38'%20cy='118'%20r='8'/%3E%3Ccircle%20cx='168'%20cy='120'%20r='7'/%3E%3Ccircle%20cx='112'%20cy='36'%20r='9'/%3E%3Ccircle%20cx='30'%20cy='80'%20r='5'/%3E%3Ccircle%20cx='175'%20cy='150'%20r='5'/%3E%3C/g%3E%3Ccircle%20cx='100'%20cy='100'%20r='28'%20fill='%23d11630'/%3E%3C/svg%3E") center/contain no-repeat}
+  /* Artistic radial RED-LIQUID splash from center — a bright core with tapering liquid tendrils
+     + flung droplets, revealed center-out by a growing clip-path. No drips/gore. Composited only. */
+  .fb-splat{left:50%;top:47%;width:150vmin;height:150vmin;transform:translate(-50%,-50%) scale(.55);
+    background:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20600%20600'%3E%3Cdefs%3E%3CradialGradient%20id='g'%20cx='50%25'%20cy='50%25'%20r='58%25'%3E%3Cstop%20offset='0'%20stop-color='%23ff5a6e'/%3E%3Cstop%20offset='.35'%20stop-color='%23e8122f'/%3E%3Cstop%20offset='.72'%20stop-color='%23bf0f24'/%3E%3Cstop%20offset='1'%20stop-color='%238c0c1d'/%3E%3C/radialGradient%3E%3C/defs%3E%3Cg%20fill='url(%23g)'%3E%3Cellipse%20cx='300'%20cy='300'%20rx='52'%20ry='46'/%3E%3Cellipse%20cx='286'%20cy='310'%20rx='30'%20ry='26'/%3E%3Cellipse%20cx='316'%20cy='292'%20rx='26'%20ry='22'/%3E%3Cpath%20d='M340.2%20313.9%20Q450.7%20304.6%20541.1%20297%20Q450.6%20291.7%20339.8%20285.1%20Z'/%3E%3Cpath%20d='M333.8%20324.6%20Q436.8%20353.6%20521.1%20377.4%20Q440.4%20343.4%20341.7%20301.9%20Z'/%3E%3Cpath%20d='M321.4%20336.1%20Q423.2%20418.1%20506.5%20485.3%20Q430.7%20409.7%20338.2%20317.4%20Z'/%3E%3Cpath%20d='M302.9%20340.7%20Q338.4%20450.3%20367.5%20539.9%20Q345.6%20448.3%20318.8%20336.3%20Z'/%3E%3Cpath%20d='M291.8%20339.8%20Q293.7%20425.2%20295.3%20495%20Q300.2%20425.3%20306.3%20340.2%20Z'/%3E%3Cpath%20d='M270.3%20329%20Q216.5%20433.1%20172.5%20518.3%20Q225.1%20438.1%20289.3%20340.1%20Z'/%3E%3Cpath%20d='M258.3%20307.1%20Q134.2%20383.3%2032.7%20445.6%20Q140.1%20394.1%20271.4%20331.2%20Z'/%3E%3Cpath%20d='M258%20297.8%20Q190.7%20323.4%20135.7%20344.5%20Q193.8%20334.9%20264.8%20323.1%20Z'/%3E%3Cpath%20d='M264.4%20280.5%20Q136.7%20241%2032.3%20208.7%20Q134.7%20247%20259.9%20293.7%20Z'/%3E%3Cpath%20d='M276%20267.1%20Q201.9%20203.3%20141.2%20151.1%20Q197.2%20208.3%20265.6%20278.2%20Z'/%3E%3Cpath%20d='M288.3%20259%20Q227.2%20189.1%20177.2%20131.9%20Q216.5%20196.9%20264.5%20276.4%20Z'/%3E%3Cpath%20d='M304.8%20258.1%20Q283%20190.4%20265.1%20135%20Q271.2%20192.9%20278.6%20263.6%20Z'/%3E%3Cpath%20d='M317.1%20263%20Q341.6%20140.9%20361.6%2041.1%20Q334.5%20139.3%20301.4%20259.2%20Z'/%3E%3Cpath%20d='M336.2%20277.4%20Q383.3%20203.2%20421.8%20142.5%20Q372.8%20195.1%20312.8%20259.3%20Z'/%3E%3Cpath%20d='M341.8%20293.2%20Q424%20240.3%20491.2%20197%20Q418.1%20229.3%20328.7%20268.9%20Z'/%3E%3C/g%3E%3Cg%20fill='%23ff3b5b'%3E%3Ccircle%20cx='547.8'%20cy='296.9'%20r='6.9'/%3E%3Ccircle%20cx='530.4'%20cy='378.4'%20r='5.5'/%3E%3Ccircle%20cx='508.3'%20cy='493.2'%20r='8.8'/%3E%3Ccircle%20cx='368.1'%20cy='547'%20r='4.3'/%3E%3Ccircle%20cx='295.1'%20cy='501.4'%20r='8.2'/%3E%3Ccircle%20cx='168.1'%20cy='524'%20r='5.4'/%3E%3Ccircle%20cx='24.8'%20cy='448.1'%20r='5.1'/%3E%3Ccircle%20cx='129.9'%20cy='347.2'%20r='5.9'/%3E%3Ccircle%20cx='28.4'%20cy='205.2'%20r='6.3'/%3E%3Ccircle%20cx='135.2'%20cy='144.5'%20r='5.3'/%3E%3Ccircle%20cx='171.5'%20cy='129.3'%20r='5.2'/%3E%3Ccircle%20cx='264.3'%20cy='127.5'%20r='6.2'/%3E%3Ccircle%20cx='363.6'%20cy='38'%20r='6.1'/%3E%3Ccircle%20cx='428'%20cy='138.5'%20r='8.4'/%3E%3Ccircle%20cx='498.6'%20cy='195.6'%20r='8.9'/%3E%3Ccircle%20cx='333'%20cy='440.2'%20r='5.1'/%3E%3Ccircle%20cx='228'%20cy='433.1'%20r='2.3'/%3E%3Ccircle%20cx='473.6'%20cy='410.4'%20r='3'/%3E%3Ccircle%20cx='166.8'%20cy='201.6'%20r='3.8'/%3E%3Ccircle%20cx='480.8'%20cy='252.5'%20r='4.3'/%3E%3Ccircle%20cx='386.7'%20cy='203.5'%20r='2.6'/%3E%3Ccircle%20cx='510.1'%20cy='163.8'%20r='3'/%3E%3Ccircle%20cx='387'%20cy='518.8'%20r='5.8'/%3E%3Ccircle%20cx='390.7'%20cy='560.2'%20r='5.5'/%3E%3Ccircle%20cx='160.7'%20cy='194'%20r='2.4'/%3E%3Ccircle%20cx='569.7'%20cy='366.9'%20r='3'/%3E%3Ccircle%20cx='259.5'%20cy='162'%20r='5.3'/%3E%3Ccircle%20cx='176.1'%20cy='214.1'%20r='2.7'/%3E%3Ccircle%20cx='280'%20cy='193.8'%20r='2.9'/%3E%3Ccircle%20cx='60.7'%20cy='206.4'%20r='4.5'/%3E%3Ccircle%20cx='249.2'%20cy='564.5'%20r='2.8'/%3E%3Ccircle%20cx='445.4'%20cy='315.2'%20r='3.8'/%3E%3Ccircle%20cx='419.3'%20cy='347.6'%20r='3.5'/%3E%3Ccircle%20cx='192.1'%20cy='247.4'%20r='3.4'/%3E%3Ccircle%20cx='517.8'%20cy='122'%20r='4.6'/%3E%3Ccircle%20cx='225.6'%20cy='107.8'%20r='2.6'/%3E%3Ccircle%20cx='396'%20cy='321.5'%20r='5.6'/%3E%3Ccircle%20cx='215.7'%20cy='35.2'%20r='2.1'/%3E%3Ccircle%20cx='177.6'%20cy='159.1'%20r='4.9'/%3E%3Ccircle%20cx='180.5'%20cy='558.6'%20r='2.3'/%3E%3Ccircle%20cx='74.8'%20cy='232.9'%20r='5.6'/%3E%3C/g%3E%3Ccircle%20cx='300'%20cy='300'%20r='20'%20fill='%23ff7283'/%3E%3C/svg%3E") center/contain no-repeat;
+    filter:drop-shadow(0 0 22px rgba(232,18,47,.5));will-change:transform,opacity,clip-path;
+    -webkit-clip-path:circle(0% at 50% 50%);clip-path:circle(0% at 50% 50%)}
+  .fb-splat2{left:50%;top:47%;width:178vmin;height:178vmin;transform:translate(-50%,-50%) scale(.7);
+    background:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20600%20600'%3E%3Cg%20fill='%23e8122f'%3E%3Ccircle%20cx='107.3'%20cy='239.9'%20r='6.3'/%3E%3Ccircle%20cx='245.6'%20cy='519.9'%20r='4'/%3E%3Ccircle%20cx='44.7'%20cy='449.9'%20r='3'/%3E%3Ccircle%20cx='127.3'%20cy='362.6'%20r='4.1'/%3E%3Ccircle%20cx='499.4'%20cy='298.4'%20r='5.2'/%3E%3Ccircle%20cx='72.8'%20cy='425.6'%20r='4.5'/%3E%3Ccircle%20cx='403.1'%20cy='488.8'%20r='4.3'/%3E%3Ccircle%20cx='362.2'%20cy='74'%20r='3.4'/%3E%3Ccircle%20cx='210.3'%20cy='127.1'%20r='4.8'/%3E%3Ccircle%20cx='339.8'%20cy='507.8'%20r='6'/%3E%3Ccircle%20cx='38.4'%20cy='274.1'%20r='5.9'/%3E%3Ccircle%20cx='89.3'%20cy='171.6'%20r='4.3'/%3E%3Ccircle%20cx='103.3'%20cy='120'%20r='2.9'/%3E%3Ccircle%20cx='489.5'%20cy='221.7'%20r='3.1'/%3E%3Ccircle%20cx='418.2'%20cy='462.7'%20r='2.8'/%3E%3Ccircle%20cx='130'%20cy='427.1'%20r='5.4'/%3E%3Ccircle%20cx='16.1'%20cy='360.5'%20r='5.5'/%3E%3Ccircle%20cx='178.6'%20cy='553.7'%20r='5.6'/%3E%3Ccircle%20cx='554.7'%20cy='247'%20r='6.8'/%3E%3Ccircle%20cx='353.2'%20cy='484.2'%20r='6.9'/%3E%3Ccircle%20cx='585.8'%20cy='339.5'%20r='6.6'/%3E%3Ccircle%20cx='413.4'%20cy='430.1'%20r='6.6'/%3E%3C/g%3E%3Cg%20fill='%23ff5a6e'%3E%3Ccircle%20cx='534'%20cy='239.5'%20r='3.8'/%3E%3Ccircle%20cx='310'%20cy='137.2'%20r='2'/%3E%3Ccircle%20cx='131'%20cy='124.7'%20r='4.4'/%3E%3Ccircle%20cx='179.4'%20cy='288.7'%20r='2.4'/%3E%3Ccircle%20cx='155.4'%20cy='347.9'%20r='2.1'/%3E%3Ccircle%20cx='366.9'%20cy='477.8'%20r='2.3'/%3E%3Ccircle%20cx='408.7'%20cy='393.2'%20r='2.1'/%3E%3Ccircle%20cx='350.4'%20cy='64.1'%20r='2.5'/%3E%3Ccircle%20cx='138.4'%20cy='119'%20r='2.6'/%3E%3Ccircle%20cx='178.2'%20cy='510.7'%20r='3.9'/%3E%3Ccircle%20cx='132.7'%20cy='140.5'%20r='3.4'/%3E%3Ccircle%20cx='214.4'%20cy='498.3'%20r='4'/%3E%3C/g%3E%3C/svg%3E") center/contain no-repeat;
+    filter:drop-shadow(0 0 12px rgba(255,90,110,.5));will-change:transform,opacity,clip-path;
+    -webkit-clip-path:circle(0% at 50% 50%);clip-path:circle(0% at 50% 50%)}
   .fb-flash{inset:0;background:#fff}
   .fb-overlay .fb-core{inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.4vh;text-align:center;opacity:1}
   .fb-title{font-family:'Press Start 2P';font-size:clamp(26px,7vw,86px);color:#fff;line-height:1;opacity:0;
@@ -269,7 +277,8 @@ const ARENA_CSS = `
   .fb-overlay.play .fb-bar.t{animation:fbBarT 5s ease-out forwards}
   .fb-overlay.play .fb-bar.b{animation:fbBarB 5s ease-out forwards}
   .fb-overlay.play .fb-rays{animation:fbRays 5s ease-out forwards}
-  .fb-overlay.play .fb-splat{animation:fbSplat 5s cubic-bezier(.2,1.4,.3,1) forwards}
+  .fb-overlay.play .fb-splat{animation:fbSplat 5s cubic-bezier(.18,.9,.25,1) forwards}
+  .fb-overlay.play .fb-splat2{animation:fbSplat2 5s cubic-bezier(.2,.85,.3,1) forwards}
   .fb-overlay.play .fb-flash{animation:fbFlash 5s linear forwards}
   .fb-overlay.play .fb-title{animation:fbTitle 5s cubic-bezier(.2,1.5,.3,1) forwards}
   .fb-overlay.play .fb-sub{animation:fbSub 5s ease-out forwards}
@@ -277,7 +286,22 @@ const ARENA_CSS = `
   @keyframes fbBarT{0%{opacity:1;transform:translateY(-100%)}9%{transform:translateY(0)}84%{opacity:1;transform:translateY(0)}100%{opacity:1;transform:translateY(-100%)}}
   @keyframes fbBarB{0%{opacity:1;transform:translateY(100%)}9%{transform:translateY(0)}84%{opacity:1;transform:translateY(0)}100%{opacity:1;transform:translateY(100%)}}
   @keyframes fbRays{0%,12%{opacity:0}16%{opacity:.7}82%{opacity:.45}100%{opacity:0}}
-  @keyframes fbSplat{0%,12%{opacity:0;transform:translate(-50%,-50%) scale(.25)}16%{opacity:.6;transform:translate(-50%,-50%) scale(1.08)}22%{transform:translate(-50%,-50%) scale(1)}82%{opacity:.5}100%{opacity:0;transform:translate(-50%,-50%) scale(1.06)}}
+  /* radial splash: clip circle bursts outward from center w/ a scale punch, settles, holds,
+     then fades drifting a touch wider (the splash dissipating). transform/opacity/clip only. */
+  @keyframes fbSplat{
+    0%,11%{opacity:0;transform:translate(-50%,-50%) scale(.55);-webkit-clip-path:circle(0% at 50% 50%);clip-path:circle(0% at 50% 50%)}
+    14%{opacity:1;transform:translate(-50%,-50%) scale(1.12);-webkit-clip-path:circle(26% at 50% 50%);clip-path:circle(26% at 50% 50%)}
+    22%{transform:translate(-50%,-50%) scale(1.03);-webkit-clip-path:circle(85% at 50% 50%);clip-path:circle(85% at 50% 50%)}
+    28%{transform:translate(-50%,-50%) scale(1);-webkit-clip-path:circle(150% at 50% 50%);clip-path:circle(150% at 50% 50%)}
+    78%{opacity:1;transform:translate(-50%,-50%) scale(1.02)}
+    100%{opacity:0;transform:translate(-50%,-50%) scale(1.12);-webkit-clip-path:circle(150% at 50% 50%);clip-path:circle(150% at 50% 50%)}}
+  /* secondary spray: a beat later, splashes a touch wider/lighter, holds, fades. */
+  @keyframes fbSplat2{
+    0%,15%{opacity:0;transform:translate(-50%,-50%) scale(.7);-webkit-clip-path:circle(0% at 50% 50%);clip-path:circle(0% at 50% 50%)}
+    20%{opacity:.9;transform:translate(-50%,-50%) scale(1.06);-webkit-clip-path:circle(60% at 50% 50%);clip-path:circle(60% at 50% 50%)}
+    28%{opacity:.85;transform:translate(-50%,-50%) scale(1);-webkit-clip-path:circle(150% at 50% 50%);clip-path:circle(150% at 50% 50%)}
+    78%{opacity:.8}
+    100%{opacity:0;transform:translate(-50%,-50%) scale(1.14);-webkit-clip-path:circle(150% at 50% 50%);clip-path:circle(150% at 50% 50%)}}
   @keyframes fbFlash{0%,11%{opacity:0}13%{opacity:.95}16%{opacity:0}18%{opacity:.5}21%{opacity:0}100%{opacity:0}}
   @keyframes fbTitle{0%{opacity:0;transform:scale(4.2)}11%{opacity:.25}15%{opacity:1;transform:scale(.92)}19%{transform:scale(1.05)}24%{transform:scale(1)}45%{transform:scale(1.015)}65%{transform:scale(1)}80%{opacity:1}100%{opacity:0;transform:scale(1.7)}}
   @keyframes fbSub{0%,21%{opacity:0;transform:translateY(16px)}29%{opacity:1;transform:translateY(0)}82%{opacity:1}100%{opacity:0}}
@@ -490,6 +514,7 @@ const ARENA_BODY = `
     <div class="fb-dark"></div>
     <div class="fb-rays"></div>
     <div class="fb-splat"></div>
+    <div class="fb-splat2"></div>
     <div class="fb-bar t"></div>
     <div class="fb-bar b"></div>
     <div class="fb-core">
