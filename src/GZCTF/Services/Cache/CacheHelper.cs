@@ -1,4 +1,5 @@
-﻿using System.Diagnostics.CodeAnalysis;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading.Channels;
 using GZCTF.Services.Cache.Handlers;
 using MemoryPack;
@@ -13,6 +14,18 @@ public class CacheHelper(
     ChannelWriter<CacheRequest> channelWriter)
 {
     /// <summary>
+    /// Per-cache-key, in-process single-flight gate. The L1 <see cref="IMemoryCache"/> entry
+    /// expires every few seconds, and plain <c>MemoryCache.GetOrCreateAsync</c> does NOT
+    /// dedupe concurrent factory calls — so on each expiry a thundering herd of concurrent
+    /// viewers would all run the expensive distributed-cache + rebuild path at once (this is
+    /// the cold-start / refresh stampede that caused timeouts under load). Collapsing the herd
+    /// to a single rebuild per key, with the rest awaiting the gate and then reading the freshly
+    /// populated L1 entry, is the dominant fix for a single-instance deployment. Keys are bounded
+    /// (a handful per game), so the dictionary never grows unbounded.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> SingleFlight = new();
+
+    /// <summary>
     /// Get or create cache, if cache not exists will block.
     /// Use local memory cache first to reduce the pressure on distributed cache.
     /// Use CacheMaker and CacheRequest to replace handling longer time operation
@@ -24,11 +37,28 @@ public class CacheHelper(
         MemoryCacheEntryOptions? memoryCacheOptions = null,
         CancellationToken token = default)
     {
-        var value = await memoryCache.GetOrCreateAsync<TResult>(key,
-            _ => GetOrCreateFromDistributedCacheAsync(logger, key, func, token),
-            memoryCacheOptions ?? CommonMemoryCacheOptions);
+        // Fast path: serve a warm L1 hit with no lock at all.
+        if (memoryCache.TryGetValue(key, out TResult? cached) && cached is not null)
+            return cached;
 
-        return value ?? await GetOrCreateFromDistributedCacheAsync(logger, key, func, token);
+        // Slow path: single-flight per key so a refresh/cold-start stampede rebuilds ONCE.
+        var gate = SingleFlight.GetOrAdd(key, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(token);
+        try
+        {
+            // Double-check: a holder we queued behind may have just populated L1.
+            if (memoryCache.TryGetValue(key, out cached) && cached is not null)
+                return cached;
+
+            var value = await GetOrCreateFromDistributedCacheAsync(logger, key, func, token);
+            if (value is not null) // don't negatively-cache a failed/transient build
+                memoryCache.Set(key, value, memoryCacheOptions ?? CommonMemoryCacheOptions);
+            return value;
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     /// <summary>
