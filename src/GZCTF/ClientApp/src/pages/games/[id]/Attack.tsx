@@ -903,7 +903,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   // of animating the SVG DOM every frame: rotating recon rings, the core-halo pulse, and
   // a soft breathing aura behind each (static, crisp) SVG avatar. This is what keeps the
   // arena smooth — the SVG now only repaints on real events (scores, status, ownership).
-  let fxClock = 0
+  let fxClock = 0, ambientTick = 0
   // Pre-render each team-colour glow once and blit it, instead of building a radial
   // gradient every frame (gradient creation is the only pricey per-frame canvas op).
   const glowCache: Record<string, any> = {}
@@ -920,6 +920,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     return c
   }
   function drawAmbient(T: number) {
+    if (frozen || ambientTick++ % 2) return // ~30fps ambient; skip entirely while frozen (overlay covers it)
     const TAU = 6.2832
     ctxbg.clearRect(0, 0, 1000, 1000)
     // two counter-rotating dashed recon rings
@@ -979,22 +980,26 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     fxClock += dt
     drawAmbient(fxClock)
     ctx.clearRect(0, 0, 1000, 1000)
+    ctx.lineCap = 'round'
     for (let i = shots.length - 1; i >= 0; i--) {
       const s = shots[i]; s.t += s.sp * dt * 60
       const x = bez(s.fx, s.cx, s.tx, Math.min(s.t, 1))
       const y = bez(s.fy, s.cy, s.ty, Math.min(s.t, 1))
       s.trail.push({ x, y }); if (s.trail.length > 14) s.trail.shift()
-      ctx.lineCap = 'round'
-      // a rejected-flag tracer ('miss') is dimmer + thinner and fizzles with no impact
-      const aMul = s.miss ? 0.32 : 0.9, wMul = s.miss ? 0.45 : 1
-      for (let j = 1; j < s.trail.length; j++) {
-        ctx.globalAlpha = (j / s.trail.length) * aMul
-        ctx.strokeStyle = s.col; ctx.lineWidth = (2 + (j / s.trail.length) * 5) * wMul
-        ctx.beginPath(); ctx.moveTo(s.trail[j - 1].x, s.trail[j - 1].y); ctx.lineTo(s.trail[j].x, s.trail[j].y); ctx.stroke()
+      const tr = s.trail, n = tr.length, aMul = s.miss ? 0.32 : 0.9, wMul = s.miss ? 0.45 : 1
+      ctx.strokeStyle = s.col
+      // ONE soft full-trail path + one brighter head segment (was ~13 per-segment strokes)
+      if (n >= 2) {
+        ctx.beginPath(); ctx.moveTo(tr[0].x, tr[0].y); for (let j = 1; j < n; j++) ctx.lineTo(tr[j].x, tr[j].y)
+        ctx.globalAlpha = 0.38 * aMul; ctx.lineWidth = 3 * wMul; ctx.stroke()
+        ctx.beginPath(); ctx.moveTo(tr[n - 2].x, tr[n - 2].y); ctx.lineTo(tr[n - 1].x, tr[n - 1].y)
+        ctx.globalAlpha = 0.9 * aMul; ctx.lineWidth = 6 * wMul; ctx.stroke()
       }
-      ctx.globalAlpha = s.miss ? 0.55 : 1
-      ctx.fillStyle = s.miss ? s.col : '#fff'; ctx.shadowColor = s.col; ctx.shadowBlur = s.miss ? 6 : 16
-      ctx.beginPath(); ctx.arc(x, y, s.miss ? 3 : 5, 0, 6.28); ctx.fill(); ctx.shadowBlur = 0
+      // head: translucent disc + core (NO shadowBlur — it's a per-shot canvas killer)
+      ctx.globalAlpha = s.miss ? 0.4 : 0.55; ctx.fillStyle = s.col
+      ctx.beginPath(); ctx.arc(x, y, s.miss ? 5 : 9, 0, 6.28); ctx.fill()
+      ctx.globalAlpha = s.miss ? 0.7 : 1; ctx.fillStyle = s.miss ? s.col : '#fff'
+      ctx.beginPath(); ctx.arc(x, y, s.miss ? 2.5 : 4, 0, 6.28); ctx.fill()
       ctx.globalAlpha = 1
       if (s.t >= 1) { if (!s.miss) addSpark(s.tx, s.ty, s.col); shots.splice(i, 1) }
     }
@@ -1303,6 +1308,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
           <div class="bars" id="bars-${t.id}"><i id="ba-${t.id}" style="background:#27e3ff"></i><i id="bd-${t.id}" style="background:#3dffb0"></i></div></div>
         <div class="sc" id="rsc-${t.id}"></div>`
       rankEl.appendChild(div)
+      const bars: any = div.querySelector('.bars')
+      // cache node refs (kills the per-frame getElementById chains in drawRank) + last-rendered values
+      t._rk = { div, pos: div.querySelector('.pos'), bars, ba: bars.children[0], bd: bars.children[1], sc: div.querySelector('.sc'), lastSc: '', lastPos: -1 }
     })
     rankInit = true
     rankEl.style.display = 'flex'; rankEl.style.flexDirection = 'column'
@@ -1311,25 +1319,26 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     if (!rankInit) rebuildRank()
     const sorted = [...TEAMS].sort((a, b) => dispScore(b) - dispScore(a))
     sorted.forEach((t, i) => {
-      const div = $('rk-' + t.id); if (!div) return
-      div.className = 'rk p' + (i + 1)
-      div.style.order = String(i)
-      div.querySelector('.pos').textContent = (i + 1 < 10 ? '0' : '') + (i + 1)
-      const bars: any = $('bars-' + t.id)
+      const r = t._rk; if (!r) return
+      // only touch position/class when the rank actually moved
+      if (r.lastPos !== i) { r.lastPos = i; r.div.className = 'rk p' + (i + 1); r.div.style.order = String(i); r.pos.textContent = (i + 1 < 10 ? '0' : '') + (i + 1) }
+      let sc: string
       if (rankMode === 'ad') {
-        if (bars) bars.style.display = ''
-        $('ba-' + t.id).style.flex = String(Math.max(dispAtk(t), 1)) // attack points
-        $('bd-' + t.id).style.flex = String(Math.max(dispDef(t), 1)) // SLA points
+        r.bars.style.display = ''
+        r.ba.style.flex = String(Math.max(dispAtk(t), 1)) // attack points
+        r.bd.style.flex = String(Math.max(dispDef(t), 1)) // SLA points
         const dl = t.defLoss || 0
-        $('rsc-' + t.id).innerHTML = `${dispScore(t)}<small class="${dl > 0 ? 'dn' : ''}">${dl > 0 ? '−' + fmtPts(dl) : '0'} DEF</small>`
+        sc = `${dispScore(t)}<small class="${dl > 0 ? 'dn' : ''}">${dl > 0 ? '−' + fmtPts(dl) : '0'} DEF</small>`
       } else if (rankMode === 'koth') {
-        if (bars) bars.style.display = 'none'
+        r.bars.style.display = 'none'
         const held = HILLS.filter((h) => h.owner && h.owner.id === t.id).length
-        $('rsc-' + t.id).innerHTML = `${dispScore(t)}<small>${held} hill${held === 1 ? '' : 's'}</small>`
+        sc = `${dispScore(t)}<small>${held} hill${held === 1 ? '' : 's'}</small>`
       } else {
-        if (bars) bars.style.display = 'none'
-        $('rsc-' + t.id).innerHTML = `${dispScore(t)}<small>${t.jpSolved || 0} solved</small>`
+        r.bars.style.display = 'none'
+        sc = `${dispScore(t)}<small>${t.jpSolved || 0} solved</small>`
       }
+      // only re-parse the score cell HTML when its rendered string changed
+      if (r.lastSc !== sc) { r.lastSc = sc; r.sc.innerHTML = sc }
     })
   }
   const renderAllScores = () => TEAMS.forEach(renderScore)
@@ -1439,7 +1448,10 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   function loop(ts: number) {
     if (killed) return
     const dt = Math.min((ts - lastTs) / 1000, 0.05); lastTs = ts
-    if (!slamCovering) drawFX(dt) // skip the arena draw while the slam overlay covers it
+    // draw only when there's something to draw: skip while the slam overlay covers the
+    // board, while the tab is hidden, and while frozen with no active FX (idle freeze).
+    const fxActive = shots.length || sparks.length || fxq.length
+    if (!slamCovering && !document.hidden && (fxActive || !frozen)) drawFX(dt)
     // a first-crown owed but deferred past a running cinematic — fire it once free
     const pc = kothDir.takePendingCrown(cinema)
     if (pc) { const ph = HILLS.find((x) => x.id === pc.hill); const po = TEAMS.find((t) => t.id === pc.owner); if (ph && po) fbKoth(po, ph, () => {}) }
