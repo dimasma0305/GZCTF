@@ -38,7 +38,7 @@ public class GZCTFApplicationFactory : WebApplicationFactory<Program>, IAsyncLif
 
     private readonly MinioContainer? _minioContainer;
     // ReSharper disable once InconsistentNaming
-    private readonly K3sContainer? _k3sContainer;
+    private K3sContainer? _k3sContainer;
 
     // ReSharper disable once InconsistentNaming
     private readonly bool _useK3sMode;
@@ -73,11 +73,7 @@ public class GZCTFApplicationFactory : WebApplicationFactory<Program>, IAsyncLif
         if (_useK3sMode)
         {
             Console.WriteLine(@"[GZCTFApplicationFactory] Creating K3s container...");
-
-            var builder = new K3sBuilder("rancher/k3s:v1.35.2-k3s1")
-                .WithCleanUp(true);
-
-            _k3sContainer = builder.Build();
+            _k3sContainer = CreateK3sContainer();
         }
     }
 
@@ -214,13 +210,44 @@ public class GZCTFApplicationFactory : WebApplicationFactory<Program>, IAsyncLif
         });
     }
 
+    // Pinned to a mature, stable k3s line. The v1.34/v1.35 builds (e.g. v1.35.2-k3s1) ship a
+    // cloud-controller-manager whose request-header auth initializer reads the
+    // "extension-apiserver-authentication" configmap on a code path that FATALS (rather than
+    // retrying) when the CCM's RBAC bootstrap hasn't landed yet. On a fast box the RBAC wins the
+    // race; on a slow/loaded CI runner the CCM wins, k3s shuts itself down, and the test container
+    // exits code 0 -> every Cloud-Mode test fails against a dead fixture. v1.33.x is the most
+    // reliable line, and InitializeK3sAsync re-rolls the race by recreating the container on a
+    // transient startup failure.
+    private static K3sContainer CreateK3sContainer() =>
+        new K3sBuilder("rancher/k3s:v1.33.12-k3s1")
+            .WithCleanUp(true)
+            .Build();
+
     // ReSharper disable once InconsistentNaming
     private async Task InitializeK3sAsync()
     {
         if (_k3sContainer is null)
             throw new InvalidOperationException("K3s container is not initialized");
 
-        await _k3sContainer.StartAsync();
+        // k3s can still lose the internal cloud-controller-manager RBAC bootstrap race on a slow CI
+        // runner and shut itself down during startup (container exits code 0). It is transient, so
+        // recreate the container and retry a few times before surfacing the failure.
+        const int maxAttempts = 4;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await _k3sContainer.StartAsync();
+                break;
+            }
+            catch (Exception ex) when (attempt < maxAttempts)
+            {
+                Console.WriteLine(
+                    $@"[InitializeK3sAsync] K3s start attempt {attempt}/{maxAttempts} failed ({ex.GetType().Name}: {ex.Message}); recreating container and retrying...");
+                await _k3sContainer.DisposeAsync();
+                _k3sContainer = CreateK3sContainer();
+            }
+        }
 
         Console.WriteLine($@"[InitializeK3sAsync] K3s container IP: {_k3sContainer.IpAddress}");
 
