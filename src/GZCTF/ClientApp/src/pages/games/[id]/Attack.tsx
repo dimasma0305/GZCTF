@@ -18,6 +18,7 @@ import { FC, useEffect, useRef } from 'react'
 import { useParams, useSearchParams } from 'react-router'
 import { KothDirector, statusFromCheck, type CaptureResult } from './kothCapture'
 import { createJeopardy, type JeopCategory } from './arenaJeopardy'
+import { createSoundEngine } from './audio'
 
 const FONTS_HREF =
   'https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=DotGothic16&display=swap'
@@ -591,6 +592,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   // preview-only knobs: how many teams / A&D services / KotH hills / jeopardy challenges
   let cfgTeams = 8, cfgAd = 4, cfgKoth = 3, cfgJeop = 24
   let arenaRect: any = null // cached arena.getBoundingClientRect(); refreshed in sizeCanvas
+  const snd = createSoundEngine() // procedural Web Audio engine (see audio.ts)
   let rankDirty = false, statsDirty = false, logDirty = false // per-frame DOM-flush flags
   const prevSvcState: Record<string, string> = {}
   // preroll = the attention-seeking telegraph (board stays visible, warning builds)
@@ -894,7 +896,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   const onResize = () => sizeCanvas()
   window.addEventListener('resize', onResize)
   // keep audio alive when the tab is backgrounded (some browsers suspend the context)
-  const onVis = () => { try { if (AC && AC.state === 'suspended') AC.resume() } catch (e) {} }
+  const onVis = () => snd.resume()
   document.addEventListener('visibilitychange', onVis)
 
   const shots: any[] = [], sparks: any[] = [], fxq: any[] = []
@@ -1076,142 +1078,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     logDirty = true // scroll-to-bottom batched in the loop (avoids a forced reflow per event)
   }
 
-  /* -------- procedural sound engine (Web Audio; runs off the main thread) -------- */
-  let AC: any = null, masterGain: any = null, reverb: any = null, soundOn = true
-  function audio(): any {
-    try {
-      if (!AC) {
-        AC = new (window.AudioContext || (window as any).webkitAudioContext)()
-        masterGain = AC.createGain(); masterGain.gain.value = 1.6 // louder; compressor below tames peaks
-        const comp = AC.createDynamicsCompressor()
-        comp.threshold.value = -16; comp.ratio.value = 12; comp.attack.value = 0.003; comp.release.value = 0.25
-        masterGain.connect(comp); comp.connect(AC.destination)
-      }
-      if (AC.state === 'suspended') AC.resume()
-      return AC
-    } catch (e) { return null }
-  }
-  function makeReverb() {
-    const ac = audio(); if (!ac || reverb) return
-    const len = Math.floor(ac.sampleRate * 2.8), buf = ac.createBuffer(2, len, ac.sampleRate)
-    for (let ch = 0; ch < 2; ch++) { const d = buf.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.8) }
-    reverb = ac.createConvolver(); reverb.buffer = buf
-    const rg = ac.createGain(); rg.gain.value = 0.95; reverb.connect(rg); rg.connect(masterGain)
-  }
-  function unlockAudio() {
-    const ac = audio(); if (ac && ac.state === 'suspended') ac.resume()
-    if ('speechSynthesis' in window) { try { speechSynthesis.getVoices() } catch (e) {} }
-  }
-  function tone(o: any) {
-    const ac = audio(); if (!ac) return; const t0 = ac.currentTime + (o.delay || 0)
-    const osc = ac.createOscillator(); osc.type = o.type || 'sine'
-    const g = ac.createGain(); const dur = o.dur || 0.15, vol = o.vol || 0.2, atk = o.attack || 0.005
-    osc.frequency.setValueAtTime(o.f, t0)
-    if (o.f2 != null) osc.frequency.exponentialRampToValueAtTime(Math.max(o.f2, 1), t0 + (o.glide || dur))
-    g.gain.setValueAtTime(0.0001, t0)
-    g.gain.exponentialRampToValueAtTime(vol, t0 + atk)
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur)
-    osc.connect(g); g.connect(masterGain)
-    if (o.rev && reverb) { const rs = ac.createGain(); rs.gain.value = o.rev; g.connect(rs); rs.connect(reverb) }
-    osc.start(t0); osc.stop(t0 + dur + 0.03)
-  }
-  function noiseBurst(o: any) {
-    const ac = audio(); if (!ac) return; const t0 = ac.currentTime + (o.delay || 0)
-    const dur = o.dur || 0.2, vol = o.vol || 0.2
-    const n = ac.createBufferSource()
-    const buf = ac.createBuffer(1, Math.max(1, Math.floor(ac.sampleRate * dur)), ac.sampleRate)
-    const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1
-    n.buffer = buf
-    const filt = ac.createBiquadFilter(); filt.type = o.type || 'highpass'
-    filt.frequency.setValueAtTime(o.f || 1000, t0); filt.Q.value = o.q || 1
-    if (o.fEnd != null) filt.frequency.exponentialRampToValueAtTime(Math.max(o.fEnd, 1), t0 + dur)
-    const g = ac.createGain()
-    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(vol, t0 + 0.005)
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur)
-    n.connect(filt); filt.connect(g); g.connect(masterGain)
-    if (o.rev && reverb) { const rs = ac.createGain(); rs.gain.value = o.rev; g.connect(rs); rs.connect(reverb) }
-    n.start(t0); n.stop(t0 + dur + 0.03)
-  }
-  function sfxAttack() {
-    if (!soundOn || !audio()) return
-    const p = Math.random(), d = rng(0.84, 1.2)
-    if (p < 0.25) { tone({ type: 'square', f: 900 * d, f2: 170 * d, dur: 0.13, vol: 0.15 }); noiseBurst({ type: 'highpass', f: 2200, fEnd: 500, dur: 0.09, vol: 0.05 }) }
-    else if (p < 0.5) { tone({ type: 'triangle', f: 1300 * d, f2: 320 * d, dur: 0.11, vol: 0.15 }); tone({ type: 'square', f: 650 * d, f2: 200 * d, dur: 0.08, vol: 0.07, delay: 0.012 }) }
-    else if (p < 0.75) { noiseBurst({ type: 'bandpass', f: 3200 * d, fEnd: 700, dur: 0.16, vol: 0.15, q: 1.2 }); tone({ type: 'sine', f: 520 * d, f2: 240 * d, dur: 0.1, vol: 0.06 }) }
-    else { tone({ type: 'square', f: 520 * d, f2: 520 * d, dur: 0.05, vol: 0.12 }); tone({ type: 'square', f: 780 * d, f2: 300 * d, dur: 0.09, vol: 0.11, delay: 0.05 }) }
-  }
-  function sfxDefend() {
-    if (!soundOn || !audio()) return
-    tone({ type: 'sine', f: 440, f2: 880, dur: 0.18, vol: 0.15, attack: 0.01 })
-    tone({ type: 'triangle', f: 660, f2: 1320, dur: 0.22, vol: 0.11, delay: 0.04 })
-    noiseBurst({ type: 'highpass', f: 4000, fEnd: 9000, dur: 0.18, vol: 0.05, delay: 0.02 })
-  }
-  function sfxDown() {
-    if (!soundOn || !audio()) return
-    tone({ type: 'sawtooth', f: 300, f2: 58, dur: 0.4, vol: 0.17 })
-    tone({ type: 'square', f: 160, f2: 46, dur: 0.45, vol: 0.11, delay: 0.02 })
-    noiseBurst({ type: 'lowpass', f: 1200, fEnd: 200, dur: 0.3, vol: 0.13 })
-    for (let i = 0; i < 4; i++) tone({ type: 'square', f: rng(120, 400), f2: rng(80, 200), dur: 0.03, vol: 0.06, delay: 0.05 + i * 0.04 })
-  }
-  function sfxCapture() {
-    if (!soundOn || !audio()) return
-    ;[392, 523, 659, 784].forEach((f, i) => tone({ type: 'triangle', f, f2: f, dur: 0.16, vol: 0.12, delay: i * 0.05 }))
-    noiseBurst({ type: 'highpass', f: 3000, fEnd: 8000, dur: 0.2, vol: 0.05, delay: 0.05 })
-  }
-  function sfxPatch() {
-    if (!soundOn || !audio()) return
-    // ratchet tighten + confirming ping
-    tone({ type: 'square', f: 360, f2: 520, dur: 0.05, vol: 0.13 })
-    tone({ type: 'square', f: 520, f2: 720, dur: 0.05, vol: 0.13, delay: 0.06 })
-    tone({ type: 'triangle', f: 900, f2: 1500, dur: 0.18, vol: 0.11, delay: 0.13 })
-    noiseBurst({ type: 'highpass', f: 5000, fEnd: 9000, dur: 0.1, vol: 0.045, delay: 0.13 })
-  }
-  function sfxFreeze() {
-    if (!soundOn || !audio()) return
-    makeReverb()
-    ;[1568, 1318, 1046, 880].forEach((f, i) => tone({ type: 'sine', f, f2: f, dur: 0.3, vol: 0.08, delay: i * 0.06, rev: 0.5 }))
-    noiseBurst({ type: 'highpass', f: 8000, fEnd: 3000, dur: 0.6, vol: 0.06, rev: 0.6 })
-    tone({ type: 'sine', f: 200, f2: 80, dur: 0.5, vol: 0.12, delay: 0.1 })
-  }
-  function sfxVictory() {
-    if (!soundOn || !audio()) return
-    makeReverb()
-    ;[392, 523, 659, 784, 1046].forEach((f, i) => tone({ type: 'triangle', f, f2: f, dur: 0.5, vol: 0.16, delay: i * 0.12, rev: 0.4 }))
-    ;[523, 659, 784].forEach((f) => tone({ type: 'sawtooth', f, f2: f, dur: 1.3, vol: 0.08, delay: 0.62, rev: 0.5 }))
-    tone({ type: 'sine', f: 130, f2: 64, dur: 1.5, vol: 0.5, delay: 0.58 })
-    noiseBurst({ type: 'highpass', f: 5000, fEnd: 9000, dur: 1.7, vol: 0.18, delay: 0.58, rev: 0.85 })
-  }
-  function sfxNeutral() { // a hill lost / went neutral — two descending sines
-    if (!soundOn || !audio()) return
-    tone({ type: 'sine', f: 660, f2: 330, dur: 0.18, vol: 0.1 })
-    tone({ type: 'sine', f: 440, f2: 220, dur: 0.22, vol: 0.08, delay: 0.06 })
-  }
-  function sfxMiss() { // a rejected / wrong flag — soft low downbend (reads as a non-event)
-    if (!soundOn || !audio()) return
-    tone({ type: 'sine', f: 380, f2: 240, dur: 0.12, vol: 0.07 })
-  }
-  function sfxMumble() { // a service slipped to MUMBLE — short warning chirp
-    if (!soundOn || !audio()) return
-    tone({ type: 'square', f: 520, f2: 600, dur: 0.06, vol: 0.08 })
-    noiseBurst({ type: 'bandpass', f: 1800, dur: 0.08, vol: 0.04 })
-  }
-  function sfxRound() { // round rollover — two-note ascending chime
-    if (!soundOn || !audio()) return
-    ;[660, 990].forEach((f, i) => tone({ type: 'triangle', f, f2: f, dur: 0.12, vol: 0.07, delay: i * 0.07 }))
-  }
-  function sfxUnfreeze() { // scoreboard unlocks — ascending mirror of sfxFreeze
-    if (!soundOn || !audio()) return
-    makeReverb()
-    ;[880, 1046, 1318, 1568].forEach((f, i) => tone({ type: 'sine', f, f2: f, dur: 0.22, vol: 0.07, delay: i * 0.05, rev: 0.4 }))
-  }
-  function sfxSolve() { // a jeopardy challenge solved (laser hits the star) — bright chime
-    if (!soundOn || !audio()) return
-    ;[784, 1046, 1318].forEach((f, i) => tone({ type: 'triangle', f, f2: f, dur: 0.13, vol: 0.11, delay: i * 0.05 }))
-    noiseBurst({ type: 'highpass', f: 4500, fEnd: 9000, dur: 0.16, vol: 0.045, delay: 0.05 })
-  }
   function resolveFlag(atkr: any, vic: any, svc: any, pts: number, isFB: boolean) {
     // A&D capture → attack SFX at impact; jeopardy solve plays sfxSolve at the laser instead
-    if (!isFB && vic) sfxAttack()
+    if (!isFB && vic) snd.sfxAttack()
     // A&D capture credits the attack/defense board; a jeopardy solve (no victim)
     // credits the jeopardy board instead. Both are corrected by the next poll.
     if (vic) { atkr.score += pts; atkr.atk++ } else { atkr.jpScore = (atkr.jpScore || 0) + pts; atkr.jpSolved = (atkr.jpSolved || 0) + 1 }
@@ -1263,7 +1132,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     ov.classList.remove('play', 'tele'); void ov.offsetWidth; ov.classList.add('tele')
     // Build-up "incoming attack" alarm (real sample /attack/incoming.mp3, ~5s, crescendos
     // into the slam). Separate from the first-blood mp3, which still lands at the reveal.
-    if (soundOn) { const ia: any = $('incomingSound'); if (ia && ia.getAttribute('src')) { try { ia.currentTime = 0; ia.volume = 1 } catch (e) {} ; ia.play().catch(() => {}) } }
+    if (snd.isEnabled()) { const ia: any = $('incomingSound'); if (ia && ia.getAttribute('src')) { try { ia.currentTime = 0; ia.volume = 1 } catch (e) {} ; ia.play().catch(() => {}) } }
     // ---- PHASE 2: the slam cinematic, after the build-up ----
     setTimeout(() => {
       if (killed) return
@@ -1273,7 +1142,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       // First-blood stinger: the shipped /attack/firstblood.mp3 (unchanged) — now
       // fires WITH the reveal so it punctuates the slam, not the build-up.
       setTimeout(() => {
-        if (killed || !soundOn) return
+        if (killed || !snd.isEnabled()) return
         const a: any = $('fbSound')
         if (a && a.getAttribute('src')) { a.currentTime = 0; a.play().catch(() => {}) }
       }, FB.soundDelay)
@@ -1375,10 +1244,10 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     addLog('FREEZE', 'sys', `<span class="em">SCOREBOARD FROZEN</span> :: public board locked, map redacted`)
     const ov = $('fzOverlay'); if (ov) { ov.classList.remove('show'); void ov.offsetWidth; ov.classList.add('show'); spawnSnow() }
     const fc = $('fzCount'); if (fc) fc.textContent = 'RESULTS IN T- ' + fmtMS(secsLeft())
-    sfxFreeze(); refreshRank()
+    snd.sfxFreeze(); refreshRank()
   }
   function unfreeze() {
-    if (!frozen) return; frozen = false; sfxUnfreeze()
+    if (!frozen) return; frozen = false; snd.sfxUnfreeze()
     const tag = $('freezeTag'); if (tag) tag.classList.remove('show')
     const rp = root.querySelector('.panel.rank'); if (rp) rp.classList.remove('frozen')
     const fb = $('freezeBtn'); if (fb) fb.classList.remove('on')
@@ -1400,7 +1269,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
          <div class="pn" style="color:${t.color}">${esc(t.name)}</div><div class="ps">${t.score}</div></div>`).join('')
     const ov = $('winOverlay'); if (ov) ov.classList.add('show')
     if (preview) { const rb = $('rematchBtn'); if (rb) rb.style.display = '' }
-    spawnConfetti(); sfxVictory()
+    spawnConfetti(); snd.sfxVictory()
     addLog('MATCH', 'sys', `<span class="em">MATCH OVER</span> :: <span class="who">${esc(champ.name)}</span> wins with <span class="em">${champ.score}</span>`)
   }
   function resetMatch() {
@@ -1489,7 +1358,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
         round++; tickLeft = 30
         TEAMS.forEach((t) => { const owned = t.svc.filter((s: any) => s.status === 'def').length; t.score += owned * Math.floor(rng(6, 14)) })
         HILLS.forEach((h) => { if (h.owner) h.owner.kothScore = (h.owner.kothScore || 0) + Math.floor(rng(10, 20)) })
-        sfxRound(); addLog('ROUND', 'sys', `<span class="em">ROUND ${round} START</span> :: passive + hold scoring`)
+        snd.sfxRound(); addLog('ROUND', 'sys', `<span class="em">ROUND ${round} START</span> :: passive + hold scoring`)
         TEAMS.forEach(renderScore); refreshRank()
       }
       refreshStats()
@@ -1607,14 +1476,14 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
         if (old && old !== ns) {
           if (ns === 'down' && old !== 'down') {
             addLog('SLA', 'sla', `<span class="who">${esc(t.name)}</span> :: <span class="svc">${esc(sv.name)}</span> went <span class="em">DOWN</span>`)
-            spawnDown(t.x, t.y, '#ff3b5b'); sfxDown()
+            spawnDown(t.x, t.y, '#ff3b5b'); snd.sfxDown()
             restartAnim($('base-' + t.id), 'node-down', 1300)
             totalEvents++
           } else if (ns === 'vuln' && old !== 'vuln') {
-            addLog('SLA', 'sla', `<span class="who">${esc(t.name)}</span> :: <span class="svc">${esc(sv.name)}</span> is <span class="em">MUMBLE</span>`); sfxMumble()
+            addLog('SLA', 'sla', `<span class="who">${esc(t.name)}</span> :: <span class="svc">${esc(sv.name)}</span> is <span class="em">MUMBLE</span>`); snd.sfxMumble()
           } else if (ns === 'def' && old !== 'def') {
             addLog('DEFEND', 'def', `<span class="who">${esc(t.name)}</span> restored <span class="svc">${esc(sv.name)}</span>`)
-            spawnShield(t.x, t.y, SVC_COLOR.def); sfxDefend(); totalEvents++
+            spawnShield(t.x, t.y, SVC_COLOR.def); snd.sfxDefend(); totalEvents++
           }
         }
         prevSvcState[key] = ns; sv.status = ns
@@ -1660,7 +1529,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     // Rejected flag (wrong answer): a soft "MISS" tracer (jeopardy aims at the CORE),
     // no score, no impact, not logged. Capped so a flag-spam burst can't flood.
     if (f.type === 'Unaccepted') {
-      if (!frozen && shots.filter((s: any) => s.miss).length < 6) { fireShot(atkr, vic || { x: CX, y: CY }, MISS_COL, true); sfxMiss() }
+      if (!frozen && shots.filter((s: any) => s.miss).length < 6) { fireShot(atkr, vic || { x: CX, y: CY }, MISS_COL, true); snd.sfxMiss() }
       return
     }
     let svc: any = null
@@ -1678,7 +1547,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     // normal solve — A&D shoots the victim; a jeopardy solve lasers the actual
     // challenge star in the constellation (falls back to the CORE if not mapped).
     if (vic) fireShot(atkr, vic, atkr.color)
-    else { if (!jeop.solveByTitle(atkr.x, atkr.y, f.challengeTitle || '', { name: atkr.name, color: atkr.color })) fireShot(atkr, { x: CX, y: CY }, atkr.color); sfxSolve() }
+    else { if (!jeop.solveByTitle(atkr.x, atkr.y, f.challengeTitle || '', { name: atkr.name, color: atkr.color })) fireShot(atkr, { x: CX, y: CY }, atkr.color); snd.sfxSolve() }
     setTimeout(() => { if (!killed) resolveFlag(atkr, vic, svc, pts, false) }, 320 / Math.max(speed, 1) + 120)
   }
   // Hill ownership is driven by BOTH the WS koth frame (instant) and the 15s poll
@@ -1690,10 +1559,10 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   // running cinematic clears; 'capture' is a normal seize; 'neutral' just logs.
   function onHillCapture(h: any, newOwner: any, res: CaptureResult) {
     if (res.kind === 'neutral' || !newOwner) {
-      sfxNeutral(); addLog('HILL', 'hill', `<span class="svc">${esc(h.name)}</span> went <span class="em">NEUTRAL</span>`); totalEvents++; refreshStats(); return
+      snd.sfxNeutral(); addLog('HILL', 'hill', `<span class="svc">${esc(h.name)}</span> went <span class="em">NEUTRAL</span>`); totalEvents++; refreshStats(); return
     }
     if (res.kind === 'crown') fbKoth(newOwner, h, () => {})
-    else if (res.kind === 'capture') { spawnCapture(newOwner, h, newOwner.color); sfxCapture() }
+    else if (res.kind === 'capture') { spawnCapture(newOwner, h, newOwner.color); snd.sfxCapture() }
     // 'defer' → the crown is owed; loop() fires it when the cinematic clears.
     floatText(h.x, h.y - 30, res.contested ? 'SEIZED' : 'CAPTURED', newOwner.color)
     addLog('HILL', 'hill', `<span class="who">${esc(newOwner.name)}</span> ${res.contested ? 'seized' : 'captured'} <span class="svc">${esc(h.name)}</span>`)
@@ -1711,7 +1580,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   // a team modified their service files — "patched". Cyan hardening pulse on their node.
   function patchEffect(t: any, challengeTitle: string, changeCount: number) {
     if (!t) return
-    spawnShield(t.x, t.y, '#27e3ff'); pulseBase(t, '#27e3ff'); sfxPatch()
+    spawnShield(t.x, t.y, '#27e3ff'); pulseBase(t, '#27e3ff'); snd.sfxPatch()
     floatText(t.x, t.y - 66, '🔧 PATCH', '#27e3ff')
     const files = changeCount ? ` <span class="em">(${changeCount} file${changeCount === 1 ? '' : 's'})</span>` : ''
     addLog('PATCH', 'patch', `<span class="who">${esc(t.name)}</span> hardened <span class="svc">${esc(challengeTitle)}</span>${files}`)
@@ -1867,7 +1736,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const t = pick(TEAMS); if (!t || !t.svc.length) return
     const s = t.svc.find((x: any) => x.status === 'vuln') || t.svc.find((x: any) => x.status === 'down') || pick(t.svc)
     s.status = 'def'; t.def++; t.score += Math.floor(rng(10, 28))
-    renderSvc(t); renderScore(t); pulseBase(t, SVC_COLOR.def); spawnShield(t.x, t.y, SVC_COLOR.def); sfxDefend()
+    renderSvc(t); renderScore(t); pulseBase(t, SVC_COLOR.def); spawnShield(t.x, t.y, SVC_COLOR.def); snd.sfxDefend()
     floatText(t.x, t.y - 66, 'PATCHED', SVC_COLOR.def)
     addLog('DEFEND', 'def', `<span class="who">${esc(t.name)}</span> shielded <span class="svc">${esc(s.name)}</span>`)
     totalEvents++; refreshRank(); refreshStats()
@@ -1877,7 +1746,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const s = pick(t.svc.filter((x: any) => x.status !== 'down')) || pick(t.svc)
     if (!s) return
     s.status = 'down'; t.sla = Math.max(40, t.sla - Math.floor(rng(2, 6))); t.score = Math.max(0, t.score - Math.floor(rng(8, 20)))
-    renderSvc(t); renderScore(t); spawnDown(t.x, t.y, '#ff3b5b'); sfxDown()
+    renderSvc(t); renderScore(t); spawnDown(t.x, t.y, '#ff3b5b'); snd.sfxDown()
     restartAnim($('base-' + t.id), 'node-down', 1300)
     floatText(t.x, t.y - 66, '▼ DOWN', '#ff5b6e')
     addLog('SLA', 'sla', `<span class="who">${esc(t.name)}</span> :: <span class="svc">${esc(s.name)}</span> went <span class="em">DOWN</span>`)
@@ -1889,7 +1758,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const h = pick(HILLS); let atkr = pick(TEAMS); let g = 0
     while (h.owner === atkr && g++ < 8) atkr = pick(TEAMS)
     const contested = h.owner && h.owner !== atkr
-    h.owner = atkr; renderHill(h); spawnCapture(atkr, h, atkr.color); sfxCapture(); atkr.kothScore = (atkr.kothScore || 0) + Math.floor(rng(20, 45))
+    h.owner = atkr; renderHill(h); spawnCapture(atkr, h, atkr.color); snd.sfxCapture(); atkr.kothScore = (atkr.kothScore || 0) + Math.floor(rng(20, 45))
     floatText(h.x, h.y - 30, contested ? 'SEIZED' : 'CAPTURED', atkr.color)
     addLog('HILL', 'hill', `<span class="who">${esc(atkr.name)}</span> ${contested ? 'seized' : 'captured'} <span class="svc">${esc(h.name)}</span>`)
     totalEvents++; refreshRank(); refreshStats()
@@ -1908,7 +1777,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const ch = hit ? hit.name : pick(DEMO_JP)
     const pts = hit ? hit.base : Math.floor(rng(50, 150))
     if (!hit) fireShot(atkr, { x: CX, y: CY }, atkr.color)
-    sfxSolve()
+    snd.sfxSolve()
     setTimeout(() => {
       if (killed) return
       atkr.jpScore = (atkr.jpScore || 0) + pts; atkr.jpSolved = (atkr.jpSolved || 0) + 1
@@ -1924,7 +1793,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     if ((HILLS.length ? Math.random() < 0.5 : Math.random() < 0.7) && TEAMS.length > 1) {
       let v = pick(TEAMS); let g = 0; while (v === atkr && g++ < 8) v = pick(TEAMS); if (v !== atkr) target = v
     }
-    if (!frozen && shots.filter((s: any) => s.miss).length < 6) { fireShot(atkr, target, MISS_COL, true); sfxMiss() }
+    if (!frozen && shots.filter((s: any) => s.miss).length < 6) { fireShot(atkr, target, MISS_COL, true); snd.sfxMiss() }
   }
   async function startPreview() {
     // Preview is a fully simulated battle driven by the TEAMS / A&D / KOTH / JEOP
@@ -1991,7 +1860,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     // other audio (incomingSound) can play() later without its own prime — priming it
     // here would race: its play()->pause() can resolve after the telegraph starts it
     // and silence the alarm.
-    unlockAudio()
+    snd.unlock()
     const a: any = $('fbSound')
     if (a) { a.play().then(() => { a.pause(); a.currentTime = 0 }).catch(() => {}) }
     document.removeEventListener('pointerdown', primeAudio)
@@ -2002,9 +1871,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
 
   const soundBtn: any = $('soundBtn')
   if (soundBtn) soundBtn.onclick = function () {
-    soundOn = !soundOn
-    soundBtn.classList.toggle('on', soundOn)
-    if (soundOn) unlockAudio()
+    const on = !snd.isEnabled(); snd.setEnabled(on)
+    soundBtn.classList.toggle('on', on)
+    if (on) snd.unlock()
     else {
       ;['fbSound', 'incomingSound'].forEach((id) => { const a: any = $(id); if (a) { try { a.pause(); a.currentTime = 0 } catch (e) {} } })
       if ('speechSynthesis' in window) { try { speechSynthesis.cancel() } catch (e) {} }
@@ -2067,7 +1936,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     document.removeEventListener('pointerdown', primeAudio)
     document.removeEventListener('keydown', primeAudio)
     if ('speechSynthesis' in window) { try { speechSynthesis.cancel() } catch (e) {} }
-    if (AC) { try { AC.close() } catch (e) {} AC = null }
+    snd.close()
     document.removeEventListener('fullscreenchange', onFsChange)
     jeop.destroy()
     if (ws) { try { ws.onclose = null; ws.close() } catch (e) {} ws = null }
