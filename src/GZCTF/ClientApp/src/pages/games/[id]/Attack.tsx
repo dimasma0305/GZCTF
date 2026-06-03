@@ -19,6 +19,8 @@ import { useParams, useSearchParams } from 'react-router'
 import { KothDirector, statusFromCheck, type CaptureResult } from './kothCapture'
 import { createJeopardy, type JeopCategory } from './arenaJeopardy'
 import { createSoundEngine } from './audio'
+import { createFxRenderer } from './fxRenderer'
+import { createJeopRenderer } from './jeopRenderer'
 
 const FONTS_HREF =
   'https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=DotGothic16&display=swap'
@@ -71,18 +73,11 @@ const ARENA_CSS = `
   .brand .mode{font-family:'Press Start 2P';font-size:9px;color:var(--dim);
     border:1px solid var(--line2);padding:5px 8px}
   .topright{display:flex;align-items:center;gap:18px;font-size:19px}
-  .live{display:flex;align-items:center;gap:7px;color:var(--good);
-    font-family:'Press Start 2P';font-size:9px;letter-spacing:1px}
-  .live.off{color:var(--dim)}
-  .live.off .dot{background:var(--dim);box-shadow:none;animation:none}
-  .dot{width:9px;height:9px;border-radius:50%;background:var(--good);
-    box-shadow:var(--glow) var(--good);animation:blink 1.1s steps(2) infinite}
-  @keyframes blink{50%{opacity:.25}}
-  .clock{color:var(--cyan);font-size:24px;letter-spacing:2px;
-    text-shadow:0 0 8px rgba(39,227,255,.6)}
   .roundpill{font-family:'Press Start 2P';font-size:9px;color:var(--amber);
     border:1px solid rgba(255,198,55,.4);padding:6px 9px;
     text-shadow:0 0 6px rgba(255,198,55,.6)}
+  .countpill{font-family:'Press Start 2P';font-size:9px;color:var(--cyan);
+    border:1px solid rgba(39,227,255,.4);padding:6px 9px;text-shadow:0 0 6px rgba(39,227,255,.6)}
 
   .panel{position:relative;border:1px solid var(--line2);background:var(--panel);
     display:flex;flex-direction:column;min-height:0;min-width:0;
@@ -136,7 +131,7 @@ const ARENA_CSS = `
   #jeop{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:4}
   #jeopSpace{display:none}
   @keyframes jtwk{0%,100%{opacity:var(--o,1)}50%{opacity:var(--o2,.6)}}
-  #jeop .twk{animation:jtwk var(--d,3s) ease-in-out infinite;animation-delay:var(--dl,0s);will-change:opacity}
+  #jeop .twk{animation:jtwk var(--d,3s) ease-in-out infinite;animation-delay:var(--dl,0s)}
   #jeop .chhit{pointer-events:all;cursor:pointer}
   .jtip{position:absolute;z-index:9;pointer-events:none;opacity:0;transform:translateY(4px);
     transition:opacity .12s ease,transform .12s ease;min-width:140px;max-width:230px;padding:8px 10px;border-radius:7px;
@@ -156,8 +151,11 @@ const ARENA_CSS = `
   .arena-wrap:hover .fs-btn{opacity:1}
   .fs-btn:hover{background:rgba(46,60,108,.96);border-color:rgba(150,180,255,.85);color:#fff}
   .fs-btn:active{transform:scale(.92)}
-  .arena-wrap:fullscreen{background:radial-gradient(120% 120% at 50% 40%,#0b0f1e 0%,#06070f 70%,#04050b 100%);padding:0}
-  .arena-wrap:fullscreen .arena{height:100%}
+  .arena-wrap:fullscreen{background:radial-gradient(120% 120% at 50% 40%,#0b0f1e 0%,#06070f 70%,#04050b 100%);padding:0;align-items:flex-start}
+  /* Keep the wheel a SQUARE that fits the screen (not height:100%, which the mobile media query's
+     width:96vw would overconstrain into a tall rectangle → jeopardy stars overlapping the wheel).
+     Top-aligned so the mobile "stack below the wheel" constellations get the room below it. */
+  .arena-wrap:fullscreen .arena{width:min(100vw,100vh);height:auto;max-width:100vw;max-height:100vh}
 
   .rightcol{display:flex;flex-direction:column;gap:12px;min-height:0;min-width:0}
   .panel.rank{flex:1;min-height:0}
@@ -185,7 +183,12 @@ const ARENA_CSS = `
   .rk .sc small{display:block;font-size:11px;color:var(--good);margin-top:1px}
   .rk .sc small.dn{color:var(--bad)}
 
-  #stats{padding:8px 12px;font-size:19px}
+  .leg{padding:9px 12px;display:flex;flex-direction:column;gap:8px}
+  .lgrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px 11px}
+  .lglbl{width:100%;color:var(--dim);font-family:'Press Start 2P';font-size:8px;letter-spacing:1px}
+  .lgi{display:inline-flex;align-items:center;gap:5px;color:#cfcce6;font-family:'DotGothic16';font-size:14px}
+  .lgi i{width:9px;height:9px;display:inline-block;border-radius:2px;border:1px solid #06050f}
+  .lgi b{font-size:14px;line-height:1}
   .strow{display:flex;justify-content:space-between;padding:3px 0;
     border-bottom:1px dashed var(--line)}
   .strow:last-child{border-bottom:0}
@@ -318,9 +321,6 @@ const ARENA_CSS = `
     55%{opacity:.74}82%{opacity:1}100%{opacity:1}}
 
   /* match countdown + freeze pills */
-  .matchpill{font-family:'Press Start 2P';font-size:9px;color:var(--cyan);
-    border:1px solid rgba(39,227,255,.4);padding:6px 9px;text-shadow:0 0 6px rgba(39,227,255,.6)}
-  .matchpill.warn{color:#ff7a8c;border-color:rgba(255,90,110,.6);text-shadow:0 0 8px rgba(255,90,110,.8);animation:freezePulse 1.2s ease-in-out infinite}
   .freezepill{display:none;font-family:'Press Start 2P';font-size:9px;color:#bfe9ff;
     border:1px solid rgba(120,200,255,.5);padding:6px 9px;background:rgba(120,200,255,.1);
     text-shadow:0 0 8px rgba(120,200,255,.8);animation:freezePulse 1.6s ease-in-out infinite}
@@ -402,7 +402,7 @@ const ARENA_CSS = `
     .shell{padding:8px;gap:8px}
     .topbar{flex-wrap:wrap;gap:8px;padding:8px 12px}
     .brand{gap:9px}.brand .logo{font-size:12px}
-    .clock{font-size:18px}.topright{gap:11px}
+    .topright{gap:11px}
     .devbar{flex-wrap:wrap;gap:7px;justify-content:center}
     .btn{font-size:7px;padding:7px 8px}
     .arena{width:96vw}
@@ -423,11 +423,9 @@ const ARENA_BODY = `
         <div class="logo" id="brandLogo">CYBER<b>A/D</b>.ARENA</div>
       </div>
       <div class="topright">
-        <div class="matchpill" id="matchPill">T- --:--</div>
         <div class="freezepill" id="freezeTag">&#10052; FROZEN</div>
-        <div class="roundpill" id="roundPill">ROUND 00</div>
-        <div class="clock" id="clock">00:00:00</div>
-        <div class="live off" id="liveBadge"><span class="dot"></span>OFFLINE</div>
+        <div class="countpill" id="countPill">0:00</div>
+        <div class="roundpill" id="roundPill">TICK</div>
       </div>
     </div>
     <div class="midrow">
@@ -437,7 +435,7 @@ const ARENA_BODY = `
       </div>
       <div class="panel arena-wrap accent-v">
         <button id="fsBtn" class="fs-btn" title="Fullscreen battle map" aria-label="Fullscreen">⛶</button>
-        <svg id="jeop" preserveAspectRatio="xMidYMid meet"></svg>
+        <svg id="jeop" preserveAspectRatio="none"></svg>
         <div class="arena" id="arena">
           <canvas id="fxbg" width="870" height="870"></canvas>
           <svg id="svg" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid meet"></svg>
@@ -452,12 +450,11 @@ const ARENA_BODY = `
           <div id="ranklist"></div>
         </div>
         <div class="panel">
-          <div class="phead accent-c"><span class="t">STATS</span></div>
-          <div id="stats"></div>
-          <div class="legend">
-            <span><i style="background:var(--good)"></i>DEFENDED</span>
-            <span><i style="background:var(--bad)"></i>EXPLOITED</span>
-            <span><i style="background:var(--dimmer)"></i>SLA DOWN</span>
+          <div class="phead accent-c"><span class="t">LEGEND</span></div>
+          <div id="stats" class="leg">
+            <div class="lgrow"><span class="lglbl">SERVICE</span><span class="lgi"><i style="background:#3dffb0"></i>OK</span><span class="lgi"><i style="background:#ffb020"></i>MUMBLE</span><span class="lgi"><i style="background:#4f4a78"></i>DOWN</span><span class="lgi"><i style="background:#9d6bff"></i>ERROR</span><span class="lgi"><i style="background:#ff3b5b"></i>PWNED</span></div>
+            <div class="lgrow"><span class="lglbl">TEAM</span><span class="lgi"><i style="background:var(--good)"></i>DEFENDED</span><span class="lgi"><i style="background:var(--bad)"></i>EXPLOITED</span><span class="lgi"><i style="background:var(--dimmer)"></i>SLA DOWN</span></div>
+            <div class="lgrow"><span class="lglbl">MAP</span><span class="lgi"><b style="color:var(--cyan)">⚔</b>ATTACK</span><span class="lgi"><b style="color:var(--amber)">♛</b>HILL</span><span class="lgi"><b style="color:var(--amber)">★</b>JEOPARDY</span></div>
           </div>
         </div>
       </div>
@@ -554,7 +551,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   const timers: number[] = []
   let raf = 0
   let ws: WebSocket | null = null
-  let wsRetry = 0
+  let wsRetry = 0, reconnectTimer = 0 // single reconnect handle (never >1 pending) — don't accumulate in timers[]
 
   const $ = (id: string): any => root.getElementById(id)
   const NS = 'http://www.w3.org/2000/svg'
@@ -593,7 +590,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   let cfgTeams = 8, cfgAd = 4, cfgKoth = 3, cfgJeop = 24
   let arenaRect: any = null // cached arena.getBoundingClientRect(); refreshed in sizeCanvas
   const snd = createSoundEngine() // procedural Web Audio engine (see audio.ts)
-  let rankDirty = false, statsDirty = false, logDirty = false // per-frame DOM-flush flags
+  let rankDirty = false, logDirty = false // per-frame DOM-flush flags
   const prevSvcState: Record<string, string> = {}
   // preroll = the attention-seeking telegraph (board stays visible, warning builds)
   // that plays BEFORE the slam cinematic; soundDelay/slam/total are relative to the slam.
@@ -671,11 +668,24 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   const fxbg: any = $('fxbg')
   const ctxbg: any = fxbg.getContext('2d')
   const arena: any = $('arena')
+  // Pixi v8 WebGL FX renderer (its own overlay canvas); the 2D #fx is the fallback
+  // used until fxRenderer.ready, or if WebGL init fails. See fxRenderer.ts.
+  const fxRenderer = createFxRenderer(fx)
   const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0
-  const jeop = createJeopardy({ root, arena, isFrozen: () => frozen, isTouch })
+  // Pixi v8 WebGL renderer for the jeopardy constellation layer (its own overlay canvas on
+  // .arena-wrap, wrap-pixel space). When ready it takes over the star twinkle + lasers from the
+  // SVG (which kept 40 infinite CSS animations); SVG stays as the static text + hit-test layer.
+  const wrapEl: any = root.querySelector('.arena-wrap')
+  const jeopRenderer = createJeopRenderer(wrapEl, { onReady: () => jeop.syncPixi() })
+  const jeop = createJeopardy({
+    root, arena, isFrozen: () => frozen, isTouch,
+    pixiReady: () => jeopRenderer.ready,
+    onStars: (cats, dense) => jeopRenderer.setStars(cats, dense),
+    onBeam: (tx, ty, sx, sy, sr, col) => jeopRenderer.beam(tx, ty, sx, sy, sr, col),
+    onFlash: (x, y, r, col) => jeopRenderer.flash(x, y, r, col),
+  })
   const logEl: any = $('log')
   const rankEl: any = $('ranklist')
-  const statsEl: any = $('stats')
 
   function hexPts(cx: number, cy: number, r: number) {
     const p: string[] = []
@@ -891,9 +901,17 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     SC = (r.width / 1000) * dpr
     ctx.setTransform(SC, 0, 0, SC, 0, 0)
     ctxbg.setTransform(SC, 0, 0, SC, 0, 0)
-    jeop.layout() // re-place the jeopardy constellations for the new panel size
+    fxRenderer.resize(r.width, r.height) // keep the WebGL FX layer aligned to the arena
+    jeop.layout() // re-place the jeopardy constellations (and hand the laid-out stars to jeopRenderer via onStars)
+    // size the wrap-space Pixi jeopardy canvas AFTER layout() (which may grow the wrap via #jeopSpace).
+    const wr = wrapEl.getBoundingClientRect()
+    if (wr.width > 1) jeopRenderer.resize(wr.width, wr.height, r.left - wr.left, r.top - wr.top, r.width)
   }
-  const onResize = () => sizeCanvas()
+  // rAF-coalesce the window resize: a drag-burst (30-60/s) collapses to one sizeCanvas per frame,
+  // each of which does forced reflows + a full jeopardy relayout/SVG rebuild + two Pixi resizes.
+  // (Direct sizeCanvas() calls for fullscreen/init stay synchronous so they aren't deferred.)
+  let resizeRaf = 0
+  const onResize = () => { if (resizeRaf) return; resizeRaf = requestAnimationFrame(() => { resizeRaf = 0; if (!killed) sizeCanvas() }) }
   window.addEventListener('resize', onResize)
   // keep audio alive when the tab is backgrounded (some browsers suspend the context)
   const onVis = () => snd.resume()
@@ -981,77 +999,81 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   function drawFX(dt: number) {
     fxClock += dt
     drawAmbient(fxClock)
-    ctx.clearRect(0, 0, 1000, 1000)
-    ctx.lineCap = 'round'
+    const pixi = fxRenderer.ready // WebGL path renders the FX; 2D draws below are the fallback
+    if (!pixi) { ctx.clearRect(0, 0, 1000, 1000); ctx.lineCap = 'round' }
     for (let i = shots.length - 1; i >= 0; i--) {
       const s = shots[i]; s.t += s.sp * dt * 60
       const x = bez(s.fx, s.cx, s.tx, Math.min(s.t, 1))
       const y = bez(s.fy, s.cy, s.ty, Math.min(s.t, 1))
       s.trail.push({ x, y }); if (s.trail.length > 14) s.trail.shift()
-      const tr = s.trail, n = tr.length, aMul = s.miss ? 0.32 : 0.9, wMul = s.miss ? 0.45 : 1
-      ctx.strokeStyle = s.col
-      // ONE soft full-trail path + one brighter head segment (was ~13 per-segment strokes)
-      if (n >= 2) {
-        ctx.beginPath(); ctx.moveTo(tr[0].x, tr[0].y); for (let j = 1; j < n; j++) ctx.lineTo(tr[j].x, tr[j].y)
-        ctx.globalAlpha = 0.38 * aMul; ctx.lineWidth = 3 * wMul; ctx.stroke()
-        ctx.beginPath(); ctx.moveTo(tr[n - 2].x, tr[n - 2].y); ctx.lineTo(tr[n - 1].x, tr[n - 1].y)
-        ctx.globalAlpha = 0.9 * aMul; ctx.lineWidth = 6 * wMul; ctx.stroke()
+      if (!pixi) {
+        const tr = s.trail, n = tr.length, aMul = s.miss ? 0.32 : 0.9, wMul = s.miss ? 0.45 : 1
+        ctx.strokeStyle = s.col
+        if (n >= 2) {
+          ctx.beginPath(); ctx.moveTo(tr[0].x, tr[0].y); for (let j = 1; j < n; j++) ctx.lineTo(tr[j].x, tr[j].y)
+          ctx.globalAlpha = 0.38 * aMul; ctx.lineWidth = 3 * wMul; ctx.stroke()
+          ctx.beginPath(); ctx.moveTo(tr[n - 2].x, tr[n - 2].y); ctx.lineTo(tr[n - 1].x, tr[n - 1].y)
+          ctx.globalAlpha = 0.9 * aMul; ctx.lineWidth = 6 * wMul; ctx.stroke()
+        }
+        ctx.globalAlpha = s.miss ? 0.4 : 0.55; ctx.fillStyle = s.col
+        ctx.beginPath(); ctx.arc(x, y, s.miss ? 5 : 9, 0, 6.28); ctx.fill()
+        ctx.globalAlpha = s.miss ? 0.7 : 1; ctx.fillStyle = s.miss ? s.col : '#fff'
+        ctx.beginPath(); ctx.arc(x, y, s.miss ? 2.5 : 4, 0, 6.28); ctx.fill()
+        ctx.globalAlpha = 1
       }
-      // head: translucent disc + core (NO shadowBlur — it's a per-shot canvas killer)
-      ctx.globalAlpha = s.miss ? 0.4 : 0.55; ctx.fillStyle = s.col
-      ctx.beginPath(); ctx.arc(x, y, s.miss ? 5 : 9, 0, 6.28); ctx.fill()
-      ctx.globalAlpha = s.miss ? 0.7 : 1; ctx.fillStyle = s.miss ? s.col : '#fff'
-      ctx.beginPath(); ctx.arc(x, y, s.miss ? 2.5 : 4, 0, 6.28); ctx.fill()
-      ctx.globalAlpha = 1
       if (s.t >= 1) { if (!s.miss) addSpark(s.tx, s.ty, s.col); shots.splice(i, 1) }
     }
     for (let i = sparks.length - 1; i >= 0; i--) {
       const sp = sparks[i]
       if (sp.ring) {
         sp.r += 420 * dt; sp.life -= 2.2 * dt
-        ctx.globalAlpha = Math.max(sp.life, 0); ctx.strokeStyle = sp.col; ctx.lineWidth = 3
-        ctx.beginPath(); ctx.arc(sp.x, sp.y, sp.r, 0, 6.28); ctx.stroke()
-        for (let k = 0; k < 8; k++) { const a = k / 8 * 6.28; ctx.beginPath(); ctx.moveTo(sp.x + Math.cos(a) * sp.r, sp.y + Math.sin(a) * sp.r); ctx.lineTo(sp.x + Math.cos(a) * (sp.r + 10), sp.y + Math.sin(a) * (sp.r + 10)); ctx.stroke() }
-        ctx.globalAlpha = 1
+        if (!pixi) {
+          ctx.globalAlpha = Math.max(sp.life, 0); ctx.strokeStyle = sp.col; ctx.lineWidth = 3
+          ctx.beginPath(); ctx.arc(sp.x, sp.y, sp.r, 0, 6.28); ctx.stroke()
+          for (let k = 0; k < 8; k++) { const a = k / 8 * 6.28; ctx.beginPath(); ctx.moveTo(sp.x + Math.cos(a) * sp.r, sp.y + Math.sin(a) * sp.r); ctx.lineTo(sp.x + Math.cos(a) * (sp.r + 10), sp.y + Math.sin(a) * (sp.r + 10)); ctx.stroke() }
+          ctx.globalAlpha = 1
+        }
       } else {
         sp.x += sp.vx * dt; sp.y += sp.vy * dt; sp.vx *= 0.92; sp.vy *= 0.92; sp.life -= 2.4 * dt
-        ctx.globalAlpha = Math.max(sp.life, 0); ctx.fillStyle = sp.col
-        ctx.fillRect(sp.x - 2, sp.y - 2, 4, 4); ctx.globalAlpha = 1
+        if (!pixi) { ctx.globalAlpha = Math.max(sp.life, 0); ctx.fillStyle = sp.col; ctx.fillRect(sp.x - 2, sp.y - 2, 4, 4); ctx.globalAlpha = 1 }
       }
       if (sp.life <= 0) sparks.splice(i, 1)
     }
     for (let i = fxq.length - 1; i >= 0; i--) {
       const e = fxq[i]; e.t += dt / e.dur; const p = Math.min(e.t, 1)
-      if (e.kind === 'shield') {
-        ctx.lineCap = 'round'
-        const rIn = 70 - 58 * Math.min(p * 2, 1)
-        ctx.globalAlpha = (1 - p) * 0.9; ctx.strokeStyle = e.col; ctx.lineWidth = 3
-        hexPath(e.x, e.y, Math.max(rIn, 12)); ctx.stroke()
-        const rOut = 18 + 60 * p
-        ctx.globalAlpha = (1 - p) * 0.6; ctx.lineWidth = 2
-        hexPath(e.x, e.y, rOut); ctx.stroke()
-        ctx.globalAlpha = (1 - p) * 0.28; ctx.fillStyle = e.col
-        hexPath(e.x, e.y, Math.max(rIn, 12)); ctx.fill()
-        ctx.globalAlpha = 1
-      } else if (e.kind === 'down') {
-        const r = 70 * (1 - p)
-        ctx.globalAlpha = (1 - p) * 0.85; ctx.strokeStyle = e.col; ctx.lineWidth = 3
-        ctx.beginPath(); ctx.arc(e.x, e.y, Math.max(r, 2), 0, 6.28); ctx.stroke()
-        ctx.globalAlpha = (1 - p) * 0.5
-        for (let k = 0; k < 3; k++) { const yy = e.y + rng(-26, 26); ctx.fillStyle = e.col; ctx.fillRect(e.x - 30, yy, 60, 2) }
-        ctx.globalAlpha = 1
-      } else if (e.kind === 'beam') {
-        const tt = Math.min(p / 0.55, 1)
-        const hx = e.fx + (e.tx - e.fx) * tt, hy = e.fy + (e.ty - e.fy) * tt
-        const w = (e.big ? 16 : 9) * (1 - p * 0.4)
-        ctx.lineCap = 'round'
-        ctx.globalAlpha = Math.min(p * 3, 1) * (1 - Math.max(p - 0.7, 0) / 0.3)
-        ctx.strokeStyle = e.col; ctx.shadowColor = e.col; ctx.shadowBlur = e.big ? 28 : 16; ctx.lineWidth = w
-        ctx.beginPath(); ctx.moveTo(e.fx, e.fy); ctx.lineTo(hx, hy); ctx.stroke()
-        ctx.strokeStyle = '#fff'; ctx.lineWidth = w * 0.4; ctx.shadowBlur = 0
-        ctx.beginPath(); ctx.moveTo(e.fx, e.fy); ctx.lineTo(hx, hy); ctx.stroke()
-        ctx.globalAlpha = 1
-        if (!e.hit && tt >= 1) { e.hit = true; addSpark(e.tx, e.ty, e.col) }
+      // beam-impact spark is a side-effect — must fire on the WebGL path too (extracted from the draw)
+      if (e.kind === 'beam' && !e.hit && p / 0.55 >= 1) { e.hit = true; addSpark(e.tx, e.ty, e.col) }
+      if (!pixi) {
+        if (e.kind === 'shield') {
+          ctx.lineCap = 'round'
+          const rIn = 70 - 58 * Math.min(p * 2, 1)
+          ctx.globalAlpha = (1 - p) * 0.9; ctx.strokeStyle = e.col; ctx.lineWidth = 3
+          hexPath(e.x, e.y, Math.max(rIn, 12)); ctx.stroke()
+          const rOut = 18 + 60 * p
+          ctx.globalAlpha = (1 - p) * 0.6; ctx.lineWidth = 2
+          hexPath(e.x, e.y, rOut); ctx.stroke()
+          ctx.globalAlpha = (1 - p) * 0.28; ctx.fillStyle = e.col
+          hexPath(e.x, e.y, Math.max(rIn, 12)); ctx.fill()
+          ctx.globalAlpha = 1
+        } else if (e.kind === 'down') {
+          const r = 70 * (1 - p)
+          ctx.globalAlpha = (1 - p) * 0.85; ctx.strokeStyle = e.col; ctx.lineWidth = 3
+          ctx.beginPath(); ctx.arc(e.x, e.y, Math.max(r, 2), 0, 6.28); ctx.stroke()
+          ctx.globalAlpha = (1 - p) * 0.5
+          for (let k = 0; k < 3; k++) { const yy = e.y + rng(-26, 26); ctx.fillStyle = e.col; ctx.fillRect(e.x - 30, yy, 60, 2) }
+          ctx.globalAlpha = 1
+        } else if (e.kind === 'beam') {
+          const tt = Math.min(p / 0.55, 1)
+          const hx = e.fx + (e.tx - e.fx) * tt, hy = e.fy + (e.ty - e.fy) * tt
+          const w = (e.big ? 16 : 9) * (1 - p * 0.4)
+          ctx.lineCap = 'round'
+          ctx.globalAlpha = Math.min(p * 3, 1) * (1 - Math.max(p - 0.7, 0) / 0.3)
+          ctx.strokeStyle = e.col; ctx.shadowColor = e.col; ctx.shadowBlur = e.big ? 28 : 16; ctx.lineWidth = w
+          ctx.beginPath(); ctx.moveTo(e.fx, e.fy); ctx.lineTo(hx, hy); ctx.stroke()
+          ctx.strokeStyle = '#fff'; ctx.lineWidth = w * 0.4; ctx.shadowBlur = 0
+          ctx.beginPath(); ctx.moveTo(e.fx, e.fy); ctx.lineTo(hx, hy); ctx.stroke()
+          ctx.globalAlpha = 1
+        }
       }
       if (e.t >= 1) fxq.splice(i, 1)
     }
@@ -1078,18 +1100,26 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     logDirty = true // scroll-to-bottom batched in the loop (avoids a forced reflow per event)
   }
 
-  function resolveFlag(atkr: any, vic: any, svc: any, pts: number, isFB: boolean) {
+  let pendingResolves = 0 // in-flight resolveFlag setTimeouts; burst signal for the overflow path
+  // quiet=true (burst overflow): keep the SCORE/accounting + dirty-flag draws live, but skip the
+  // per-event cosmetics (audio graph, float DOM nodes + their timers, battle-log innerHTML, pwn pulse)
+  // so a flag flurry / 256-deep WS reconnect catch-up can't flood timers+audio+DOM. The 15s poll is
+  // the score source of truth, so skipped cosmetics never desync the board.
+  function resolveFlag(atkr: any, vic: any, svc: any, pts: number, isFB: boolean, quiet?: boolean) {
     // A&D capture → attack SFX at impact; jeopardy solve plays sfxSolve at the laser instead
-    if (!isFB && vic) snd.sfxAttack()
+    if (!isFB && vic && !quiet) snd.sfxAttack()
     // A&D capture credits the attack/defense board; a jeopardy solve (no victim)
     // credits the jeopardy board instead. Both are corrected by the next poll.
     if (vic) { atkr.score += pts; atkr.atk++ } else { atkr.jpScore = (atkr.jpScore || 0) + pts; atkr.jpSolved = (atkr.jpSolved || 0) + 1 }
-    if (vic && svc) { svc.pwnUntil = Date.now() + 5000; setTimeout(() => { if (!killed) renderSvc(vic) }, 5200) }
-    renderScore(atkr); if (vic) { renderSvc(vic); pulseBase(vic, vic.color) }
-    floatText(atkr.x, atkr.y - 66, '+' + pts, atkr.color)
-    if (vic) floatText(vic.x, vic.y - 66, isFB ? 'FIRST BLOOD' : 'PWNED', vic.color)
-    if (isFB) addLog('FIRST BLOOD', 'fb', `<span class="who">${esc(atkr.name)}</span> drew first blood${vic ? ` on <span class="vic">${esc(vic.name)}</span>` : ''}`)
-    else addLog('FLAG', 'flag', `<span class="who">${esc(atkr.name)}</span> &gt; <span class="vic">${vic ? esc(vic.name) : 'CORE'}</span> :: <span class="svc">${esc(svc ? svc.name : 'flag')}</span> <span class="em">+${pts}</span>`)
+    renderScore(atkr)
+    if (!quiet) {
+      if (vic && svc) { svc.pwnUntil = Date.now() + 5000; setTimeout(() => { if (!killed) renderSvc(vic) }, 5200) }
+      if (vic) { renderSvc(vic); pulseBase(vic, vic.color) }
+      floatText(atkr.x, atkr.y - 66, '+' + pts, atkr.color)
+      if (vic) floatText(vic.x, vic.y - 66, isFB ? 'FIRST BLOOD' : 'PWNED', vic.color)
+      if (isFB) addLog('FIRST BLOOD', 'fb', `<span class="who">${esc(atkr.name)}</span> drew first blood${vic ? ` on <span class="vic">${esc(vic.name)}</span>` : ''}`)
+      else addLog('FLAG', 'flag', `<span class="who">${esc(atkr.name)}</span> &gt; <span class="vic">${vic ? esc(vic.name) : 'CORE'}</span> :: <span class="svc">${esc(svc ? svc.name : 'flag')}</span> <span class="em">+${pts}</span>`)
+    }
     totalFlags++; refreshRank(); refreshStats()
   }
 
@@ -1286,31 +1316,12 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const ov = $('winOverlay'); if (ov) ov.classList.remove('show'); clearConfetti()
     addLog('SYS', 'sys', `<span class="em">REMATCH</span> :: arena reset`)
   }
-  function drawStats() {
-    const up = TEAMS.reduce((a, t) => a + t.svc.filter((s: any) => s.status === 'def').length, 0)
-    const tot = TEAMS.length * SERVICES.length
-    $('roundPill').textContent = 'ROUND ' + String(round).padStart(2, '0')
-    statsEl.innerHTML = `
-      <div class="strow"><span class="k">ATTACK FLAGS</span><span class="v acc">${totalFlags}</span></div>
-      <div class="strow"><span class="k">SVC ONLINE</span><span class="v">${up} / ${tot}</span></div>
-      <div class="strow"><span class="k">EVENTS</span><span class="v">${totalEvents}</span></div>
-      <div class="strow"><span class="k">TEAMS</span><span class="v">${TEAMS.length}</span></div>
-      <div class="strow"><span class="k">SERVICES</span><span class="v">${SERVICES.length}</span></div>
-      <div class="strow"><span class="k">TICK</span><span class="v acc">${tickLeft}s</span></div>
-      <div class="slegend">
-        <span><i style="background:${SVC_COLOR.def}"></i>OK</span>
-        <span><i style="background:${SVC_COLOR.vuln}"></i>MUMBLE</span>
-        <span><i style="background:${SVC_COLOR.down}"></i>OFFLINE</span>
-        <span><i style="background:${SVC_COLOR.error}"></i>ERROR</span>
-        <span><i style="background:${SVC_COLOR.pwned}"></i>PWNED</span>
-      </div>`
-  }
-
-  // Coalesce the heavy DOM rebuilds: events just mark dirty (refreshRank/refreshStats),
-  // and the rAF loop flushes drawRank/drawStats/log-scroll at most once per frame instead
-  // of rebuilding on every single event.
+  // Coalesce the heavy DOM rebuilds: events just mark dirty (refreshRank), and the rAF loop
+  // flushes drawRank/log-scroll at most once per frame instead of rebuilding on every event.
+  // (The old aggregate STATS panel is now a static LEGEND, so refreshStats is a no-op kept for
+  // its many call sites; the upper-right tick pill is driven by tickClock/setTickPill instead.)
   function refreshRank() { rankDirty = true }
-  function refreshStats() { statsDirty = true }
+  function refreshStats() { /* stats panel replaced by a static legend */ }
 
   /* -------- loop / clock -------- */
   let lastTs = performance.now()
@@ -1320,12 +1331,16 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     // draw only when there's something to draw: skip while the slam overlay covers the
     // board, while the tab is hidden, and while frozen with no active FX (idle freeze).
     const fxActive = shots.length || sparks.length || fxq.length
-    if (!slamCovering && !document.hidden && (fxActive || !frozen)) drawFX(dt)
+    const jeopActive = jeopRenderer.active() // GPU jeopardy stars twinkling / lasers in flight
+    if (!slamCovering && !document.hidden && (fxActive || jeopActive || !frozen)) {
+      drawFX(dt) // advances FX physics + ambient; draws the 2D fallback only while !fxRenderer.ready
+      if (fxRenderer.ready) fxRenderer.tick(dt, shots, sparks, fxq) // WebGL render of the same arrays
+      jeopRenderer.render(ts, frozen) // WebGL jeopardy star twinkle (30fps) + lasers; skips while frozen
+    }
     // a first-crown owed but deferred past a running cinematic — fire it once free
     const pc = kothDir.takePendingCrown(cinema)
     if (pc) { const ph = HILLS.find((x) => x.id === pc.hill); const po = TEAMS.find((t) => t.id === pc.owner); if (ph && po) fbKoth(po, ph, () => {}) }
     if (rankDirty) { rankDirty = false; drawRank() }
-    if (statsDirty) { statsDirty = false; drawStats() }
     if (logDirty) { logDirty = false; logEl.scrollTop = logEl.scrollHeight }
     raf = requestAnimationFrame(loop)
   }
@@ -1341,13 +1356,16 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     }
     evTimer = window.setTimeout(scheduleEvent, rng(900, 1700) / Math.max(speed, 1))
   }
+  // upper-right pills: current scoring tick (right) + the countdown to the next tick (to its left)
+  const setTickPill = () => {
+    const rp = $('roundPill'); if (rp) rp.textContent = 'TICK ' + Math.max(round, 0)
+    const cp = $('countPill'); if (cp) cp.textContent = fmtMS(Math.max(tickLeft, 0))
+  }
   function tickClock() {
     tNow = Date.now()
-    const cl = $('clock'); if (cl) cl.textContent = clk()
     // match countdown to game end (live: real EndTimeUtc; preview: boot + MATCH_SECONDS)
     if (gameEndMs != null && !matchOver) {
       const left = secsLeft()
-      const mp = $('matchPill'); if (mp) { mp.textContent = 'T- ' + fmtMS(left); mp.classList.toggle('warn', left <= FREEZE_SECONDS) }
       if (preview && left <= FREEZE_SECONDS && !frozen) enterFreeze() // live freeze comes from the board's isFrozenView
       if (frozen) { const fc = $('fzCount'); if (fc) fc.textContent = 'RESULTS IN T- ' + fmtMS(left) }
       if (left <= 0) { endMatch(); return }
@@ -1361,12 +1379,12 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
         snd.sfxRound(); addLog('ROUND', 'sys', `<span class="em">ROUND ${round} START</span> :: passive + hold scoring`)
         TEAMS.forEach(renderScore); refreshRank()
       }
-      refreshStats()
+      setTickPill()
       return
     }
     if (liveRoundEndsAt) {
       tickLeft = Math.max(0, Math.round((liveRoundEndsAt - Date.now()) / 1000))
-      refreshStats()
+      setTickPill()
     }
   }
 
@@ -1546,9 +1564,13 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     }
     // normal solve — A&D shoots the victim; a jeopardy solve lasers the actual
     // challenge star in the constellation (falls back to the CORE if not mapped).
+    // Burst overflow (e.g. a 256-deep WS catch-up): resolve quietly & synchronously — score stays
+    // live, but skip the tracer/laser/sfx and the per-event setTimeout so we don't flood.
+    if (pendingResolves > 12) { resolveFlag(atkr, vic, svc, pts, false, true); return }
     if (vic) fireShot(atkr, vic, atkr.color)
     else { if (!jeop.solveByTitle(atkr.x, atkr.y, f.challengeTitle || '', { name: atkr.name, color: atkr.color })) fireShot(atkr, { x: CX, y: CY }, atkr.color); snd.sfxSolve() }
-    setTimeout(() => { if (!killed) resolveFlag(atkr, vic, svc, pts, false) }, 320 / Math.max(speed, 1) + 120)
+    pendingResolves++
+    setTimeout(() => { pendingResolves--; if (!killed) resolveFlag(atkr, vic, svc, pts, false) }, 320 / Math.max(speed, 1) + 120)
   }
   // Hill ownership is driven by BOTH the WS koth frame (instant) and the 15s poll
   // (reliable backstop) — whichever sees the change first; the other dedups via the
@@ -1588,16 +1610,11 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   }
   function livePatch(f: any) { patchEffect(teamByName(f.teamName), f.challengeTitle, f.changeCount || 0) }
 
-  function setLiveBadge(connected: boolean) {
-    const b: any = $('liveBadge'); if (!b) return
-    b.classList.toggle('off', !connected)
-    b.childNodes[1].nodeValue = connected ? 'LIVE' : 'OFFLINE'
-  }
   function connectWS() {
     if (killed) return
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
     ws = new WebSocket(`${proto}://${location.host}/hub/attack/ws?game=${gameId}`)
-    ws.onopen = () => { wsRetry = 0; setLiveBadge(true) }
+    ws.onopen = () => { wsRetry = 0 }
     ws.onmessage = (m) => {
       if (killed) return
       let f: any; try { f = JSON.parse(m.data) } catch (e) { return }
@@ -1608,8 +1625,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     }
     ws.onclose = () => {
       if (killed) return
-      setLiveBadge(false); wsRetry = Math.min(wsRetry + 1, 6)
-      timers.push(window.setTimeout(connectWS, 1000 * wsRetry))
+      wsRetry = Math.min(wsRetry + 1, 6)
+      reconnectTimer = window.setTimeout(connectWS, 1000 * wsRetry)
     }
     ws.onerror = () => { try { if (ws) ws.close() } catch (e) {} }
   }
@@ -1625,7 +1642,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       ad = await fetchJSON(`/api/Game/${gameId}/Ad/Scoreboard`)
     } catch (e) {
       if (killed) return
-      const lb = $('liveBadge'); if (lb) lb.childNodes[1].nodeValue = 'NO DATA'
       showNote('NO LIVE A&amp;D DATA<br/>this game has no Attack &amp; Defense<br/>or King of the Hill challenges')
       addLog('SYS', 'sys', `<span class="em">NO A&amp;D / KOTH SCOREBOARD</span> for this game`)
       tNow = Date.now(); timers.push(window.setInterval(tickClock, 1000)); raf = requestAnimationFrame(loop)
@@ -1806,7 +1822,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     if (title) $('brandLogo').textContent = title.toUpperCase().slice(0, 22)
     liveRoundEndsAt = null; round = 1; tickLeft = 30; gameEndMs = Date.now() + MATCH_SECONDS * 1000
     buildArena()
-    const lb: any = $('liveBadge'); if (lb) { lb.classList.remove('off'); lb.style.color = 'var(--amber)'; lb.childNodes[1].nodeValue = 'PREVIEW' }
     const fbb: any = $('fbBtns'); if (fbb) fbb.style.display = ''
     const cfg: any = $('cfgBtns'); if (cfg) cfg.style.display = ''
     refreshRank(); refreshStats()
@@ -1930,8 +1945,10 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     timers.forEach((id) => clearInterval(id))
     timers.forEach((id) => clearTimeout(id))
     clearTimeout(evTimer)
+    clearTimeout(reconnectTimer) // cancel any pending WS reconnect so connectWS can't fire after killed
     if (raf) cancelAnimationFrame(raf)
     window.removeEventListener('resize', onResize)
+    if (resizeRaf) cancelAnimationFrame(resizeRaf) // don't let a pending resize fire sizeCanvas into destroyed Pixi apps
     document.removeEventListener('visibilitychange', onVis)
     document.removeEventListener('pointerdown', primeAudio)
     document.removeEventListener('keydown', primeAudio)
@@ -1939,6 +1956,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     snd.close()
     document.removeEventListener('fullscreenchange', onFsChange)
     jeop.destroy()
+    fxRenderer.destroy()
+    jeopRenderer.destroy()
     if (ws) { try { ws.onclose = null; ws.close() } catch (e) {} ws = null }
   }
 }

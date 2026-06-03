@@ -34,6 +34,13 @@ export interface JeopDeps {
   arena: HTMLElement
   isFrozen: () => boolean
   isTouch: boolean
+  // Pixi/WebGL star layer (jeopRenderer). When pixiReady() is true the SVG drops the
+  // animated star visuals (emits only the invisible .chhit hit circle + text) and the
+  // stars/lasers are drawn on the GPU instead. All optional → SVG-only fallback if absent.
+  pixiReady?: () => boolean
+  onStars?: (cats: any[], dense: boolean) => void // hand the laid-out categories to the Pixi layer (full rebuild)
+  onBeam?: (tx: number, ty: number, sx: number, sy: number, sr: number, col: string) => void
+  onFlash?: (x: number, y: number, r: number, col: string) => void
 }
 
 // deterministic 0..1 so layouts are stable across re-renders
@@ -68,14 +75,17 @@ export function createJeopardy(deps: JeopDeps) {
   const CHALLENGES: any[] = []
   let jeopReady = false, jDense = false, _jeopKilled = false
   let jWheelX = 0, jWheelY = 0, jWheelSize = 0
+  // Pixi star layer takes over the animated visuals only on the non-dense desktop path
+  // (dense/mobile already draws static, twinkle-free stars cheaply in SVG).
+  const usePixi = () => !!(deps.pixiReady && deps.pixiReady()) && !jDense
 
   const esc = (s: any) => String(s == null ? '' : s).replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' } as any)[c])
 
   function layout() {
     CHALLENGES.length = 0; jeopReady = false
     const wrap = qs('.arena-wrap'), js = $('jeop'), space = $('jeopSpace')
-    if (!wrap || !js || !arena || !CATEGORIES.length) { if (js) js.innerHTML = ''; return }
-    let r = wrap.getBoundingClientRect(); if (r.width < 2) return
+    if (!wrap || !js || !arena || !CATEGORIES.length) { if (js) js.innerHTML = ''; deps.onStars?.([], true); return }
+    let r = wrap.getBoundingClientRect(); if (r.width < 2) return // transient (mid-mount/hidden) — leave the Pixi layer as-is
     let ar = arena.getBoundingClientRect()
     const wsize = ar.width
     const leftBand = ar.left - r.left, rightBand = r.right - ar.right
@@ -94,7 +104,7 @@ export function createJeopardy(deps: JeopDeps) {
     const W = r.width, H = r.height, wx0 = ar.left - r.left, wy0 = ar.top - r.top
     jWheelX = wx0; jWheelY = wy0; jWheelSize = wsize
     js.setAttribute('viewBox', `0 0 ${W.toFixed(0)} ${H.toFixed(0)}`)
-    if (!mobile && Math.min(leftBand, rightBand) < 70) { CATEGORIES.forEach((c) => (c.ch = [])); jeopReady = false; js.innerHTML = ''; return }
+    if (!mobile && Math.min(leftBand, rightBand) < 70) { CATEGORIES.forEach((c) => (c.ch = [])); jeopReady = false; js.innerHTML = ''; deps.onStars?.([], true); return }
 
     if (mobile) {
       const pad = 10, top0 = wy0 + wsize + 10, colW = (W - pad * 2) / gCols
@@ -114,7 +124,7 @@ export function createJeopardy(deps: JeopDeps) {
         })
         cat._links = aster.links.slice(); cat._labels = false
       })
-      jeopReady = true; return
+      jeopReady = true; deps.onStars?.(CATEGORIES, jDense); return
     }
 
     // desktop: side bands left/right of the wheel
@@ -173,10 +183,15 @@ export function createJeopardy(deps: JeopDeps) {
         cat._links = aster.links.slice(); cat._labels = false
       }
     })
-    jeopReady = true
+    jeopReady = true; deps.onStars?.(CATEGORIES, jDense)
   }
 
+  // invisible hover/click hit target (the ONLY interactive element); always emitted on both paths
+  const hitCircle = (c: any) => `<circle class="chhit" data-cat="${c.cat}" data-i="${c.i}" cx="${c.x}" cy="${c.y}" r="${Math.max(c.r + 11, 14).toFixed(1)}" fill="#fff" opacity="0"/>`
+
   function drawChallenge(c: any) {
+    // Pixi-active: the GPU draws the star/glow/crosshair/solved-ring; SVG keeps only the hit target.
+    if (usePixi()) return hitCircle(c)
     const cat = c.catObj, R = c.r, x = c.x, y = c.y
     const solved = c.solvers.length > 0
     const dim = solved ? 0.62 : 1
@@ -193,7 +208,7 @@ export function createJeopardy(deps: JeopDeps) {
       s = `<g class="twk" style="--o:${dim.toFixed(2)};--o2:${(dim * (solved ? 0.8 : 0.55)).toFixed(2)};--d:${dur}s;--dl:${dly}s">${core}</g>`
     }
     if (solved) s += `<circle cx="${x}" cy="${y}" r="${(R + 4).toFixed(1)}" fill="none" stroke="${c.solvers[0].color}" stroke-width="1.4" opacity="0.85"/>`
-    s += `<circle class="chhit" data-cat="${c.cat}" data-i="${c.i}" cx="${x}" cy="${y}" r="${Math.max(R + 11, 14).toFixed(1)}" fill="#fff" opacity="0"/>`
+    s += hitCircle(c)
     return s
   }
 
@@ -232,6 +247,7 @@ export function createJeopardy(deps: JeopDeps) {
   }
 
   function flashChallenge(c: any) {
+    if (usePixi() && deps.onFlash) { deps.onFlash(c.x, c.y, c.r, c.catObj.color); return } // GPU draws the flash ring
     const g = $('ch-' + c.cat + '-' + c.i); if (!g) return
     const ring = document.createElementNS(NS, 'circle')
     ring.setAttribute('cx', c.x); ring.setAttribute('cy', c.y); ring.setAttribute('r', c.r)
@@ -249,7 +265,9 @@ export function createJeopardy(deps: JeopDeps) {
 
   // laser from a team node (wheel coords 0..1000) to the challenge star (panel px)
   function jeopBeam(tx: number, ty: number, c: any, col: string) {
-    const host = $('jeop'); if (!host || !jeopReady || deps.isFrozen()) return
+    if (!jeopReady || deps.isFrozen()) return
+    if (usePixi() && deps.onBeam) { deps.onBeam(tx, ty, c.x, c.y, c.r, col); return } // GPU draws the laser
+    const host = $('jeop'); if (!host) return
     const px = jWheelX + (tx / 1000) * jWheelSize, py = jWheelY + (ty / 1000) * jWheelSize
     const g = document.createElementNS(NS, 'g'); host.appendChild(g)
     const ln = (w: number, stroke: string) => {
@@ -340,9 +358,16 @@ export function createJeopardy(deps: JeopDeps) {
         // immediate redraw, and the source CATEGORIES so a later relayout stays fresh)
         const byId: any = {}; CHALLENGES.forEach((c) => (byId[c.id] = c))
         const srcById: any = {}; CATEGORIES.forEach((cat) => cat.challenges.forEach((x: any) => (srcById[x.id] = x)))
+        const solversSig = (arr: any[]) => (arr ? arr.map((s: any) => s.color).join(',') : '')
         cats.forEach((cat) => cat.challenges.forEach((nc) => {
           const c = byId[nc.id]
-          if (c) { c.base = nc.base; c.solveCount = nc.solveCount; c.solvers = nc.solvers; renderChallenge(c) }
+          if (c) {
+            // only re-render the SVG when something visible actually changed (most 15s polls change nothing);
+            // ALWAYS update the in-place values so a later relayout stays fresh. signature BEFORE overwrite.
+            const changed = c.base !== nc.base || c.solveCount !== nc.solveCount || solversSig(c.solvers) !== solversSig(nc.solvers)
+            c.base = nc.base; c.solveCount = nc.solveCount; c.solvers = nc.solvers
+            if (changed) renderChallenge(c)
+          }
           const sc = srcById[nc.id]
           if (sc) { sc.base = nc.base; sc.solveCount = nc.solveCount; sc.solvers = nc.solvers }
         }))
@@ -351,6 +376,9 @@ export function createJeopardy(deps: JeopDeps) {
       CATEGORIES = cats; _sig = sig; layout(); render()
     },
     layout() { layout(); render() },
+    /** Pixi star layer just became ready: hand it the laid-out stars and re-render the SVG to
+     *  hit-only (drawChallenge now drops the animated visuals). No-op until the first layout. */
+    syncPixi() { if (!jeopReady) return; deps.onStars?.(CATEGORIES, jDense); render() },
     /** fire a solve beam + flash from a team node to a challenge by title (live feed) */
     solveByTitle(wheelX: number, wheelY: number, title: string, team: { name: string; color: string }): boolean {
       if (!jeopReady) return false
