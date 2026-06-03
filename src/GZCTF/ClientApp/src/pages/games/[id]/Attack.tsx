@@ -599,6 +599,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   let speed = 1
   // preview-only knobs: how many teams / A&D services / KotH hills / jeopardy challenges
   let cfgTeams = 8, cfgAd = 4, cfgKoth = 3, cfgJeop = 24
+  let arenaRect: any = null // cached arena.getBoundingClientRect(); refreshed in sizeCanvas
+  let rankDirty = false, statsDirty = false, logDirty = false // per-frame DOM-flush flags
   const prevSvcState: Record<string, string> = {}
   // preroll = the attention-seeking telegraph (board stays visible, warning builds)
   // that plays BEFORE the slam cinematic; soundDelay/slam/total are relative to the slam.
@@ -614,11 +616,13 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   // while frozen the board shows the snapshot taken at freeze; real values keep updating underneath.
   // RANKING panel mode — switchable between the three score boards.
   let rankMode: 'ad' | 'koth' | 'jeopardy' = 'ad'
-  const adScore = (t: any) => (frozen && t.shown != null ? t.shown : t.score)
+  // during the freeze, show the snapshot captured at freeze time instead of the live value
+  const shownOr = (t: any, snap: string, live: string) => (frozen && t[snap] != null ? t[snap] : t[live])
+  const adScore = (t: any) => shownOr(t, 'shown', 'score')
   const dispScore = (t: any) => (rankMode === 'koth' ? t.kothScore || 0 : rankMode === 'jeopardy' ? t.jpScore || 0 : adScore(t))
-  const dispSla = (t: any) => (frozen && t.shownSla != null ? t.shownSla : t.sla)
-  const dispAtk = (t: any) => (frozen && t.shownAtk != null ? t.shownAtk : t.atk)
-  const dispDef = (t: any) => (frozen && t.shownDef != null ? t.shownDef : t.def)
+  const dispSla = (t: any) => shownOr(t, 'shownSla', 'sla')
+  const dispAtk = (t: any) => shownOr(t, 'shownAtk', 'atk')
+  const dispDef = (t: any) => shownOr(t, 'shownDef', 'def')
   const fmtPts = (n: number) => { const r = Math.round(n || 0); return r >= 10000 ? (r / 1000).toFixed(1) + 'k' : String(r) }
   const fmtMS = (s: number) => { const m = Math.floor(s / 60), x = Math.floor(s % 60); return m + ':' + String(x).padStart(2, '0') }
 
@@ -860,16 +864,20 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   const MISS_COL = '#8c5663' // rejected-flag (wrong answer) tracer — muted blood-grey
   function renderSvc(t: any) {
     const g = $('svc-' + t.id); if (!g) return
-    g.innerHTML = ''
     const now = Date.now()
     const n = t.svc.length, w = 11, gap = 4, tot = n * w + (n - 1) * gap, start = -tot / 2
+    // Build the per-service rects ONCE; on later calls just patch the fill of the ones
+    // that changed (a flag burst re-tints tiles without re-creating DOM each time).
+    if (g.childElementCount !== n) {
+      g.innerHTML = ''
+      for (let i = 0; i < n; i++) g.appendChild(el('rect', { x: start + i * (w + gap), y: 0, width: w, height: 11, rx: 2, fill: SVC_COLOR.none, stroke: '#06050f', 'stroke-width': 1 }))
+    }
+    const rects = g.children
     t.svc.forEach((s: any, i: number) => {
-      const x = start + i * (w + gap)
       // a freshly-pwned service flashes red for a few seconds; otherwise it shows its
       // SLA check verdict colour (Ok / Mumble / Offline / InternalError).
       const fill = s.pwnUntil && s.pwnUntil > now ? SVC_COLOR.pwned : (SVC_COLOR[s.status] || SVC_COLOR.none)
-      const r = el('rect', { x, y: 0, width: w, height: 11, rx: 2, fill, stroke: '#06050f', 'stroke-width': 1 })
-      g.appendChild(r)
+      const rc: any = rects[i]; if (rc && rc.getAttribute('fill') !== fill) rc.setAttribute('fill', fill)
     })
   }
   function renderScore(t: any) { const e = $('sc-' + t.id); if (e) e.textContent = adScore(t) }
@@ -883,7 +891,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   /* -------- FX canvas -------- */
   let SC = 1
   function sizeCanvas() {
-    const r = arena.getBoundingClientRect()
+    const r = arena.getBoundingClientRect(); arenaRect = r
     const dpr = 1 // FX particle layers; the SVG stays vector-crisp regardless
     fx.width = r.width * dpr; fx.height = r.height * dpr
     fxbg.width = r.width * dpr; fxbg.height = r.height * dpr
@@ -947,7 +955,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   }
 
   function fireShot(from: any, to: any, col: string, miss = false) {
-    if (frozen || document.hidden) return
+    if (frozen || document.hidden || shots.length > 220) return // cap: a huge flag burst can't unbound the queue
     const cx = (from.x + to.x) / 2, cy = (from.y + to.y) / 2
     const dx = to.x - from.x, dy = to.y - from.y
     const px = -dy, py = dx, len = Math.hypot(px, py) || 1
@@ -956,7 +964,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   }
   const bez = (a: number, c: number, b: number, t: number) => { const u = 1 - t; return u * u * a + 2 * u * t * c + t * t * b }
   function addSpark(x: number, y: number, col: string) {
-    if (document.hidden) return
+    if (document.hidden || sparks.length > 600) return
     for (let i = 0; i < 16; i++) { const a = rng(0, 6.28), v = rng(60, 260); sparks.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 1, col }) }
     sparks.push({ x, y, ring: true, r: 4, life: 1, col })
   }
@@ -973,6 +981,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   }
   function spawnBeam(from: any, to: any, col: string, big: boolean) { if (frozen || document.hidden) return; fxq.push({ kind: 'beam', fx: from.x, fy: from.y, tx: to.x, ty: to.y, col, t: 0, dur: big ? 0.6 : 0.42, big: !!big }) }
   function spawnCapture(from: any, hill: any, col: string) { if (frozen || document.hidden) return; spawnBeam(from, hill, col, false); fxq.push({ kind: 'shield', x: hill.x, y: hill.y, col, t: 0, dur: 0.9 }) }
+  // replay a CSS class animation (toggle + forced reflow), then drop the class after ms
+  function restartAnim(g: any, cls: string, ms: number) { if (!g) return; g.classList.remove(cls); void g.offsetWidth; g.classList.add(cls); setTimeout(() => g.classList.remove(cls), ms) }
 
   function drawFX(dt: number) {
     fxClock += dt
@@ -1050,8 +1060,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   }
 
   function floatText(wx: number, wy: number, txt: string, col: string) {
-    if (frozen) return
-    const r = arena.getBoundingClientRect()
+    if (frozen || document.hidden) return
+    const r = arenaRect || arena.getBoundingClientRect() // cached; only re-measured if not yet sized
     const px = (wx / 1000) * r.width, py = (wy / 1000) * r.height
     const d = document.createElement('div')
     d.className = 'float'; d.style.left = px + 'px'; d.style.top = py + 'px'
@@ -1067,7 +1077,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     row.innerHTML = `<span class="ts">${clk()}</span><span class="tag ${cls}">${tag}</span>${html}`
     logEl.appendChild(row)
     while (logEl.children.length > 60) logEl.removeChild(logEl.firstChild)
-    logEl.scrollTop = logEl.scrollHeight
+    logDirty = true // scroll-to-bottom batched in the loop (avoids a forced reflow per event)
   }
 
   /* -------- procedural sound engine (Web Audio; runs off the main thread) -------- */
@@ -1175,6 +1185,29 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     tone({ type: 'sine', f: 130, f2: 64, dur: 1.5, vol: 0.5, delay: 0.58 })
     noiseBurst({ type: 'highpass', f: 5000, fEnd: 9000, dur: 1.7, vol: 0.18, delay: 0.58, rev: 0.85 })
   }
+  function sfxNeutral() { // a hill lost / went neutral — two descending sines
+    if (!soundOn || !audio()) return
+    tone({ type: 'sine', f: 660, f2: 330, dur: 0.18, vol: 0.1 })
+    tone({ type: 'sine', f: 440, f2: 220, dur: 0.22, vol: 0.08, delay: 0.06 })
+  }
+  function sfxMiss() { // a rejected / wrong flag — soft low downbend (reads as a non-event)
+    if (!soundOn || !audio()) return
+    tone({ type: 'sine', f: 380, f2: 240, dur: 0.12, vol: 0.07 })
+  }
+  function sfxMumble() { // a service slipped to MUMBLE — short warning chirp
+    if (!soundOn || !audio()) return
+    tone({ type: 'square', f: 520, f2: 600, dur: 0.06, vol: 0.08 })
+    noiseBurst({ type: 'bandpass', f: 1800, dur: 0.08, vol: 0.04 })
+  }
+  function sfxRound() { // round rollover — two-note ascending chime
+    if (!soundOn || !audio()) return
+    ;[660, 990].forEach((f, i) => tone({ type: 'triangle', f, f2: f, dur: 0.12, vol: 0.07, delay: i * 0.07 }))
+  }
+  function sfxUnfreeze() { // scoreboard unlocks — ascending mirror of sfxFreeze
+    if (!soundOn || !audio()) return
+    makeReverb()
+    ;[880, 1046, 1318, 1568].forEach((f, i) => tone({ type: 'sine', f, f2: f, dur: 0.22, vol: 0.07, delay: i * 0.05, rev: 0.4 }))
+  }
   function resolveFlag(atkr: any, vic: any, svc: any, pts: number, isFB: boolean) {
     if (!isFB) sfxAttack()
     // A&D capture credits the attack/defense board; a jeopardy solve (no victim)
@@ -1277,7 +1310,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     rankInit = true
     rankEl.style.display = 'flex'; rankEl.style.flexDirection = 'column'
   }
-  function refreshRank() {
+  function drawRank() {
     if (!rankInit) rebuildRank()
     const sorted = [...TEAMS].sort((a, b) => dispScore(b) - dispScore(a))
     sorted.forEach((t, i) => {
@@ -1339,7 +1372,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     sfxFreeze(); refreshRank()
   }
   function unfreeze() {
-    if (!frozen) return; frozen = false
+    if (!frozen) return; frozen = false; sfxUnfreeze()
     const tag = $('freezeTag'); if (tag) tag.classList.remove('show')
     const rp = root.querySelector('.panel.rank'); if (rp) rp.classList.remove('frozen')
     const fb = $('freezeBtn'); if (fb) fb.classList.remove('on')
@@ -1378,7 +1411,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const ov = $('winOverlay'); if (ov) ov.classList.remove('show'); clearConfetti()
     addLog('SYS', 'sys', `<span class="em">REMATCH</span> :: arena reset`)
   }
-  function refreshStats() {
+  function drawStats() {
     const up = TEAMS.reduce((a, t) => a + t.svc.filter((s: any) => s.status === 'def').length, 0)
     const tot = TEAMS.length * SERVICES.length
     $('roundPill').textContent = 'ROUND ' + String(round).padStart(2, '0')
@@ -1398,6 +1431,12 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       </div>`
   }
 
+  // Coalesce the heavy DOM rebuilds: events just mark dirty (refreshRank/refreshStats),
+  // and the rAF loop flushes drawRank/drawStats/log-scroll at most once per frame instead
+  // of rebuilding on every single event.
+  function refreshRank() { rankDirty = true }
+  function refreshStats() { statsDirty = true }
+
   /* -------- loop / clock -------- */
   let lastTs = performance.now()
   function loop(ts: number) {
@@ -1407,6 +1446,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     // a first-crown owed but deferred past a running cinematic — fire it once free
     const pc = kothDir.takePendingCrown(cinema)
     if (pc) { const ph = HILLS.find((x) => x.id === pc.hill); const po = TEAMS.find((t) => t.id === pc.owner); if (ph && po) fbKoth(po, ph, () => {}) }
+    if (rankDirty) { rankDirty = false; drawRank() }
+    if (statsDirty) { statsDirty = false; drawStats() }
+    if (logDirty) { logDirty = false; logEl.scrollTop = logEl.scrollHeight }
     raf = requestAnimationFrame(loop)
   }
   // Preview event generator runs on a self-rescheduling setTimeout (NOT the rAF loop):
@@ -1438,7 +1480,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
         round++; tickLeft = 30
         TEAMS.forEach((t) => { const owned = t.svc.filter((s: any) => s.status === 'def').length; t.score += owned * Math.floor(rng(6, 14)) })
         HILLS.forEach((h) => { if (h.owner) h.owner.kothScore = (h.owner.kothScore || 0) + Math.floor(rng(10, 20)) })
-        addLog('ROUND', 'sys', `<span class="em">ROUND ${round} START</span> :: passive + hold scoring`)
+        sfxRound(); addLog('ROUND', 'sys', `<span class="em">ROUND ${round} START</span> :: passive + hold scoring`)
         TEAMS.forEach(renderScore); refreshRank()
       }
       refreshStats()
@@ -1557,11 +1599,10 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
           if (ns === 'down' && old !== 'down') {
             addLog('SLA', 'sla', `<span class="who">${esc(t.name)}</span> :: <span class="svc">${esc(sv.name)}</span> went <span class="em">DOWN</span>`)
             spawnDown(t.x, t.y, '#ff3b5b'); sfxDown()
-            const g = $('base-' + t.id)
-            if (g) { g.classList.remove('node-down'); void g.offsetWidth; g.classList.add('node-down'); setTimeout(() => g.classList.remove('node-down'), 1300) }
+            restartAnim($('base-' + t.id), 'node-down', 1300)
             totalEvents++
           } else if (ns === 'vuln' && old !== 'vuln') {
-            addLog('SLA', 'sla', `<span class="who">${esc(t.name)}</span> :: <span class="svc">${esc(sv.name)}</span> is <span class="em">MUMBLE</span>`)
+            addLog('SLA', 'sla', `<span class="who">${esc(t.name)}</span> :: <span class="svc">${esc(sv.name)}</span> is <span class="em">MUMBLE</span>`); sfxMumble()
           } else if (ns === 'def' && old !== 'def') {
             addLog('DEFEND', 'def', `<span class="who">${esc(t.name)}</span> restored <span class="svc">${esc(sv.name)}</span>`)
             spawnShield(t.x, t.y, SVC_COLOR.def); sfxDefend(); totalEvents++
@@ -1610,7 +1651,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     // Rejected flag (wrong answer): a soft "MISS" tracer (jeopardy aims at the CORE),
     // no score, no impact, not logged. Capped so a flag-spam burst can't flood.
     if (f.type === 'Unaccepted') {
-      if (!frozen && shots.filter((s: any) => s.miss).length < 6) fireShot(atkr, vic || { x: CX, y: CY }, MISS_COL, true)
+      if (!frozen && shots.filter((s: any) => s.miss).length < 6) { fireShot(atkr, vic || { x: CX, y: CY }, MISS_COL, true); sfxMiss() }
       return
     }
     let svc: any = null
@@ -1640,7 +1681,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   // running cinematic clears; 'capture' is a normal seize; 'neutral' just logs.
   function onHillCapture(h: any, newOwner: any, res: CaptureResult) {
     if (res.kind === 'neutral' || !newOwner) {
-      addLog('HILL', 'hill', `<span class="svc">${esc(h.name)}</span> went <span class="em">NEUTRAL</span>`); totalEvents++; refreshStats(); return
+      sfxNeutral(); addLog('HILL', 'hill', `<span class="svc">${esc(h.name)}</span> went <span class="em">NEUTRAL</span>`); totalEvents++; refreshStats(); return
     }
     if (res.kind === 'crown') fbKoth(newOwner, h, () => {})
     else if (res.kind === 'capture') { spawnCapture(newOwner, h, newOwner.color); sfxCapture() }
@@ -1832,7 +1873,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     if (!s) return
     s.status = 'down'; t.sla = Math.max(40, t.sla - Math.floor(rng(2, 6))); t.score = Math.max(0, t.score - Math.floor(rng(8, 20)))
     renderSvc(t); renderScore(t); spawnDown(t.x, t.y, '#ff3b5b'); sfxDown()
-    const g = $('base-' + t.id); if (g) { g.classList.remove('node-down'); void g.offsetWidth; g.classList.add('node-down'); setTimeout(() => g.classList.remove('node-down'), 1300) }
+    restartAnim($('base-' + t.id), 'node-down', 1300)
     floatText(t.x, t.y - 66, '▼ DOWN', '#ff5b6e')
     addLog('SLA', 'sla', `<span class="who">${esc(t.name)}</span> :: <span class="svc">${esc(s.name)}</span> went <span class="em">DOWN</span>`)
     setTimeout(() => { if (s.status === 'down') { s.status = 'def'; t.sla = Math.min(100, t.sla + 2); renderSvc(t) } }, rng(4000, 9000))
@@ -1877,7 +1918,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     if ((HILLS.length ? Math.random() < 0.5 : Math.random() < 0.7) && TEAMS.length > 1) {
       let v = pick(TEAMS); let g = 0; while (v === atkr && g++ < 8) v = pick(TEAMS); if (v !== atkr) target = v
     }
-    if (!frozen && shots.filter((s: any) => s.miss).length < 6) fireShot(atkr, target, MISS_COL, true)
+    if (!frozen && shots.filter((s: any) => s.miss).length < 6) { fireShot(atkr, target, MISS_COL, true); sfxMiss() }
   }
   async function startPreview() {
     // Preview is a fully simulated battle driven by the TEAMS / A&D / KOTH / JEOP
