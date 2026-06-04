@@ -61,9 +61,14 @@ public class DatabaseSink : ILogEventSink, IDisposable
             UserName = LogHelper.GetLogPropertyValue(userName, "Anonymous"),
             Logger = LogHelper.GetLogPropertyValue<string>(sourceContext, "Unknown") ?? string.Empty,
             RemoteIP = LogHelper.GetLogPropertyValue<IPAddress>(ip, null),
-            Status = logEvent.Exception is null
-                ? LogHelper.GetLogPropertyValue(status, TaskStatus.Failed)
-                : TaskStatus.Failed,
+            // An explicit Status (set by SystemLog/Log) always wins. When it's absent — i.e. a
+            // plain ILogger call (LogInformation/LogWarning/…) from a service — derive the default
+            // from the level instead of hard-coding Failed, so routine Information logs (service
+            // startup, repo-scan activity, honeypot bind, …) don't all render as failures.
+            Status = logEvent.Exception is not null
+                ? TaskStatus.Failed
+                : LogHelper.GetLogPropertyValue(status,
+                    logEvent.Level >= LogEventLevel.Error ? TaskStatus.Failed : TaskStatus.Success),
             BrowserFingerprint = LogHelper.GetLogPropertyValue<string>(fingerprint, null),
             Exception = logEvent.Exception?.ToString()
         };
