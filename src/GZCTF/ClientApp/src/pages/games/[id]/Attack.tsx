@@ -1182,12 +1182,12 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       div.innerHTML = `<div class="pos"></div>
         <div class="av">${avatar(t.look, t.color)}</div>
         <div class="body"><div class="nm" style="color:${t.color}">${esc(t.name)}</div>
-          <div class="bars" id="bars-${t.id}"><i id="ba-${t.id}" style="background:#27e3ff"></i><i id="bd-${t.id}" style="background:#3dffb0"></i></div></div>
+          <div class="bars" id="bars-${t.id}"><i id="ba-${t.id}" style="background:#27e3ff"></i><i id="bd-${t.id}" style="background:#3dffb0"></i><i id="bf-${t.id}" style="background:#ff4d5e"></i></div></div>
         <div class="sc" id="rsc-${t.id}"></div>`
       rankEl.appendChild(div)
       const bars: any = div.querySelector('.bars')
       // cache node refs (kills the per-frame getElementById chains in drawRank) + last-rendered values
-      t._rk = { div, pos: div.querySelector('.pos'), bars, ba: bars.children[0], bd: bars.children[1], sc: div.querySelector('.sc'), lastSc: '', lastPos: -1 }
+      t._rk = { div, pos: div.querySelector('.pos'), bars, ba: bars.children[0], bd: bars.children[1], bf: bars.children[2], sc: div.querySelector('.sc'), lastSc: '', lastPos: -1 }
     })
     rankInit = true
     rankEl.style.display = 'flex'; rankEl.style.flexDirection = 'column'
@@ -1202,8 +1202,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       let sc: string
       if (rankMode === 'ad') {
         r.bars.style.display = ''
-        r.ba.style.flex = String(Math.max(dispAtk(t), 1)) // attack points
-        r.bd.style.flex = String(Math.max(dispDef(t), 1)) // SLA points
+        r.ba.style.flex = String(Math.max(dispAtk(t), 1)) // attack points (blue)
+        r.bd.style.flex = String(Math.max(dispDef(t), 1)) // SLA points (green)
+        r.bf.style.flex = String(Math.max(shownOr(t, 'shownDefLoss', 'defLoss') || 0, 0)) // defense loss (red) — only when breached
         const dl = t.defLoss || 0
         sc = `${dispScore(t)}<small class="${dl > 0 ? 'dn' : ''}">${dl > 0 ? '−' + fmtPts(dl) : '0'} DEF</small>`
       } else if (rankMode === 'koth') {
@@ -1237,7 +1238,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   }
   function enterFreeze() {
     if (frozen) return; frozen = true
-    TEAMS.forEach((t) => { t.shown = t.score; t.shownSla = t.sla; t.shownAtk = t.atk; t.shownDef = t.def })
+    TEAMS.forEach((t) => { t.shown = t.score; t.shownSla = t.sla; t.shownAtk = t.atk; t.shownDef = t.def; t.shownDefLoss = t.defLoss })
     const tag = $('freezeTag'); if (tag) tag.classList.add('show')
     const rp = root.querySelector('.panel.rank'); if (rp) rp.classList.add('frozen')
     const fb = $('freezeBtn'); if (fb) fb.classList.add('on')
@@ -1277,7 +1278,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     gameEndMs = Date.now() + MATCH_SECONDS * 1000
     TEAMS.forEach((t) => {
       t.score = Math.floor(rng(380, 520)); t.atk = Math.floor(rng(2, 9)); t.def = Math.floor(rng(2, 9)); t.sla = Math.floor(rng(88, 100))
-      t.shown = t.shownSla = t.shownAtk = t.shownDef = null
+      t.shown = t.shownSla = t.shownAtk = t.shownDef = t.shownDefLoss = null
       t.svc.forEach((s: any) => { s.status = Math.random() < 0.85 ? 'def' : 'vuln' }); renderSvc(t)
     })
     HILLS.forEach((h) => { h.owner = null; renderHill(h) })
