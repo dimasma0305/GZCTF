@@ -97,11 +97,11 @@ const ARENA_CSS = `
   .accent-m{box-shadow:inset 3px 0 0 var(--magenta)}
   .accent-v{box-shadow:inset 3px 0 0 var(--violet)}
 
-  #log{flex:1;overflow-y:auto;overflow-x:hidden;padding:8px 10px;display:flex;flex-direction:column;
-    gap:3px;font-size:15px;line-height:1.25;justify-content:flex-start;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
-  #log::-webkit-scrollbar{width:6px}#log::-webkit-scrollbar-thumb{background:var(--line2);border-radius:3px}
-  .lg{flex:0 0 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.92;
-    animation:logIn .25s ease-out}
+  #log{flex:1;overflow-y:auto;overflow-x:auto;padding:8px 10px;display:flex;flex-direction:column;
+    align-items:flex-start;gap:3px;font-size:15px;line-height:1.25;justify-content:flex-start;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+  #log::-webkit-scrollbar{width:6px;height:6px}#log::-webkit-scrollbar-thumb{background:var(--line2);border-radius:3px}
+  /* rows keep their full width (no ellipsis) so long lines stay readable via horizontal scroll */
+  .lg{flex:0 0 auto;white-space:nowrap;opacity:.92;animation:logIn .25s ease-out}
   @keyframes logIn{from{opacity:0;transform:translateX(-8px)}}
   .lg .ts{color:var(--dimmer);margin-right:5px}
   .lg .tag{font-family:'Press Start 2P';font-size:8px;padding:1px 4px;margin-right:6px;
@@ -1667,6 +1667,26 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     arena.appendChild(note)
   }
 
+  // Backfill the battle log with recent attacks so a refresh doesn't start empty.
+  // History only — scores come from the 15s poll, and we deliberately skip the map
+  // cinematics (replaying ~50 events would be a flurry of noise). Oldest-first from the
+  // server; the backend returns [] for Hidden/frozen games (matching the live gate).
+  async function seedLog() {
+    let evts: any[]
+    try { evts = await fetchJSON(`/api/Game/${gameId}/AttackFeed?limit=50`) } catch (e) { return }
+    if (!Array.isArray(evts) || !evts.length) return
+    for (const f of evts) {
+      if (!f || f.type === 'Unaccepted') continue
+      const who = esc(f.teamName || '???')
+      const svc = esc(f.challengeTitle || 'flag')
+      const vic = f.victimTeamName ? esc(f.victimTeamName) : 'CORE'
+      if (f.type === 'FirstBlood')
+        addLog('FIRST BLOOD', 'fb', `<span class="who">${who}</span> drew first blood${f.victimTeamName ? ` on <span class="vic">${vic}</span>` : ''} :: <span class="svc">${svc}</span>`)
+      else
+        addLog('FLAG', 'flag', `<span class="who">${who}</span> &gt; <span class="vic">${vic}</span> :: <span class="svc">${svc}</span>`)
+    }
+  }
+
   async function start() {
     let ad: any
     try {
@@ -1693,6 +1713,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     refreshRank(); refreshStats()
     sizeCanvas()
     if (ad.isFrozenView) enterFreeze() // board already frozen when we connect
+    await seedLog() // replay recent attacks first so the log survives a refresh
+    if (killed) return
     addLog('SYS', 'sys', `<span class="em">ARENA ONLINE</span> :: ${TEAMS.length} teams, ${SERVICES.length} services, live feed`)
 
     connectWS()
