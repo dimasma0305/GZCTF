@@ -26,8 +26,8 @@ function blobTexture(size = 256): Texture {
   const c = document.createElement('canvas'); c.width = c.height = size
   const g = c.getContext('2d')!, r = size / 2
   const grd = g.createRadialGradient(r, r, 0, r, r, r)
-  grd.addColorStop(0, 'rgba(255,214,214,1)')
-  grd.addColorStop(0.35, 'rgba(232,18,47,0.95)')
+  grd.addColorStop(0, 'rgba(255,120,135,1)')   // sample bloom: pink-red core (NOT white-hot)
+  grd.addColorStop(0.4, 'rgba(232,18,47,0.95)')
   grd.addColorStop(1, 'rgba(140,12,29,0)')
   g.fillStyle = grd; g.beginPath(); g.arc(r, r, r, 0, Math.PI * 2); g.fill()
   return Texture.from(c)
@@ -60,7 +60,7 @@ export function createFbRenderer(mount: ShadowRoot | HTMLElement) {
     .then(() => {
       if (disposed) { try { app.destroy({ removeView: true }, { children: true, texture: true }) } catch (e) {} ; return }
       dark = new Graphics(); gfx = new Graphics(); flash = new Graphics()
-      blob = new Sprite(blobTexture()); blob.anchor.set(0.5); blob.blendMode = 'add'
+      blob = new Sprite(blobTexture()); blob.anchor.set(0.5) // normal blend, like the sample bloom
       app.stage.addChild(dark, blob, gfx, flash) // dark < bloom < rays/ring < flash
       ready = true
     })
@@ -99,14 +99,16 @@ export function createFbRenderer(mount: ShadowRoot | HTMLElement) {
       if (p.life <= 0) continue
       p.tr.push([p.x, p.y]); if (p.tr.length > TENDRIL) p.tr.shift()
       const a = p.life
+      // one reddish droplet colour for streak + head (sample brightens g/b slightly with life)
+      const col = (245 << 16) | ((20 + 30 * a) | 0) << 8 | ((40 + 20 * a) | 0)
       if (p.tr.length > 1) {
         gfx.moveTo(p.tr[0][0], p.tr[0][1]); for (let j = 1; j < p.tr.length; j++) gfx.lineTo(p.tr[j][0], p.tr[j][1])
-        gfx.stroke({ width: Math.max(0.5, p.r * 1.2), color: 0xff3b5b, alpha: a * 0.9 })
+        gfx.stroke({ width: Math.max(0.5, p.r * 1.2), color: col, alpha: a })
       }
-      gfx.circle(p.x, p.y, Math.max(0.5, p.r)).fill({ color: 0xffd6d6, alpha: a })
+      gfx.circle(p.x, p.y, Math.max(0.5, p.r * (0.5 + 0.5 * a))).fill({ color: col, alpha: a })
     }
-    // impact flash flicker
-    const fa = kf(elapsed, [[0, 0.9], [0.12, 0], [0.16, 0.4], [0.2, 0]])
+    // single impact flash, capped at 0.5 like the sample
+    const fa = Math.max(0, 0.5 - elapsed * 3)
     flash.clear(); if (fa > 0.001) flash.rect(0, 0, W, H).fill({ color: 0xffffff, alpha: fa })
   }
 
