@@ -632,42 +632,16 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     return { ...base, eye: t.color, hair: `hsl(${h} 80% 70%)`, skin: base.skin }
   }
 
-  /* -------- avatar (chibi SVG) -------- */
+  /* -------- avatar = PROFILE portrait: a head+shoulders BUST of the SAME full-body character
+     (reuses chibiHead/chibiCollar so the FB/champion/ranklist profile always matches the wheel). -------- */
   function avatar(L: any, color: string) {
-    const { hair, skin, eye, style } = L
-    const acc = L.gear || 'none'
-    let hairTop = ''
-    if (style === 'spiky') hairTop = `<path d="M14 30 L20 12 L26 26 L32 10 L38 26 L44 12 L50 30 Z" fill="${hair}"/>`
-    else if (style === 'bob') hairTop = `<path d="M13 34 Q13 12 32 12 Q51 12 51 34 L51 40 Q44 30 32 30 Q20 30 13 40 Z" fill="${hair}"/>`
-    else if (style === 'pony') hairTop = `<path d="M14 32 Q14 12 32 12 Q50 12 50 32 L46 30 Q46 18 32 18 Q18 18 18 30 Z" fill="${hair}"/><path d="M48 22 Q60 28 56 46 Q52 40 46 38 Z" fill="${hair}"/>`
-    else if (style === 'twin') hairTop = `<path d="M15 32 Q15 13 32 13 Q49 13 49 32 L45 30 Q45 19 32 19 Q19 19 19 30 Z" fill="${hair}"/><circle cx="14" cy="30" r="7" fill="${hair}"/><circle cx="50" cy="30" r="7" fill="${hair}"/>`
-    else hairTop = `<path d="M12 44 Q10 12 32 11 Q54 12 52 44 L48 44 Q48 26 32 26 Q16 26 16 44 Z" fill="${hair}"/>`
-    let ears = ''
-    if (acc === 'catears') ears = `<path d="M16 24 L12 8 L26 18 Z" fill="${hair}"/><path d="M48 24 L52 8 L38 18 Z" fill="${hair}"/><path d="M17 21 L15 12 L22 17 Z" fill="${color}"/><path d="M47 21 L49 12 L42 17 Z" fill="${color}"/>`
-    let gear = ''
-    if (acc === 'visor') gear = `<rect x="18" y="34" width="28" height="9" rx="3" fill="${color}" opacity=".9"/><rect x="20" y="36" width="9" height="3" fill="#fff" opacity=".7"/>`
-    if (acc === 'headset') gear = `<path d="M16 38 Q16 22 32 22 Q48 22 48 38" fill="none" stroke="${color}" stroke-width="3"/><rect x="12" y="36" width="6" height="10" rx="2" fill="${color}"/><rect x="46" y="36" width="6" height="10" rx="2" fill="${color}"/>`
-    if (acc === 'horns') gear = `<path d="M18 22 L10 6 L24 16 Z" fill="${color}"/><path d="M46 22 L54 6 L40 16 Z" fill="${color}"/>`
-    if (acc === 'headband') gear = `<rect x="13" y="30" width="38" height="6" rx="2" fill="${color}"/><path d="M50 33 L60 28 L58 40 Z" fill="${color}" opacity=".85"/>`
-    if (acc === 'hood') gear = `<path d="M10 40 Q8 8 32 8 Q56 8 54 40 L54 30 Q54 18 32 18 Q10 18 10 30 Z" fill="${color}" opacity=".9"/>`
-    if (acc === 'clip') gear = `<path d="M44 24 l3 -5 l3 5 l-3 5 Z" fill="${color}"/>`
-    const eyes = acc === 'visor' ? '' :
-      `<ellipse cx="25" cy="42" rx="4.4" ry="6" fill="#fff"/><ellipse cx="39" cy="42" rx="4.4" ry="6" fill="#fff"/>
-       <circle cx="25.5" cy="43" r="3" fill="${eye}"/><circle cx="39.5" cy="43" r="3" fill="${eye}"/>
-       <circle cx="24" cy="41.5" r="1.1" fill="#fff"/><circle cx="38" cy="41.5" r="1.1" fill="#fff"/>`
-    const gid = String(L.eye).replace('#', '') + Math.floor(rng(0, 99999))
+    const u = String(L.eye).replace('#', '') + Math.floor(rng(0, 99999))
     return `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-      <defs><radialGradient id="bg_${gid}" cx="50%" cy="40%" r="70%">
-        <stop offset="0%" stop-color="${color}" stop-opacity=".34"/><stop offset="100%" stop-color="#0a0818"/>
+      <defs><radialGradient id="bg_${u}" cx="50%" cy="35%" r="75%">
+        <stop offset="0%" stop-color="${color}" stop-opacity=".32"/><stop offset="100%" stop-color="#0a0818"/>
       </radialGradient></defs>
-      <rect width="64" height="64" fill="url(#bg_${gid})"/>
-      ${ears}
-      <ellipse cx="32" cy="37" rx="16" ry="18.5" fill="${skin}"/>
-      <ellipse cx="22" cy="48" rx="3.2" ry="2.2" fill="${color}" opacity=".35"/>
-      <ellipse cx="42" cy="48" rx="3.2" ry="2.2" fill="${color}" opacity=".35"/>
-      ${eyes}
-      <path d="M29 52 Q32 55 35 52" fill="none" stroke="#9a6b58" stroke-width="1.6" stroke-linecap="round"/>
-      ${hairTop}${gear}
+      <rect width="64" height="64" fill="url(#bg_${u})"/>
+      <g transform="translate(32 50) scale(1.28)">${chibiCollar(color)}${chibiHead(L, color)}</g>
     </svg>`
   }
 
@@ -781,29 +755,10 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     return { x, y, anc }
   }
 
-  function buildBase(t: any) {
-    const c = t.color, L = t.look, idx = t.idx, hair = L.hair, skin = L.skin, eye = L.eye, expr = L.expr
-    const g = el('g', { id: 'base-' + t.id, transform: `translate(${t.x} ${t.y})` })
-    const body = `
-      <rect x="-7" y="14" width="6" height="13" rx="3" fill="#14122e" stroke="${c}" stroke-width="1.2"/>
-      <rect x="1" y="14" width="6" height="13" rx="3" fill="#14122e" stroke="${c}" stroke-width="1.2"/>
-      <path d="M-13 0 Q-13 -3 -9 -3 L9 -3 Q13 -3 13 0 L13 14 Q13 18 9 18 L-9 18 Q-13 18 -13 14 Z" fill="#1b1838" stroke="${c}" stroke-width="2"/>
-      <path d="M-13 0 Q-13 -3 -9 -3 L0 -3 L0 18 L-9 18 Q-13 18 -13 14 Z" fill="${c}" opacity="0.8"/>
-      <path d="M-9 -3 L0 5 L9 -3 Z" fill="#0c0a1c"/>
-      <circle cx="0" cy="8" r="3" fill="${c}"/>
-      <rect x="-17" y="2" width="5" height="12" rx="2.5" fill="#14122e" stroke="${c}" stroke-width="1.2"/>
-      <rect x="12" y="2" width="5" height="12" rx="2.5" fill="#14122e" stroke="${c}" stroke-width="1.2"/>`
-    let back = ''
-    if (L.style === 'pony') back += `<path d="M11 -16 Q28 -8 22 12 Q19 0 9 -4 Z" fill="${hair}"/>`
-    if (L.style === 'long') back += `<path d="M-15 -12 Q-18 -30 0 -30 Q18 -30 15 -12 L16 12 L11 12 Q12 -14 0 -14 Q-12 -14 -11 12 L-16 12 Z" fill="${hair}" opacity="0.95"/>`
-    if (L.style === 'twin') back += `<path d="M-14 -14 Q-22 -2 -18 12 Q-15 2 -10 -4 Z" fill="${hair}"/><path d="M14 -14 Q22 -2 18 12 Q15 2 10 -4 Z" fill="${hair}"/>`
-    if (L.prop === 'katana') back += `<g transform="rotate(-26)"><rect x="13" y="-32" width="2.6" height="34" rx="1.2" fill="#e6ecff"/><rect x="11" y="0" width="7" height="3" rx="1" fill="${c}"/><rect x="13.4" y="3" width="2" height="9" rx="1" fill="#2a2740"/></g>`
-    let props = ''
-    if (L.prop === 'orb') props += `<circle cx="21" cy="7" r="8" fill="none" stroke="${c}" stroke-width="0.9" opacity="0.5"/><circle cx="21" cy="7" r="4.6" fill="${c}"/><circle cx="19.4" cy="5.6" r="1.4" fill="#fff" opacity="0.8"/>`
-    if (L.prop === 'gaunt') props += `<rect x="13" y="9" width="11" height="10" rx="2.5" fill="#1b1838" stroke="${c}" stroke-width="1.6"/><rect x="14.5" y="10.5" width="8" height="2.4" fill="${c}"/>`
-    if (L.prop === 'kunai') props += `<g transform="rotate(28 20 8)"><path d="M20 0 L24 7 L20 9 L16 7 Z" fill="#dfe6ff"/><rect x="19" y="9" width="2" height="6" fill="#2a2740"/><circle cx="20" cy="16" r="2.2" fill="none" stroke="#dfe6ff" stroke-width="1.2"/></g>`
-    if (L.prop === 'shield') props += `<g transform="translate(-20 4)"><path d="M0 -7 L8 -4 Q8 7 0 13 Q-8 7 -8 -4 Z" fill="#1b1838" stroke="${c}" stroke-width="1.6"/><circle cx="0" cy="1" r="2.4" fill="${c}"/></g>`
-
+  /* -------- shared chibi head: the SINGLE source of truth for the team head, used by both the
+     full-body wheel character (buildBase) and the profile portrait (avatar), so they always match. -------- */
+  function chibiHead(L: any, c: string) {
+    const { hair, skin, eye, style, gear, expr } = L
     const EW = `<ellipse cx="-6" cy="-12" rx="4" ry="5.2" fill="#fff"/><ellipse cx="6" cy="-12" rx="4" ry="5.2" fill="#fff"/><circle cx="-5.4" cy="-11" r="2.7" fill="${eye}"/><circle cx="6.6" cy="-11" r="2.7" fill="${eye}"/><circle cx="-6.6" cy="-12.6" r="1" fill="#fff"/><circle cx="5.4" cy="-12.6" r="1" fill="#fff"/>`
     const FACE: any = {
       angry: `${EW}<path d="M-10 -17 L-3 -14" stroke="#7a2230" stroke-width="2" stroke-linecap="round"/><path d="M10 -17 L3 -14" stroke="#7a2230" stroke-width="2" stroke-linecap="round"/><path d="M-3 -3 Q0 -6 3 -3 Q0 -1 -3 -3 Z" fill="#5a0f1a"/><rect x="-1" y="-4" width="2" height="2" fill="#fff"/>`,
@@ -830,20 +785,47 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       none: '',
     }
     const blush = `<ellipse cx="-8" cy="-7" rx="3" ry="2" fill="${c}" opacity="0.3"/><ellipse cx="8" cy="-7" rx="3" ry="2" fill="${c}" opacity="0.3"/>`
-    let head
-    if (L.gear === 'hood') {
-      head = `<ellipse cx="0" cy="-12" rx="15" ry="15" fill="${skin}"/>
+    if (gear === 'hood')
+      return `<ellipse cx="0" cy="-12" rx="15" ry="15" fill="${skin}"/>
         <path d="M-16 -6 Q-20 -34 0 -34 Q20 -34 16 -6 L16 -2 Q13 -19 0 -19 Q-13 -19 -16 -2 Z" fill="${c}" opacity="0.93"/>
         <path d="M-9 -12 L-3 -11 L-4 -8 L-9 -9 Z" fill="${eye}"/><path d="M9 -12 L3 -11 L4 -8 L9 -9 Z" fill="${eye}"/>
         <path d="M-9 -6 Q0 -3 9 -6 L9 0 Q0 4 -9 0 Z" fill="#15122b" stroke="${c}" stroke-width="1"/>`
-    } else if (L.gear === 'visor') {
-      head = `<ellipse cx="0" cy="-12" rx="15" ry="15" fill="${skin}"/>${HAIR[L.style]}
+    if (gear === 'visor')
+      return `<ellipse cx="0" cy="-12" rx="15" ry="15" fill="${skin}"/>${HAIR[style]}
         <rect x="-13" y="-15" width="26" height="8.5" rx="3.5" fill="${c}" opacity="0.92"/>
         <rect x="-11" y="-13.5" width="9" height="2.6" rx="1" fill="#fff" opacity="0.75"/>
         <path d="M-4 -3 Q0 0 4 -3" stroke="#9a5b4e" stroke-width="1.4" fill="none" stroke-linecap="round"/>`
-    } else {
-      head = `<ellipse cx="0" cy="-12" rx="15" ry="15" fill="${skin}"/>${blush}${HAIR[L.style]}${FACE[expr] || FACE.cool}${GEAR[L.gear] || ''}`
-    }
+    return `<ellipse cx="0" cy="-12" rx="15" ry="15" fill="${skin}"/>${blush}${HAIR[style]}${FACE[expr] || FACE.cool}${GEAR[gear] || ''}`
+  }
+  // simplified torso-top (collar + V-neck + gem) matching the body, for the profile bust
+  function chibiCollar(c: string) {
+    return `<path d="M-13 0 Q-13 -3 -9 -3 L9 -3 Q13 -3 13 0 L13 9 L-13 9 Z" fill="#1b1838" stroke="${c}" stroke-width="2"/><path d="M-13 0 Q-13 -3 -9 -3 L0 -3 L0 9 L-13 9 Z" fill="${c}" opacity="0.7"/><path d="M-9 -3 L0 5 L9 -3 Z" fill="#0c0a1c"/><circle cx="0" cy="2" r="2.4" fill="${c}"/>`
+  }
+
+  function buildBase(t: any) {
+    const c = t.color, L = t.look, idx = t.idx, hair = L.hair
+    const g = el('g', { id: 'base-' + t.id, transform: `translate(${t.x} ${t.y})` })
+    const body = `
+      <rect x="-7" y="14" width="6" height="13" rx="3" fill="#14122e" stroke="${c}" stroke-width="1.2"/>
+      <rect x="1" y="14" width="6" height="13" rx="3" fill="#14122e" stroke="${c}" stroke-width="1.2"/>
+      <path d="M-13 0 Q-13 -3 -9 -3 L9 -3 Q13 -3 13 0 L13 14 Q13 18 9 18 L-9 18 Q-13 18 -13 14 Z" fill="#1b1838" stroke="${c}" stroke-width="2"/>
+      <path d="M-13 0 Q-13 -3 -9 -3 L0 -3 L0 18 L-9 18 Q-13 18 -13 14 Z" fill="${c}" opacity="0.8"/>
+      <path d="M-9 -3 L0 5 L9 -3 Z" fill="#0c0a1c"/>
+      <circle cx="0" cy="8" r="3" fill="${c}"/>
+      <rect x="-17" y="2" width="5" height="12" rx="2.5" fill="#14122e" stroke="${c}" stroke-width="1.2"/>
+      <rect x="12" y="2" width="5" height="12" rx="2.5" fill="#14122e" stroke="${c}" stroke-width="1.2"/>`
+    let back = ''
+    if (L.style === 'pony') back += `<path d="M11 -16 Q28 -8 22 12 Q19 0 9 -4 Z" fill="${hair}"/>`
+    if (L.style === 'long') back += `<path d="M-15 -12 Q-18 -30 0 -30 Q18 -30 15 -12 L16 12 L11 12 Q12 -14 0 -14 Q-12 -14 -11 12 L-16 12 Z" fill="${hair}" opacity="0.95"/>`
+    if (L.style === 'twin') back += `<path d="M-14 -14 Q-22 -2 -18 12 Q-15 2 -10 -4 Z" fill="${hair}"/><path d="M14 -14 Q22 -2 18 12 Q15 2 10 -4 Z" fill="${hair}"/>`
+    if (L.prop === 'katana') back += `<g transform="rotate(-26)"><rect x="13" y="-32" width="2.6" height="34" rx="1.2" fill="#e6ecff"/><rect x="11" y="0" width="7" height="3" rx="1" fill="${c}"/><rect x="13.4" y="3" width="2" height="9" rx="1" fill="#2a2740"/></g>`
+    let props = ''
+    if (L.prop === 'orb') props += `<circle cx="21" cy="7" r="8" fill="none" stroke="${c}" stroke-width="0.9" opacity="0.5"/><circle cx="21" cy="7" r="4.6" fill="${c}"/><circle cx="19.4" cy="5.6" r="1.4" fill="#fff" opacity="0.8"/>`
+    if (L.prop === 'gaunt') props += `<rect x="13" y="9" width="11" height="10" rx="2.5" fill="#1b1838" stroke="${c}" stroke-width="1.6"/><rect x="14.5" y="10.5" width="8" height="2.4" fill="${c}"/>`
+    if (L.prop === 'kunai') props += `<g transform="rotate(28 20 8)"><path d="M20 0 L24 7 L20 9 L16 7 Z" fill="#dfe6ff"/><rect x="19" y="9" width="2" height="6" fill="#2a2740"/><circle cx="20" cy="16" r="2.2" fill="none" stroke="#dfe6ff" stroke-width="1.2"/></g>`
+    if (L.prop === 'shield') props += `<g transform="translate(-20 4)"><path d="M0 -7 L8 -4 Q8 7 0 13 Q-8 7 -8 -4 Z" fill="#1b1838" stroke="${c}" stroke-width="1.6"/><circle cx="0" cy="1" r="2.4" fill="${c}"/></g>`
+
+    const head = chibiHead(L, c)
     const flag = `<line x1="-17" y1="-2" x2="-17" y2="-25" stroke="#cfd2ee" stroke-width="1.6"/><path d="M-17 -25 L-33 -21 L-17 -18 Z" fill="${c}" stroke="#0a0818" stroke-width="0.8"/>`
     const lo = labelOffset(t)
     g.innerHTML = `
