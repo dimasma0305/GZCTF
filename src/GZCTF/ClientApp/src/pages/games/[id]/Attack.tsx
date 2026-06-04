@@ -23,7 +23,7 @@ import { createFxRenderer } from './fxRenderer'
 import { createJeopRenderer } from './jeopRenderer'
 
 const FONTS_HREF =
-  'https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=DotGothic16&family=Noto+Serif+JP:wght@700&display=swap'
+  'https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=DotGothic16&display=swap'
 
 /* -------------------------------------------------------------------------- */
 /* Scene CSS (lawbyte). `body` is remapped to `:host` for the shadow root.    */
@@ -126,13 +126,11 @@ const ARENA_CSS = `
   #fxbg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
   /* overflow:visible so the outer team-name labels (offset past the 1000 viewBox edge) aren't clipped */
   #svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
-  /* central ENSŌ core: orbiting tick-crown + dashed ring counter-rotate; kanji glow breathes.
+  /* central ENSŌ core: orbiting tick-crown + dashed ring counter-rotate.
      transform-box:view-box keeps transform-origin in viewBox (500,500) units. */
   #svg .core-spin-ccw{transform-box:view-box;transform-origin:500px 500px;animation:coreSpin 22s linear infinite reverse}
   #svg .core-spin-cw{transform-box:view-box;transform-origin:500px 500px;animation:coreSpin 26s linear infinite}
   @keyframes coreSpin{to{transform:rotate(360deg)}}
-  #svg .core-glow{animation:coreGlow 3.2s ease-in-out infinite}
-  @keyframes coreGlow{0%,100%{opacity:.22}50%{opacity:.6}}
   #fx{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
   .arena-note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     text-align:center;font-family:'Press Start 2P';font-size:11px;color:var(--dim);
@@ -741,8 +739,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       svg.appendChild(el('line', { x1: ix, y1: iy, x2: ox, y2: oy, stroke: t.color, 'stroke-width': 1, 'stroke-opacity': 0.16, 'stroke-dasharray': '4 6' }))
     })
 
-    // central SCORE core: a zen ENSŌ brush-ring wrapping the kanji 攻防 (kō·bō = attack·defense),
-    // orbited by a counter-rotating tick crown + slow dashed ring. Halo is on #fxbg (drawAmbient).
+    // central SCORE core: a zen ENSŌ brush-ring orbited by a counter-rotating tick crown
+    // + slow dashed ring. Halo is on #fxbg (drawAmbient).
     // size baked into geometry (no wrapper transform). CR = enso ring radius; everything derives
     // from it, so retuning the whole core's size is one number. Kept small to match the prior spark.
     const coreG = el('g', {})
@@ -765,15 +763,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const ensoD = `M${CX + CR * 0.893} ${CY - CR * 0.464} A${CR} ${CR} 0 1 1 ${CX + CR * 0.536} ${CY - CR * 0.786}`
     coreG.appendChild(el('path', { d: ensoD, fill: 'none', stroke: '#1e6fa8', 'stroke-width': CR * 0.16, 'stroke-linecap': 'round', 'stroke-opacity': 0.5 }))
     coreG.appendChild(el('path', { d: ensoD, fill: 'none', stroke: '#bdf3ff', 'stroke-width': CR * 0.11, 'stroke-linecap': 'round' }))
-
-    // 攻防 kanji: crisp white face (cyan outline) under a breathing cyan glow ghost
-    const kanji = { x: CX, y: CY, 'text-anchor': 'middle', 'dominant-baseline': 'central', 'font-family': "'Noto Serif JP',serif", 'font-weight': 700, 'font-size': CR * 0.82 }
-    const kFace: any = el('text', { ...kanji, fill: '#eaffff', stroke: '#27e3ff', 'stroke-width': CR * 0.013, style: 'paint-order:stroke' })
-    kFace.textContent = '攻防'
-    coreG.appendChild(kFace)
-    const kGlow: any = el('text', { ...kanji, class: 'core-glow', fill: '#7fe9ff' })
-    kGlow.textContent = '攻防'
-    coreG.appendChild(kGlow)
 
     svg.appendChild(coreG)
 
