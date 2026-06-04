@@ -6,8 +6,9 @@
  * rings, expanding spark rings) are drawn into ONE batched Graphics per frame.
  *
  * It renders into its OWN <canvas> (overlaid on #fx) so the legacy 2D #fx canvas
- * stays a clean fallback: until app.init() resolves (ready=false), or if WebGL
- * init fails, the caller keeps drawing the 2D path. The 0..1000 logical space is
+ * stays a clean fallback: until app.init() resolves (ready=false), or if GPU init
+ * fails, the caller keeps drawing the 2D path. Renderer preference is WebGPU, which
+ * Pixi v8 auto-falls-back to WebGL where WebGPU is unavailable. The 0..1000 logical space is
  * preserved by stage.scale = cssW/1000, so every coordinate in the engine is
  * unchanged. Driven by the engine's rAF loop (autoStart:false → render() per tick).
  */
@@ -50,7 +51,7 @@ export function createFxRenderer(refCanvas: HTMLCanvasElement): FxRenderer {
 
   const r0 = refCanvas.getBoundingClientRect()
   ;(async () => {
-    await app.init({ canvas, backgroundAlpha: 0, antialias: true, autoStart: false, autoDensity: true, resolution: window.devicePixelRatio || 1, width: Math.max(r0.width, 1), height: Math.max(r0.height, 1), preference: 'webgl' })
+    await app.init({ canvas, backgroundAlpha: 0, antialias: true, autoStart: false, autoDensity: true, resolution: window.devicePixelRatio || 1, width: Math.max(r0.width, 1), height: Math.max(r0.height, 1), preference: 'webgpu' })
     if (disposed) { app.destroy({ removeView: true }, { children: true, texture: true }); return }
     dot = bakeDot()
     const layer = new Container()

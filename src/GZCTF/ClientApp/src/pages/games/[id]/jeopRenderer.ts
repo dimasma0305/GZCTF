@@ -69,7 +69,7 @@ export function createJeopRenderer(wrapEl: HTMLElement, opts?: { onReady?: () =>
   const r0 = wrapEl.getBoundingClientRect()
   lastW = Math.max(r0.width, 1); lastH = Math.max(r0.height, 1)
   ;(async () => {
-    await app.init({ canvas, backgroundAlpha: 0, antialias: true, autoStart: false, autoDensity: true, resolution: window.devicePixelRatio || 1, width: lastW, height: lastH, preference: 'webgl' })
+    await app.init({ canvas, backgroundAlpha: 0, antialias: true, autoStart: false, autoDensity: true, resolution: window.devicePixelRatio || 1, width: lastW, height: lastH, preference: 'webgpu' })
     if (disposed) { app.destroy({ removeView: true }, { children: true, texture: true }); return }
     starTex = bakeStar()
     const bounds = new Rectangle(-2000, -2000, 8000, 8000)
