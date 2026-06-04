@@ -515,6 +515,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) :
             entity.Property(e => e.Status)
                 .HasConversion<string>()
                 .HasMaxLength(Limits.MaxLogStatusLength);
+
+            // Supports IpAttributionHelper.ResolveUserIpAt (runs on every accepted submission):
+            // WHERE UserName = @u AND TimeUtc BETWEEN @min AND @max ORDER BY TimeUtc DESC LIMIT 1.
+            // Without it that query seq-scans the whole (unbounded) Logs table (~35ms at 290k rows,
+            // growing linearly); the composite index keeps it a ~2ms index seek regardless of size.
+            entity.HasIndex(e => new { e.UserName, e.TimeUtc });
         });
 
         builder.Entity<FlagEgressEvent>(entity =>

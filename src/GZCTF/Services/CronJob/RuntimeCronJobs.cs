@@ -4,6 +4,7 @@ using GZCTF.Services.Cache;
 using GZCTF.Services.Cache.Handlers;
 using GZCTF.Services.Traffic;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Distributed;
 
 // ReSharper disable UnusedMember.Global
@@ -12,6 +13,11 @@ namespace GZCTF.Services.CronJob;
 
 public static class RuntimeCronJobs
 {
+    /// <summary>Information-level logs older than this are pruned (Warning/Error are kept).</summary>
+    const int LogRetentionDays = 30;
+
+    const int LogPruneBatchSize = 5000;
+
     [CronJob("*/3 * * * *")]
     public static async Task ContainerChecker(AsyncServiceScope scope, ILogger<CronJobService> logger)
     {
@@ -82,5 +88,33 @@ public static class RuntimeCronJobs
 
         logger.SystemLog(StaticLocalizer[nameof(Resources.Program.CronJob_RemoveUnactivatedUsers), usersToDelete.Count],
             TaskStatus.Success, LogLevel.Information);
+    }
+
+    [CronJob("30 4 * * *")]
+    public static async Task PruneOldLogs(AsyncServiceScope scope, ILogger<CronJobService> logger)
+    {
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var cutoff = DateTimeOffset.UtcNow.AddDays(-LogRetentionDays);
+
+        // Information-level logs are the bulk of the otherwise-unbounded Logs table and carry no
+        // forensic value past the retention window. Delete in bounded batches (by ctid) so a prune
+        // never holds a long lock during a live game; Warning/Error rows are retained.
+        var total = 0;
+        int batch;
+        do
+        {
+            batch = await db.Database.ExecuteSqlInterpolatedAsync(
+                $"""
+                 DELETE FROM "Logs" WHERE ctid IN (
+                     SELECT ctid FROM "Logs"
+                     WHERE "Level" = 'Information' AND "TimeUtc" < {cutoff}
+                     LIMIT {LogPruneBatchSize})
+                 """);
+            total += batch;
+        } while (batch == LogPruneBatchSize);
+
+        if (total > 0)
+            logger.SystemLog($"Pruned {total} Information-level log row(s) older than {LogRetentionDays} days",
+                TaskStatus.Success, LogLevel.Information);
     }
 }
