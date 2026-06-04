@@ -402,6 +402,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) :
         {
             entity.Property(e => e.Status).HasConversion<string>();
 
+            // Serves the "recent submissions for a game, newest first" queries
+            // (GetRecentSubmissionsForAttackFeed — run on every attack-page load — and the
+            // admin submission views): WHERE GameId = ? ORDER BY SubmitTimeUtc DESC LIMIT n.
+            // Without it those do a GameId index scan + full sort of the game's submissions.
+            entity.HasIndex(e => new { e.GameId, e.SubmitTimeUtc });
+
             entity.Navigation(e => e.Team).AutoInclude();
             entity.Navigation(e => e.User).AutoInclude();
             entity.Navigation(e => e.GameChallenge).AutoInclude();
