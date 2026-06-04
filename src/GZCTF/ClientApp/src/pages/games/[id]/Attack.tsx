@@ -126,11 +126,6 @@ const ARENA_CSS = `
   #fxbg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
   /* overflow:visible so the outer team-name labels (offset past the 1000 viewBox edge) aren't clipped */
   #svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
-  /* central ENSŌ core: orbiting tick-crown + dashed ring counter-rotate.
-     transform-box:view-box keeps transform-origin in viewBox (500,500) units. */
-  #svg .core-spin-ccw{transform-box:view-box;transform-origin:500px 500px;animation:coreSpin 22s linear infinite reverse}
-  #svg .core-spin-cw{transform-box:view-box;transform-origin:500px 500px;animation:coreSpin 26s linear infinite}
-  @keyframes coreSpin{to{transform:rotate(360deg)}}
   #fx{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
   .arena-note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     text-align:center;font-family:'Press Start 2P';font-size:11px;color:var(--dim);
@@ -739,32 +734,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       svg.appendChild(el('line', { x1: ix, y1: iy, x2: ox, y2: oy, stroke: t.color, 'stroke-width': 1, 'stroke-opacity': 0.16, 'stroke-dasharray': '4 6' }))
     })
 
-    // central SCORE core: a zen ENSŌ brush-ring orbited by a counter-rotating tick crown
-    // + slow dashed ring.
-    // size baked into geometry (no wrapper transform). CR = enso ring radius; everything derives
-    // from it, so retuning the whole core's size is one number. Kept small to match the prior spark.
-    const coreG = el('g', {})
-    const CR = 100
-
-    // counter-rotating tick crown (36 spokes)
-    const crown = el('g', { class: 'core-spin-ccw', stroke: '#27e3ff', 'stroke-opacity': 0.5, 'stroke-width': CR * 0.02 })
-    for (let i = 0; i < 36; i++) {
-      const a = i / 36 * 2 * Math.PI, c = Math.cos(a), s = Math.sin(a)
-      crown.appendChild(el('line', { x1: CX + CR * 1.08 * c, y1: CY + CR * 1.08 * s, x2: CX + CR * 1.26 * c, y2: CY + CR * 1.26 * s }))
-    }
-    coreG.appendChild(crown)
-
-    // slow forward-rotating dashed ring
-    const dring = el('g', { class: 'core-spin-cw' })
-    dring.appendChild(el('circle', { cx: CX, cy: CY, r: CR * 0.86, fill: 'none', stroke: '#9d6bff', 'stroke-opacity': 0.4, 'stroke-width': CR * 0.018, 'stroke-dasharray': '4 13' }))
-    coreG.appendChild(dring)
-
-    // ENSŌ brush ring: blurred underlay + crisp top stroke (incomplete circle w/ tapered ends)
-    const ensoD = `M${CX + CR * 0.893} ${CY - CR * 0.464} A${CR} ${CR} 0 1 1 ${CX + CR * 0.536} ${CY - CR * 0.786}`
-    coreG.appendChild(el('path', { d: ensoD, fill: 'none', stroke: '#1e6fa8', 'stroke-width': CR * 0.16, 'stroke-linecap': 'round', 'stroke-opacity': 0.5 }))
-    coreG.appendChild(el('path', { d: ensoD, fill: 'none', stroke: '#bdf3ff', 'stroke-width': CR * 0.11, 'stroke-linecap': 'round' }))
-
-    svg.appendChild(coreG)
+    // arena center is intentionally left open (no central core)
 
     HILLS.forEach((h) => svg.appendChild(buildHill(h)))
     TEAMS.forEach((t) => svg.appendChild(buildBase(t)))
