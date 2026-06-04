@@ -740,7 +740,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     })
 
     // central SCORE core: a zen ENSŌ brush-ring orbited by a counter-rotating tick crown
-    // + slow dashed ring. Halo is on #fxbg (drawAmbient).
+    // + slow dashed ring.
     // size baked into geometry (no wrapper transform). CR = enso ring radius; everything derives
     // from it, so retuning the whole core's size is one number. Kept small to match the prior spark.
     const coreG = el('g', {})
@@ -948,8 +948,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   const shots: any[] = [], sparks: any[] = [], fxq: any[] = []
 
   // Ambient idle motion lives on the #fxbg background canvas (behind the SVG) instead
-  // of animating the SVG DOM every frame: rotating recon rings, the core-halo pulse, and
-  // a soft breathing aura behind each (static, crisp) SVG avatar. This is what keeps the
+  // of animating the SVG DOM every frame: rotating recon rings and a soft breathing aura
+  // behind each (static, crisp) SVG avatar. This is what keeps the
   // arena smooth — the SVG now only repaints on real events (scores, status, ownership).
   let fxClock = 0, ambientTick = 0
   // Pre-render each team-colour glow once and blit it, instead of building a radial
@@ -979,11 +979,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     ctxbg.globalAlpha = 0.4; ctxbg.strokeStyle = '#27e3ff'; ctxbg.lineWidth = 1; ctxbg.setLineDash([2, 10])
     ctxbg.beginPath(); ctxbg.arc(0, 0, 300, 0, TAU); ctxbg.stroke(); ctxbg.restore()
     ctxbg.setLineDash([]); ctxbg.globalAlpha = 1
-    // core halo pulse
-    const hp = (Math.sin(T * TAU / 3.4) + 1) / 2
-    ctxbg.globalAlpha = 0.5 - 0.35 * hp; ctxbg.strokeStyle = '#9d6bff'; ctxbg.lineWidth = 2
-    ctxbg.beginPath(); ctxbg.arc(CX, CY, CORE + 18 + 12 * hp, 0, TAU); ctxbg.stroke()
-    ctxbg.globalAlpha = 1
     // soft breathing aura behind each avatar (replaces the per-avatar SVG bob)
     for (const t of TEAMS) {
       const p = (Math.sin(T * TAU / 2.8 + t.idx * 0.7) + 1) / 2
