@@ -119,8 +119,11 @@ public sealed class AttackStreamService
         finally
         {
             conns.TryRemove(id, out _);
-            if (conns.IsEmpty)
-                _subs.TryRemove(gameId, out _);
+            // Intentionally keep the (possibly empty) per-game bucket. Removing it here races with
+            // the GetOrAdd in HandleWebSocketAsync: a client connecting exactly as the last one
+            // leaves could land its channel in a bucket that this thread then drops from _subs,
+            // orphaning it from Publish. Buckets are keyed by gameId, so the leftover is bounded by
+            // game count (negligible), and Publish early-outs on an empty bucket.
         }
     }
 
