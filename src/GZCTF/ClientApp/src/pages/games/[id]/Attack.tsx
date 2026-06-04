@@ -23,7 +23,7 @@ import { createFxRenderer } from './fxRenderer'
 import { createJeopRenderer } from './jeopRenderer'
 
 const FONTS_HREF =
-  'https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=DotGothic16&display=swap'
+  'https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=DotGothic16&family=Noto+Serif+JP:wght@700&display=swap'
 
 /* -------------------------------------------------------------------------- */
 /* Scene CSS (lawbyte). `body` is remapped to `:host` for the shadow root.    */
@@ -126,9 +126,13 @@ const ARENA_CSS = `
   #fxbg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
   /* overflow:visible so the outer team-name labels (offset past the 1000 viewBox edge) aren't clipped */
   #svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
-  /* central spark core: gentle twinkle (transform-box:view-box so transform-origin is in viewBox units) */
-  #svg .core-twk{transform-box:view-box;transform-origin:500px 500px;animation:coreTwk 3.4s ease-in-out infinite}
-  @keyframes coreTwk{0%,100%{transform:scale(.95);opacity:.92}50%{transform:scale(1.05);opacity:1}}
+  /* central ENSŌ core: orbiting tick-crown + dashed ring counter-rotate; kanji glow breathes.
+     transform-box:view-box keeps transform-origin in viewBox (500,500) units. */
+  #svg .core-spin-ccw{transform-box:view-box;transform-origin:500px 500px;animation:coreSpin 22s linear infinite reverse}
+  #svg .core-spin-cw{transform-box:view-box;transform-origin:500px 500px;animation:coreSpin 26s linear infinite}
+  @keyframes coreSpin{to{transform:rotate(360deg)}}
+  #svg .core-glow{animation:coreGlow 3.2s ease-in-out infinite}
+  @keyframes coreGlow{0%,100%{opacity:.22}50%{opacity:.6}}
   #fx{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
   .arena-note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     text-align:center;font-family:'Press Start 2P';font-size:11px;color:var(--dim);
@@ -712,9 +716,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
         <stop offset="60%" stop-color="#9d6bff"/><stop offset="100%" stop-color="#1a1040"/>
       </radialGradient>
       <filter id="soft"><feGaussianBlur stdDeviation="3"/></filter>
-      <filter id="glow"><feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-      <radialGradient id="sparkG" cx="50%" cy="50%" r="60%"><stop offset="0%" stop-color="#ffffff"/><stop offset="45%" stop-color="#9fefff"/><stop offset="100%" stop-color="#27e3ff"/></radialGradient>
-      <filter id="coreblur"><feGaussianBlur stdDeviation="10"/></filter>`
+      <filter id="glow"><feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>`
     svg.appendChild(defs)
 
     const step = 360 / TEAMS.length, R = 470
@@ -739,14 +741,40 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       svg.appendChild(el('line', { x1: ix, y1: iy, x2: ox, y2: oy, stroke: t.color, 'stroke-width': 1, 'stroke-opacity': 0.16, 'stroke-dasharray': '4 6' }))
     })
 
-    // central SCORE core: a clean 4-point spark (replaces the hexagon) — glows + gently twinkles,
-    // tying into the jeopardy constellations. The pulsing halo is on #fxbg (see drawAmbient).
+    // central SCORE core: a zen ENSŌ brush-ring wrapping the kanji 攻防 (kō·bō = attack·defense),
+    // orbited by a counter-rotating tick crown + slow dashed ring. Halo is on #fxbg (drawAmbient).
+    // size baked into geometry (no wrapper transform). CR = enso ring radius; everything derives
+    // from it, so retuning the whole core's size is one number. Kept small to match the prior spark.
     const coreG = el('g', {})
-    coreG.appendChild(el('path', { d: 'M500 368 Q516 484 632 500 Q516 516 500 632 Q484 516 368 500 Q484 484 500 368 Z', fill: 'url(#sparkG)', opacity: 0.4, filter: 'url(#coreblur)' }))
-    const spark = el('g', { class: 'core-twk', filter: 'url(#glow)' })
-    spark.appendChild(el('path', { d: 'M500 395 Q511 489 605 500 Q511 511 500 605 Q489 511 395 500 Q489 489 500 395 Z', fill: 'url(#sparkG)', stroke: '#eaffff', 'stroke-width': 1.5 }))
-    spark.appendChild(el('circle', { cx: CX, cy: CY, r: 18, fill: '#fff' }))
-    coreG.appendChild(spark)
+    const CR = 100
+
+    // counter-rotating tick crown (36 spokes)
+    const crown = el('g', { class: 'core-spin-ccw', stroke: '#27e3ff', 'stroke-opacity': 0.5, 'stroke-width': CR * 0.02 })
+    for (let i = 0; i < 36; i++) {
+      const a = i / 36 * 2 * Math.PI, c = Math.cos(a), s = Math.sin(a)
+      crown.appendChild(el('line', { x1: CX + CR * 1.08 * c, y1: CY + CR * 1.08 * s, x2: CX + CR * 1.26 * c, y2: CY + CR * 1.26 * s }))
+    }
+    coreG.appendChild(crown)
+
+    // slow forward-rotating dashed ring
+    const dring = el('g', { class: 'core-spin-cw' })
+    dring.appendChild(el('circle', { cx: CX, cy: CY, r: CR * 0.86, fill: 'none', stroke: '#9d6bff', 'stroke-opacity': 0.4, 'stroke-width': CR * 0.018, 'stroke-dasharray': '4 13' }))
+    coreG.appendChild(dring)
+
+    // ENSŌ brush ring: blurred underlay + crisp top stroke (incomplete circle w/ tapered ends)
+    const ensoD = `M${CX + CR * 0.893} ${CY - CR * 0.464} A${CR} ${CR} 0 1 1 ${CX + CR * 0.536} ${CY - CR * 0.786}`
+    coreG.appendChild(el('path', { d: ensoD, fill: 'none', stroke: '#1e6fa8', 'stroke-width': CR * 0.16, 'stroke-linecap': 'round', 'stroke-opacity': 0.5 }))
+    coreG.appendChild(el('path', { d: ensoD, fill: 'none', stroke: '#bdf3ff', 'stroke-width': CR * 0.11, 'stroke-linecap': 'round' }))
+
+    // 攻防 kanji: crisp white face (cyan outline) under a breathing cyan glow ghost
+    const kanji = { x: CX, y: CY, 'text-anchor': 'middle', 'dominant-baseline': 'central', 'font-family': "'Noto Serif JP',serif", 'font-weight': 700, 'font-size': CR * 0.82 }
+    const kFace: any = el('text', { ...kanji, fill: '#eaffff', stroke: '#27e3ff', 'stroke-width': CR * 0.013, style: 'paint-order:stroke' })
+    kFace.textContent = '攻防'
+    coreG.appendChild(kFace)
+    const kGlow: any = el('text', { ...kanji, class: 'core-glow', fill: '#7fe9ff' })
+    kGlow.textContent = '攻防'
+    coreG.appendChild(kGlow)
+
     svg.appendChild(coreG)
 
     HILLS.forEach((h) => svg.appendChild(buildHill(h)))
