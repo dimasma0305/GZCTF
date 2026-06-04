@@ -21,6 +21,7 @@ import { createJeopardy, type JeopCategory } from './arenaJeopardy'
 import { createSoundEngine } from './audio'
 import { createFxRenderer } from './fxRenderer'
 import { createJeopRenderer } from './jeopRenderer'
+import { createFbRenderer } from './fbRenderer'
 
 const FONTS_HREF =
   'https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=DotGothic16&display=swap'
@@ -498,10 +499,7 @@ const ARENA_BODY = `
       <div class="fb-tele-vig"></div>
       <div class="fb-tele-ban"><b class="fb-tele-txt">INCOMING STRIKE</b></div>
     </div>
-    <div class="fb-dark"></div>
     <div class="fb-rays"></div>
-    <div class="fb-splat"></div>
-    <div class="fb-splat2"></div>
     <div class="fb-bar t"></div>
     <div class="fb-bar b"></div>
     <div class="fb-core">
@@ -513,7 +511,6 @@ const ARENA_BODY = `
       <div class="fb-title">FIRST BLOOD</div>
       <div class="fb-sub" id="fbSub"></div>
     </div>
-    <div class="fb-flash"></div>
   </div>
   <audio id="fbSound" preload="auto" src="/attack/firstblood.mp3"></audio>
   <audio id="incomingSound" preload="auto" src="/attack/incoming.mp3"></audio>
@@ -683,6 +680,10 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   // Pixi v8 WebGL FX renderer (its own overlay canvas); the 2D #fx is the fallback
   // used until fxRenderer.ready, or if WebGL init fails. See fxRenderer.ts.
   const fxRenderer = createFxRenderer(fx)
+  // Pixi v8 first-blood slam graphics (dark + radial splash + flash) on a full-viewport
+  // GPU canvas (z-94, under the DOM FB text z-95) — replaces the screen-sized DOM splash
+  // layers that caused the first-blood lag. See fbRenderer.ts.
+  const fbRenderer = createFbRenderer(root)
   const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0
   // Pixi v8 WebGL renderer for the jeopardy constellation layer (its own overlay canvas on
   // .arena-wrap, wrap-pixel space). When ready it takes over the star twinkle + lasers from the
@@ -900,6 +901,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     ctx.setTransform(SC, 0, 0, SC, 0, 0)
     ctxbg.setTransform(SC, 0, 0, SC, 0, 0)
     fxRenderer.resize(r.width, r.height) // keep the WebGL FX layer aligned to the arena
+    fbRenderer.resize() // first-blood layer is viewport-sized; tracks the window
     jeop.layout() // re-place the jeopardy constellations (and hand the laid-out stars to jeopRenderer via onStars)
     // size the wrap-space Pixi jeopardy canvas AFTER layout() (which may grow the wrap via #jeopSpace).
     const wr = wrapEl.getBoundingClientRect()
@@ -1161,6 +1163,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       if (killed) return
       const iaStop: any = $('incomingSound'); if (iaStop) { try { iaStop.pause(); iaStop.currentTime = 0 } catch (e) {} }
       ov.classList.remove('tele'); void ov.offsetWidth; ov.classList.add('play')
+      fbRenderer.play(FB.total) // GPU slam graphics (dark+splash+flash), synced with the DOM text/bars
       slamCovering = true // the dark slam overlay covers the board — pause the arena draw underneath
       // First-blood stinger: the shipped /attack/firstblood.mp3 (unchanged) — now
       // fires WITH the reveal so it punctuates the slam, not the build-up.
@@ -1965,6 +1968,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     jeop.destroy()
     fxRenderer.destroy()
     jeopRenderer.destroy()
+    fbRenderer.destroy()
     if (ws) { try { ws.onclose = null; ws.close() } catch (e) {} ws = null }
   }
 }
