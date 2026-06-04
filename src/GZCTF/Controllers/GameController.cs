@@ -351,9 +351,10 @@ public class GameController(
     [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Scoreboard([FromRoute] int id, CancellationToken token)
     {
-        // Need the Game for the freeze decision, so load it first. GameCache is a 2-day
-        // sliding cache so this is effectively one Redis hit.
-        var game = await gameRepository.GetGameById(id, token);
+        // Need the Game only for the freeze/started decision (scalar times) — load it from the
+        // GameCache (2-day sliding, invalidated on edit) so this hot path is a cache hit, not a
+        // per-request SELECT on Games. Read-only: the scoreboard path never mutates the game.
+        var game = await gameRepository.GetGameByIdCached(id, token);
         if (game is null)
             return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Game_NotFound)],
                 StatusCodes.Status404NotFound));

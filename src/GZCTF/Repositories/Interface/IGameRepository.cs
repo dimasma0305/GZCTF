@@ -56,6 +56,12 @@ public interface IGameRepository : IRepository
     public Task<Game?> GetGameById(int id, CancellationToken token = default);
 
     /// <summary>
+    /// Get game by ID from the GameCache (read-only, AsNoTracking). Invalidated on UpdateGame.
+    /// Use for hot read paths (e.g. scoreboard) instead of <see cref="GetGameById" />; never mutate the result.
+    /// </summary>
+    public Task<Game?> GetGameByIdCached(int id, CancellationToken token = default);
+
+    /// <summary>
     /// Get check info for joining a game
     /// </summary>
     /// <param name="game"></param>

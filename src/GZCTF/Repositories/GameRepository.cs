@@ -101,17 +101,21 @@ public class GameRepository(
                 TeamMemberCountLimit = game.TeamMemberCountLimit
             }).ToArrayAsync(token);
 
-    public async Task<DetailedGameInfoModel?> GetDetailedGameInfo(int gameId, CancellationToken token = default)
-    {
-        var game = await cacheHelper.GetOrCreateAsync(logger, CacheKey.GameCache(gameId),
+    // Read-only, cached (GameCache, 2-day sliding; invalidated by UpdateGame). Returns an
+    // AsNoTracking, shared instance — never mutate it. For edit/mutation paths use GetGameById.
+    public Task<Game?> GetGameByIdCached(int id, CancellationToken token = default)
+        => cacheHelper.GetOrCreateAsync(logger, CacheKey.GameCache(id),
             entry =>
             {
                 entry.SlidingExpiration = TimeSpan.FromDays(2);
                 return Context.Games.AsNoTracking()
                     .Include(g => g.Divisions)
-                    .FirstOrDefaultAsync(x => x.Id == gameId, token);
+                    .FirstOrDefaultAsync(x => x.Id == id, token);
             }, token: token);
 
+    public async Task<DetailedGameInfoModel?> GetDetailedGameInfo(int gameId, CancellationToken token = default)
+    {
+        var game = await GetGameByIdCached(gameId, token);
         return game is null ? null : DetailedGameInfoModel.FromGame(game);
     }
 
