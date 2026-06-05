@@ -767,9 +767,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     // bold outer rim + inner seating-band ring; clean cyan ring where the bases stand
     ringG.appendChild(el('circle', { cx: CX, cy: CY, r: R, fill: 'none', stroke: 'var(--line2)', 'stroke-width': 1.6 }))
     ringG.appendChild(el('circle', { cx: CX, cy: CY, r: RIN, fill: 'none', stroke: 'var(--line)', 'stroke-width': 1, 'stroke-opacity': 0.5 }))
-    ringG.appendChild(el('circle', { cx: CX, cy: CY, r: RING, fill: 'none', stroke: '#27e3ff', 'stroke-width': 1.2, 'stroke-opacity': 0.4 }))
-    // no radial sector dividers — the seats read from the alternating fill alone, so nothing
-    // draws a line between adjacent avatars
+    // NO ring at the avatar radius (RING) — that circle ran right through all the bases and read
+    // as a line connecting the avatars. NO radial dividers either; the seats read from the
+    // alternating colour fill alone.
     svg.appendChild(ringG)
 
     // arena center (the pit) is intentionally left open — hills sit just inside the inner ring
