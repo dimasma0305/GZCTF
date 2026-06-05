@@ -22,6 +22,7 @@ import { createSoundEngine } from './audio'
 import { createFxRenderer } from './fxRenderer'
 import { createJeopRenderer } from './jeopRenderer'
 import { createFbRenderer } from './fbRenderer'
+import { createFzRenderer } from './fzRenderer'
 
 const FONTS_HREF =
   'https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=DotGothic16&display=swap'
@@ -380,28 +381,46 @@ const ARENA_CSS = `
   .btn.frz{background:#7fd7ff;color:#06121a;box-shadow:0 0 14px rgba(127,215,255,.5)}
 
   /* ===== SCOREBOARD FREEZE CINEMATIC ===== */
+  /* ===== WINDOW FROST: dark wash + 2D-canvas corner frost + frosted-glass panel ===== */
   .fz-overlay{position:fixed;inset:0;z-index:96;pointer-events:none;visibility:hidden;overflow:hidden}
   .fz-overlay.show{visibility:visible}
-  .fz-overlay>div{position:absolute;opacity:0;transition:opacity .5s}
-  .fz-dark{inset:0;background:radial-gradient(circle at 50% 46%,rgba(12,36,72,.95),rgba(2,8,22,.99))}
-  .fz-frost{inset:0;background:radial-gradient(circle at 50% 50%,transparent 30%,rgba(170,220,255,.28) 100%);
-    box-shadow:inset 0 0 160px rgba(180,225,255,.5),inset 0 0 60px rgba(220,240,255,.55)}
-  .fz-flash{inset:0;background:#dff1ff}
-  .fz-overlay .fz-core{inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.3vh;text-align:center;opacity:1}
-  .fz-title{font-family:'Press Start 2P';font-size:clamp(20px,5vw,62px);color:#eaf7ff;line-height:1.18;
-    text-shadow:0 0 22px rgba(150,210,255,.9),3px 0 #59c3ff,-3px 0 #bdffff}
-  .fz-sub{font-family:'Press Start 2P';font-size:clamp(8px,1.3vw,13px);color:#bfe9ff;letter-spacing:1px;text-shadow:0 0 10px rgba(150,210,255,.7)}
-  .fz-overlay .fz-snow{inset:0;overflow:hidden}
-  /* in-place frost shimmer (NOT falling): suspended ice crystals that glint/breathe where they sit */
-  .fz-snow i{position:absolute;color:#dff1ff;text-shadow:0 0 8px rgba(180,225,255,.9);transform-origin:center;will-change:transform,opacity;animation:fzGlint ease-in-out infinite}
-  @keyframes fzGlint{0%,100%{opacity:.12;transform:scale(.55) rotate(-8deg)}50%{opacity:.95;transform:scale(1.12) rotate(8deg)}}
-  .fz-lock{width:clamp(54px,7vw,88px);height:auto;filter:drop-shadow(0 0 18px rgba(150,210,255,.85))}
-  .fz-count{font-family:'VT323';font-size:clamp(20px,3vw,34px);color:#eaf7ff;letter-spacing:2px;margin-top:6px;text-shadow:0 0 12px rgba(150,210,255,.85)}
-  .fz-overlay.show>div{opacity:1}
-  .fz-overlay.show .fz-title{animation:fzTitleIn .7s cubic-bezier(.2,1.5,.3,1)}
-  .fz-overlay.show .fz-flash{animation:fzFlashIn .9s linear;opacity:0}
-  @keyframes fzTitleIn{0%{opacity:0;transform:scale(2.6);filter:blur(9px)}60%{opacity:1;transform:scale(1)}100%{opacity:1}}
-  @keyframes fzFlashIn{0%{opacity:0}12%{opacity:.85}30%{opacity:0}100%{opacity:0}}
+  .fz-dark{position:absolute;inset:0;opacity:0;transition:opacity .5s;background:radial-gradient(circle at 50% 44%,#103257,#0a1f3c 55%,#040b18)}
+  .fz-overlay.show .fz-dark{opacity:.97}
+  .fz-cv{position:absolute;inset:0;width:100%;height:100%}
+  .fz-vig{position:absolute;inset:0;background:radial-gradient(circle at 50% 46%,transparent 42%,rgba(2,8,20,.6) 100%)}
+  .fz-overlay .fz-core{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center}
+  .fz-panel{position:relative;display:flex;flex-direction:column;align-items:center;gap:clamp(8px,1.6vh,16px);
+    padding:clamp(22px,3.4vw,40px) clamp(30px,5vw,66px);border-radius:18px;opacity:0;overflow:hidden;
+    background:linear-gradient(160deg,rgba(180,220,255,.10),rgba(120,180,255,.04));border:1px solid rgba(180,225,255,.28);
+    box-shadow:0 24px 70px rgba(0,18,45,.55),inset 0 1px 0 rgba(255,255,255,.22),inset 0 0 48px rgba(150,210,255,.10);
+    -webkit-backdrop-filter:blur(7px) saturate(1.15);backdrop-filter:blur(7px) saturate(1.15)}
+  .fz-overlay.show .fz-panel{animation:fzPanelIn .8s .15s cubic-bezier(.2,1.1,.3,1) forwards}
+  .fz-panel::after{content:'';position:absolute;top:0;bottom:0;width:55%;left:-70%;pointer-events:none;
+    background:linear-gradient(105deg,transparent,rgba(230,245,255,.30),transparent);transform:skewX(-18deg)}
+  .fz-overlay.show .fz-panel::after{animation:fzSweep 2.4s 1.1s ease-in-out}
+  .fz-brk{position:absolute;width:18px;height:18px;border:2px solid #8fdcff;box-shadow:0 0 8px rgba(140,220,255,.7);opacity:.9}
+  .fz-brk.tl{top:10px;left:10px;border-right:0;border-bottom:0}.fz-brk.tr{top:10px;right:10px;border-left:0;border-bottom:0}
+  .fz-brk.bl{bottom:10px;left:10px;border-right:0;border-top:0}.fz-brk.br{bottom:10px;right:10px;border-left:0;border-top:0}
+  .fz-badge{color:#cdeaff;filter:drop-shadow(0 0 18px rgba(150,210,255,.9));opacity:0;width:clamp(64px,9vw,92px)}
+  .fz-badge svg{display:block;width:100%;height:auto}
+  .fz-overlay.show .fz-badge{animation:fzIcoIn .9s .25s cubic-bezier(.2,1.3,.3,1) forwards}
+  .fz-title{font-family:'Press Start 2P';font-size:clamp(18px,4.4vw,46px);color:#eef8ff;line-height:1.14;letter-spacing:2px;
+    text-shadow:0 0 22px rgba(140,210,255,.95),0 0 6px rgba(180,230,255,.8),0 2px 0 rgba(20,50,90,.5);opacity:0}
+  .fz-overlay.show .fz-title{animation:fzTitleIn .8s .3s cubic-bezier(.2,1.3,.3,1) forwards}
+  .fz-bar{width:min(280px,66vw);height:9px;border:1px solid rgba(150,205,255,.34);border-radius:6px;overflow:hidden;background:rgba(10,26,50,.5);opacity:0}
+  .fz-overlay.show .fz-bar{animation:fzFade .4s .6s forwards}
+  .fz-fill{display:block;height:100%;width:0;background:linear-gradient(90deg,#5fc4ff,#bdf0ff);box-shadow:0 0 14px rgba(150,220,255,.8)}
+  .fz-overlay.show .fz-fill{animation:fzFill 1.1s .65s cubic-bezier(.3,.8,.3,1) forwards}
+  .fz-secured{font-family:'VT323';font-size:clamp(12px,1.6vw,17px);color:#8fdcff;letter-spacing:2px;opacity:0;text-shadow:0 0 10px rgba(140,210,255,.6)}
+  .fz-overlay.show .fz-secured{animation:fzFade .5s 1.05s forwards}
+  .fz-count{font-family:'VT323';font-size:clamp(20px,3vw,34px);color:#eef8ff;letter-spacing:3px;text-shadow:0 0 14px rgba(150,210,255,.9);opacity:0}
+  .fz-overlay.show .fz-count{animation:fzFade .6s 1.2s forwards}
+  @keyframes fzPanelIn{0%{opacity:0;transform:translateY(16px) scale(.96)}100%{opacity:1;transform:translateY(0) scale(1)}}
+  @keyframes fzSweep{0%{left:-70%}60%,100%{left:160%}}
+  @keyframes fzIcoIn{0%{opacity:0;transform:scale(1.7) rotate(-10deg);filter:blur(6px)}60%{opacity:1;transform:scale(1) rotate(0);filter:blur(0)}100%{opacity:1}}
+  @keyframes fzTitleIn{0%{opacity:0;transform:scale(1.5);filter:blur(8px)}60%{opacity:1;transform:scale(1);filter:blur(0)}100%{opacity:1}}
+  @keyframes fzFill{to{width:100%}}
+  @keyframes fzFade{to{opacity:1}}
 
   /* ===== MATCH WINNER SCREEN ===== */
   .win-overlay{position:fixed;inset:0;z-index:97;pointer-events:none;opacity:0;visibility:hidden;overflow:hidden;
@@ -547,20 +566,18 @@ const ARENA_BODY = `
   <!-- ===== SCOREBOARD FREEZE CINEMATIC ===== -->
   <div class="fz-overlay" id="fzOverlay">
     <div class="fz-dark"></div>
-    <div class="fz-frost"></div>
-    <div class="fz-snow" id="fzSnow"></div>
+    <canvas class="fz-cv" id="fzCanvas"></canvas>
+    <div class="fz-vig"></div>
     <div class="fz-core">
-      <svg class="fz-lock" viewBox="0 0 64 64" fill="none">
-        <path d="M20 30 V22 a12 12 0 0 1 24 0 V30" stroke="#bfe9ff" stroke-width="5" stroke-linecap="round"/>
-        <rect x="13" y="30" width="38" height="27" rx="5" fill="#9fd6ff" stroke="#eaf7ff" stroke-width="2"/>
-        <circle cx="32" cy="41" r="4" fill="#0a1830"/>
-        <rect x="30" y="43" width="4" height="9" rx="2" fill="#0a1830"/>
-      </svg>
-      <div class="fz-title">SCOREBOARD<br>FROZEN</div>
-      <div class="fz-sub">PUBLIC BOARD LOCKED, RESULTS AT MATCH END</div>
-      <div class="fz-count" id="fzCount"></div>
+      <div class="fz-panel">
+        <span class="fz-brk tl"></span><span class="fz-brk tr"></span><span class="fz-brk bl"></span><span class="fz-brk br"></span>
+        <div class="fz-badge"><svg viewBox="0 0 100 100" fill="none" stroke="currentColor"><polygon points="50,4 93.8,35.8 77,87.2 23,87.2 6.2,35.8" stroke-width="3" fill="currentColor" fill-opacity=".09"/><path d="M40 47 V41 a10 10 0 0 1 20 0 V47" stroke-width="4" stroke-linecap="round"/><rect x="33" y="47" width="34" height="23" rx="4" fill="currentColor" fill-opacity=".2" stroke-width="3"/><circle cx="50" cy="56.5" r="3.6" fill="currentColor"/><rect x="48.4" y="58.6" width="3.2" height="9" rx="1.6" fill="currentColor"/></svg></div>
+        <div class="fz-title">BOARD LOCKED</div>
+        <div class="fz-bar"><span class="fz-fill"></span></div>
+        <div class="fz-secured">&#10003; SECURED &middot; RESULTS AT MATCH END</div>
+        <div class="fz-count" id="fzCount"></div>
+      </div>
     </div>
-    <div class="fz-flash"></div>
   </div>
 
   <!-- ===== MATCH WINNER SCREEN ===== -->
@@ -687,6 +704,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   // GPU canvas (z-94, under the DOM FB text z-95) — replaces the screen-sized DOM splash
   // layers that caused the first-blood lag. See fbRenderer.ts.
   const fbRenderer = createFbRenderer(root)
+  // 2D-canvas WINDOW FROST for the scoreboard-freeze cinematic (corner frost ferns, baked).
+  const fzRenderer = createFzRenderer($('fzCanvas') as HTMLCanvasElement)
   const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0
   // Pixi v8 WebGL renderer for the jeopardy constellation layer (its own overlay canvas on
   // .arena-wrap, wrap-pixel space). When ready it takes over the star twinkle + lasers from the
@@ -913,6 +932,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     ctxbg.setTransform(SC, 0, 0, SC, 0, 0)
     fxRenderer.resize(r.width, r.height) // keep the WebGL FX layer aligned to the arena
     fbRenderer.resize() // first-blood layer is viewport-sized; tracks the window
+    fzRenderer.resize() // freeze frost is viewport-sized too
     jeop.layout() // re-place the jeopardy constellations (and hand the laid-out stars to jeopRenderer via onStars)
     // size the wrap-space Pixi jeopardy canvas AFTER layout() (which may grow the wrap via #jeopSpace).
     const wr = wrapEl.getBoundingClientRect()
@@ -1291,19 +1311,6 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
 
   /* -------- scoreboard freeze + match winner -------- */
   const secsLeft = () => (gameEndMs != null ? Math.max(0, Math.round((gameEndMs - Date.now()) / 1000)) : 0)
-  // freeze ambience: suspended frost crystals that glint IN PLACE (no falling) — a frozen field
-  // that matches the "scoreboard FROZEN / locked" state.
-  function spawnSnow() {
-    const c: any = $('fzSnow'); if (!c) return; c.innerHTML = ''
-    const glyphs = ['❄', '❅', '✦', '❄', '❅']
-    for (let i = 0; i < 26; i++) {
-      const s = document.createElement('i'); s.textContent = pick(glyphs)
-      s.style.left = rng(2, 98) + '%'; s.style.top = rng(2, 96) + '%'
-      s.style.fontSize = ((rng(7, 20)) | 0) + 'px'
-      s.style.animationDuration = rng(2.2, 4.6).toFixed(2) + 's'; s.style.animationDelay = rng(0, 3).toFixed(2) + 's'
-      c.appendChild(s)
-    }
-  }
   function enterFreeze() {
     if (frozen) return; frozen = true
     TEAMS.forEach((t) => { t.shown = t.score; t.shownSla = t.sla; t.shownAtk = t.atk; t.shownDef = t.def; t.shownDefLoss = t.defLoss })
@@ -1311,7 +1318,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const rp = root.querySelector('.panel.rank'); if (rp) rp.classList.add('frozen')
     const fb = $('freezeBtn'); if (fb) fb.classList.add('on')
     addLog('FREEZE', 'sys', `<span class="em">SCOREBOARD FROZEN</span> :: public board locked, map redacted`)
-    const ov = $('fzOverlay'); if (ov) { ov.classList.remove('show'); void ov.offsetWidth; ov.classList.add('show'); spawnSnow() }
+    const ov = $('fzOverlay'); if (ov) { ov.classList.remove('show'); void ov.offsetWidth; ov.classList.add('show'); fzRenderer.start() }
     const fc = $('fzCount'); if (fc) fc.textContent = 'RESULTS IN T- ' + fmtMS(secsLeft())
     snd.sfxFreeze(); refreshRank()
   }
@@ -1321,7 +1328,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const rp = root.querySelector('.panel.rank'); if (rp) rp.classList.remove('frozen')
     const fb = $('freezeBtn'); if (fb) fb.classList.remove('on')
     const ov = $('fzOverlay'); if (ov) ov.classList.remove('show')
-    const sn = $('fzSnow'); if (sn) sn.innerHTML = ''
+    fzRenderer.stop()
     HILLS.forEach((h) => renderHill(h)); renderAllScores(); refreshRank()
   }
   function endMatch() {
@@ -2020,6 +2027,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     fxRenderer.destroy()
     jeopRenderer.destroy()
     fbRenderer.destroy()
+    fzRenderer.destroy()
     if (ws) { try { ws.onclose = null; ws.close() } catch (e) {} ws = null }
   }
 }
