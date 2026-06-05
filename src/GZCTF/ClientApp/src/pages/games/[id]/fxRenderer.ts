@@ -149,11 +149,21 @@ export function createFxRenderer(refCanvas: HTMLCanvasElement): FxRenderer {
           vec.circle(e.x, e.y, Math.max(70 * (1 - p), 2)).stroke({ width: 3, color: col, alpha: (1 - p) * 0.85 })
           for (let k = 0; k < 3; k++) { const yy = e.y + (k - 1) * 18; vec.rect(e.x - 30, yy, 60, 2).fill({ color: col, alpha: (1 - p) * 0.5 }) }
         } else if (e.kind === 'beam') {
-          const tt = Math.min(p / 0.55, 1), hx = e.fx + (e.tx - e.fx) * tt, hy = e.fy + (e.ty - e.fy) * tt
-          const w = (e.big ? 16 : 9) * (1 - p * 0.4), ga = Math.min(p * 3, 1) * (1 - Math.max(p - 0.7, 0) / 0.3)
-          vec.moveTo(e.fx, e.fy).lineTo(hx, hy).stroke({ width: w * 2.2, color: col, alpha: ga * 0.22 })
-          vec.moveTo(e.fx, e.fy).lineTo(hx, hy).stroke({ width: w, color: col, alpha: ga })
-          vec.moveTo(e.fx, e.fy).lineTo(hx, hy).stroke({ width: w * 0.4, color: 0xffffff, alpha: ga })
+          // PLASMA LANCE: thick flickering beam (soft + mid + white-hot core) that grows from
+          // the source to a traveling head, with a head bloom, source glow and an impact bloom+ring.
+          const tt = Math.min(p / 0.4, 1), hx = e.fx + (e.tx - e.fx) * tt, hy = e.fy + (e.ty - e.fy) * tt
+          const fade = p < 0.7 ? 1 : Math.max(0, 1 - (p - 0.7) / 0.3), fl = 0.82 + 0.18 * Math.sin(p * 50), b = e.big ? 1.5 : 1
+          vec.moveTo(e.fx, e.fy).lineTo(hx, hy).stroke({ width: 22 * b * fade * fl, color: col, alpha: 0.15 * fade })
+          vec.moveTo(e.fx, e.fy).lineTo(hx, hy).stroke({ width: 11 * b * fade, color: col, alpha: 0.45 * fade })
+          vec.moveTo(e.fx, e.fy).lineTo(hx, hy).stroke({ width: 5 * b * fade, color: 0xffebff, alpha: 0.92 * fade })
+          vec.circle(hx, hy, 12 * b * fade).fill({ color: 0xffebff, alpha: 0.5 * fade })
+          vec.circle(hx, hy, 6 * b * fade).fill({ color: 0xffffff, alpha: 0.9 * fade })
+          vec.circle(e.fx, e.fy, 10 * b * fade).fill({ color: col, alpha: 0.4 * fade })
+          const rt = p > 0.4 ? (p - 0.4) / 0.6 : 0
+          if (rt > 0) {
+            vec.circle(e.tx, e.ty, (e.big ? 14 : 10) + rt * 22).fill({ color: col, alpha: 0.5 * (1 - rt) })
+            vec.circle(e.tx, e.ty, (e.big ? 14 : 10) + rt * 30).stroke({ width: 3, color: 0xffebff, alpha: 1 - rt })
+          }
         }
       }
       app.render()

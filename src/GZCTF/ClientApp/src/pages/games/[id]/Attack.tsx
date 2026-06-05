@@ -1100,15 +1100,17 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
           for (let k = 0; k < 3; k++) { const yy = e.y + rng(-26, 26); ctx.fillStyle = e.col; ctx.fillRect(e.x - 30, yy, 60, 2) }
           ctx.globalAlpha = 1
         } else if (e.kind === 'beam') {
-          const tt = Math.min(p / 0.55, 1)
+          // PLASMA LANCE (2D fallback before WebGL loads): thick flickering beam + white-hot core
+          const tt = Math.min(p / 0.4, 1)
           const hx = e.fx + (e.tx - e.fx) * tt, hy = e.fy + (e.ty - e.fy) * tt
-          const w = (e.big ? 16 : 9) * (1 - p * 0.4)
+          const fade = p < 0.7 ? 1 : Math.max(0, 1 - (p - 0.7) / 0.3), fl = 0.82 + 0.18 * Math.sin(p * 50), b = e.big ? 1.5 : 1
           ctx.lineCap = 'round'
-          ctx.globalAlpha = Math.min(p * 3, 1) * (1 - Math.max(p - 0.7, 0) / 0.3)
-          ctx.strokeStyle = e.col; ctx.shadowColor = e.col; ctx.shadowBlur = e.big ? 28 : 16; ctx.lineWidth = w
-          ctx.beginPath(); ctx.moveTo(e.fx, e.fy); ctx.lineTo(hx, hy); ctx.stroke()
-          ctx.strokeStyle = '#fff'; ctx.lineWidth = w * 0.4; ctx.shadowBlur = 0
-          ctx.beginPath(); ctx.moveTo(e.fx, e.fy); ctx.lineTo(hx, hy); ctx.stroke()
+          const beam = (w: number, color: string, a: number) => { ctx.globalAlpha = a; ctx.strokeStyle = color; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(e.fx, e.fy); ctx.lineTo(hx, hy); ctx.stroke() }
+          ctx.shadowColor = e.col; ctx.shadowBlur = e.big ? 30 : 20
+          beam(22 * b * fl, e.col, 0.16 * fade)
+          beam(11 * b, e.col, 0.45 * fade)
+          ctx.shadowBlur = 0; beam(5 * b, '#ffebff', 0.92 * fade)
+          ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.9 * fade; ctx.beginPath(); ctx.arc(hx, hy, 6 * b, 0, 6.28); ctx.fill()
           ctx.globalAlpha = 1
         }
       }

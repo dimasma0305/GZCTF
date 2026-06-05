@@ -117,16 +117,22 @@ export function createJeopRenderer(wrapEl: HTMLElement, opts?: { onReady?: () =>
       const e = fxq[i]; e.t += dt / e.dur; const t = e.t
       if (t >= 1) { fxq.splice(i, 1); continue }
       if (e.kind === 'beam') {
+        // PLASMA LANCE: thick flickering plasma + white-hot core grows to a traveling head,
+        // with a head bloom, source glow and an impact bloom+ring at the star.
         const fade = t < 0.12 ? t / 0.12 : t > 0.6 ? Math.max(0, 1 - (t - 0.6) / 0.4) : 1
-        beamG.moveTo(e.px, e.py).lineTo(e.sx, e.sy).stroke({ width: 9, color: e.col, alpha: 0.32 * fade })
-        beamG.moveTo(e.px, e.py).lineTo(e.sx, e.sy).stroke({ width: 4, color: e.col, alpha: 0.95 * fade })
-        beamG.moveTo(e.px, e.py).lineTo(e.sx, e.sy).stroke({ width: 1.7, color: 0xffffff, alpha: fade })
-        const mz = t < 0.3 ? t / 0.3 : 1
-        beamG.circle(e.px, e.py, 3 + 11 * Math.sin(mz * Math.PI)).fill({ color: 0xffffff, alpha: 0.9 * (1 - mz) })
-        const pt = Math.min(1, t / 0.4)
-        if (pt < 1) beamG.circle(e.px + (e.sx - e.px) * pt, e.py + (e.sy - e.py) * pt, 4.5).fill({ color: 0xffffff, alpha: 0.95 })
-        const rt = t > 0.34 ? (t - 0.34) / 0.66 : 0
-        if (rt > 0) beamG.circle(e.sx, e.sy, e.sr + rt * 26).stroke({ width: 2.6, color: e.col, alpha: Math.max(0, 1 - rt) })
+        const pt = Math.min(1, t / 0.4), fl = 0.82 + 0.18 * Math.sin(t * 50 + i)
+        const hx = e.px + (e.sx - e.px) * pt, hy = e.py + (e.sy - e.py) * pt
+        beamG.moveTo(e.px, e.py).lineTo(hx, hy).stroke({ width: 18 * fade * fl, color: e.col, alpha: 0.16 * fade })
+        beamG.moveTo(e.px, e.py).lineTo(hx, hy).stroke({ width: 9 * fade, color: e.col, alpha: 0.45 * fade })
+        beamG.moveTo(e.px, e.py).lineTo(hx, hy).stroke({ width: 4 * fade, color: 0xffebff, alpha: 0.92 * fade })
+        beamG.circle(hx, hy, 10 * fade).fill({ color: 0xffebff, alpha: 0.5 * fade })
+        beamG.circle(hx, hy, 5 * fade).fill({ color: 0xffffff, alpha: 0.9 * fade })
+        beamG.circle(e.px, e.py, 8 * fade).fill({ color: e.col, alpha: 0.4 * fade })
+        const rt = t > 0.4 ? (t - 0.4) / 0.6 : 0
+        if (rt > 0) {
+          beamG.circle(e.sx, e.sy, e.sr + rt * 18).fill({ color: e.col, alpha: 0.5 * (1 - rt) })
+          beamG.circle(e.sx, e.sy, e.sr + rt * 26).stroke({ width: 3, color: 0xffebff, alpha: Math.max(0, 1 - rt) })
+        }
       } else { // flash ring
         beamG.circle(e.x, e.y, e.r + 30 * t).stroke({ width: 2, color: e.col, alpha: 1 - t })
       }
