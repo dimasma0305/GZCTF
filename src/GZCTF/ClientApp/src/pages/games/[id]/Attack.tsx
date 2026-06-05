@@ -630,7 +630,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string),
     )
 
-  const CX = 500, CY = 500, RING = 362, HILLR = 212
+  const CX = 500, CY = 500, RING = 362, HILLR = 165
   const PALETTE = ['#ff4d5e', '#27e3ff', '#ffc637', '#ff39a8', '#b9ff42', '#ff7a3a', '#9d6bff', '#4d8bff', '#3dffb0', '#ff9d63', '#7fd7ff', '#e667ff', '#ffd23a', '#5ad1a8']
   const LOOKS = [
     { hair: '#ff5a6a', skin: '#ffd9c2', eye: '#ff4d5e', style: 'spiky', gear: 'horns', expr: 'angry', prop: 'gaunt' },
@@ -768,12 +768,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     ringG.appendChild(el('circle', { cx: CX, cy: CY, r: R, fill: 'none', stroke: 'var(--line2)', 'stroke-width': 1.6 }))
     ringG.appendChild(el('circle', { cx: CX, cy: CY, r: RIN, fill: 'none', stroke: 'var(--line)', 'stroke-width': 1, 'stroke-opacity': 0.5 }))
     ringG.appendChild(el('circle', { cx: CX, cy: CY, r: RING, fill: 'none', stroke: '#27e3ff', 'stroke-width': 1.2, 'stroke-opacity': 0.4 }))
-    // radial dividers between sectors (RIN → rim), one per boundary
-    for (let i = 0; i < TEAMS.length; i++) {
-      const [ix, iy] = polar(RIN, -90 + i * step - step / 2)
-      const [ox, oy] = polar(R, -90 + i * step - step / 2)
-      ringG.appendChild(el('line', { x1: ix.toFixed(1), y1: iy.toFixed(1), x2: ox.toFixed(1), y2: oy.toFixed(1), stroke: '#8c79e8', 'stroke-width': 1, 'stroke-opacity': 0.4 }))
-    }
+    // no radial sector dividers — the seats read from the alternating fill alone, so nothing
+    // draws a line between adjacent avatars
     svg.appendChild(ringG)
 
     // arena center (the pit) is intentionally left open — hills sit just inside the inner ring
@@ -790,16 +786,16 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     g.innerHTML = `
       <ellipse cx="0" cy="22" rx="30" ry="9" fill="currentColor" opacity="${owned ? 0.18 : 0.08}" filter="url(#soft)"/>
       <ellipse cx="0" cy="22" rx="20" ry="5.5" fill="#0b0a1c" stroke="currentColor" stroke-width="1.2" stroke-opacity="0.7"/>
-      <g stroke="currentColor" fill="currentColor">
-        <rect x="-15" y="-14" width="4.5" height="34" rx="1" stroke-width="0"/>
-        <rect x="10.5" y="-14" width="4.5" height="34" rx="1" stroke-width="0"/>
-        <path d="M-23 -18 Q0 -24 23 -18 L23 -13 Q0 -18 -23 -13 Z" stroke-width="0"/>
-        <rect x="-19" y="-9" width="38" height="4" stroke-width="0"/>
-        <rect x="-2" y="-13" width="4" height="6" stroke-width="0"/>
-      </g>
       <circle cx="0" cy="0" r="27" fill="none" stroke="currentColor" stroke-width="1.5" stroke-opacity="0.5" stroke-dasharray="3 6"/>
-      <circle cx="0" cy="-1" r="6.5" fill="currentColor"/>
-      <circle cx="-2" cy="-3" r="1.8" fill="#fff" opacity="0.85"/>
+      <g fill="currentColor">
+        <rect x="-13" y="-14" width="4" height="34" rx="1"/>
+        <rect x="9" y="-14" width="4" height="34" rx="1"/>
+        <rect x="-18" y="-2.5" width="36" height="3.4" rx="1"/>
+        <rect x="-2" y="-13" width="4" height="8"/>
+        <rect x="-4" y="-11" width="8" height="5" rx="1"/>
+        <path d="M-23 -15 Q0 -8.5 23 -15 L23 -10.6 Q0 -4.1 -23 -10.6 Z"/>
+        <path d="M-19 -10 Q0 -4.5 19 -10 L19 -7 Q0 -1.5 -19 -7 Z" opacity="0.85"/>
+      </g>
       <rect id="hstat-${h.id}" x="-9" y="29" width="18" height="5" rx="2.5" fill="${SVC_COLOR[h.status] || SVC_COLOR.none}" stroke="#06050f" stroke-width="1"/>
       <text x="0" y="44" text-anchor="middle" fill="#cfd2ee" font-family="'Press Start 2P'" font-size="8" paint-order="stroke" stroke="#06050f" stroke-width="3.5">${esc(h.name)}</text>
       <text id="hown-${h.id}" x="0" y="55" text-anchor="middle" fill="currentColor" font-family="'VT323'" font-size="15" paint-order="stroke" stroke="#06050f" stroke-width="3">${owned ? esc(h.owner.name) : 'NEUTRAL'}</text>`
