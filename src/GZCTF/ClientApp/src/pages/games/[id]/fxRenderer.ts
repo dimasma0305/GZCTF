@@ -112,18 +112,24 @@ export function createFxRenderer(refCanvas: HTMLCanvasElement): FxRenderer {
       reconcile(sparks, sparksPC, sparkPairs, () => 0.13, (o) => o.life <= 0,
         (o, p) => { p.x = o.x; p.y = o.y; p.tint = colNum(o.col); p.alpha = Math.max(o.life, 0) })
       shots.forEach((s: any) => { s.__hx = bez(s.fx, s.cx, s.tx, Math.min(s.t, 1)); s.__hy = bez(s.fy, s.cy, s.ty, Math.min(s.t, 1)) })
-      reconcile(shots, headsPC, headPairs, (s) => (s.miss ? 0.16 : 0.32), (s) => s.t >= 1,
-        (s, p) => { p.x = s.__hx; p.y = s.__hy; p.tint = colNum(s.col); p.alpha = s.miss ? 0.55 : 1 })
+      // PLASMA: a big soft additive glow head (the dot is a soft radial sprite, tinted)
+      reconcile(shots, headsPC, headPairs, (s) => (s.miss ? 0.26 : 0.46), (s) => s.t >= 1,
+        (s, p) => { p.x = s.__hx; p.y = s.__hy; p.tint = colNum(s.col); p.alpha = s.miss ? 0.5 : 1 })
 
       // ---- vector FX: trails + beams + shields + downs + spark rings (one Graphics) ----
       vec.clear()
       for (const s of shots) {
         const tr = s.trail, n = tr.length; if (n < 2) continue
         const aMul = s.miss ? 0.32 : 0.9, wMul = s.miss ? 0.45 : 1
-        vec.moveTo(tr[0].x, tr[0].y); for (let j = 1; j < n; j++) vec.lineTo(tr[j].x, tr[j].y)
-        vec.stroke({ width: 3 * wMul, color: colNum(s.col), alpha: 0.38 * aMul })
-        vec.moveTo(tr[n - 2].x, tr[n - 2].y).lineTo(tr[n - 1].x, tr[n - 1].y)
-        vec.stroke({ width: 6 * wMul, color: colNum(s.col), alpha: 0.9 * aMul })
+        const col = colNum(s.col)
+        // PLASMA comet tail: width + alpha grow toward the head (one stroke per segment)
+        for (let j = 1; j < n; j++) {
+          const f = j / (n - 1)
+          vec.moveTo(tr[j - 1].x, tr[j - 1].y).lineTo(tr[j].x, tr[j].y)
+          vec.stroke({ width: (1.5 + 8 * f) * wMul, color: col, alpha: (0.12 + 0.55 * f) * aMul })
+        }
+        // white-hot core at the head (accepted shots only)
+        if (!s.miss) vec.circle(tr[n - 1].x, tr[n - 1].y, 4.5).fill({ color: 0xffffff, alpha: 0.95 })
       }
       for (const sp of sparks) {
         if (!sp.ring) continue
