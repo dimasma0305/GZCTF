@@ -264,7 +264,7 @@ const ARENA_CSS = `
     background:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20600%20600'%3E%3Cg%20fill='%23e8122f'%3E%3Ccircle%20cx='107.3'%20cy='239.9'%20r='6.3'/%3E%3Ccircle%20cx='245.6'%20cy='519.9'%20r='4'/%3E%3Ccircle%20cx='44.7'%20cy='449.9'%20r='3'/%3E%3Ccircle%20cx='127.3'%20cy='362.6'%20r='4.1'/%3E%3Ccircle%20cx='499.4'%20cy='298.4'%20r='5.2'/%3E%3Ccircle%20cx='72.8'%20cy='425.6'%20r='4.5'/%3E%3Ccircle%20cx='403.1'%20cy='488.8'%20r='4.3'/%3E%3Ccircle%20cx='362.2'%20cy='74'%20r='3.4'/%3E%3Ccircle%20cx='210.3'%20cy='127.1'%20r='4.8'/%3E%3Ccircle%20cx='339.8'%20cy='507.8'%20r='6'/%3E%3Ccircle%20cx='38.4'%20cy='274.1'%20r='5.9'/%3E%3Ccircle%20cx='89.3'%20cy='171.6'%20r='4.3'/%3E%3Ccircle%20cx='103.3'%20cy='120'%20r='2.9'/%3E%3Ccircle%20cx='489.5'%20cy='221.7'%20r='3.1'/%3E%3Ccircle%20cx='418.2'%20cy='462.7'%20r='2.8'/%3E%3Ccircle%20cx='130'%20cy='427.1'%20r='5.4'/%3E%3Ccircle%20cx='16.1'%20cy='360.5'%20r='5.5'/%3E%3Ccircle%20cx='178.6'%20cy='553.7'%20r='5.6'/%3E%3Ccircle%20cx='554.7'%20cy='247'%20r='6.8'/%3E%3Ccircle%20cx='353.2'%20cy='484.2'%20r='6.9'/%3E%3Ccircle%20cx='585.8'%20cy='339.5'%20r='6.6'/%3E%3Ccircle%20cx='413.4'%20cy='430.1'%20r='6.6'/%3E%3C/g%3E%3Cg%20fill='%23ff5a6e'%3E%3Ccircle%20cx='534'%20cy='239.5'%20r='3.8'/%3E%3Ccircle%20cx='310'%20cy='137.2'%20r='2'/%3E%3Ccircle%20cx='131'%20cy='124.7'%20r='4.4'/%3E%3Ccircle%20cx='179.4'%20cy='288.7'%20r='2.4'/%3E%3Ccircle%20cx='155.4'%20cy='347.9'%20r='2.1'/%3E%3Ccircle%20cx='366.9'%20cy='477.8'%20r='2.3'/%3E%3Ccircle%20cx='408.7'%20cy='393.2'%20r='2.1'/%3E%3Ccircle%20cx='350.4'%20cy='64.1'%20r='2.5'/%3E%3Ccircle%20cx='138.4'%20cy='119'%20r='2.6'/%3E%3Ccircle%20cx='178.2'%20cy='510.7'%20r='3.9'/%3E%3Ccircle%20cx='132.7'%20cy='140.5'%20r='3.4'/%3E%3Ccircle%20cx='214.4'%20cy='498.3'%20r='4'/%3E%3C/g%3E%3C/svg%3E") center/contain no-repeat;
     will-change:transform,opacity}
   .fb-flash{inset:0;background:#fff}
-  .fb-overlay .fb-core{inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.4vh;text-align:center;opacity:1}
+  .fb-overlay .fb-core{inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.4vh;text-align:center;opacity:1;padding-bottom:8vh}
   .fb-title{font-family:'Press Start 2P';font-size:clamp(26px,7vw,86px);color:#fff;line-height:1;opacity:0;
     text-shadow:4px 0 #ff2350,-4px 0 #27e3ff,0 0 26px rgba(255,40,80,.9),0 0 60px rgba(255,40,80,.6)}
   .fb-sub{font-family:'Press Start 2P';font-size:clamp(9px,1.5vw,15px);color:#ffd0d6;opacity:0;
@@ -303,19 +303,47 @@ const ARENA_CSS = `
   @keyframes fbFlash{0%,11%{opacity:0}13%{opacity:.95}16%{opacity:0}18%{opacity:.5}21%{opacity:0}100%{opacity:0}}
   @keyframes fbTitle{0%{opacity:0;transform:scale(4.2)}11%{opacity:.25}15%{opacity:1;transform:scale(.92)}19%{transform:scale(1.05)}24%{transform:scale(1)}45%{transform:scale(1.015)}65%{transform:scale(1)}80%{opacity:1}100%{opacity:0;transform:scale(1.7)}}
   @keyframes fbSub{0%,21%{opacity:0;transform:translateY(16px)}29%{opacity:1;transform:translateY(0)}82%{opacity:1}100%{opacity:0}}
-  .fb-overlay .fb-vs{display:flex;align-items:center;justify-content:center;gap:clamp(18px,7vw,90px);opacity:1}
+  /* symmetric 3-col grid: equal side columns keep the separator dead-centre even when
+     the two team names differ in width; fighters hug the centre (atk->end, vic->start).
+     .solo (jeopardy: no victim) collapses to a single centred attacker. */
+  .fb-overlay .fb-vs{display:grid;grid-template-columns:1fr auto 1fr;align-items:start;justify-items:center;column-gap:clamp(18px,7vw,90px);opacity:1}
+  .fb-overlay .fb-vs .fb-fighter.atk{justify-self:end}
+  .fb-overlay .fb-vs .fb-fighter.vic{justify-self:start}
+  .fb-overlay .fb-vs.solo{display:flex;justify-content:center}
+  .fb-overlay .fb-vs.solo .fb-vs-x,.fb-overlay .fb-vs.solo .fb-fighter.vic{display:none}
   .fb-fighter{display:flex;flex-direction:column;align-items:center;gap:6px;opacity:0}
+  .fb-rtag{font-family:'Press Start 2P';font-size:clamp(6px,.82vw,9px);letter-spacing:.1em;padding:.45em .7em;border-radius:5px;opacity:0;white-space:nowrap}
+  .fb-fighter .por.fb-throne{background:radial-gradient(circle at 38% 30%,#d8c4ff,#9d6bff)}
+  .fb-fighter .por.fb-throne svg{width:76%;height:76%;color:#220a3a;display:block}
+  /* RETICLE BRACKETS challenge container — four amber corner brackets, no fill. --rc/--rcg set inline. */
+  .fb-chal{opacity:0;display:inline-flex;align-items:center;justify-content:center}
+  .fb-brk{position:relative;font-family:'Press Start 2P';font-size:clamp(9px,1.3vw,15px);color:#fff;padding:.7em 1.3em;text-shadow:0 0 10px var(--rcg,rgba(255,198,55,.6))}
+  .fb-brk.big{font-size:clamp(11px,1.7vw,20px);padding:.85em 1.7em}
+  .fb-brk .lbl{color:var(--rc,#ffc637)}
+  .fb-brk i{position:absolute;width:13px;height:13px;border:2px solid var(--rc,#ffc637);box-shadow:0 0 8px var(--rcg,rgba(255,198,55,.6))}
+  .fb-brk.big i{width:17px;height:17px}
+  .fb-brk .tl{top:0;left:0;border-right:0;border-bottom:0}
+  .fb-brk .tr{top:0;right:0;border-left:0;border-bottom:0}
+  .fb-brk .bl{bottom:0;left:0;border-right:0;border-top:0}
+  .fb-brk .br{bottom:0;right:0;border-left:0;border-top:0}
   .fb-fighter .por{width:clamp(64px,11vw,124px);height:clamp(64px,11vw,124px);border-radius:50%;
     overflow:hidden;border:3px solid #fff;box-shadow:0 0 26px rgba(255,40,80,.7);background:#0a0818}
   .fb-fighter .por svg{display:block;width:100%;height:100%}
   .fb-fighter .nm{font-family:'Press Start 2P';font-size:clamp(8px,1.1vw,13px);color:#fff;text-shadow:0 0 8px currentColor}
-  .fb-vs-x{font-family:'Press Start 2P';font-size:clamp(16px,2.4vw,30px);color:#fff;opacity:0;
+  /* separator sits in its own cell, height = portrait height so it centres on the portrait row
+     (not the taller name+tag column). Holds "VS"/flag text or a crown SVG (KotH). */
+  .fb-vs-x{display:grid;place-items:center;height:clamp(64px,11vw,124px);font-family:'Press Start 2P';font-size:clamp(16px,2.4vw,30px);color:#fff;opacity:0;
     text-shadow:0 0 14px #ff3b5b,2px 0 #ff2350,-2px 0 #27e3ff}
+  .fb-vs-x svg{width:74%;height:74%;display:block;filter:drop-shadow(0 0 12px rgba(157,107,255,.85))}
   .fb-fighter.atk{transform:translateX(-130vw)}
   .fb-fighter.vic{transform:translateX(130vw)}
   .fb-overlay.play .fb-vs .fb-fighter.atk{animation:fbAtk 5s cubic-bezier(.2,1.3,.3,1) forwards}
   .fb-overlay.play .fb-vs .fb-fighter.vic{animation:fbVic 5s cubic-bezier(.2,1.3,.3,1) forwards}
   .fb-overlay.play .fb-vs-x{animation:fbVsx 5s ease-out forwards}
+  .fb-overlay.play .fb-rtag{animation:fbRtag 5s ease-out forwards}
+  .fb-overlay.play .fb-chal{animation:fbChal 5s cubic-bezier(.2,1.4,.4,1) forwards}
+  @keyframes fbRtag{0%,18%{opacity:0;transform:translateY(10px)}24%{opacity:1;transform:translateY(0)}80%{opacity:1}100%{opacity:0}}
+  @keyframes fbChal{0%,22%{opacity:0;transform:translateY(12px) scale(.9)}28%{opacity:1;transform:translateY(0) scale(1.05)}32%{transform:translateY(0) scale(1)}80%{opacity:1}100%{opacity:0}}
   @keyframes fbAtk{0%{opacity:0;transform:translateX(-130vw)}9%{opacity:1;transform:translateX(-14px)}
     14%{transform:translateX(14px)}16%{transform:translateX(0)}80%{opacity:1;transform:translateX(0)}100%{opacity:0;transform:translateX(-22vw)}}
   @keyframes fbVic{0%{opacity:0;transform:translateX(130vw)}9%{opacity:1;transform:translateX(14px)}
@@ -503,13 +531,14 @@ const ARENA_BODY = `
     <div class="fb-bar t"></div>
     <div class="fb-bar b"></div>
     <div class="fb-core">
-      <div class="fb-vs">
-        <div class="fb-fighter atk"><div class="por" id="fbAtkPor"></div><div class="nm" id="fbAtkNm"></div></div>
-        <div class="fb-vs-x">VS</div>
-        <div class="fb-fighter vic"><div class="por" id="fbVicPor"></div><div class="nm" id="fbVicNm"></div></div>
+      <div class="fb-vs" id="fbVs">
+        <div class="fb-fighter atk"><div class="por" id="fbAtkPor"></div><div class="nm" id="fbAtkNm"></div><span class="fb-rtag" id="fbAtkTag"></span></div>
+        <div class="fb-vs-x" id="fbVsx">VS</div>
+        <div class="fb-fighter vic"><div class="por" id="fbVicPor"></div><div class="nm" id="fbVicNm"></div><span class="fb-rtag" id="fbVicTag"></span></div>
       </div>
       <div class="fb-title">FIRST BLOOD</div>
       <div class="fb-sub" id="fbSub"></div>
+      <div class="fb-chal" id="fbChal"></div>
     </div>
   </div>
   <audio id="fbSound" preload="auto" src="/attack/firstblood.mp3"></audio>
@@ -1100,16 +1129,16 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     totalFlags++; refreshRank(); refreshStats()
   }
 
-  // Opponent glyphs for the non-A&D cinematics (jeopardy flag / KotH crown).
-  const flagGlyph = (col: string) => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="fgg" cx="50%" cy="40%" r="70%"><stop offset="0%" stop-color="${col}" stop-opacity=".4"/><stop offset="100%" stop-color="#0a0818"/></radialGradient></defs><rect width="64" height="64" fill="url(#fgg)"/><rect x="20" y="11" width="3.2" height="43" rx="1.6" fill="#cfd2ee"/><path d="M23 13 L52 20 L23 31 Z" fill="${col}" stroke="#0a0818" stroke-width="1"/><circle cx="21.6" cy="10" r="3.2" fill="${col}"/></svg>`
-  const crownGlyph = (col: string) => `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="cgg" cx="50%" cy="40%" r="70%"><stop offset="0%" stop-color="${col}" stop-opacity=".45"/><stop offset="100%" stop-color="#0a0818"/></radialGradient></defs><rect width="64" height="64" fill="url(#cgg)"/><path d="M13 45 L11 21 L24 34 L32 15 L40 34 L53 21 L51 45 Z" fill="${col}" stroke="#0a0818" stroke-width="1.4"/><rect x="13" y="44" width="38" height="8" rx="2.5" fill="${col}"/><circle cx="11" cy="19" r="3.2" fill="#fff"/><circle cx="53" cy="19" r="3.2" fill="#fff"/><circle cx="32" cy="13" r="3.6" fill="#fff"/></svg>`
-
-  // Per-kind first-blood theming. A&D = blood clash, Jeopardy = flag capture,
-  // KotH = coronation ("FIRST CROWN").
+  // Jewel-band crown (fill=currentColor; tight viewBox so it fills its box). Used as the KotH
+  // VS separator (purple) and the throne portrait (dark on a purple disc).
+  const JEWEL_CROWN = `<svg viewBox="10 29 80 59" fill="currentColor"><path d="M10 70 L14 36 L30 50 L50 30 L70 50 L86 36 L90 70 Z"/><rect x="10" y="66" width="80" height="16" rx="3"/><circle cx="50" cy="73" r="4" fill="#fff" opacity=".55"/><circle cx="28" cy="73" r="3.2" fill="#fff" opacity=".45"/><circle cx="72" cy="73" r="3.2" fill="#fff" opacity=".45"/></svg>`
+  // Per-kind first-blood theming. A&D = blood clash (attacker vs defender + challenge reticle),
+  // Jeopardy = solo capture (attacker + big challenge reticle, no victim), KotH = coronation
+  // ("FIRST CROWN", purple nova, crown separator + throne). retAccent/retGlow colour the reticle.
   const FB_THEME: any = {
-    ad: { title: 'FIRST BLOOD', accent: '#ff3b5b', accent2: '#ff2350', vs: 'VS', tag: 'A&D', tele: 'INCOMING STRIKE' },
-    jeopardy: { title: 'FIRST BLOOD', accent: '#ffc637', accent2: '#ff9a1f', vs: '⚑', tag: 'JEOPARDY', tele: 'INCOMING BREACH' },
-    koth: { title: 'FIRST CROWN', accent: '#9d6bff', accent2: '#b98bff', vs: '♛', tag: 'KOTH', tele: 'INCOMING SIEGE' },
+    ad: { title: 'FIRST BLOOD', accent: '#ff3b5b', accent2: '#ff2350', sep: 'VS', tele: 'INCOMING STRIKE', palette: 'blood', atkTag: 'ATTACKER', oppTag: 'DEFENDER', retAccent: '#ffc637', retGlow: 'rgba(255,198,55,.6)', retLabel: '&#9635;' },
+    jeopardy: { title: 'FIRST BLOOD', accent: '#ffc637', accent2: '#ff9a1f', sep: '', tele: 'INCOMING BREACH', palette: 'blood', atkTag: 'ATTACKER', oppTag: '', retAccent: '#ffc637', retGlow: 'rgba(255,198,55,.6)', retLabel: '&#9635; CHALLENGE' },
+    koth: { title: 'FIRST CROWN', accent: '#9d6bff', accent2: '#b98bff', sep: 'CROWN', tele: 'INCOMING SIEGE', palette: 'crown', atkTag: 'CHALLENGER', oppTag: 'THE THRONE', retAccent: '#9d6bff', retGlow: 'rgba(157,107,255,.6)', retLabel: '' },
   }
 
   // opt: { kind, oppName, oppColor, oppPortrait(html), beamTo, onImpact }
@@ -1120,14 +1149,36 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const oppColor = opt.oppColor || th.accent
     const ov: any = $('fbOverlay')
     const ttl: any = root.querySelector('.fb-title')
-    if (ttl) { ttl.textContent = th.title; ttl.style.textShadow = `4px 0 ${th.accent2}, -4px 0 #27e3ff, 0 0 26px ${th.accent}, 0 0 60px ${th.accent}` }
-    const vsx: any = root.querySelector('.fb-vs-x'); if (vsx) { vsx.textContent = th.vs; vsx.style.textShadow = `0 0 14px ${th.accent},2px 0 ${th.accent2},-2px 0 #27e3ff` }
+    const tShadowW = th.palette === 'crown' ? 3 : 4
+    if (ttl) { ttl.textContent = th.title; ttl.style.textShadow = `${tShadowW}px 0 ${th.accent2}, -${tShadowW}px 0 #27e3ff, 0 0 26px ${th.accent}, 0 0 60px ${th.accent}` }
+    // separator: "VS"/flag text, a crown SVG (KotH), or collapsed (jeopardy = solo attacker)
+    const vsEl: any = $('fbVs'); if (vsEl) vsEl.classList.toggle('solo', !!opt.solo)
+    const vsx: any = $('fbVsx')
+    if (vsx) {
+      if (th.sep === 'CROWN') { vsx.innerHTML = JEWEL_CROWN; vsx.style.color = th.accent; vsx.style.textShadow = 'none' }
+      else { vsx.innerHTML = ''; vsx.textContent = th.sep; vsx.style.color = '#fff'; vsx.style.textShadow = `0 0 14px ${th.accent},2px 0 ${th.accent2},-2px 0 #27e3ff` }
+    }
     root.querySelectorAll('.fb-fighter .por').forEach((p: any) => { p.style.boxShadow = `0 0 26px ${th.accent}` })
-    $('fbSub').innerHTML = `<span style="color:${atkr.color}">${esc(atkr.name)}</span> &nbsp;&#9656;&nbsp; <span style="color:${oppColor}">${esc(oppName)}</span> &nbsp;<span style="color:${th.accent};opacity:.85">${th.tag}</span>`
+    $('fbSub').innerHTML = opt.sub || ''
     $('fbAtkPor').innerHTML = avatar(atkr.look, atkr.color)
-    $('fbVicPor').innerHTML = opt.oppPortrait || ''
+    const vicPor: any = $('fbVicPor'); if (vicPor) { vicPor.innerHTML = opt.oppPortrait || ''; vicPor.classList.toggle('fb-throne', opt.oppPorClass === 'fb-throne') }
     const an: any = $('fbAtkNm'); an.textContent = atkr.name; an.style.color = atkr.color
     const vn: any = $('fbVicNm'); vn.textContent = oppName; vn.style.color = oppColor
+    // role tags (team-coloured): who attacked / who defended / who holds the throne
+    const setTag = (el: any, label: string, col: string) => {
+      if (!el) return
+      if (!label) { el.style.display = 'none'; return }
+      el.style.display = ''; el.textContent = label
+      el.style.color = col; el.style.background = `${col}1f`; el.style.border = `1px solid ${col}80`
+    }
+    setTag($('fbAtkTag'), th.atkTag, atkr.color)
+    setTag($('fbVicTag'), th.oppTag, oppColor)
+    // challenge reticle (A&D + Jeopardy show the challenge; KotH's "challenge" IS the throne)
+    const chalEl: any = $('fbChal')
+    if (chalEl) {
+      if (opt.chal) { chalEl.innerHTML = `<div class="fb-brk${opt.chalBig ? ' big' : ''}" style="--rc:${th.retAccent};--rcg:${th.retGlow}"><i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i><span class="lbl">${th.retLabel}</span> ${esc(opt.chal)}</div>`; chalEl.style.display = '' }
+      else { chalEl.innerHTML = ''; chalEl.style.display = 'none' }
+    }
     // ---- PHASE 1: telegraph (attention-seeking pre-roll) ----
     // The board stays FULLY VISIBLE while a warning builds (transparent edge
     // vignette + a pulsing "INCOMING …" banner), so the room
@@ -1145,7 +1196,10 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       if (killed) return
       const iaStop: any = $('incomingSound'); if (iaStop) { try { iaStop.pause(); iaStop.currentTime = 0 } catch (e) {} }
       ov.classList.remove('tele'); void ov.offsetWidth; ov.classList.add('play')
-      fbRenderer.play(FB.total) // GPU slam graphics (dark+splash+flash), synced with the DOM text/bars
+      // GPU slam graphics (dark+splash+flash), synced with the DOM text/bars. Burst behind the
+      // hero title (its layout centre is stable under the scale animation), tinted per mode.
+      const tr: any = ttl ? ttl.getBoundingClientRect() : null
+      fbRenderer.play(FB.total, tr ? { cx: tr.left + tr.width / 2, cy: tr.top + tr.height / 2, palette: th.palette } : { palette: th.palette })
       slamCovering = true // the dark slam overlay covers the board — pause the arena draw underneath
       // First-blood stinger: the shipped /attack/firstblood.mp3 (unchanged) — now
       // fires WITH the reveal so it punctuates the slam, not the build-up.
@@ -1163,14 +1217,28 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       setTimeout(() => { ov.classList.remove('play'); cinema = false; slamCovering = false }, FB.total)
     }, FB.preroll)
   }
-  function fbAd(atkr: any, vic: any, onImpact: () => void) {
-    fbCinematic(atkr, { kind: 'ad', oppName: vic ? vic.name : 'THE FIELD', oppColor: vic ? vic.color : '#ff3b5b', oppPortrait: vic ? avatar(vic.look, vic.color) : '', beamTo: vic || { x: CX, y: CY }, onImpact })
+  function fbAd(atkr: any, vic: any, chalName: string, onImpact: () => void) {
+    const oppN = vic ? vic.name : 'THE FIELD', oppC = vic ? vic.color : '#ff3b5b'
+    fbCinematic(atkr, {
+      kind: 'ad', oppName: oppN, oppColor: oppC, oppPortrait: vic ? avatar(vic.look, vic.color) : '',
+      sub: `<span style="color:${atkr.color}">${esc(atkr.name)}</span> &nbsp;&#9656;&nbsp; <span style="color:${oppC}">${esc(oppN)}</span>`,
+      chal: chalName, beamTo: vic || { x: CX, y: CY }, onImpact,
+    })
   }
   function fbJeopardy(atkr: any, chalName: string, onImpact: () => void) {
-    fbCinematic(atkr, { kind: 'jeopardy', oppName: chalName, oppColor: '#ffc637', oppPortrait: flagGlyph('#ffc637'), beamTo: { x: CX, y: CY }, onImpact })
+    fbCinematic(atkr, {
+      kind: 'jeopardy', solo: true, chal: chalName, chalBig: true,
+      sub: `<span style="color:${atkr.color}">${esc(atkr.name)}</span> drew first blood`,
+      beamTo: { x: CX, y: CY }, onImpact,
+    })
   }
   function fbKoth(atkr: any, hill: any, onImpact: () => void) {
-    fbCinematic(atkr, { kind: 'koth', oppName: hill ? hill.name : 'THE HILL', oppColor: '#9d6bff', oppPortrait: crownGlyph('#9d6bff'), beamTo: hill || { x: CX, y: CY }, onImpact })
+    const hillN = hill ? hill.name : 'THE HILL'
+    fbCinematic(atkr, {
+      kind: 'koth', oppName: hillN, oppColor: '#9d6bff', oppPortrait: JEWEL_CROWN, oppPorClass: 'fb-throne',
+      sub: `<span style="color:${atkr.color}">${esc(atkr.name)}</span> seized <span style="color:#9d6bff">${esc(hillN)}</span>`,
+      beamTo: hill || { x: CX, y: CY }, onImpact,
+    })
   }
 
   /* -------- rank + stats -------- */
@@ -1529,7 +1597,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const isFB = f.type === 'FirstBlood'
     if (isFB) {
       if (cinema) { resolveFlag(atkr, vic, svc, pts, true); return }
-      if (vic) fbAd(atkr, vic, () => resolveFlag(atkr, vic, svc, pts, true))
+      if (vic) fbAd(atkr, vic, f.challengeTitle || (svc && svc.name) || 'a challenge', () => resolveFlag(atkr, vic, svc, pts, true))
       else fbJeopardy(atkr, f.challengeTitle || 'a challenge', () => resolveFlag(atkr, null, null, pts, true))
       return
     }
@@ -1895,7 +1963,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const a = pick(TEAMS); let v = pick(TEAMS); let g = 0
     while (v === a && g++ < 8) v = pick(TEAMS)
     const svc = pick(v.svc); const pts = Math.floor(rng(60, 99))
-    fbAd(a, v, () => resolveFlag(a, v, svc, pts, true))
+    fbAd(a, v, svc && svc.name ? svc.name : 'a challenge', () => resolveFlag(a, v, svc, pts, true))
   }
   const fbJeoBtn: any = $('fbJeoBtn')
   if (fbJeoBtn) fbJeoBtn.onclick = () => {
