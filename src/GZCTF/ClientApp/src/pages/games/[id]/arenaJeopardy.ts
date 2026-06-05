@@ -105,8 +105,10 @@ export function createJeopardy(deps: JeopDeps) {
     jWheelX = wx0; jWheelY = wy0; jWheelSize = wsize
     js.setAttribute('viewBox', `0 0 ${W.toFixed(0)} ${H.toFixed(0)}`)
     // Pixi path (desktop) stretches with the canvas → 'none' keeps SVG text aligned; when the SVG
-    // itself draws the stars (mobile/dense) 'meet' avoids non-uniform stretch on a transient resize.
-    js.setAttribute('preserveAspectRatio', usePixi() ? 'none' : 'meet')
+    // itself draws the stars (mobile/dense) 'xMidYMid meet' avoids non-uniform stretch on a
+    // transient resize. (Bare 'meet' is not a valid enum value — browsers log an error and fall
+    // back to the default, which happens to be xMidYMid meet.)
+    js.setAttribute('preserveAspectRatio', usePixi() ? 'none' : 'xMidYMid meet')
     if (!mobile && Math.min(leftBand, rightBand) < 70) { CATEGORIES.forEach((c) => (c.ch = [])); jeopReady = false; js.innerHTML = ''; deps.onStars?.([], true); return }
 
     if (mobile) {
