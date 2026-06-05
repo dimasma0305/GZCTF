@@ -33,6 +33,14 @@ namespace GZCTF.Integration.Test.Tests.Api;
 public class DockerBuilderE2ETests(GZCTFApplicationFactory factory, ITestOutputHelper output)
 {
     private const string AdminPassword = "Admin@Build123";
+
+    // The build worker retries transient failures up to 3× with 10s/30s/90s backoff
+    // (ChallengeBuildQueueService.BackoffSchedule = 130s total). A single transient blip
+    // (e.g. an Alpine registry hiccup on a CI runner) therefore legitimately keeps the
+    // status at Building/Queued for >2min, so the poll timeout MUST exceed that backoff
+    // budget plus a few real build attempts — otherwise the test is structurally racy.
+    private static readonly TimeSpan BuildPollTimeout = TimeSpan.FromMinutes(5);
+
     private static readonly bool IsLocalMode =
         string.Equals(Environment.GetEnvironmentVariable("GZCTF_INTEGRATION_TEST_MODE"),
             "local", StringComparison.OrdinalIgnoreCase);
@@ -119,7 +127,7 @@ public class DockerBuilderE2ETests(GZCTFApplicationFactory factory, ITestOutputH
 
         // Wait for the async worker to pick up the job + complete the build.
         // Alpine pull + single-RUN build is ~5–15s on a warm daemon.
-        var finalStatus = await PollChallengeStatusAsync(game.Id, slug, TimeSpan.FromMinutes(2));
+        var finalStatus = await PollChallengeStatusAsync(game.Id, slug, BuildPollTimeout);
 
         output.WriteLine($"final BuildStatus: {finalStatus}");
         Assert.Equal(ChallengeBuildStatus.Success, finalStatus);
@@ -152,7 +160,7 @@ public class DockerBuilderE2ETests(GZCTFApplicationFactory factory, ITestOutputH
         var resp1 = await PostTarballAsync(client, game.Id, BuildableTarball(slug));
         resp1.EnsureSuccessStatusCode();
         Assert.Equal(ChallengeBuildStatus.Success,
-            await PollChallengeStatusAsync(game.Id, slug, TimeSpan.FromMinutes(2)));
+            await PollChallengeStatusAsync(game.Id, slug, BuildPollTimeout));
 
         // Derive the actual repository from the built image (everything before the
         // final ':' digest tag) — this is exactly the namespace the cleanup pass scopes to.
@@ -183,7 +191,7 @@ public class DockerBuilderE2ETests(GZCTFApplicationFactory factory, ITestOutputH
         var resp2 = await PostTarballAsync(client, game.Id, BuildableTarball(slug, cacheBust: "rebuild"));
         resp2.EnsureSuccessStatusCode();
         Assert.Equal(ChallengeBuildStatus.Success,
-            await PollChallengeStatusAsync(game.Id, slug, TimeSpan.FromMinutes(2)));
+            await PollChallengeStatusAsync(game.Id, slug, BuildPollTimeout));
 
         // Verify the stale tag is gone.
         using (var docker = new DockerClientConfiguration().CreateClient())
