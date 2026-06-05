@@ -315,7 +315,7 @@ const ARENA_CSS = `
   .fb-overlay .fb-vs.solo .fb-vs-x,.fb-overlay .fb-vs.solo .fb-fighter.vic{display:none}
   .fb-fighter{display:flex;flex-direction:column;align-items:center;gap:6px;opacity:0}
   .fb-rtag{font-family:'Press Start 2P';font-size:clamp(6px,.82vw,9px);letter-spacing:.1em;padding:.45em .7em;border-radius:5px;opacity:0;white-space:nowrap}
-  .fb-fighter .por.fb-throne{background:radial-gradient(circle at 38% 30%,#d8c4ff,#9d6bff)}
+  .fb-fighter .por.fb-throne{display:grid;place-items:center;background:radial-gradient(circle at 38% 30%,#d8c4ff,#9d6bff)}
   .fb-fighter .por.fb-throne svg{width:76%;height:76%;color:#220a3a;display:block}
   /* RETICLE BRACKETS challenge container — four amber corner brackets, no fill. --rc/--rcg set inline. */
   .fb-chal{opacity:0;display:inline-flex;align-items:center;justify-content:center}
