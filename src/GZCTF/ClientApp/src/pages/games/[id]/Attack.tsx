@@ -23,6 +23,7 @@ import { createFxRenderer } from './fxRenderer'
 import { createJeopRenderer } from './jeopRenderer'
 import { createFbRenderer } from './fbRenderer'
 import { createFzRenderer } from './fzRenderer'
+import { createWinRenderer } from './winRenderer'
 
 const FONTS_HREF =
   'https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=DotGothic16&display=swap'
@@ -423,31 +424,40 @@ const ARENA_CSS = `
   @keyframes fzFade{to{opacity:1}}
 
   /* ===== MATCH WINNER SCREEN ===== */
+  /* ===== MATCH COMPLETE — PODIUM SPOTLIGHT (gold god-rays canvas + tiered podium) ===== */
   .win-overlay{position:fixed;inset:0;z-index:97;pointer-events:none;opacity:0;visibility:hidden;overflow:hidden;
-    background:radial-gradient(circle at 50% 42%,rgba(60,44,8,.7),rgba(3,2,8,.97));transition:opacity .5s}
+    background:radial-gradient(circle at 50% 40%,rgba(60,44,8,.72),rgba(3,2,8,.97));transition:opacity .5s}
   .win-overlay.show{opacity:1;visibility:visible;pointer-events:auto}
-  .win-core{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;text-align:center;padding:18px}
+  .win-cv{position:absolute;inset:0;width:100%;height:100%;z-index:0}
+  .win-core{position:absolute;inset:0;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:clamp(6px,1.4vh,14px);text-align:center;padding:18px}
   .win-overlay.show .win-core{animation:winIn .7s cubic-bezier(.2,1.3,.3,1) both}
   @keyframes winIn{0%{opacity:0;transform:translateY(24px) scale(.92)}100%{opacity:1;transform:none}}
   .win-eyebrow{font-family:'Press Start 2P';font-size:clamp(8px,1.2vw,12px);color:var(--amber);letter-spacing:2px;text-shadow:0 0 10px rgba(255,198,55,.6)}
-  .champ{position:relative;margin:4px 0}
-  .champ-por{width:clamp(116px,17vw,186px);height:clamp(116px,17vw,186px);border-radius:50%;overflow:hidden;
-    border:4px solid var(--amber);box-shadow:0 0 50px rgba(255,198,55,.7),inset 0 0 20px rgba(0,0,0,.4);background:#0a0818}
-  .champ-por svg{display:block;width:100%;height:100%}
-  .crown{position:absolute;top:-28px;left:50%;transform:translateX(-50%);font-size:clamp(26px,4vw,44px);
-    color:var(--amber);text-shadow:0 0 16px rgba(255,198,55,.9);animation:crownBob 2.4s ease-in-out infinite}
-  @keyframes crownBob{50%{transform:translateX(-50%) translateY(-6px)}}
-  .win-title{font-family:'Press Start 2P';font-size:clamp(22px,5vw,58px);color:#fff;line-height:1;
+  .win-title{font-family:'Press Start 2P';font-size:clamp(18px,3.6vw,38px);color:#fff;line-height:1;letter-spacing:2px;
     text-shadow:0 0 24px rgba(255,198,55,.8),3px 0 var(--amber),-3px 0 #ff7a3a}
-  .champ-name{font-family:'Press Start 2P';font-size:clamp(12px,2vw,22px);text-shadow:0 0 12px currentColor;margin-top:4px}
-  .champ-score{font-family:'VT323';font-size:clamp(28px,4vw,46px);color:#fff;line-height:1}
-  .podium{display:flex;gap:clamp(10px,2vw,26px);align-items:flex-end;margin-top:12px}
-  .pod{display:flex;flex-direction:column;align-items:center;gap:5px;opacity:.92}
-  .pod .pav{width:clamp(40px,5vw,58px);height:clamp(40px,5vw,58px);border-radius:8px;overflow:hidden;border:1px solid var(--line2);background:#0a0818}
+  /* tiered podium: 1st tall/centre/gold, 2nd left/silver, 3rd right/bronze */
+  .podium{display:flex;gap:clamp(8px,1.6vw,22px);align-items:flex-end;justify-content:center;margin-top:clamp(8px,1.6vh,18px)}
+  .pod{display:flex;flex-direction:column;align-items:center;gap:6px;opacity:0}
+  .pod .pcrown{width:clamp(34px,4.4vw,58px);color:var(--amber);filter:drop-shadow(0 0 12px rgba(255,198,55,.9));animation:crownBob 2.6s ease-in-out infinite}
+  .pod .pcrown svg{display:block;width:100%;height:auto}
+  @keyframes crownBob{50%{transform:translateY(-6px)}}
+  .pod .pav{aspect-ratio:1;border-radius:50%;overflow:hidden;border:3px solid var(--c);background:#0a0818;box-shadow:0 0 26px -4px var(--c)}
   .pod .pav svg{display:block;width:100%;height:100%}
-  .pod .pn{font-family:'Press Start 2P';font-size:7px}
-  .pod .ps{font-family:'VT323';font-size:18px;color:#fff}
-  .pod .pr{font-family:'Press Start 2P';font-size:10px;color:var(--dim)}
+  .pod .pn{font-family:'Press Start 2P';font-size:clamp(7px,.9vw,10px);max-width:clamp(70px,12vw,160px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pod .ps{font-family:'VT323';font-size:clamp(16px,2.2vw,28px);color:#fff;line-height:.9}
+  .pod .ped{display:flex;align-items:flex-start;justify-content:center;width:clamp(66px,10vw,116px);border-radius:6px 6px 0 0;padding-top:6px;
+    background:linear-gradient(180deg,rgba(255,210,120,.20),rgba(255,180,70,.05));border:1px solid rgba(255,200,90,.3);border-bottom:0;box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}
+  .pod .rk{font-family:'Press Start 2P';font-size:clamp(9px,1.3vw,15px);color:var(--c);text-shadow:0 0 8px currentColor}
+  .pod.p1{order:2;--c:var(--amber)}.pod.p2{order:1;--c:#cfe0ee}.pod.p3{order:3;--c:#e0975a}
+  .pod.p1 .pav{width:clamp(74px,10.5vw,132px);border-width:4px}
+  .pod.p2 .pav{width:clamp(52px,7vw,90px)}.pod.p3 .pav{width:clamp(46px,6vw,78px)}
+  .pod.p1 .ped{height:clamp(40px,6vw,82px)}
+  .pod.p2 .ped{height:clamp(28px,4.4vw,58px)}
+  .pod.p3 .ped{height:clamp(20px,3.4vw,44px)}
+  .win-overlay.show .pod.p2{animation:podrise .6s .85s ease-out forwards}
+  .win-overlay.show .pod.p1{animation:podrise .6s .98s cubic-bezier(.2,1.3,.3,1) forwards}
+  .win-overlay.show .pod.p3{animation:podrise .6s 1.1s ease-out forwards}
+  @keyframes podrise{0%{opacity:0;transform:translateY(28px)}100%{opacity:1;transform:translateY(0)}}
   .btn.rematch{margin-top:16px;pointer-events:auto;font-size:11px;padding:12px 22px;background:var(--amber);color:#1c1400;box-shadow:0 0 20px rgba(255,198,55,.6)}
 
   @media (max-width:900px){
@@ -582,13 +592,11 @@ const ARENA_BODY = `
 
   <!-- ===== MATCH WINNER SCREEN ===== -->
   <div class="win-overlay" id="winOverlay">
+    <canvas class="win-cv" id="winCanvas"></canvas>
     <div class="win-core">
-      <div class="win-eyebrow">MATCH COMPLETE</div>
-      <div class="champ"><div class="champ-por" id="champPor"></div><div class="crown">&#9819;</div></div>
-      <div class="win-title">CHAMPION</div>
-      <div class="champ-name" id="champName">TEAM</div>
-      <div class="champ-score" id="champScore">0</div>
-      <div class="podium" id="podium"></div>
+      <div class="win-eyebrow">MATCH COMPLETE &middot; FINAL STANDINGS</div>
+      <div class="win-title">CHAMPIONS</div>
+      <div class="podium big" id="podium"></div>
       <button class="btn rematch" id="rematchBtn" style="display:none">&#8635; REMATCH</button>
     </div>
   </div>
@@ -706,6 +714,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   const fbRenderer = createFbRenderer(root)
   // 2D-canvas WINDOW FROST for the scoreboard-freeze cinematic (corner frost ferns, baked).
   const fzRenderer = createFzRenderer($('fzCanvas') as HTMLCanvasElement)
+  // 2D-canvas VICTORY effects (god-rays + confetti + sparkles) for MATCH COMPLETE / podium.
+  const winRenderer = createWinRenderer($('winCanvas') as HTMLCanvasElement)
   const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0
   // Pixi v8 WebGL renderer for the jeopardy constellation layer (its own overlay canvas on
   // .arena-wrap, wrap-pixel space). When ready it takes over the star twinkle + lasers from the
@@ -933,6 +943,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     fxRenderer.resize(r.width, r.height) // keep the WebGL FX layer aligned to the arena
     fbRenderer.resize() // first-blood layer is viewport-sized; tracks the window
     fzRenderer.resize() // freeze frost is viewport-sized too
+    winRenderer.resize() // victory confetti/rays viewport-sized too
     jeop.layout() // re-place the jeopardy constellations (and hand the laid-out stars to jeopRenderer via onStars)
     // size the wrap-space Pixi jeopardy canvas AFTER layout() (which may grow the wrap via #jeopSpace).
     const wr = wrapEl.getBoundingClientRect()
@@ -1335,15 +1346,17 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     if (matchOver) return; matchOver = true; unfreeze()
     const sorted = [...TEAMS].sort((a, b) => b.score - a.score)
     const champ = sorted[0]; if (!champ) return
-    $('champPor').innerHTML = avatar(champ.look, champ.color)
-    const nm: any = $('champName'); nm.textContent = champ.name; nm.style.color = champ.color
-    $('champScore').textContent = champ.score + ' PTS'
-    const order = [sorted[1], sorted[0], sorted[2]].filter(Boolean); const ranks = [2, 1, 3]
-    $('podium').innerHTML = order.map((t: any, i: number) =>
-      `<div class="pod"><div class="pr">0${ranks[i]}</div>
-         <div class="pav" style="border-color:${t.color}">${avatar(t.look, t.color)}</div>
-         <div class="pn" style="color:${t.color}">${esc(t.name)}</div><div class="ps">${t.score}</div></div>`).join('')
+    // PODIUM SPOTLIGHT: top 3 on tiered pedestals (1st centre/crowned/gold, 2nd left, 3rd right).
+    // DOM order is 1·2·3; CSS `order` lays them out as 2·1·3 with the gold step tallest.
+    const top = [sorted[0], sorted[1], sorted[2]], cls = ['p1', 'p2', 'p3'], lbl = ['01', '02', '03']
+    $('podium').innerHTML = top.map((t: any, i: number) => t
+      ? `<div class="pod ${cls[i]}">${i === 0 ? `<div class="pcrown">${JEWEL_CROWN}</div>` : ''}` +
+        `<div class="pav">${avatar(t.look, t.color)}</div>` +
+        `<div class="pn" style="color:${t.color}">${esc(t.name)}</div>` +
+        `<div class="ps">${t.score}</div><div class="ped"><span class="rk">${lbl[i]}</span></div></div>`
+      : '').join('')
     const ov = $('winOverlay'); if (ov) ov.classList.add('show')
+    winRenderer.start()
     if (preview) { const rb = $('rematchBtn'); if (rb) rb.style.display = '' }
     snd.sfxVictory()
     addLog('MATCH', 'sys', `<span class="em">MATCH OVER</span> :: <span class="who">${esc(champ.name)}</span> wins with <span class="em">${champ.score}</span>`)
@@ -1360,6 +1373,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     totalFlags = 0; totalEvents = 0
     renderAllScores(); refreshRank(); refreshStats()
     const ov = $('winOverlay'); if (ov) ov.classList.remove('show')
+    winRenderer.stop()
     addLog('SYS', 'sys', `<span class="em">REMATCH</span> :: arena reset`)
   }
   // Coalesce the heavy DOM rebuilds: events just mark dirty (refreshRank), and the rAF loop
@@ -2028,6 +2042,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     jeopRenderer.destroy()
     fbRenderer.destroy()
     fzRenderer.destroy()
+    winRenderer.destroy()
     if (ws) { try { ws.onclose = null; ws.close() } catch (e) {} ws = null }
   }
 }
