@@ -1078,8 +1078,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     }
     for (let i = fxq.length - 1; i >= 0; i--) {
       const e = fxq[i]; e.t += dt / e.dur; const p = Math.min(e.t, 1)
-      // beam-impact spark is a side-effect — must fire on the WebGL path too (extracted from the draw)
-      if (e.kind === 'beam' && !e.hit && p / 0.55 >= 1) { e.hit = true; addSpark(e.tx, e.ty, e.col) }
+      // beam-impact spark is a side-effect — must fire on the WebGL path too (extracted from the
+      // draw). 0.4 matches the PLASMA LANCE head-arrival in all three beam renderers.
+      if (e.kind === 'beam' && !e.hit && p / 0.4 >= 1) { e.hit = true; addSpark(e.tx, e.ty, e.col) }
       if (!pixi) {
         if (e.kind === 'shield') {
           ctx.lineCap = 'round'
@@ -1306,7 +1307,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
         r.ba.style.flex = String(Math.max(dispAtk(t), 1)) // attack points (blue)
         r.bd.style.flex = String(Math.max(dispDef(t), 1)) // SLA points (green)
         r.bf.style.flex = String(Math.max(shownOr(t, 'shownDefLoss', 'defLoss') || 0, 0)) // defense loss (red) — only when breached
-        const dl = t.defLoss || 0
+        const dl = shownOr(t, 'shownDefLoss', 'defLoss') || 0 // freeze-aware like the bar — no live leak on the frozen board
         sc = `${dispScore(t)}<small class="${dl > 0 ? 'dn' : ''}">${dl > 0 ? '−' + fmtPts(dl) : '0'} DEF</small>`
       } else if (rankMode === 'koth') {
         r.bars.style.display = 'none'
@@ -1399,8 +1400,10 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       if (fxRenderer.ready) fxRenderer.tick(dt, shots, sparks, fxq) // WebGL render of the same arrays
       jeopRenderer.render(ts, frozen) // WebGL jeopardy star twinkle (30fps) + lasers; skips while frozen
     }
-    // a first-crown owed but deferred past a running cinematic — fire it once free
-    const pc = kothDir.takePendingCrown(cinema)
+    // a first-crown owed but deferred past a running cinematic — fire it once free. Also hold
+    // through a freeze (the FB overlay z95 sits under the frost z96 — it would play invisibly)
+    // and after match end (the podium is up; never fire a cinematic under it).
+    const pc = kothDir.takePendingCrown(cinema || frozen || matchOver)
     if (pc) { const ph = HILLS.find((x) => x.id === pc.hill); const po = TEAMS.find((t) => t.id === pc.owner); if (ph && po) fbKoth(po, ph, () => {}) }
     if (rankDirty) { rankDirty = false; drawRank() }
     if (logDirty) { logDirty = false; logEl.scrollTop = logEl.scrollHeight }
@@ -1587,8 +1590,10 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     })
     round = ad.latestRound || round
     liveRoundEndsAt = ad.currentRoundEndsAt ? new Date(ad.currentRoundEndsAt).getTime() : liveRoundEndsAt
-    // public ICPC freeze drives the lock screen
-    if (ad.isFrozenView && !frozen) enterFreeze()
+    // public ICPC freeze drives the lock screen. !matchOver on BOTH branches: after endMatch
+    // the board often stays isFrozenView until organizers unfreeze — re-entering freeze here
+    // would start a permanent fzRenderer loop hidden under the win overlay (z96 < z97).
+    if (ad.isFrozenView && !frozen && !matchOver) enterFreeze()
     else if (!ad.isFrozenView && frozen && !matchOver) unfreeze()
     refreshRank(); refreshStats()
   }
@@ -1659,7 +1664,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const res = kothDir.applyCapture(h.id, newOwner ? newOwner.id : null, cinema)
     if (res.changed) h.owner = newOwner
     renderHill(h)
-    if (res.changed) onHillCapture(h, newOwner, res)
+    if (res.changed && !matchOver) onHillCapture(h, newOwner, res) // same gate as the poll path
   }
   // a team modified their service files — "patched". Cyan hardening pulse on their node.
   function patchEffect(t: any, challengeTitle: string, changeCount: number) {
@@ -1812,6 +1817,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     cinema = false; matchOver = false
     if (frozen) unfreeze()
     const wo: any = $('winOverlay'); if (wo) wo.classList.remove('show')
+    winRenderer.stop() // symmetric with resetMatch — don't leave confetti drawing to a hidden canvas
     bootDemoModel(); kothDir.reset()
     liveRoundEndsAt = null; round = 1; tickLeft = 30; gameEndMs = Date.now() + MATCH_SECONDS * 1000
     totalFlags = 0; totalEvents = 0
