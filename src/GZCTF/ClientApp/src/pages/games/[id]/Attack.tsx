@@ -1146,8 +1146,10 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   // so a flag flurry / 256-deep WS reconnect catch-up can't flood timers+audio+DOM. The 15s poll is
   // the score source of truth, so skipped cosmetics never desync the board.
   function resolveFlag(atkr: any, vic: any, svc: any, pts: number, isFB: boolean, quiet?: boolean) {
-    // A&D capture → attack SFX at impact; jeopardy solve plays sfxSolve at the laser instead
-    if (!isFB && vic && !quiet) snd.sfxAttack()
+    // A&D capture → attack SFX at impact; jeopardy solve plays sfxSolve at the laser instead.
+    // No SFX while frozen: the public freeze redacts scoring events, and an audible cue would
+    // leak that a capture happened (the visual fireShot/laser are already frozen-gated).
+    if (!isFB && vic && !quiet && !frozen) snd.sfxAttack()
     // A&D capture credits the attack/defense board; a jeopardy solve (no victim)
     // credits the jeopardy board instead. Both are corrected by the next poll.
     if (vic) { atkr.score += pts; atkr.atk++ } else { atkr.jpScore = (atkr.jpScore || 0) + pts; atkr.jpSolved = (atkr.jpSolved || 0) + 1 }
@@ -1364,6 +1366,16 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     snd.sfxVictory()
     addLog('MATCH', 'sys', `<span class="em">MATCH OVER</span> :: <span class="who">${esc(champ.name)}</span> wins with <span class="em">${champ.score}</span>`)
   }
+  // Live-only: an admin extending the game's EndTimeUtc past now after the podium showed
+  // (a supported workflow) must resume the arena, not leave the champions screen stuck up.
+  // Unlike resetMatch this preserves all scores/state — the match simply continues.
+  function reopenMatch() {
+    if (!matchOver) return
+    matchOver = false
+    const ov = $('winOverlay'); if (ov) ov.classList.remove('show')
+    winRenderer.stop()
+    addLog('MATCH', 'sys', `<span class="em">MATCH RESUMED</span> :: end time extended`)
+  }
   function resetMatch() {
     matchOver = false; round = 1; tickLeft = 30; kothDir.reset()
     gameEndMs = Date.now() + MATCH_SECONDS * 1000
@@ -1395,7 +1407,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     // board, while the tab is hidden, and while frozen with no active FX (idle freeze).
     const fxActive = shots.length || sparks.length || fxq.length
     const jeopActive = jeopRenderer.active() // GPU jeopardy stars twinkling / lasers in flight
-    if (!slamCovering && !document.hidden && (fxActive || jeopActive || !frozen)) {
+    // !matchOver: after endMatch the opaque PODIUM win overlay (z97) covers the whole arena and
+    // winRenderer runs its own loop on top — skip the ambient/jeop draw beneath it to save GPU.
+    if (!slamCovering && !matchOver && !document.hidden && (fxActive || jeopActive || !frozen)) {
       drawFX(dt) // advances FX physics + ambient; draws the 2D fallback only while !fxRenderer.ready
       if (fxRenderer.ready) fxRenderer.tick(dt, shots, sparks, fxq) // WebGL render of the same arrays
       jeopRenderer.render(ts, frozen) // WebGL jeopardy star twinkle (30fps) + lasers; skips while frozen
@@ -1557,16 +1571,19 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
         const s = byId[sv.cid]; const ns = s ? statusFromCheck(s.lastCheckStatus) : 'none'
         const key = t.id + ':' + sv.cid; const old = prevSvcState[key]
         if (old && old !== ns) {
+          // While frozen the SFX/anim are suppressed too (not just the addLog/spawn* visuals
+          // above, which already frozen-gate): an audible down/mumble/defend cue would leak
+          // that a scoring-relevant service transition happened during the public freeze.
           if (ns === 'down' && old !== 'down') {
             addLog('SLA', 'sla', `<span class="who">${esc(t.name)}</span> :: <span class="svc">${esc(sv.name)}</span> went <span class="em">DOWN</span>`)
-            spawnDown(t.x, t.y, '#ff3b5b'); snd.sfxDown()
-            restartAnim($('base-' + t.id), 'node-down', 1300)
+            spawnDown(t.x, t.y, '#ff3b5b')
+            if (!frozen) { snd.sfxDown(); restartAnim($('base-' + t.id), 'node-down', 1300) }
             totalEvents++
           } else if (ns === 'vuln' && old !== 'vuln') {
-            addLog('SLA', 'sla', `<span class="who">${esc(t.name)}</span> :: <span class="svc">${esc(sv.name)}</span> is <span class="em">MUMBLE</span>`); snd.sfxMumble()
+            addLog('SLA', 'sla', `<span class="who">${esc(t.name)}</span> :: <span class="svc">${esc(sv.name)}</span> is <span class="em">MUMBLE</span>`); if (!frozen) snd.sfxMumble()
           } else if (ns === 'def' && old !== 'def') {
             addLog('DEFEND', 'def', `<span class="who">${esc(t.name)}</span> restored <span class="svc">${esc(sv.name)}</span>`)
-            spawnShield(t.x, t.y, SVC_COLOR.def); snd.sfxDefend(); totalEvents++
+            spawnShield(t.x, t.y, SVC_COLOR.def); if (!frozen) snd.sfxDefend(); totalEvents++
           }
         }
         prevSvcState[key] = ns; sv.status = ns
@@ -1582,7 +1599,9 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       // backstop: if the WS koth frame was missed, the director fires the capture/crown
       // here so the FIRST CROWN cinematic still plays instead of the holder silently
       // appearing. Deduped against the WS frame by the director's owner ledger.
-      const res = kothDir.applyCapture(h.id, newOwner ? newOwner.id : null, cinema)
+      // cinema||frozen blocks the FIRST CROWN: during a freeze it's deferred (loop's
+      // takePendingCrown holds it on the same || frozen ||) and plays once the freeze lifts.
+      const res = kothDir.applyCapture(h.id, newOwner ? newOwner.id : null, cinema || frozen)
       if (!res.changed && h.status === ns) return
       if (res.changed) h.owner = newOwner
       h.status = ns; renderHill(h)
@@ -1604,6 +1623,11 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       const ad = await fetchJSON(`/api/Game/${gameId}/Ad/Scoreboard`)
       let koth: any = null; try { koth = await fetchJSON(`/api/Game/${gameId}/Ad/Koth/Scoreboard`) } catch (e) {}
       let jp: any = null; try { jp = await fetchJSON(`/api/Game/${gameId}/Scoreboard`) } catch (e) {}
+      // refresh the real end time: an admin extending EndTimeUtc mid-match must move the podium
+      // trigger (and un-stick it if the champions screen already showed) — gameEndMs was otherwise
+      // read once at load and never updated. Keep the old value if the field is missing.
+      try { const gi = await fetchJSON(`/api/Game/${gameId}`); if (gi && gi.end) gameEndMs = new Date(gi.end).getTime() } catch (e) {}
+      if (matchOver && gameEndMs != null && Date.now() < gameEndMs - 1500) reopenMatch()
       if (!killed) applyLivePoll(ad, koth, jp)
     } catch (e) { /* transient */ }
   }
@@ -1635,7 +1659,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     // live, but skip the tracer/laser/sfx and the per-event setTimeout so we don't flood.
     if (pendingResolves > 12) { resolveFlag(atkr, vic, svc, pts, false, true); return }
     if (vic) fireShot(atkr, vic, atkr.color)
-    else { if (!jeop.solveByTitle(atkr.x, atkr.y, f.challengeTitle || '', { name: atkr.name, color: atkr.color })) fireShot(atkr, { x: CX, y: CY }, atkr.color); snd.sfxSolve() }
+    else { if (!jeop.solveByTitle(atkr.x, atkr.y, f.challengeTitle || '', { name: atkr.name, color: atkr.color })) fireShot(atkr, { x: CX, y: CY }, atkr.color); if (!frozen) snd.sfxSolve() }
     pendingResolves++
     setTimeout(() => { pendingResolves--; if (!killed) resolveFlag(atkr, vic, svc, pts, false) }, 320 / Math.max(speed, 1) + 120)
   }
@@ -1647,11 +1671,15 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
   // h.owner). 'crown' plays the cinematic now; 'defer' lets loop() fire it once the
   // running cinematic clears; 'capture' is a normal seize; 'neutral' just logs.
   function onHillCapture(h: any, newOwner: any, res: CaptureResult) {
+    // While frozen, suppress the audio (and the crown is deferred by the director's blocked
+    // flag below, so res.kind is never 'crown' here during a freeze) — an audible neutral/
+    // capture cue or the FIRST CROWN stinger would leak a scoring event past the public freeze.
     if (res.kind === 'neutral' || !newOwner) {
-      snd.sfxNeutral(); addLog('HILL', 'hill', `<span class="svc">${esc(h.name)}</span> went <span class="em">NEUTRAL</span>`); totalEvents++; refreshStats(); return
+      if (!frozen) snd.sfxNeutral()
+      addLog('HILL', 'hill', `<span class="svc">${esc(h.name)}</span> went <span class="em">NEUTRAL</span>`); totalEvents++; refreshStats(); return
     }
     if (res.kind === 'crown') fbKoth(newOwner, h, () => {})
-    else if (res.kind === 'capture') { spawnCapture(newOwner, h, newOwner.color); snd.sfxCapture() }
+    else if (res.kind === 'capture') { spawnCapture(newOwner, h, newOwner.color); if (!frozen) snd.sfxCapture() }
     // 'defer' → the crown is owed; loop() fires it when the cinematic clears.
     floatText(h.x, h.y - 30, res.contested ? 'SEIZED' : 'CAPTURED', newOwner.color)
     addLog('HILL', 'hill', `<span class="who">${esc(newOwner.name)}</span> ${res.contested ? 'seized' : 'captured'} <span class="svc">${esc(h.name)}</span>`)
@@ -1661,7 +1689,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const h = HILLS.find((x) => x.cid === f.challengeId); if (!h) return
     if (f.status) h.status = statusFromCheck(f.status)
     const newOwner = f.holderTeamName ? (teamByName(f.holderTeamName) || null) : null
-    const res = kothDir.applyCapture(h.id, newOwner ? newOwner.id : null, cinema)
+    const res = kothDir.applyCapture(h.id, newOwner ? newOwner.id : null, cinema || frozen)
     if (res.changed) h.owner = newOwner
     renderHill(h)
     if (res.changed && !matchOver) onHillCapture(h, newOwner, res) // same gate as the poll path
