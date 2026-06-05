@@ -630,7 +630,7 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string),
     )
 
-  const CX = 500, CY = 500, RING = 362, CORE = 92, HILLR = 212
+  const CX = 500, CY = 500, RING = 362, HILLR = 212
   const PALETTE = ['#ff4d5e', '#27e3ff', '#ffc637', '#ff39a8', '#b9ff42', '#ff7a3a', '#9d6bff', '#4d8bff', '#3dffb0', '#ff9d63', '#7fd7ff', '#e667ff', '#ffd23a', '#5ad1a8']
   const LOOKS = [
     { hair: '#ff5a6a', skin: '#ffd9c2', eye: '#ff4d5e', style: 'spiky', gear: 'horns', expr: 'angry', prop: 'gaunt' },
@@ -745,29 +745,38 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
       <filter id="glow"><feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>`
     svg.appendChild(defs)
 
-    const step = 360 / TEAMS.length, R = 470
+    // COLOSSEUM SECTORS — each team gets a donut wedge "seat" (alternating fill) with a
+    // divider at every boundary; teams ring the rim, the central pit (hills + open core)
+    // stays clear. RIN = inner edge of the seating band; bases sit on the cyan ring at RING.
+    const step = 360 / TEAMS.length, R = 470, RIN = 224
+    const polar = (r: number, deg: number): [number, number] => {
+      const a = deg * Math.PI / 180
+      return [CX + r * Math.cos(a), CY + r * Math.sin(a)]
+    }
     TEAMS.forEach((t, i) => {
-      const a0 = (-90 + i * step - step / 2) * Math.PI / 180
-      const a1 = (-90 + i * step + step / 2) * Math.PI / 180
-      const x0 = CX + R * Math.cos(a0), y0 = CY + R * Math.sin(a0)
-      const x1 = CX + R * Math.cos(a1), y1 = CY + R * Math.sin(a1)
-      const p = el('path', { d: `M${CX} ${CY} L${x0} ${y0} A${R} ${R} 0 0 1 ${x1} ${y1} Z`, fill: t.color, opacity: 0.06, stroke: t.color, 'stroke-width': 0.6, 'stroke-opacity': 0.18 })
-      svg.appendChild(p)
+      const d0 = -90 + i * step - step / 2, d1 = -90 + i * step + step / 2
+      const [ox0, oy0] = polar(R, d0), [ox1, oy1] = polar(R, d1)
+      const [ix0, iy0] = polar(RIN, d0), [ix1, iy1] = polar(RIN, d1)
+      svg.appendChild(el('path', {
+        d: `M${ix0.toFixed(1)} ${iy0.toFixed(1)} L${ox0.toFixed(1)} ${oy0.toFixed(1)} A${R} ${R} 0 0 1 ${ox1.toFixed(1)} ${oy1.toFixed(1)} L${ix1.toFixed(1)} ${iy1.toFixed(1)} A${RIN} ${RIN} 0 0 0 ${ix0.toFixed(1)} ${iy0.toFixed(1)} Z`,
+        fill: t.color, opacity: i % 2 ? 0.05 : 0.1
+      }))
     })
 
     const ringG = el('g', {})
-    ringG.appendChild(el('circle', { cx: CX, cy: CY, r: 470, fill: 'none', stroke: 'var(--line2)', 'stroke-width': 1.2 }))
-    // the two rotating dashed rings (r=455, r=300) are drawn + spun on the #fxbg canvas now
-    ringG.appendChild(el('circle', { cx: CX, cy: CY, r: RING, fill: 'none', stroke: 'var(--line)', 'stroke-width': 1, 'stroke-dasharray': '1 7' }))
+    // bold outer rim + inner seating-band ring; clean cyan ring where the bases stand
+    ringG.appendChild(el('circle', { cx: CX, cy: CY, r: R, fill: 'none', stroke: 'var(--line2)', 'stroke-width': 1.6 }))
+    ringG.appendChild(el('circle', { cx: CX, cy: CY, r: RIN, fill: 'none', stroke: 'var(--line)', 'stroke-width': 1, 'stroke-opacity': 0.5 }))
+    ringG.appendChild(el('circle', { cx: CX, cy: CY, r: RING, fill: 'none', stroke: '#27e3ff', 'stroke-width': 1.2, 'stroke-opacity': 0.4 }))
+    // radial dividers between sectors (RIN → rim), one per boundary
+    for (let i = 0; i < TEAMS.length; i++) {
+      const [ix, iy] = polar(RIN, -90 + i * step - step / 2)
+      const [ox, oy] = polar(R, -90 + i * step - step / 2)
+      ringG.appendChild(el('line', { x1: ix.toFixed(1), y1: iy.toFixed(1), x2: ox.toFixed(1), y2: oy.toFixed(1), stroke: '#8c79e8', 'stroke-width': 1, 'stroke-opacity': 0.4 }))
+    }
     svg.appendChild(ringG)
 
-    TEAMS.forEach((t) => {
-      const ix = CX + CORE * Math.cos(t.ang), iy = CY + CORE * Math.sin(t.ang)
-      const ox = CX + (RING - 44) * Math.cos(t.ang), oy = CY + (RING - 44) * Math.sin(t.ang)
-      svg.appendChild(el('line', { x1: ix, y1: iy, x2: ox, y2: oy, stroke: t.color, 'stroke-width': 1, 'stroke-opacity': 0.16, 'stroke-dasharray': '4 6' }))
-    })
-
-    // arena center is intentionally left open (no central core)
+    // arena center (the pit) is intentionally left open — hills sit just inside the inner ring
 
     HILLS.forEach((h) => svg.appendChild(buildHill(h)))
     TEAMS.forEach((t) => svg.appendChild(buildBase(t)))
@@ -985,15 +994,8 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     if (frozen || ambientTick++ % 2) return // ~30fps ambient; skip entirely while frozen (overlay covers it)
     const TAU = 6.2832
     ctxbg.clearRect(0, 0, 1000, 1000)
-    // two counter-rotating dashed recon rings
-    ctxbg.save(); ctxbg.translate(CX, CY); ctxbg.rotate((T / 60) * TAU)
-    ctxbg.globalAlpha = 0.55; ctxbg.strokeStyle = '#9d6bff'; ctxbg.lineWidth = 1.4; ctxbg.setLineDash([3, 16])
-    ctxbg.beginPath(); ctxbg.arc(0, 0, 455, 0, TAU); ctxbg.stroke(); ctxbg.restore()
-    ctxbg.save(); ctxbg.translate(CX, CY); ctxbg.rotate(-(T / 44) * TAU)
-    ctxbg.globalAlpha = 0.4; ctxbg.strokeStyle = '#27e3ff'; ctxbg.lineWidth = 1; ctxbg.setLineDash([2, 10])
-    ctxbg.beginPath(); ctxbg.arc(0, 0, 300, 0, TAU); ctxbg.stroke(); ctxbg.restore()
-    ctxbg.setLineDash([]); ctxbg.globalAlpha = 1
-    // soft breathing aura behind each avatar (replaces the per-avatar SVG bob)
+    // the colosseum ring is static SVG now (no rotating recon rings) — the ambient canvas
+    // only carries the per-avatar breathing aura (replaces the per-avatar SVG bob)
     for (const t of TEAMS) {
       const p = (Math.sin(T * TAU / 2.8 + t.idx * 0.7) + 1) / 2
       const rad = 24 + 5 * p
