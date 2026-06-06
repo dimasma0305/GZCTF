@@ -152,4 +152,41 @@ public class SuspicionScoringTests
         Assert.Equal(RiskBand.Clean, b.Band);
         Assert.Equal(0, b.Total);
     }
+
+    [Fact]
+    public void Counted_DoesNotExceedTierCeiling()
+    {
+        // Three distinct FastSolveOpen incidents (w=50). The Behavioral tier caps at
+        // 25, so the first incident alone saturates it — only ONE event may be flagged
+        // Counted, even though all three are sub-cap. (Pre-fix all three read "counted",
+        // implying 150 while the tier contributed 25.)
+        var events = new[]
+        {
+            Evt(SuspicionType.FastSolveOpen, "chal=1", 0),
+            Evt(SuspicionType.FastSolveOpen, "chal=2", 1),
+            Evt(SuspicionType.FastSolveOpen, "chal=3", 2),
+        };
+
+        var b = SuspicionScoring.Compute(events, DefaultWeight);
+
+        Assert.Equal(25, b.Behavioral);
+        Assert.Equal(1, b.Events.Count(e => e.Counted));
+    }
+
+    [Fact]
+    public void Counted_PrefersMostRecentIncident_ForDriftingRule()
+    {
+        // CollusionGroup drifts its Details every report run (cap=1). The incident that
+        // scores must be the NEWEST one — that's the current state, and the report shows
+        // events newest-first, so the scored row should be on top, not greyed at the bottom.
+        var oldest = Evt(SuspicionType.CollusionGroup, "avgRsi=0.70", 0);
+        var newest = Evt(SuspicionType.CollusionGroup, "avgRsi=0.95", 30);
+        var middle = Evt(SuspicionType.CollusionGroup, "avgRsi=0.82", 15);
+
+        var b = SuspicionScoring.Compute(new[] { oldest, newest, middle }, DefaultWeight);
+
+        var counted = b.Events.Where(e => e.Counted).ToList();
+        Assert.Single(counted);
+        Assert.Equal(newest.Item3, counted[0].Time); // the most-recent event is the scored one
+    }
 }

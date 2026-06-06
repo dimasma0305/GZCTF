@@ -221,6 +221,64 @@ public class CheatReportNewSignalsTests(GZCTFApplicationFactory factory, ITestOu
     }
 
     [Fact]
+    public async Task ShouldNotDetect_WrongFlagLeakage_AcrossDifferentChallenge()
+    {
+        // A flag only counts as leakage when submitted as a wrong answer on the SAME
+        // challenge it belongs to. Matching a flag string across challenge boundaries
+        // (reused/colliding flags) used to fire a HARD WrongFlagLeakage citing an owner
+        // from an unrelated challenge — and post-tier a single Hard event forces the
+        // Evidenced band, so that cross-challenge false match must not fire.
+        using var scope = factory.Services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var game = await TestDataSeeder.CreateGameAsync(factory.Services,
+            "WFL CrossChal " + TestDataSeeder.RandomName());
+        var chal1 = await TestDataSeeder.CreateDynamicChallengeAsync(factory.Services, game.Id,
+            "WFL C1 " + TestDataSeeder.RandomName());
+        var chal2 = await TestDataSeeder.CreateDynamicChallengeAsync(factory.Services, game.Id,
+            "WFL C2 " + TestDataSeeder.RandomName());
+
+        var uA = await TestDataSeeder.CreateUserAsync(factory.Services, TestDataSeeder.RandomName(), "Test@123");
+        var tA = await TestDataSeeder.CreateTeamAsync(factory.Services, uA.Id, "WFL XA " + TestDataSeeder.RandomName());
+        var pA = await TestDataSeeder.JoinGameAsync(factory.Services, game.Id, tA.Id, uA.Id);
+
+        var uB = await TestDataSeeder.CreateUserAsync(factory.Services, TestDataSeeder.RandomName(), "Test@123");
+        var tB = await TestDataSeeder.CreateTeamAsync(factory.Services, uB.Id, "WFL XB " + TestDataSeeder.RandomName());
+        var pB = await TestDataSeeder.JoinGameAsync(factory.Services, game.Id, tB.Id, uB.Id);
+
+        const string flag = "flag{cross_challenge_collision}";
+
+        // Team A owns this flag for CHALLENGE 1.
+        var flagCtx = new FlagContext { Flag = flag, ChallengeId = chal1.Id };
+        context.FlagContexts.Add(flagCtx);
+        await context.SaveChangesAsync();
+        var instance = await context.GameInstances.FirstAsync(i =>
+            i.ParticipationId == pA.Id && i.ChallengeId == chal1.Id);
+        instance.FlagId = flagCtx.Id;
+        await context.SaveChangesAsync();
+
+        // Team B submits that flag as a WRONG answer on CHALLENGE 2 (a different challenge).
+        await context.Submissions.AddAsync(
+            CreateWrongSub(game.Id, chal2.Id, tB.Id, pB.Id, uB.Id,
+                DateTimeOffset.UtcNow.AddMinutes(-5), flag));
+        await context.SaveChangesAsync();
+
+        var admin = await TestDataSeeder.CreateUserAsync(factory.Services, TestDataSeeder.RandomName(), "Test@123",
+            role: Role.Admin);
+        using var client = factory.CreateClient();
+        await client.PostAsJsonAsync("/api/Account/Login",
+            new { UserName = admin.UserName, Password = "Test@123" });
+
+        var response = await client.GetAsync($"/api/game/{game.Id}/cheatreport");
+        response.EnsureSuccessStatusCode();
+        var report = await response.Content.ReadFromJsonAsync<CheatReport>(GetJsonOptions());
+
+        Assert.NotNull(report);
+        Assert.DoesNotContain(report.AbnormalSolves,
+            s => s.TeamId == tB.Id && s.Type == SuspicionType.WrongFlagLeakage);
+    }
+
+    [Fact]
     public async Task ShouldDetect_SolutionRelay_WithConstantLag()
     {
         using var scope = factory.Services.CreateScope();

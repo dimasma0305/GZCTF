@@ -389,7 +389,8 @@ const COLLUSION_FILTER_DEFS: FilterDef[] = [
 
 const SUSPICION_FILTER_DEFS: FilterDef[] = [
     { field: 'team', description: 'Team name', color: 'blue', icon: mdiAccountGroup, example: 'ggg' },
-    { field: 'score', description: 'Min risk score (e.g. >500)', color: 'red', icon: mdiAlertCircle, example: '>500' },
+    { field: 'band', description: 'Risk band', color: 'red', icon: mdiAlertCircle, example: 'evidenced' },
+    { field: 'score', description: 'Min risk score (e.g. >80)', color: 'orange', icon: mdiAlertCircle, example: '>80' },
     { field: 'status', description: 'Participation status', color: 'green', icon: mdiCheckCircle, example: 'approved' },
 ]
 
@@ -399,7 +400,8 @@ const GLOBAL_FILTER_DEFS: FilterDef[] = [
     { field: 'ip', description: 'IP address (IP)', color: 'blue', icon: mdiIpNetwork, example: '192.168' },
     { field: 'type', description: 'Anomaly type (IP, Solves)', color: 'orange', icon: mdiShieldAlert, example: 'hoarding' },
     { field: 'challenge', description: 'Challenge name (Solves)', color: 'teal', icon: mdiCubeOutline, example: 'web1' },
-    { field: 'score', description: 'Risk score (Suspicion)', color: 'red', icon: mdiAlertCircle, example: '>500' },
+    { field: 'band', description: 'Risk band (Suspicion)', color: 'red', icon: mdiAlertCircle, example: 'evidenced' },
+    { field: 'score', description: 'Min risk score (Suspicion)', color: 'orange', icon: mdiAlertCircle, example: '>80' },
     { field: 'status', description: 'Status (Suspicion)', color: 'green', icon: mdiCheckCircle, example: 'approved' },
     { field: 'similarity', description: 'Similarity % (Collusion)', color: 'red', icon: mdiAlertCircle, example: '>80' },
     { field: 'time', description: 'Date or time (IP, Solves)', color: 'violet', icon: mdiClockOutline, example: '2025' },
@@ -821,7 +823,9 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
     const [solveSort, setSolveSort] = useState<SortConfig<any>>({ key: null, direction: 'asc' })
 
     // 3. Suspicion Sort State
-    const [suspSort, setSuspSort] = useState<SortConfig<any>>({ key: 'score', direction: 'desc' })
+    // Default to the server's band-first order (hard evidence on top); clicking the
+    // Score header switches to an explicit raw-total sort.
+    const [suspSort, setSuspSort] = useState<SortConfig<any>>({ key: 'band', direction: 'desc' })
 
     const [opened, { open, close }] = useDisclosure(false)
     const [selectedGroup, setSelectedGroup] = useState<CollusionGroupResult | null>(null)
@@ -1075,6 +1079,7 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                 for (const f of combinedFilters) {
                     switch (f.field) {
                         case 'team': if (!item.teamName?.toLowerCase().includes(f.value)) return false; break;
+                        case 'band': if (!(item.band ?? 'clean').toLowerCase().includes(f.value)) return false; break;
                         case 'score':
                             const m = f.value.match(/^>?(\d+)$/)
                             if (m && (item.score ?? 0) < parseInt(m[1])) return false
@@ -1091,19 +1096,22 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                 return true
             })
         }
-        // Band-aware ordering: hard evidence always outranks any volume of
-        // low-tier signals. Score is the in-band tiebreak (encoded together so a
-        // high-scoring non-hard team can never jump above a hard-evidence team).
         const asc = suspSort.direction === 'asc'
-        return [...data].sort((a: any, b: any) => {
-            if (suspSort.key === 'teamName') {
+        if (suspSort.key === 'teamName') {
+            return [...data].sort((a: any, b: any) => {
                 const cmp = (a.teamName || '').localeCompare(b.teamName || '')
                 return asc ? cmp : -cmp
-            }
-            const ma = bandRank(a.band) * 1_000_000 + (a.score ?? 0)
-            const mb = bandRank(b.band) * 1_000_000 + (b.score ?? 0)
-            return asc ? ma - mb : mb - ma
-        })
+            })
+        }
+        if (suspSort.key === 'score') {
+            // Explicit user intent: sort by RAW total across bands, so an admin can
+            // pull a high-scoring automation (Investigate) case above a marginal
+            // hard one if they choose. (The default keeps band-first ordering.)
+            return [...data].sort((a: any, b: any) => asc ? (a.score ?? 0) - (b.score ?? 0) : (b.score ?? 0) - (a.score ?? 0))
+        }
+        // Default: trust the server's band-first, deterministically tie-broken order
+        // (hard evidence always on top); reverse for ascending.
+        return asc ? [...data].reverse() : data
     }, [report?.suspicionList, debouncedSuspSearch, globalParsed, suspSort])
 
     const paginatedSuspicionList = useMemo(() => {
@@ -1832,7 +1840,18 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                                                 </Table.Td>
                                                 <Table.Td><Text ff="monospace" fz="xs" style={{ wordBreak: 'break-all' }}>{ov.value}</Text></Table.Td>
                                                 <Table.Td style={{ textAlign: 'center' }}>
-                                                    <Badge size="sm" color={ov.teamCount >= 3 ? 'red' : 'orange'} variant="filled">{ov.teamCount}</Badge>
+                                                    <Badge
+                                                        size="sm"
+                                                        variant="filled"
+                                                        color={
+                                                            ov.kind === 'fingerprint'
+                                                                // One browser across teams is conclusive; keep it red.
+                                                                ? 'red'
+                                                                // Shared IP: the more teams, the likelier it's just a
+                                                                // campus/CGNAT egress — desaturate toward gray.
+                                                                : ov.teamCount <= 2 ? 'orange' : ov.teamCount <= 4 ? 'yellow' : 'gray'
+                                                        }
+                                                    >{ov.teamCount}</Badge>
                                                 </Table.Td>
                                                 <Table.Td><Text size="xs">{(ov.teamNames ?? []).join(', ')}</Text></Table.Td>
                                                 <Table.Td><Text size="xs" c="dimmed">{(ov.userNames ?? []).join(', ')}</Text></Table.Td>

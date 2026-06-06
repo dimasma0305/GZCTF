@@ -41,10 +41,16 @@ public sealed class ContainerAccessSubmissionDetector(
         var cfg = options.Value;
         var userId = submission.UserId.Value;
 
-        // Single projection over all access events for this challenge.
+        // Projection over access events for THIS team's own container of the challenge.
+        // The delayed/instant/never-accessed/ip-mismatch signals are all about whether
+        // the submitter interacted with their OWN instance before solving — a member
+        // poking a rival's container (which is the separate CrossTeamContainerAccess
+        // signal) must not anchor this team's solve-timing or suppress its
+        // SubmitterNeverAccessed.
         var rows = await db.ContainerAccessEvents
             .AsNoTracking()
             .Where(e => e.ChallengeId == submission.ChallengeId
+                        && e.ContainerOwnerParticipationId == submission.ParticipationId
                         && e.ConnectedAtUtc <= submission.SubmitTimeUtc)
             .Select(e => new
             {

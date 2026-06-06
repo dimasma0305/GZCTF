@@ -845,7 +845,52 @@ public class CheatReportTests(GZCTFApplicationFactory factory, ITestOutputHelper
         var report = await response.Content.ReadFromJsonAsync<CheatReport>(GetJsonOptions());
 
         Assert.NotNull(report);
-        Assert.Contains(report.IpAnalysis, i => i.Type == "SharedIP" && i.Ip == ip);
+        // Two teams sharing an IP with NO behavioral corroboration is environmental
+        // (CGNAT/campus): it no longer files a scored per-team SharedIP signal, but the
+        // cross-team sharing is surfaced (non-scoring) in the Identity Overlap view.
+        Assert.DoesNotContain(report.IpAnalysis, i => i.Type == "SharedIP" && i.Ip == ip);
+        Assert.Contains(report.IdentityOverlaps, o => o.Kind == "ip" && o.Value == ip && o.TeamCount == 2);
+    }
+
+    [Fact]
+    public async Task GetCheatReport_TreatsDualStackIp_AsSameHost()
+    {
+        // The same host seen once via a dual-stack socket (::ffff:a.b.c.d) and once as
+        // plain IPv4 (a.b.c.d) must collapse to one IP — otherwise dual-stack ingress
+        // splits a shared IP into two and hides real cross-team overlap.
+        using var scope = factory.Services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var game = await TestDataSeeder.CreateGameAsync(factory.Services, "DualStack Game " + TestDataSeeder.RandomName());
+
+        var u1 = await TestDataSeeder.CreateUserAsync(factory.Services, TestDataSeeder.RandomName(), "Test@123");
+        var t1 = await TestDataSeeder.CreateTeamAsync(factory.Services, u1.Id, "DS Team A " + TestDataSeeder.RandomName());
+        await TestDataSeeder.JoinGameAsync(factory.Services, game.Id, t1.Id, u1.Id);
+
+        var u2 = await TestDataSeeder.CreateUserAsync(factory.Services, TestDataSeeder.RandomName(), "Test@123");
+        var t2 = await TestDataSeeder.CreateTeamAsync(factory.Services, u2.Id, "DS Team B " + TestDataSeeder.RandomName());
+        await TestDataSeeder.JoinGameAsync(factory.Services, game.Id, t2.Id, u2.Id);
+
+        var time = DateTimeOffset.UtcNow;
+        await context.Logs.AddRangeAsync(
+            // Team A's member logs in over a dual-stack socket (IPv4-mapped IPv6) ...
+            new LogModel { Level = "Info", Logger = "AccountController", Message = "Login", TimeUtc = time, UserName = u1.UserName, RemoteIP = IPAddress.Parse("::ffff:203.0.113.5") },
+            // ... Team B's member from the SAME host as plain IPv4.
+            new LogModel { Level = "Info", Logger = "AccountController", Message = "Login", TimeUtc = time.AddMinutes(1), UserName = u2.UserName, RemoteIP = IPAddress.Parse("203.0.113.5") }
+        );
+        await context.SaveChangesAsync();
+
+        var monitorUser = await TestDataSeeder.CreateUserAsync(factory.Services, TestDataSeeder.RandomName(), "Test@123", role: Role.Admin);
+        using var client = factory.CreateClient();
+        await client.PostAsJsonAsync("/api/Account/Login", new { UserName = monitorUser.UserName, Password = "Test@123" });
+
+        var response = await client.GetAsync($"/api/game/{game.Id}/cheatreport");
+        response.EnsureSuccessStatusCode();
+        var report = await response.Content.ReadFromJsonAsync<CheatReport>(GetJsonOptions());
+
+        Assert.NotNull(report);
+        // Both logins collapse to the one IPv4 host → a single 2-team overlap.
+        Assert.Contains(report.IdentityOverlaps, o => o.Kind == "ip" && o.Value == "203.0.113.5" && o.TeamCount == 2);
     }
 
     [Fact]
@@ -975,15 +1020,15 @@ public class CheatReportTests(GZCTFApplicationFactory factory, ITestOutputHelper
 
         Assert.NotNull(report);
 
-        var teamARecord = report.IpAnalysis.FirstOrDefault(i => i.Type == "SharedFingerprint" && i.TeamId == t1.Id && i.Ip == fingerprint);
-        Assert.NotNull(teamARecord);
-        Assert.Contains(u1.UserName, teamARecord.UserNames);
-        Assert.Contains(u2.UserName, teamARecord.RelatedUsers);
-
-        var teamBRecord = report.IpAnalysis.FirstOrDefault(i => i.Type == "SharedFingerprint" && i.TeamId == t2.Id && i.Ip == fingerprint);
-        Assert.NotNull(teamBRecord);
-        Assert.Contains(u2.UserName, teamBRecord.UserNames);
-        Assert.Contains(u1.UserName, teamBRecord.RelatedUsers);
+        // Cross-team fingerprint sharing with no behavioral corroboration surfaces in the
+        // non-scoring Identity Overlap view (the dedicated home for account-sharing review),
+        // not as a scored per-team SharedFingerprint signal. Both usernames are listed.
+        Assert.DoesNotContain(report.IpAnalysis, i => i.Type == "SharedFingerprint");
+        var fpOverlap = report.IdentityOverlaps.FirstOrDefault(o => o.Kind == "fingerprint");
+        Assert.NotNull(fpOverlap);
+        Assert.Equal(2, fpOverlap.TeamCount);
+        Assert.Contains(u1.UserName, fpOverlap.UserNames);
+        Assert.Contains(u2.UserName, fpOverlap.UserNames);
     }
 
     [Fact]

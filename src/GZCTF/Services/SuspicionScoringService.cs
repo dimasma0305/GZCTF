@@ -73,8 +73,13 @@ public static class SuspicionScoring
     {
         var annotated = new List<ScoredSuspicionEvent>();
         var tierSubtotal = new Dictionary<SuspicionTier, int>();
+        var tierScored = new Dictionary<SuspicionTier, int>();
         var corroborationUnits = 0;
         var contextSeen = new HashSet<string>();
+
+        // Tier ceiling for the Counted-flag accounting (Hard is uncapped).
+        static int Ceiling(SuspicionTier t) =>
+            SuspicionType.TierCeiling.TryGetValue(t, out var c) ? c : int.MaxValue;
 
         foreach (var byType in events.GroupBy(e => e.Type))
         {
@@ -84,19 +89,33 @@ public static class SuspicionScoring
             var w = weight(ruleCode);
 
             // Distinct incidents = distinct Details (legacy rows have no IncidentKey
-            // yet; Details grouping defuses drift, the cap bounds the rest).
-            var ordered = byType.OrderBy(e => e.Time).ToList();
+            // yet; Details grouping defuses drift, the cap bounds the rest). Count the
+            // MOST RECENT distinct incidents first — for a drifting rule the newest
+            // Details is the current state, and the report renders events newest-first,
+            // so the rows that score are the ones an admin sees on top.
+            var ordered = byType.OrderByDescending(e => e.Time).ToList();
             var seenIncident = new HashSet<string>();
             var countedIncidents = 0;
 
             foreach (var e in ordered)
             {
                 var isNewIncident = seenIncident.Add(e.Details);
-                // An event "counts" if it's a new, sub-cap incident of a scoring tier.
-                var counted = tier > SuspicionTier.Context
-                              && isNewIncident
-                              && countedIncidents < cap;
-                if (counted) countedIncidents++;
+                // An event scores only if it's a new, sub-cap incident of a scoring
+                // tier AND that tier hasn't already hit its ceiling — so the Counted
+                // chips never imply more than the tier actually contributes (e.g. three
+                // FastSolve rows at w=50 no longer all read "counted" when Behavioral
+                // only adds 25).
+                var counted = false;
+                if (tier > SuspicionTier.Context && isNewIncident && countedIncidents < cap)
+                {
+                    countedIncidents++;
+                    tierScored.TryGetValue(tier, out var scored);
+                    if (scored < Ceiling(tier))
+                    {
+                        counted = true;
+                        tierScored[tier] = scored + w;
+                    }
+                }
 
                 annotated.Add(new ScoredSuspicionEvent
                 {

@@ -46,8 +46,16 @@ public class HoneypotService(
         // attribute by IP only (the IP fallback in ResolveAttribution).
         var sameOrigin = string.Equals(
             context.Request.Headers["Sec-Fetch-Site"].ToString(), "same-origin", StringComparison.Ordinal);
+        // No IP fallback for HTTP baits: a GET is browser-forgeable cross-site
+        // (an attacker embeds the bait URL as an <img>/fetch/redirect in a page or
+        // a Discord message), so the victim's own browser fetches it from the
+        // victim's IP. Same-origin + authenticated is the only trustworthy HTTP
+        // attribution; the IP path would let a rival pin a HoneypotChain (Strong)
+        // on an innocent solo-IP team. The hit is still logged + broadcast for
+        // manual review either way. TCP probes (RecordTcpHit) are NOT browser-
+        // forgeable, so they keep the IP fallback.
         return RecordAndBroadcast(notice, ruleCode ?? SuspicionType.HoneypotHit,
-            sameOrigin ? context.User : null, probe: null, token);
+            sameOrigin ? context.User : null, probe: null, allowIpFallback: false, token);
     }
 
     public Task RecordTcpHit(
@@ -67,7 +75,7 @@ public class HoneypotService(
             UserAgent = null,
             Attributed = false
         };
-        return RecordAndBroadcast(notice, ruleCode ?? SuspicionType.HoneypotProtocolHit, principal: null, probe, token);
+        return RecordAndBroadcast(notice, ruleCode ?? SuspicionType.HoneypotProtocolHit, principal: null, probe, allowIpFallback: true, token);
     }
 
     private async Task RecordAndBroadcast(
@@ -75,6 +83,7 @@ public class HoneypotService(
         string ruleCode,
         ClaimsPrincipal? principal,
         string? probe,
+        bool allowIpFallback,
         CancellationToken token)
     {
         try
@@ -83,7 +92,7 @@ public class HoneypotService(
             var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var userManager = scope.ServiceProvider.GetRequiredService<UserManager<UserInfo>>();
 
-            var attribution = await ResolveAttribution(dbContext, userManager, principal, notice.IP, notice.Time, token);
+            var attribution = await ResolveAttribution(dbContext, userManager, principal, notice.IP, notice.Time, allowIpFallback, token);
             notice.UserName = attribution.UserName;
             notice.TeamName = attribution.TeamName;
 
@@ -127,6 +136,7 @@ public class HoneypotService(
         ClaimsPrincipal? principal,
         IPAddress? ip,
         DateTimeOffset now,
+        bool allowIpFallback,
         CancellationToken token)
     {
         if (principal?.Identity?.IsAuthenticated == true)
@@ -140,7 +150,8 @@ public class HoneypotService(
             }
         }
 
-        if (ip is null) return (null, null, null);
+        // IP fallback is forgeable for HTTP baits (see RecordHit) — only TCP probes opt in.
+        if (!allowIpFallback || ip is null) return (null, null, null);
 
         // Fall back to recent IP→user matches from the application log.
         var since = now - IpAttributionWindow;

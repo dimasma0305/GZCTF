@@ -76,7 +76,7 @@ public class CheatReportController(
                     TeamId = teamId,
                     TeamName = teamMap[teamId].Name,
                     UserName = l.UserName!,
-                    Ip = l.RemoteIP?.ToString(),
+                    Ip = NormIp(l.RemoteIP),
                     Fingerprint = l.BrowserFingerprint,
                     Time = l.TimeUtc
                 };
@@ -192,7 +192,7 @@ public class CheatReportController(
             .GroupBy(l => l.UserName!)
             .ToDictionary(
                 g => g.Key,
-                g => g.OrderBy(x => x.TimeUtc).First().RemoteIP?.ToString());
+                g => NormIp(g.OrderBy(x => x.TimeUtc).First().RemoteIP));
 
         bool RequiresLocalDownload(int teamId, GameChallenge challenge)
         {
@@ -219,7 +219,7 @@ public class CheatReportController(
                     teamIps[teamId] = [];
                 
                 if (log.RemoteIP != null)
-                    teamIps[teamId].Add(log.RemoteIP.ToString());
+                    teamIps[teamId].Add(NormIp(log.RemoteIP));
 
                 if (!string.IsNullOrEmpty(log.BrowserFingerprint))
                 {
@@ -295,7 +295,7 @@ public class CheatReportController(
             .Select(g => new
             {
                 UserName = g.Key,
-                Ips = g.Select(x => x.RemoteIP!.ToString()).Distinct().ToList(),
+                Ips = g.Select(x => NormIp(x.RemoteIP)).Distinct().ToList(),
                 FirstSeen = g.Min(x => x.TimeUtc),
                 LastSeen = g.Max(x => x.TimeUtc),
             })
@@ -343,7 +343,7 @@ public class CheatReportController(
                     teamIps[team.Id] = [];
                 
                  if (member.IP != null && !IPAddress.Any.Equals(member.IP) && !IPAddress.IPv6Any.Equals(member.IP))
-                     teamIps[team.Id].Add(member.IP.ToString());
+                     teamIps[team.Id].Add(NormIp(member.IP));
             }
         }
 
@@ -495,9 +495,9 @@ public class CheatReportController(
                 });
             }
             
-            if (dlIp != "Unknown" && IPAddress.TryParse(dlIp, out var ipAddr)) 
+            if (dlIp != "Unknown" && IPAddress.TryParse(dlIp, out var ipAddr))
             {
-                ipStr = ipAddr.ToString();
+                ipStr = NormIp(ipAddr);
 
                 // Check if this IP belongs to another team
                 if (ipToTeams.TryGetValue(ipStr, out var teamsWithThisIp))
@@ -1396,15 +1396,21 @@ public class CheatReportController(
         // A team submitted another team's valid dynamic flag as a wrong answer.
         // This catches near-misses where the stolen flag was expired, already destroyed, or typed incorrectly.
         {
+            // Key on (Flag, ChallengeId): a wrong answer only counts as leakage when it
+            // equals another team's valid flag FOR THE SAME CHALLENGE it was submitted to.
+            // Grouping on the flag string alone matched a flag that collides across
+            // challenges (reused/templated/static-ish flags) and cited an owner team from
+            // an unrelated challenge — and post-tier that single Hard event now forces the
+            // Evidenced band, so the cross-challenge false match had to go.
             var flagToOwners = allFlagContexts
                 .Where(f => !string.IsNullOrEmpty(f.Flag))
-                .GroupBy(f => f.Flag)
+                .GroupBy(f => (f.Flag, f.ChallengeId))
                 .ToDictionary(g => g.Key, g => g.Select(x => x.TeamId).Distinct().ToList());
 
             var leakageReported = new HashSet<string>();
             foreach (var wrong in wrongSubmissions)
             {
-                if (!flagToOwners.TryGetValue(wrong.Answer, out var ownerTeams)) continue;
+                if (!flagToOwners.TryGetValue((wrong.Answer, wrong.ChallengeId), out var ownerTeams)) continue;
                 var otherOwners = ownerTeams.Where(tid => tid != wrong.TeamId).ToList();
                 if (otherOwners.Count == 0) continue;
 
@@ -1637,25 +1643,37 @@ public class CheatReportController(
             }
         }
 
-        // Tier Gating: Soft signals only score if the team already has at least one Hard/Strong signal.
-        // Prevents soft-signal stacking (SubnetOverlap + DirectedSolving + AdaptiveFastSolve = false Red).
+        // Context gating: network/identity CONTEXT signals (SharedIP, CrossTeamIP,
+        // UnknownIP, IpChurn, SubnetOverlap, SessionConcurrency, ClusteredRegistration,
+        // SharedFingerprint, FingerprintChurn) are pure environment — shared NAT/CGNAT,
+        // campus subnets, one household. They are only shown/persisted for a team that
+        // ALSO exhibits some behavioral-or-stronger anomaly to corroborate; a team with
+        // nothing but shared-IP context gets no cheat-roster entry. Scoring already makes
+        // Context worth 0, so this only prevents the rows being persisted/displayed for
+        // an innocent CGNAT/campus field. Cross-team IP/fingerprint sharing remains
+        // surfaced (non-scoring) in the Identity-overlap view below.
+        // Gating is tier-derived (GetTier == Context), NOT the legacy IsSoft sets, so it
+        // can never drift from the score: SharedIP/CrossTeamIP/SharedFingerprint used to
+        // sit in StrongSignals and leaked through this gate unconditionally.
         {
-            var teamsWithStrongSignal = new HashSet<int>();
+            static bool IsContext(string type) => SuspicionType.GetTier(type) == SuspicionTier.Context;
+
+            var teamsWithCorroboration = new HashSet<int>();
 
             foreach (var item in report.IpAnalysis)
-                if (!SuspicionType.IsSoft(item.Type))
-                    teamsWithStrongSignal.Add(item.TeamId);
+                if (!IsContext(item.Type))
+                    teamsWithCorroboration.Add(item.TeamId);
 
             foreach (var item in report.AbnormalSolves)
-                if (!SuspicionType.IsSoft(item.Type))
-                    teamsWithStrongSignal.Add(item.TeamId);
+                if (!IsContext(item.Type))
+                    teamsWithCorroboration.Add(item.TeamId);
 
             report.IpAnalysis = report.IpAnalysis
-                .Where(i => !SuspicionType.IsSoft(i.Type) || teamsWithStrongSignal.Contains(i.TeamId))
+                .Where(i => !IsContext(i.Type) || teamsWithCorroboration.Contains(i.TeamId))
                 .ToList();
 
             report.AbnormalSolves = report.AbnormalSolves
-                .Where(a => !SuspicionType.IsSoft(a.Type) || teamsWithStrongSignal.Contains(a.TeamId))
+                .Where(a => !IsContext(a.Type) || teamsWithCorroboration.Contains(a.TeamId))
                 .ToList();
         }
 
@@ -1777,10 +1795,16 @@ public class CheatReportController(
         }
 
         // Rank by band first (hard evidence always on top), then by total. A team
-        // with no hard evidence can never out-rank one that has it.
+        // with no hard evidence can never out-rank one that has it. Tie-break
+        // deterministically — most behavioral subtotals collapse to the 25 ceiling,
+        // so without the extra keys the whole Watch band would fall back to
+        // nondeterministic DB order. More distinct scored incidents ranks higher;
+        // TeamId is the final stable key.
         report.SuspicionList = report.SuspicionList
             .OrderByDescending(r => BandRank(r.Band))
             .ThenByDescending(r => r.Score)
+            .ThenByDescending(r => r.Events.Count(e => e.Counted))
+            .ThenBy(r => r.TeamId)
             .ToList();
 
         // ── Cross-team identity overlap (non-scoring, for human review) ──────────
@@ -1818,9 +1842,15 @@ public class CheatReportController(
                 rows.Select(r => (r.TeamId, r.TeamName, r.UserName)).ToList())!);
         }
 
+        // Rank by suspiciousness, not raw team count: a shared FINGERPRINT (one
+        // browser across teams) is far more telling than a shared IP, and FEWER
+        // teams sharing an identifier is more suspicious than many (a 30-team pool is
+        // a campus/CGNAT egress, not a sockpuppet). This keeps the conclusive
+        // 2-team fingerprint match at the top and sinks benign large NAT pools.
         report.IdentityOverlaps = report.IdentityOverlaps
-            .OrderByDescending(o => o.TeamCount)
-            .ThenBy(o => o.Kind)
+            .OrderBy(o => o.Kind == "fingerprint" ? 0 : 1)
+            .ThenBy(o => o.TeamCount)
+            .ThenBy(o => o.Value, StringComparer.Ordinal)
             .Take(200)
             .ToList();
 
@@ -1936,6 +1966,19 @@ public class CheatReportController(
         return DownloadEventLogMetadata.TryParse(values[DownloadEventLogMetadata.ValuesIndex], out var metadata)
             ? metadata
             : null;
+    }
+
+    /// Canonicalize an IP for cross-source comparison: collapse an IPv4-mapped
+    /// IPv6 address (::ffff:1.2.3.4) to its IPv4 form so the same host logged via
+    /// a dual-stack socket and via a plain IPv4 socket compares equal. Used for
+    /// every IP grouping key (SharedIP/CrossTeamIP/UnknownIP/Subnet, the identity
+    /// overlap, registration clustering) so dual-stack ingress can't split a
+    /// shared IP into two and hide real cross-team overlap.
+    private static string NormIp(IPAddress? ip)
+    {
+        if (ip is null) return string.Empty;
+        if (ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
+        return ip.ToString();
     }
 
     private static string? GetSubnet28(string ip)
