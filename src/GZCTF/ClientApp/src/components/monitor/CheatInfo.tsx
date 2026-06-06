@@ -161,6 +161,19 @@ const TIER_META: Record<string, { label: string; color: string }> = {
 }
 const tierMeta = (tier?: string) => TIER_META[tier ?? 'behavioral'] ?? TIER_META.behavioral
 
+// A timestamp is "real" only if it parses AND isn't the 0001-01-01 / epoch default
+// that some backend rows fall back to when a Time field is left unset — which
+// dayjs().fromNow() would otherwise render as the absurd "2025 years ago". Route
+// every relative/absolute time render through these guards.
+const isRealTime = (t?: string | number | null): boolean => {
+    if (t === null || t === undefined || t === '' || t === 0) return false
+    const d = dayjs(t)
+    return d.isValid() && d.year() > 2000
+}
+const fmtRelTime = (t?: string | number | null) => (isRealTime(t) ? dayjs(t).fromNow() : '—')
+const fmtAbsTime = (t: string | number | null | undefined, locale?: string | null, fmt = 'YYYY-MM-DD HH:mm:ss') =>
+    isRealTime(t) ? dayjs(t).locale(locale || 'en').format(fmt) : '—'
+
 // Horizontal stacked bar showing the score COMPOSITION (hard / corroboration /
 // strong / behavioral) at absolute scale, so a 2000-point team no longer renders
 // the same as a 100-point one (unlike the old min(score,100) ring).
@@ -662,8 +675,8 @@ const IpAnalysisRow = React.memo<{
 }>(({ item, index, locale }) => {
     const { t } = useTranslation()
     const meta = IP_TYPE_META[item.type] ?? { label: t('common.label.unknown', 'Unknown'), color: 'gray' }
-    const absTime = useMemo(() => item.time ? dayjs(item.time).locale(locale || 'en').format('YYYY-MM-DD HH:mm:ss') : '-', [item.time, locale])
-    const relTime = useMemo(() => item.time ? dayjs(item.time).fromNow() : '-', [item.time])
+    const absTime = useMemo(() => fmtAbsTime(item.time, locale), [item.time, locale])
+    const relTime = useMemo(() => fmtRelTime(item.time), [item.time])
 
     return (
         <Table.Tr>
@@ -721,8 +734,8 @@ const AbnormalSolveRow = React.memo<{
     const typeColor = item.type === 'Hoarding' ? 'cyan' : item.type === 'NoDownload' ? 'violet' : item.type === 'NoContainer' ? 'indigo' : 'orange'
     const typeIcon = item.type === 'NoDownload' ? mdiDownload : item.type === 'NoContainer' ? mdiCubeOutline : mdiGhost
     const typeLabel = item.type === 'NoDownload' ? t('game.cheat_analysis.solve_type.NoDownload', 'No Download') : item.type === 'NoContainer' ? t('game.cheat_analysis.solve_type.NoContainer', 'No Container') : item.type
-    const absTime = useMemo(() => dayjs(item.solveTime).locale(locale || 'en').format('YYYY-MM-DD HH:mm:ss'), [item.solveTime, locale])
-    const relTime = useMemo(() => dayjs(item.solveTime).fromNow(), [item.solveTime])
+    const absTime = useMemo(() => fmtAbsTime(item.solveTime, locale), [item.solveTime, locale])
+    const relTime = useMemo(() => fmtRelTime(item.solveTime), [item.solveTime])
 
     return (
         <Table.Tr>
@@ -1230,10 +1243,10 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                                                     <ScrollingText text={solve.challengeName || t('common.label.unknown', 'Unknown')} size="sm" maw={200} />
                                                 </Table.Td>
                                                 <Table.Td ff="monospace" fz="sm" miw="11rem">
-                                                    {solve.timeA ? dayjs(solve.timeA).locale(locale).format('MM-DD HH:mm:ss') : '-'}
+                                                    {fmtAbsTime(solve.timeA, locale, 'MM-DD HH:mm:ss')}
                                                 </Table.Td>
                                                 <Table.Td ff="monospace" fz="sm" miw="11rem">
-                                                    {solve.timeB ? dayjs(solve.timeB).locale(locale).format('MM-DD HH:mm:ss') : '-'}
+                                                    {fmtAbsTime(solve.timeB, locale, 'MM-DD HH:mm:ss')}
                                                 </Table.Td>
                                                 <Table.Td miw="8rem">
                                                     <Badge color={(solve.timeDiff ?? 0) < 60 ? 'alert' : (solve.timeDiff ?? 0) < 300 ? 'yellow' : 'gray'}>
@@ -1336,7 +1349,7 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                                                     </Group>
                                                 </Table.Td>
                                                 <Table.Td fz="xs" ff="monospace" miw="11rem">
-                                                    {evt.time ? dayjs(evt.time).locale(locale).format('MM-DD HH:mm:ss') : '-'}
+                                                    {fmtAbsTime(evt.time, locale, 'MM-DD HH:mm:ss')}
                                                 </Table.Td>
                                                 <Table.Td miw="23rem"><ReadableDetails details={evt.details} /></Table.Td>
                                             </Table.Tr>

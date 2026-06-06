@@ -93,6 +93,13 @@ public class CheatReportController(
             .GroupBy(x => x.Fingerprint!)
             .ToDictionary(g => g.Key, g => g.ToList());
 
+        // Last login time seen per team — used to stamp correlation signals that have
+        // no single event time of their own (otherwise their Time defaults to
+        // 0001-01-01 and the UI renders "2025 years ago").
+        var teamLastSeen = logIdentities
+            .GroupBy(x => x.TeamId)
+            .ToDictionary(g => g.Key, g => g.Max(x => x.Time));
+
         // ... (IP Analysis Logic) ...
 
         // Fetch Game Events
@@ -592,6 +599,9 @@ public class CheatReportController(
                     TeamName = teamMap[tid].Name,
                     Type = SuspicionType.SharedIP,
                     Ip = group.Key,
+                    Time = ipUserUsage.TryGetValue(group.Key, out var sharedIpRows) && sharedIpRows.Count > 0
+                        ? sharedIpRows.Max(x => x.Time)
+                        : teamLastSeen.GetValueOrDefault(tid, DateTimeOffset.UtcNow),
                     Details = BuildDetail(
                         ("Summary", "Same IP observed across multiple teams"),
                         ("Target", TeamRef(tid)),
@@ -636,6 +646,9 @@ public class CheatReportController(
                     TeamName = teamMap[tid].Name,
                     Type = SuspicionType.SharedFingerprint,
                     Ip = group.Key,
+                    Time = fingerprintUserUsage.TryGetValue(group.Key, out var sharedFpRows) && sharedFpRows.Count > 0
+                        ? sharedFpRows.Max(x => x.Time)
+                        : teamLastSeen.GetValueOrDefault(tid, DateTimeOffset.UtcNow),
                     Details = BuildDetail(
                         ("Summary", "Same browser fingerprint observed across multiple teams"),
                         ("Target", TeamRef(tid)),
@@ -798,6 +811,7 @@ public class CheatReportController(
                     TeamName = snTeam.Name,
                     Type = SuspicionType.SubnetOverlap,
                     Ip = group.Key,
+                    Time = teamLastSeen.GetValueOrDefault(teamId, DateTimeOffset.UtcNow),
                     RelatedTeams = otherTeams.Select(t => teamMap[t].Name).ToList(),
                     Details = BuildDetail(
                         ("Summary", "Team shares /28 subnet with other teams"),
