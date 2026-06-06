@@ -763,8 +763,8 @@ public class CheatReportController(
             }
         }
 
-        // Check G: Subnet Overlap (/24)
-        // Soft signal: teams accessing from the same /24 subnet.
+        // Check G: Subnet Overlap (/28)
+        // Soft signal: teams accessing from the same /28 subnet (GetSubnet28).
         // Low weight alone, but amplifies other corroborating signals.
         var teamSubnets28 = teamIps.ToDictionary(
             kvp => kvp.Key,
@@ -800,7 +800,7 @@ public class CheatReportController(
                     Ip = group.Key,
                     RelatedTeams = otherTeams.Select(t => teamMap[t].Name).ToList(),
                     Details = BuildDetail(
-                        ("Summary", "Team shares /24 subnet with other teams"),
+                        ("Summary", "Team shares /28 subnet with other teams"),
                         ("Target", TeamRef(teamId)),
                         ("Subnet", group.Key),
                         ("Related teams", string.Join(", ", otherTeams.Select(TeamRef))))
@@ -1719,36 +1719,123 @@ public class CheatReportController(
             }
         }
 
-        // Populate Suspicion List in Report
+        // Populate Suspicion List in Report — tiered fair scoring (read-time).
+        // The stored Participation.SuspicionScore is legacy/advisory; the ranking
+        // and band below are recomputed from the events so IP/identity signals
+        // can never inflate a team past hard evidence.
+        var ruleWeights = await dbContext.SuspicionRules
+            .AsNoTracking()
+            .ToDictionaryAsync(r => r.RuleCode, r => r.Weight, token);
+        int Weight(string code) =>
+            ruleWeights.TryGetValue(code, out var w) ? w : Services.SuspicionService.GetDefaultWeight(code);
+
+        static string TierKey(SuspicionTier tier) => tier switch
+        {
+            SuspicionTier.Hard => "hard",
+            SuspicionTier.Strong => "strong",
+            SuspicionTier.Context => "context",
+            _ => "behavioral",
+        };
+
         var participations = await dbContext.Participations
             .AsNoTracking()
-            .Where(p => p.GameId == id && p.SuspicionScore > 0)
+            .Where(p => p.GameId == id && p.SuspicionEvents.Any())
             .Include(p => p.Team)
             .Include(p => p.SuspicionEvents)
-            .OrderByDescending(p => p.SuspicionScore)
             .ToListAsync(token);
 
         foreach (var p in participations)
         {
+            var breakdown = Services.SuspicionScoring.Compute(
+                p.SuspicionEvents.Select(e => (e.Type, e.Details, e.TimeUtc, e.ScoreDelta)),
+                Weight);
+
             report.SuspicionList.Add(new SuspicionRecordResult
             {
                 TeamId = p.TeamId,
                 ParticipationId = p.Id,
                 Status = p.Status,
                 TeamName = p.Team?.Name ?? "Unknown",
-                Score = p.SuspicionScore,
-                Events = p.SuspicionEvents.Select(e => new SuspicionEventResult
-                {
-                    Type = e.Type,
-                    ScoreDelta = e.ScoreDelta,
-                    Details = e.Details,
-                    Time = e.TimeUtc
-                }).OrderByDescending(e => e.Time).ToList()
+                Score = breakdown.Total,
+                Band = breakdown.BandKey,
+                Hard = breakdown.Hard,
+                Strong = breakdown.Strong,
+                Behavioral = breakdown.Behavioral,
+                Corroboration = breakdown.Corroboration,
+                Events = breakdown.Events
+                    .OrderByDescending(e => e.Time)
+                    .Select(e => new SuspicionEventResult
+                    {
+                        Type = e.Type,
+                        ScoreDelta = e.ScoreDelta,
+                        Details = e.Details,
+                        Time = e.Time,
+                        Tier = TierKey(e.Tier),
+                        Counted = e.Counted,
+                    }).ToList()
             });
         }
 
+        // Rank by band first (hard evidence always on top), then by total. A team
+        // with no hard evidence can never out-rank one that has it.
+        report.SuspicionList = report.SuspicionList
+            .OrderByDescending(r => BandRank(r.Band))
+            .ThenByDescending(r => r.Score)
+            .ToList();
+
+        // ── Cross-team identity overlap (non-scoring, for human review) ──────────
+        // Same browser fingerprint or IP used by ≥2 distinct teams. Surfaces the
+        // account-sharing / sockpuppet signal that the Context tier no longer scores.
+        IdentityOverlapResult? BuildOverlap(string kind, string value, List<int> teamIds,
+            IReadOnlyList<(int TeamId, string TeamName, string UserName)> rows)
+        {
+            var teamNames = teamIds.Select(tid => teamMap.TryGetValue(tid, out var tm) ? tm.Name : "Unknown")
+                .Distinct().Take(12).ToList();
+            return new IdentityOverlapResult
+            {
+                Kind = kind,
+                Value = value,
+                TeamCount = teamIds.Count,
+                TeamNames = teamNames,
+                UserNames = rows.Select(r => r.UserName).Where(n => !string.IsNullOrEmpty(n)).Distinct().Take(12).ToList(),
+            };
+        }
+
+        foreach (var (fp, rows) in fingerprintUserUsage)
+        {
+            var teamIds = rows.Select(r => r.TeamId).Distinct().ToList();
+            if (teamIds.Count < 2) continue;
+            var masked = fp.Length > 12 ? fp[..12] + "…" : fp;
+            report.IdentityOverlaps.Add(BuildOverlap("fingerprint", masked, teamIds,
+                rows.Select(r => (r.TeamId, r.TeamName, r.UserName)).ToList())!);
+        }
+
+        foreach (var (ip, rows) in ipUserUsage)
+        {
+            var teamIds = rows.Select(r => r.TeamId).Distinct().ToList();
+            if (teamIds.Count < 2) continue;
+            report.IdentityOverlaps.Add(BuildOverlap("ip", ip, teamIds,
+                rows.Select(r => (r.TeamId, r.TeamName, r.UserName)).ToList())!);
+        }
+
+        report.IdentityOverlaps = report.IdentityOverlaps
+            .OrderByDescending(o => o.TeamCount)
+            .ThenBy(o => o.Kind)
+            .Take(200)
+            .ToList();
+
         return Ok(report);
     }
+
+    /// Sort weight for a risk band string (higher = more severe).
+    private static int BandRank(string band) => band switch
+    {
+        "evidenced" => 4,
+        "investigate" => 3,
+        "watch" => 2,
+        "context" => 1,
+        _ => 0,
+    };
 
     [HttpGet("compare")]
     [RequireMonitor]

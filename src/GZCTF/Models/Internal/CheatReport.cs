@@ -19,6 +19,12 @@ public class CheatReport
 
     [JsonPropertyName("collusionGroups")]
     public List<CollusionGroupResult> CollusionGroups { get; set; } = new();
+
+    /// Cross-team identity/network overlap (same fingerprint or IP used by
+    /// multiple teams). Non-scoring — surfaced for human review only, so the
+    /// account-sharing signal isn't lost now that identity signals score 0.
+    [JsonPropertyName("identityOverlaps")]
+    public List<IdentityOverlapResult> IdentityOverlaps { get; set; } = new();
 }
 
 public class IpAnalysisResult
@@ -86,8 +92,26 @@ public class SuspicionRecordResult
     [JsonPropertyName("teamName")]
     public string TeamName { get; set; } = string.Empty;
 
+    /// Total tiered risk score (Hard + Corroboration + Strong + Behavioral).
     [JsonPropertyName("score")]
     public int Score { get; set; }
+
+    /// Risk band: evidenced | investigate | watch | context | clean.
+    /// This — not the raw number — is the headline classification.
+    [JsonPropertyName("band")]
+    public string Band { get; set; } = "clean";
+
+    [JsonPropertyName("hard")]
+    public int Hard { get; set; }
+
+    [JsonPropertyName("strong")]
+    public int Strong { get; set; }
+
+    [JsonPropertyName("behavioral")]
+    public int Behavioral { get; set; }
+
+    [JsonPropertyName("corroboration")]
+    public int Corroboration { get; set; }
 
     [JsonPropertyName("status")]
     public ParticipationStatus Status { get; set; }
@@ -109,6 +133,35 @@ public class SuspicionEventResult
 
     [JsonPropertyName("time")]
     public DateTimeOffset Time { get; set; }
+
+    /// Evidence tier: context | behavioral | strong | hard.
+    [JsonPropertyName("tier")]
+    public string Tier { get; set; } = "behavioral";
+
+    /// True if this event actually contributed to the score (false for context
+    /// signals and for repeat incidents beyond the per-rule cap).
+    [JsonPropertyName("counted")]
+    public bool Counted { get; set; }
+}
+
+public class IdentityOverlapResult
+{
+    /// "fingerprint" or "ip".
+    [JsonPropertyName("kind")]
+    public string Kind { get; set; } = string.Empty;
+
+    /// The shared value, masked for display (e.g. fingerprint prefix or IP).
+    [JsonPropertyName("value")]
+    public string Value { get; set; } = string.Empty;
+
+    [JsonPropertyName("teamCount")]
+    public int TeamCount { get; set; }
+
+    [JsonPropertyName("teamNames")]
+    public List<string> TeamNames { get; set; } = new();
+
+    [JsonPropertyName("userNames")]
+    public List<string> UserNames { get; set; } = new();
 }
 
 

@@ -139,8 +139,11 @@ public sealed class ContainerAccessSubmissionDetector(
         {
             try
             {
+                // Normalize the stored access IPs the same way the submitter IP is
+                // normalized below, or every dual-stack (::ffff:1.2.3.4 vs 1.2.3.4)
+                // solve trips a false mismatch.
                 var submitterAccessIps = submitterRows
-                    .Select(r => r.RemoteIp)
+                    .Select(r => NormalizeIpString(r.RemoteIp))
                     .Where(s => !string.IsNullOrEmpty(s))
                     .Distinct(StringComparer.Ordinal)
                     .ToHashSet(StringComparer.Ordinal);
@@ -174,5 +177,14 @@ public sealed class ContainerAccessSubmissionDetector(
     {
         if (ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
         return ip.ToString();
+    }
+
+    /// String overload mirroring <see cref="NormalizeIp(IPAddress)"/> so stored
+    /// RemoteIp strings compare apples-to-apples with the resolved submitter IP.
+    /// Falls back to the original (trimmed) string if it isn't a parseable IP.
+    private static string NormalizeIpString(string? ip)
+    {
+        if (string.IsNullOrWhiteSpace(ip)) return string.Empty;
+        return IPAddress.TryParse(ip, out var parsed) ? NormalizeIp(parsed) : ip.Trim();
     }
 }

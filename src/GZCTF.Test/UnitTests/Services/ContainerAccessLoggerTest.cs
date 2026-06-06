@@ -26,9 +26,6 @@ public class ContainerAccessLoggerTest
             Calls.Add((participation.Id, ruleCode, details, relatedParticipationId));
             return Task.CompletedTask;
         }
-
-        public Task<int> GetScore(Participation participation, CancellationToken token = default) =>
-            Task.FromResult(0);
     }
 
     private static AppDbContext NewDb(string name) =>

@@ -1125,6 +1125,7 @@ export interface CheatReport {
 
   collusionGroups?: CollusionGroupResult[];
   suspicionList?: SuspicionRecordResult[];
+  identityOverlaps?: IdentityOverlapResult[];
 }
 
 export interface SuspicionRecordResult {
@@ -1136,6 +1137,16 @@ export interface SuspicionRecordResult {
   teamName?: string;
   /** @format int32 */
   score?: number;
+  /** evidenced | investigate | watch | context | clean */
+  band?: string;
+  /** @format int32 */
+  hard?: number;
+  /** @format int32 */
+  strong?: number;
+  /** @format int32 */
+  behavioral?: number;
+  /** @format int32 */
+  corroboration?: number;
   events?: SuspicionEventResult[];
 }
 
@@ -1146,6 +1157,19 @@ export interface SuspicionEventResult {
   details?: string;
   /** @format uint64 */
   time?: number;
+  /** context | behavioral | strong | hard */
+  tier?: string;
+  counted?: boolean;
+}
+
+export interface IdentityOverlapResult {
+  /** "fingerprint" or "ip" */
+  kind?: string;
+  value?: string;
+  /** @format int32 */
+  teamCount?: number;
+  teamNames?: string[];
+  userNames?: string[];
 }
 
 export interface IpAnalysisResult {

@@ -56,15 +56,6 @@ public class SuspicionService(
         await dbContext.SaveChangesAsync(token);
     }
 
-    public async Task<int> GetScore(Participation participation, CancellationToken token = default)
-    {
-        using var scope = scopeFactory.CreateScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        
-        var p = await dbContext.Participations.FindAsync([participation.Id], token);
-        return p?.SuspicionScore ?? 0;
-    }
-
     public static List<SuspicionRule> DefaultRules =>
         SuspicionType.Defaults.Select(kv => new SuspicionRule
         {

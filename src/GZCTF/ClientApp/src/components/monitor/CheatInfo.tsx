@@ -22,7 +22,6 @@ import {
     Tabs,
     Tooltip,
     Box,
-    RingProgress,
     Divider,
     ActionIcon,
     Progress,
@@ -130,6 +129,48 @@ function ThSort({ children, reversed, sorted, onSort, w, miw }: ThSortProps) {
 interface DetailLine {
     label?: string
     value: string
+}
+
+// ── Risk band & evidence tier presentation ──────────────────────────────────
+// The band — derived server-side from the highest evidence tier that fired — is
+// the headline. Network/identity signals land in "context" (gray) and never
+// push a team into a high band, no matter how many fire.
+const BAND_META: Record<string, { label: string; color: string; rank: number; desc: string }> = {
+    evidenced: { label: 'Evidenced', color: 'red', rank: 4, desc: 'Hard cross-team evidence (flag/session movement)' },
+    investigate: { label: 'Investigate', color: 'orange', rank: 3, desc: 'Strong automation / scanner evidence' },
+    watch: { label: 'Watch', color: 'yellow', rank: 2, desc: 'Low-confidence behavioral heuristics' },
+    context: { label: 'Context', color: 'gray', rank: 1, desc: 'Network / identity correlation only — not suspicion' },
+    clean: { label: 'Clean', color: 'gray', rank: 0, desc: 'No signals' },
+}
+const bandMeta = (band?: string) => BAND_META[band ?? 'clean'] ?? BAND_META.clean
+const bandRank = (band?: string) => bandMeta(band).rank
+
+const TIER_META: Record<string, { label: string; color: string }> = {
+    hard: { label: 'Hard', color: 'red' },
+    strong: { label: 'Strong', color: 'orange' },
+    behavioral: { label: 'Behavioral', color: 'yellow' },
+    context: { label: 'Context', color: 'gray' },
+}
+const tierMeta = (tier?: string) => TIER_META[tier ?? 'behavioral'] ?? TIER_META.behavioral
+
+// Horizontal stacked bar showing the score COMPOSITION (hard / corroboration /
+// strong / behavioral) at absolute scale, so a 2000-point team no longer renders
+// the same as a 100-point one (unlike the old min(score,100) ring).
+const RiskCompositionBar: FC<{ hard?: number; corroboration?: number; strong?: number; behavioral?: number }> = ({
+    hard = 0, corroboration = 0, strong = 0, behavioral = 0,
+}) => {
+    const SCALE = 200 // px-equivalent reference; segments clamp to the track
+    const seg = (v: number, color: string, key: string) =>
+        v > 0 ? <Box key={key} style={{ flexBasis: `${Math.min((v / SCALE) * 100, 100)}%`, backgroundColor: `var(--mantine-color-${color})` }} /> : null
+    return (
+        <Box style={{ display: 'flex', width: '100%', height: 12, borderRadius: 6, overflow: 'hidden', backgroundColor: 'var(--mantine-color-default-border)' }}>
+            {seg(hard, 'red-6', 'h')}
+            {seg(corroboration, 'red-3', 'c')}
+            {seg(strong, 'orange-5', 's')}
+            {seg(behavioral, 'yellow-5', 'b')}
+            <Box style={{ flexGrow: 1 }} />
+        </Box>
+    )
 }
 
 const IP_TYPE_META: Record<string, { label: string; color: string; icon: string }> = {
@@ -512,7 +553,7 @@ const SuspicionRow = React.memo<{
     const score = item.score ?? 0
     const currentStatus = item.status ?? ParticipationStatus.Pending
     const statusMeta = statusMap.get(currentStatus)
-    const riskColor = score >= 500 ? 'red.9' : score >= 100 ? 'red' : score >= 70 ? 'orange' : 'yellow'
+    const band = bandMeta(item.band)
 
     return (
         <Table.Tr>
@@ -526,17 +567,22 @@ const SuspicionRow = React.memo<{
                     </Text>
                 </Tooltip>
             </Table.Td>
-            <Table.Td miw="9rem">
-                <Tooltip label={t('game.cheat_analysis.risk_score_label', 'Risk score: {{score}}', { score })} withArrow>
-                    <Badge
-                        color={riskColor}
-                        size="md"
-                        variant="filled"
-                        leftSection={<Icon path={mdiAlertCircle} size={0.5} />}
-                        style={{ fontVariantNumeric: 'tabular-nums', minWidth: '4rem', textAlign: 'center' }}
-                    >
-                        {score.toLocaleString()}
-                    </Badge>
+            <Table.Td miw="11rem">
+                <Tooltip label={t(`game.cheat_analysis.band_desc.${item.band ?? 'clean'}`, band.desc)} withArrow multiline maw={280}>
+                    <Group gap={6} wrap="nowrap">
+                        <Badge
+                            color={band.color}
+                            size="md"
+                            variant={item.band === 'context' || item.band === 'clean' ? 'light' : 'filled'}
+                            leftSection={<Icon path={mdiAlertCircle} size={0.5} />}
+                            style={{ minWidth: '6.5rem', textAlign: 'center' }}
+                        >
+                            {t(`game.cheat_analysis.band.${item.band ?? 'clean'}`, band.label)}
+                        </Badge>
+                        <Text size="xs" c="dimmed" fw={600} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                            {score.toLocaleString()}
+                        </Text>
+                    </Group>
                 </Tooltip>
             </Table.Td>
             <Table.Td miw="11rem">
@@ -862,22 +908,27 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
 
     const summaryStats = useMemo(() => {
         const totalTeams = report?.suspicionList?.length ?? 0
-        const highRiskTeams = report?.suspicionList?.filter((x: any) => (x.score ?? 0) >= 70).length ?? 0
+        // "High risk" now means hard evidence (EVIDENCED band), not a raw number.
+        const highRiskTeams = report?.suspicionList?.filter((x: any) => x.band === 'evidenced').length ?? 0
         const highRiskPct = totalTeams ? (highRiskTeams / totalTeams) * 100 : 0
+        const automationFlagged = report?.suspicionList?.filter((x: any) => x.band === 'investigate').length ?? 0
 
         const ipAnomalies = report?.ipAnalysis?.length ?? 0
         const abnormalSolves = report?.abnormalSolves?.length ?? 0
         const collusionGroups = report?.collusionGroups?.length ?? 0
+        const identityOverlaps = report?.identityOverlaps?.length ?? 0
 
         return {
             totalTeams,
             highRiskTeams,
             highRiskPct,
+            automationFlagged,
             ipAnomalies,
             abnormalSolves,
-            collusionGroups
+            collusionGroups,
+            identityOverlaps
         }
-    }, [report?.suspicionList, report?.ipAnalysis, report?.abnormalSolves, report?.collusionGroups])
+    }, [report?.suspicionList, report?.ipAnalysis, report?.abnormalSolves, report?.collusionGroups, report?.identityOverlaps])
 
     const sortedIpAnalysis = useMemo(() => {
         if (!report?.ipAnalysis) return []
@@ -1040,7 +1091,19 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                 return true
             })
         }
-        return sortData(data, suspSort)
+        // Band-aware ordering: hard evidence always outranks any volume of
+        // low-tier signals. Score is the in-band tiebreak (encoded together so a
+        // high-scoring non-hard team can never jump above a hard-evidence team).
+        const asc = suspSort.direction === 'asc'
+        return [...data].sort((a: any, b: any) => {
+            if (suspSort.key === 'teamName') {
+                const cmp = (a.teamName || '').localeCompare(b.teamName || '')
+                return asc ? cmp : -cmp
+            }
+            const ma = bandRank(a.band) * 1_000_000 + (a.score ?? 0)
+            const mb = bandRank(b.band) * 1_000_000 + (b.score ?? 0)
+            return asc ? ma - mb : mb - ma
+        })
     }, [report?.suspicionList, debouncedSuspSearch, globalParsed, suspSort])
 
     const paginatedSuspicionList = useMemo(() => {
@@ -1171,48 +1234,70 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                                 <Text fw={700} size="lg">{selectedSuspicion.teamName}</Text>
                                 <Text size="xs" c="dimmed">{t('game.cheat_analysis.score_breakdown', 'Suspicion score breakdown')}</Text>
                             </Box>
-                            <Stack gap={4} align="center">
-                                <RingProgress
-                                    size={80}
-                                    thickness={8}
-                                    roundCaps
-                                    sections={[{
-                                        value: Math.min(selectedSuspicion.score ?? 0, 100),
-                                        color: (selectedSuspicion.score ?? 0) >= 70 ? 'red' : 'yellow',
-                                    }]}
-                                    label={
-                                        <Text ta="center" fw={900} size="sm" c={(selectedSuspicion.score ?? 0) >= 70 ? 'red' : 'yellow'}>
-                                            {selectedSuspicion.score}
-                                        </Text>
-                                    }
-                                />
-                                <Text size="xs" c="dimmed">{t('game.cheat_analysis.risk_score', 'Risk Score')}</Text>
-                            </Stack>
+                            <Group gap="sm" align="center">
+                                <Badge color={bandMeta(selectedSuspicion.band).color} size="lg"
+                                    variant={selectedSuspicion.band === 'context' || selectedSuspicion.band === 'clean' ? 'light' : 'filled'}>
+                                    {t(`game.cheat_analysis.band.${selectedSuspicion.band ?? 'clean'}`, bandMeta(selectedSuspicion.band).label)}
+                                </Badge>
+                                <Text fw={900} size="xl" c={bandMeta(selectedSuspicion.band).color}>{selectedSuspicion.score}</Text>
+                            </Group>
                         </Group>
+                        <Box>
+                            <RiskCompositionBar
+                                hard={(selectedSuspicion as any).hard}
+                                corroboration={(selectedSuspicion as any).corroboration}
+                                strong={(selectedSuspicion as any).strong}
+                                behavioral={(selectedSuspicion as any).behavioral}
+                            />
+                            <Group gap="md" mt={6}>
+                                <Text size="xs" c="dimmed">{t('game.cheat_analysis.tier.hard', 'Hard')}: <b>{(selectedSuspicion as any).hard ?? 0}</b></Text>
+                                <Text size="xs" c="dimmed">{t('game.cheat_analysis.corroboration', 'Corroboration')}: <b>{(selectedSuspicion as any).corroboration ?? 0}</b></Text>
+                                <Text size="xs" c="dimmed">{t('game.cheat_analysis.tier.strong', 'Strong')}: <b>{(selectedSuspicion as any).strong ?? 0}</b></Text>
+                                <Text size="xs" c="dimmed">{t('game.cheat_analysis.tier.behavioral', 'Behavioral')}: <b>{(selectedSuspicion as any).behavioral ?? 0}</b></Text>
+                            </Group>
+                            <Text size="xs" c="dimmed" mt={4}>{t('game.cheat_analysis.context_note', 'Network / identity (context) signals are shown below but never score on their own.')}</Text>
+                        </Box>
                         <Divider />
-                        <ScrollArea h={400}>
+                        <ScrollArea h={380}>
                             <Table striped miw="54rem">
                                 <Table.Thead>
                                     <Table.Tr>
                                         <Table.Th w="10rem" miw="10rem">{t('game.cheat_analysis.type', 'Type')}</Table.Th>
-                                        <Table.Th w="10rem" miw="10rem">{t('game.cheat_analysis.score_delta', 'Score Delta')}</Table.Th>
+                                        <Table.Th w="9rem" miw="9rem">{t('game.cheat_analysis.tier_label', 'Tier')}</Table.Th>
                                         <Table.Th w="11rem" miw="11rem">{t('common.label.time', 'Time')}</Table.Th>
                                         <Table.Th w="23rem" miw="23rem">{t('game.cheat_analysis.details', 'Details')}</Table.Th>
                                     </Table.Tr>
                                 </Table.Thead>
                                 <Table.Tbody>
-                                    {selectedSuspicion.events?.map((evt, idx) => (
-                                        <Table.Tr key={idx}>
-                                            <Table.Td miw="10rem">
-                                                <Badge color={evt.type === 'Corroboration' ? 'grape' : 'blue'}>{evt.type}</Badge>
-                                            </Table.Td>
-                                            <Table.Td miw="10rem">+{evt.scoreDelta}</Table.Td>
-                                            <Table.Td fz="xs" ff="monospace" miw="11rem">
-                                                {evt.time ? dayjs(evt.time).locale(locale).format('MM-DD HH:mm:ss') : '-'}
-                                            </Table.Td>
-                                            <Table.Td miw="23rem"><ReadableDetails details={evt.details} /></Table.Td>
-                                        </Table.Tr>
-                                    ))}
+                                    {selectedSuspicion.events?.map((evt, idx) => {
+                                        const tm = tierMeta((evt as any).tier)
+                                        const counted = (evt as any).counted
+                                        return (
+                                            <Table.Tr key={idx} style={{ opacity: counted ? 1 : 0.55 }}>
+                                                <Table.Td miw="10rem">
+                                                    <Text size="sm" fw={600}>{evt.type}</Text>
+                                                </Table.Td>
+                                                <Table.Td miw="9rem">
+                                                    <Group gap={4} wrap="nowrap">
+                                                        <Badge color={tm.color} size="sm" variant={counted ? 'filled' : 'outline'}>
+                                                            {t(`game.cheat_analysis.tier.${(evt as any).tier ?? 'behavioral'}`, tm.label)}
+                                                        </Badge>
+                                                        {!counted && (
+                                                            <Text size="xs" c="dimmed">
+                                                                {(evt as any).tier === 'context'
+                                                                    ? t('game.cheat_analysis.not_scored', 'context')
+                                                                    : t('game.cheat_analysis.capped', 'capped')}
+                                                            </Text>
+                                                        )}
+                                                    </Group>
+                                                </Table.Td>
+                                                <Table.Td fz="xs" ff="monospace" miw="11rem">
+                                                    {evt.time ? dayjs(evt.time).locale(locale).format('MM-DD HH:mm:ss') : '-'}
+                                                </Table.Td>
+                                                <Table.Td miw="23rem"><ReadableDetails details={evt.details} /></Table.Td>
+                                            </Table.Tr>
+                                        )
+                                    })}
                                 </Table.Tbody>
                             </Table>
                         </ScrollArea>
@@ -1243,7 +1328,7 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                         className={`${classes.summaryCard} ${activeTab === 'suspicion' ? classes.summaryCardActive : ''}`}
                     >
                         <Group justify="space-between" mb={6}>
-                            <Text fw={600} size="sm" c="dimmed" tt="uppercase" style={{ letterSpacing: '0.04em' }}>{t('game.cheat_analysis.card.high_risk_teams', 'High Risk Teams')}</Text>
+                            <Text fw={600} size="sm" c="dimmed" tt="uppercase" style={{ letterSpacing: '0.04em' }}>{t('game.cheat_analysis.card.hard_evidence', 'Hard Evidence')}</Text>
                             <ThemeIcon
                                 size="md"
                                 radius="sm"
@@ -1256,7 +1341,7 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                         <Title order={2} c="red" lh={1}>
                             {summaryStats.highRiskTeams}
                         </Title>
-                        <Text size="xs" c="dimmed" mt={4}>{t('game.cheat_analysis.card.of_total_teams', 'of {{count}} total teams', { count: summaryStats.totalTeams })}</Text>
+                        <Text size="xs" c="dimmed" mt={4}>{t('game.cheat_analysis.card.evidenced_sub', '{{auto}} more flagged for automation', { auto: summaryStats.automationFlagged })}</Text>
                         <Box className={classes.scoreBar} mt={8}>
                             <Box
                                 className={classes.scoreBarFill}
@@ -1370,7 +1455,7 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                             value="suspicion"
                             leftSection={<Icon path={mdiShieldAlert} size={0.75} />}
                             rightSection={
-                                <Badge size="xs" variant="filled" color={(report?.suspicionList?.filter((x: any) => (x.score ?? 0) >= 70).length ?? 0) > 0 ? 'red' : 'gray'} circle>
+                                <Badge size="xs" variant="filled" color={(report?.suspicionList?.filter((x: any) => x.band === 'evidenced' || x.band === 'investigate').length ?? 0) > 0 ? 'red' : 'gray'} circle>
                                     {report?.suspicionList?.length ?? 0}
                                 </Badge>
                             }
@@ -1409,6 +1494,17 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                             }
                         >
                             {t('game.cheat_analysis.tab.collusion', 'Collusion')}
+                        </Tabs.Tab>
+                        <Tabs.Tab
+                            value="identity"
+                            leftSection={<Icon path={mdiFingerprint} size={0.75} />}
+                            rightSection={
+                                <Badge size="xs" variant="filled" color={(report?.identityOverlaps?.length ?? 0) > 0 ? 'violet' : 'gray'} circle>
+                                    {report?.identityOverlaps?.length ?? 0}
+                                </Badge>
+                            }
+                        >
+                            {t('game.cheat_analysis.tab.identity', 'Identity Overlap')}
                         </Tabs.Tab>
                     </Tabs.List>
 
@@ -1696,6 +1792,63 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                                     </ThemeIcon>
                                     <Text fw={600} size="md">{t('game.cheat_analysis.all_clear', 'All Clear')}</Text>
                                     <Text size="sm" c="dimmed">{t('game.cheat_analysis.no_collusion', 'No collusion groups detected')}</Text>
+                                </Stack>
+                            </Center>
+                        )}
+                    </Tabs.Panel>
+
+                    <Tabs.Panel value="identity" pt="md">
+                        <Group justify="space-between" mb="xs">
+                            <Group gap="xs">
+                                <Title order={4}>{t('game.cheat_analysis.tab.identity', 'Identity Overlap')}</Title>
+                                <Badge variant="light" color="violet">{report?.identityOverlaps?.length ?? 0}</Badge>
+                            </Group>
+                        </Group>
+                        <Text size="xs" c="dimmed" mb="md">
+                            {t('game.cheat_analysis.identity_note', 'Same browser fingerprint or IP used by multiple teams. Non-scoring — surfaced for human review (e.g. account sharing or sockpuppet teams). A shared campus/NAT IP across many teams is usually benign; a shared high-entropy fingerprint across teams is not.')}
+                        </Text>
+                        {report?.identityOverlaps && report.identityOverlaps.length > 0 ? (
+                            <ScrollArea offsetScrollbars h={roomyHeight}>
+                                <Table className={tableClasses.table} horizontalSpacing="md" verticalSpacing="xs" striped highlightOnHover withTableBorder stickyHeader miw="46rem">
+                                    <Table.Thead>
+                                        <Table.Tr>
+                                            <Table.Th w="8rem" miw="8rem">{t('game.cheat_analysis.identity_kind', 'Kind')}</Table.Th>
+                                            <Table.Th w="14rem" miw="14rem">{t('game.cheat_analysis.identity_value', 'Fingerprint / IP')}</Table.Th>
+                                            <Table.Th w="5rem" miw="5rem" style={{ textAlign: 'center' }}>{t('game.cheat_analysis.identity_teams', 'Teams')}</Table.Th>
+                                            <Table.Th miw="16rem">{t('common.label.team', 'Team')}</Table.Th>
+                                            <Table.Th miw="14rem">{t('game.cheat_analysis.identity_users', 'Users')}</Table.Th>
+                                        </Table.Tr>
+                                    </Table.Thead>
+                                    <Table.Tbody>
+                                        {report.identityOverlaps.map((ov: any, idx: number) => (
+                                            <Table.Tr key={idx}>
+                                                <Table.Td>
+                                                    <Badge size="sm" variant="light" color={ov.kind === 'fingerprint' ? 'violet' : 'blue'}
+                                                        leftSection={<Icon path={ov.kind === 'fingerprint' ? mdiFingerprint : mdiIpNetwork} size={0.45} />}>
+                                                        {ov.kind === 'fingerprint'
+                                                            ? t('game.cheat_analysis.identity_fingerprint', 'Fingerprint')
+                                                            : t('game.cheat_analysis.identity_ip', 'IP')}
+                                                    </Badge>
+                                                </Table.Td>
+                                                <Table.Td><Text ff="monospace" fz="xs" style={{ wordBreak: 'break-all' }}>{ov.value}</Text></Table.Td>
+                                                <Table.Td style={{ textAlign: 'center' }}>
+                                                    <Badge size="sm" color={ov.teamCount >= 3 ? 'red' : 'orange'} variant="filled">{ov.teamCount}</Badge>
+                                                </Table.Td>
+                                                <Table.Td><Text size="xs">{(ov.teamNames ?? []).join(', ')}</Text></Table.Td>
+                                                <Table.Td><Text size="xs" c="dimmed">{(ov.userNames ?? []).join(', ')}</Text></Table.Td>
+                                            </Table.Tr>
+                                        ))}
+                                    </Table.Tbody>
+                                </Table>
+                            </ScrollArea>
+                        ) : (
+                            <Center className={classes.emptyState} py="xl">
+                                <Stack align="center" gap="xs">
+                                    <ThemeIcon size={48} radius="xl" color="green" variant="light">
+                                        <Icon path={mdiCheckCircle} size={1.4} />
+                                    </ThemeIcon>
+                                    <Text fw={600} size="md">{t('game.cheat_analysis.all_clear', 'All Clear')}</Text>
+                                    <Text size="sm" c="dimmed">{t('game.cheat_analysis.no_identity_overlap', 'No cross-team identity overlap detected')}</Text>
                                 </Stack>
                             </Center>
                         )}
