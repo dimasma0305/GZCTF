@@ -16,52 +16,48 @@
 }
 
 /* ── Summary stat cards ──────────────────────────────── */
+/* Selection chrome reads as brand teal (matches ScoreboardTable's active row),
+   never red — so "this is selected" stops colliding with "this is dangerous". */
 .summaryCard {
     transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
     cursor: pointer;
+    height: 100%;
 }
 
 .summaryCard:hover {
     transform: translateY(-3px);
     box-shadow: var(--mantine-shadow-md);
+    border-color: light-dark(var(--mantine-color-brand-4), var(--mantine-color-brand-7));
 }
 
 .summaryCardActive {
-    outline: 2px solid var(--mantine-color-red-5);
-    outline-offset: 2px;
-}
-
-/* Score ring progress bar container */
-.scoreBar {
-    height: 6px;
-    border-radius: 3px;
-    background-color: light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-5));
-    overflow: hidden;
-    margin-top: 6px;
-}
-
-.scoreBarFill {
-    height: 6px;
-    border-radius: 3px;
-    transition: width 300ms ease;
+    border-color: var(--mantine-color-brand-5);
+    background-color: var(--mantine-color-brand-light);
 }
 
 /* ── Details readable box ────────────────────────────── */
 .detailsBox {
     width: 100%;
     overflow: hidden;
-    padding-left: 4px;
-    border-left: 2px solid light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-5));
+    padding-left: 6px;
+    border-left: 2px solid light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-4));
+    transition: border-left-color 200ms ease;
 }
 
 .detailsBox:hover {
-    border-left-color: var(--mantine-color-blue-5);
-    transition: border-left-color 200ms ease;
+    border-left-color: var(--mantine-color-brand-5);
 }
 
 /* ── User badge wrap ─────────────────────────────────── */
 .userWrap {
     max-width: 14rem;
+}
+
+/* ── One-line truncation (was repeated inline) ───────── */
+.truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* ── SmartSearch filter option row ──────────────────────*/
@@ -75,30 +71,12 @@
     background: light-dark(var(--mantine-color-gray-1), var(--mantine-color-dark-6));
 }
 
-/* ── Section header area inside tab panels ───────────── */
-.panelHeader {
-    border-bottom: 1px solid light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-5));
-    padding-bottom: var(--mantine-spacing-sm);
-    margin-bottom: var(--mantine-spacing-sm);
-}
-
-/* ── Modal header gradient strip ────────────────────────*/
-.modalHeaderStrip {
-    height: 4px;
-    border-radius: 3px 3px 0 0;
-    background: linear-gradient(90deg,
-            var(--mantine-color-red-6),
-            var(--mantine-color-orange-5),
-            var(--mantine-color-yellow-4));
-    margin: -1rem -1rem 1rem -1rem;
-}
-
-/* ── Empty state area ────────────────────────────────── */
+/* ── Empty / all-clear state ─────────────────────────── */
 .emptyState {
     padding: 2.5rem 1rem;
     border-radius: var(--mantine-radius-md);
-    background-color: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-8));
-    border: 1px dashed light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-5));
+    background-color: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-7));
+    border: 1px solid light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-5));
     text-align: center;
 }
 

@@ -135,8 +135,11 @@ interface DetailLine {
 // The band — derived server-side from the highest evidence tier that fired — is
 // the headline. Network/identity signals land in "context" (gray) and never
 // push a team into a high band, no matter how many fire.
+// One discrete risk ladder, reused everywhere: alert(red) → orange → yellow → gray.
+// 'alert' is the theme's registered red scale (ThemeOverride.ts) — token-correct
+// vs raw 'red', and visually reserved for data-driven danger only.
 const BAND_META: Record<string, { label: string; color: string; rank: number; desc: string }> = {
-    evidenced: { label: 'Evidenced', color: 'red', rank: 4, desc: 'Hard cross-team evidence (flag/session movement)' },
+    evidenced: { label: 'Evidenced', color: 'alert', rank: 4, desc: 'Hard cross-team evidence (flag/session movement)' },
     investigate: { label: 'Investigate', color: 'orange', rank: 3, desc: 'Strong automation / scanner evidence' },
     watch: { label: 'Watch', color: 'yellow', rank: 2, desc: 'Low-confidence behavioral heuristics' },
     context: { label: 'Context', color: 'gray', rank: 1, desc: 'Network / identity correlation only — not suspicion' },
@@ -145,8 +148,13 @@ const BAND_META: Record<string, { label: string; color: string; rank: number; de
 const bandMeta = (band?: string) => BAND_META[band ?? 'clean'] ?? BAND_META.clean
 const bandRank = (band?: string) => bandMeta(band).rank
 
+// Shared severity→color for the heuristic thresholds scattered across tabs
+// (collusion RSI, similarity %, identity team-count) so color == risk everywhere.
+const riskColor = (level: 'high' | 'med' | 'low' | 'none') =>
+    level === 'high' ? 'alert' : level === 'med' ? 'orange' : level === 'low' ? 'yellow' : 'gray'
+
 const TIER_META: Record<string, { label: string; color: string }> = {
-    hard: { label: 'Hard', color: 'red' },
+    hard: { label: 'Hard', color: 'alert' },
     strong: { label: 'Strong', color: 'orange' },
     behavioral: { label: 'Behavioral', color: 'yellow' },
     context: { label: 'Context', color: 'gray' },
@@ -164,8 +172,8 @@ const RiskCompositionBar: FC<{ hard?: number; corroboration?: number; strong?: n
         v > 0 ? <Box key={key} style={{ flexBasis: `${Math.min((v / SCALE) * 100, 100)}%`, backgroundColor: `var(--mantine-color-${color})` }} /> : null
     return (
         <Box style={{ display: 'flex', width: '100%', height: 12, borderRadius: 6, overflow: 'hidden', backgroundColor: 'var(--mantine-color-default-border)' }}>
-            {seg(hard, 'red-6', 'h')}
-            {seg(corroboration, 'red-3', 'c')}
+            {seg(hard, 'alert-6', 'h')}
+            {seg(corroboration, 'alert-3', 'c')}
             {seg(strong, 'orange-5', 's')}
             {seg(behavioral, 'yellow-5', 'b')}
             <Box style={{ flexGrow: 1 }} />
@@ -173,13 +181,40 @@ const RiskCompositionBar: FC<{ hard?: number; corroboration?: number; strong?: n
     )
 }
 
+// Clickable summary stat card — one flat semantic icon, no gradient, no fake bar.
+// `accent` colors the number to draw the eye (used for Hard Evidence).
+const SummaryCard: FC<{
+    label: string
+    value: number
+    sub?: string
+    icon: string
+    color: string
+    accent?: boolean
+    active: boolean
+    onClick: () => void
+}> = ({ label, value, sub, icon, color, accent, active, onClick }) => (
+    <UnstyledButton onClick={onClick} style={{ height: '100%' }} aria-pressed={active}>
+        <Card shadow="sm" padding="md" radius="md" withBorder
+            className={`${classes.summaryCard} ${active ? classes.summaryCardActive : ''}`}>
+            <Group justify="space-between" mb={6} wrap="nowrap">
+                <Text fw={600} size="sm" c="dimmed" tt="uppercase" style={{ letterSpacing: '0.04em' }} lineClamp={1}>{label}</Text>
+                <ThemeIcon size="md" radius="sm" variant="light" color={color}>
+                    <Icon path={icon} size={0.7} />
+                </ThemeIcon>
+            </Group>
+            <Title order={2} lh={1} c={accent && value > 0 ? color : undefined} style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</Title>
+            {sub && <Text size="xs" c="dimmed" mt={4} lineClamp={1}>{sub}</Text>}
+        </Card>
+    </UnstyledButton>
+)
+
 const IP_TYPE_META: Record<string, { label: string; color: string; icon: string }> = {
     SharedIP: { label: 'Shared IP', color: 'orange', icon: mdiIpNetwork },
     SharedFingerprint: { label: 'Shared Fingerprint', color: 'violet', icon: mdiFingerprint },
     FingerprintChurn: { label: 'FP Churn', color: 'yellow', icon: mdiRefresh },
     IpChurn: { label: 'IP Churn', color: 'yellow', icon: mdiRefresh },
-    CrossTeamIP: { label: 'Cross-Team IP', color: 'red', icon: mdiSwapHorizontal },
-    TokenAbuse: { label: 'Token Abuse', color: 'red', icon: mdiLockAlert },
+    CrossTeamIP: { label: 'Cross-Team IP', color: 'alert', icon: mdiSwapHorizontal },
+    TokenAbuse: { label: 'Token Abuse', color: 'alert', icon: mdiLockAlert },
 }
 
 const parseDetailLines = (details?: string | null): DetailLine[] => {
@@ -265,7 +300,7 @@ const ReadableDetails: FC<{ details?: string | null; maxRows?: number }> = ({ de
         <Stack gap={2} className={classes.detailsBox} style={{ maxWidth: '100%', overflow: 'hidden' }}>
             {/* Summary line — prominent */}
             {summaryLine && (
-                <Text size="xs" fw={700} c="blue.4" style={{ lineHeight: 1.4 }}>
+                <Text size="xs" fw={700} c="brand.5" style={{ lineHeight: 1.4 }}>
                     {summaryLine.value}
                 </Text>
             )}
@@ -276,8 +311,8 @@ const ReadableDetails: FC<{ details?: string | null; maxRows?: number }> = ({ de
                 <Popover width={400} position="bottom-end" withArrow shadow="lg" withinPortal>
                     <Popover.Target>
                         <Group gap={3} style={{ cursor: 'pointer', userSelect: 'none' }} align="center">
-                            <Icon path={mdiChevronRight} size={0.55} color="var(--mantine-color-blue-5)" />
-                            <Text size="xs" c="blue" fw={600}>
+                            <Icon path={mdiChevronRight} size={0.55} color="var(--mantine-color-brand-5)" />
+                            <Text size="xs" c="brand" fw={600}>
                                 {t('game.cheat_analysis.more_fields', '+{{count}} more fields', { count: hiddenKv.length })}
                             </Text>
                         </Group>
@@ -286,7 +321,7 @@ const ReadableDetails: FC<{ details?: string | null; maxRows?: number }> = ({ de
                         <Stack gap={6}>
                             <Group justify="space-between" pb={4} mb={2} style={{ borderBottom: '1px solid var(--mantine-color-dark-4)' }}>
                                 <Text size="xs" fw={700} c="dimmed">{t('game.cheat_analysis.all_fields', 'All Fields')}</Text>
-                                {summaryLine && <Text size="xs" c="blue.4" fw={600}>{summaryLine.value}</Text>}
+                                {summaryLine && <Text size="xs" c="brand.5" fw={600}>{summaryLine.value}</Text>}
                             </Group>
                             {kvLines.map(renderKvLine)}
                         </Stack>
@@ -317,7 +352,7 @@ const UsersCell: FC<{ users?: string[]; relatedUsers?: string[] }> = ({ users, r
                 <Badge
                     key={i}
                     size="xs"
-                    color={currentUsers.includes(user) ? 'blue' : 'gray'}
+                    color={currentUsers.includes(user) ? 'cyan' : 'gray'}
                     variant="light"
                     style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}
                     title={user}
@@ -336,7 +371,7 @@ const UsersCell: FC<{ users?: string[]; relatedUsers?: string[] }> = ({ users, r
                         <Text size="xs" fw={700} c="dimmed" mb={4}>{t('game.cheat_analysis.all_users', 'All Users')}</Text>
                         <Group gap={4} wrap="wrap">
                             {[...currentUsers, ...others].map((user, i) => (
-                                <Badge key={i} size="xs" color={currentUsers.includes(user) ? 'blue' : 'gray'} variant="light">{user}</Badge>
+                                <Badge key={i} size="xs" color={currentUsers.includes(user) ? 'cyan' : 'gray'} variant="light">{user}</Badge>
                             ))}
                         </Group>
                     </Popover.Dropdown>
@@ -383,13 +418,13 @@ const SOLVE_FILTER_DEFS: FilterDef[] = [
 
 const COLLUSION_FILTER_DEFS: FilterDef[] = [
     { field: 'team', description: 'Team name', color: 'blue', icon: mdiAccountGroup, example: 'aaa' },
-    { field: 'similarity', description: 'Min similarity % (e.g. >80)', color: 'red', icon: mdiAlertCircle, example: '>80' },
+    { field: 'similarity', description: 'Min similarity % (e.g. >80)', color: 'alert', icon: mdiAlertCircle, example: '>80' },
     { field: 'details', description: 'Detail text', color: 'gray', icon: mdiInformation, example: 'ring' },
 ]
 
 const SUSPICION_FILTER_DEFS: FilterDef[] = [
     { field: 'team', description: 'Team name', color: 'blue', icon: mdiAccountGroup, example: 'ggg' },
-    { field: 'band', description: 'Risk band', color: 'red', icon: mdiAlertCircle, example: 'evidenced' },
+    { field: 'band', description: 'Risk band', color: 'alert', icon: mdiAlertCircle, example: 'evidenced' },
     { field: 'score', description: 'Min risk score (e.g. >80)', color: 'orange', icon: mdiAlertCircle, example: '>80' },
     { field: 'status', description: 'Participation status', color: 'green', icon: mdiCheckCircle, example: 'approved' },
 ]
@@ -400,10 +435,10 @@ const GLOBAL_FILTER_DEFS: FilterDef[] = [
     { field: 'ip', description: 'IP address (IP)', color: 'blue', icon: mdiIpNetwork, example: '192.168' },
     { field: 'type', description: 'Anomaly type (IP, Solves)', color: 'orange', icon: mdiShieldAlert, example: 'hoarding' },
     { field: 'challenge', description: 'Challenge name (Solves)', color: 'teal', icon: mdiCubeOutline, example: 'web1' },
-    { field: 'band', description: 'Risk band (Suspicion)', color: 'red', icon: mdiAlertCircle, example: 'evidenced' },
+    { field: 'band', description: 'Risk band (Suspicion)', color: 'alert', icon: mdiAlertCircle, example: 'evidenced' },
     { field: 'score', description: 'Min risk score (Suspicion)', color: 'orange', icon: mdiAlertCircle, example: '>80' },
     { field: 'status', description: 'Status (Suspicion)', color: 'green', icon: mdiCheckCircle, example: 'approved' },
-    { field: 'similarity', description: 'Similarity % (Collusion)', color: 'red', icon: mdiAlertCircle, example: '>80' },
+    { field: 'similarity', description: 'Similarity % (Collusion)', color: 'alert', icon: mdiAlertCircle, example: '>80' },
     { field: 'time', description: 'Date or time (IP, Solves)', color: 'violet', icon: mdiClockOutline, example: '2025' },
     { field: 'details', description: 'Detail text (Various)', color: 'gray', icon: mdiInformation, example: 'ring' },
 ]
@@ -493,7 +528,7 @@ const SmartSearch: FC<{
                         <Text size="xs" c="dimmed" px={4} pb={4} mb={2}
                             style={{ borderBottom: '1px solid var(--mantine-color-dark-5)' }}>
                             {t('game.cheat_analysis.filter_hint_before', 'Type')}{' '}
-                            <Text span ff="monospace" c="blue.4" fw={700}>@field:"value"</Text>
+                            <Text span ff="monospace" c="brand.4" fw={700}>@field:"value"</Text>
                             {' '}{t('game.cheat_analysis.filter_hint_after', 'to filter')}
                         </Text>
                         {matchingDefs.map((f) => (
@@ -557,14 +592,15 @@ const SuspicionRow = React.memo<{
     const statusMeta = statusMap.get(currentStatus)
     const band = bandMeta(item.band)
 
+    const strongBand = item.band === 'evidenced' || item.band === 'investigate'
     return (
-        <Table.Tr>
+        <Table.Tr style={{ cursor: 'pointer' }} onClick={() => onView(item)}>
             <Table.Td style={{ textAlign: 'center' }}>
                 <Text size="xs" c="dimmed" fw={600}>#{index + 1}</Text>
             </Table.Td>
             <Table.Td miw="14rem" style={{ maxWidth: '18rem', overflow: 'hidden' }}>
                 <Tooltip label={item.teamName || t('common.label.unknown', 'Unknown')} withArrow disabled={(item.teamName || '').length <= 24} multiline maw={280}>
-                    <Text size="sm" fw={700} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <Text size="sm" fw={700} className={classes.truncate}>
                         {item.teamName || t('common.label.unknown', 'Unknown')}
                     </Text>
                 </Tooltip>
@@ -581,13 +617,13 @@ const SuspicionRow = React.memo<{
                         >
                             {t(`game.cheat_analysis.band.${item.band ?? 'clean'}`, band.label)}
                         </Badge>
-                        <Text size="xs" c="dimmed" fw={600} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                        <Text size="xs" c={strongBand ? band.color : 'dimmed'} fw={700} ff="monospace" style={{ fontVariantNumeric: 'tabular-nums' }}>
                             {score.toLocaleString()}
                         </Text>
                     </Group>
                 </Tooltip>
             </Table.Td>
-            <Table.Td miw="11rem">
+            <Table.Td miw="11rem" onClick={(e) => e.stopPropagation()}>
                 <Menu shadow="md" width={200}>
                     <Menu.Target>
                         <UnstyledButton style={{ cursor: 'pointer' }}>
@@ -610,7 +646,7 @@ const SuspicionRow = React.memo<{
             </Table.Td>
             <Table.Td style={{ textAlign: 'center' }}>
                 <Tooltip label={t('game.cheat_analysis.view_suspicion', 'View suspicion details')} withArrow>
-                    <ActionIcon variant="subtle" color="blue" size="sm" onClick={() => onView(item)}>
+                    <ActionIcon variant="subtle" color="brand" size="sm" onClick={() => onView(item)}>
                         <Icon path={mdiOpenInNew} size={0.7} />
                     </ActionIcon>
                 </Tooltip>
@@ -625,7 +661,7 @@ const IpAnalysisRow = React.memo<{
     locale: string | null
 }>(({ item, index, locale }) => {
     const { t } = useTranslation()
-    const meta = IP_TYPE_META[item.type] ?? { label: t('common.label.unknown', 'Unknown'), color: 'grape' }
+    const meta = IP_TYPE_META[item.type] ?? { label: t('common.label.unknown', 'Unknown'), color: 'gray' }
     const absTime = useMemo(() => item.time ? dayjs(item.time).locale(locale || 'en').format('YYYY-MM-DD HH:mm:ss') : '-', [item.time, locale])
     const relTime = useMemo(() => item.time ? dayjs(item.time).fromNow() : '-', [item.time])
 
@@ -737,7 +773,7 @@ const CollusionGroupRow = React.memo<{
     const { t } = useTranslation()
     const rsi = item.averageRsi ?? 0
     const rsiPct = +(rsi * 100).toFixed(1)
-    const rsiColor = rsi > 0.9 ? 'red' : rsi > 0.8 ? 'orange' : 'yellow'
+    const rsiColor = rsi > 0.9 ? 'alert' : rsi > 0.8 ? 'orange' : 'yellow'
     const commonCount = item.commonSolves?.length ?? 0
 
     return (
@@ -746,7 +782,7 @@ const CollusionGroupRow = React.memo<{
                 <Stack gap={3}>
                     {item.teams?.map((team: CollusionTeamInfo, idx: number) => (
                         <Group key={idx} gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
-                            <Badge size="xs" variant="dot" color={idx === 0 ? 'blue' : 'grape'} />
+                            <Badge size="xs" variant="dot" color={idx === 0 ? 'brand' : 'violet'} />
                             <Tooltip label={team.name} withArrow disabled={(team.name || '').length <= 24} multiline maw={280}>
                                 <Text size="sm" fw={600} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     {team.name}
@@ -773,12 +809,12 @@ const CollusionGroupRow = React.memo<{
                 ) : (
                     <Group gap={4} wrap="wrap">
                         {item.commonSolves?.slice(0, 3).map((s: string, i: number) => (
-                            <Badge key={i} size="xs" variant="light" color="grape">{s}</Badge>
+                            <Badge key={i} size="xs" variant="light" color="violet">{s}</Badge>
                         ))}
                         {commonCount > 3 && (
                             <Popover width={300} position="top" withArrow shadow="md" withinPortal>
                                 <Popover.Target>
-                                    <Badge size="xs" variant="outline" color="grape" style={{ cursor: 'pointer' }}>
+                                    <Badge size="xs" variant="outline" color="violet" style={{ cursor: 'pointer' }}>
                                         {t('game.cheat_analysis.more', '+{{count}} more', { count: commonCount - 3 })}
                                     </Badge>
                                 </Popover.Target>
@@ -786,7 +822,7 @@ const CollusionGroupRow = React.memo<{
                                     <Text size="xs" fw={700} c="dimmed" mb={6}>{t('game.cheat_analysis.all_common_challenges', 'All {{count}} Common Challenges', { count: commonCount })}</Text>
                                     <Group gap={4} wrap="wrap">
                                         {item.commonSolves?.map((s: string, i: number) => (
-                                            <Badge key={i} size="xs" variant="light" color="grape">{s}</Badge>
+                                            <Badge key={i} size="xs" variant="light" color="violet">{s}</Badge>
                                         ))}
                                     </Group>
                                 </Popover.Dropdown>
@@ -800,7 +836,7 @@ const CollusionGroupRow = React.memo<{
             </Table.Td>
             <Table.Td style={{ textAlign: 'center' }}>
                 <Tooltip label={t('game.cheat_analysis.view_collusion', 'View collusion details')} withArrow>
-                    <ActionIcon variant="subtle" color="grape" size="sm" onClick={() => onView(item)}>
+                    <ActionIcon variant="subtle" color="violet" size="sm" onClick={() => onView(item)}>
                         <Icon path={mdiOpenInNew} size={0.7} />
                     </ActionIcon>
                 </Tooltip>
@@ -1134,7 +1170,7 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                 onClose={close}
                 title={
                     <Group gap="xs">
-                        <ThemeIcon size="sm" color="grape" variant="light" radius="sm">
+                        <ThemeIcon size="sm" color="violet" variant="light" radius="sm">
                             <Icon path={mdiAccountGroup} size={0.7} />
                         </ThemeIcon>
                         <Text fw={700}>{t('game.cheat_analysis.collusion_details', 'Collusion Details')}</Text>
@@ -1157,7 +1193,7 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                             />
                             <Center h={60}>
                                 <Stack align="center" gap={0}>
-                                    <Text size="xl" fw={900} c={((drilledSolves?.rsi ?? selectedGroup.averageRsi ?? 0) > 0.9) ? 'red' : 'yellow'}>
+                                    <Text size="xl" fw={900} c={((drilledSolves?.rsi ?? selectedGroup.averageRsi ?? 0) > 0.9) ? 'alert' : 'yellow'}>
                                         {((drilledSolves?.rsi ?? selectedGroup.averageRsi ?? 0) * 100).toFixed(1)}%
                                     </Text>
                                     <Text size="xs" c="dimmed">{t('game.cheat_analysis.similarity', 'Similarity')}</Text>
@@ -1200,7 +1236,7 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                                                     {solve.timeB ? dayjs(solve.timeB).locale(locale).format('MM-DD HH:mm:ss') : '-'}
                                                 </Table.Td>
                                                 <Table.Td miw="8rem">
-                                                    <Badge color={(solve.timeDiff ?? 0) < 60 ? 'red' : (solve.timeDiff ?? 0) < 300 ? 'yellow' : 'gray'}>
+                                                    <Badge color={(solve.timeDiff ?? 0) < 60 ? 'alert' : (solve.timeDiff ?? 0) < 300 ? 'yellow' : 'gray'}>
                                                         {(solve.timeDiff ?? 0).toFixed(0)}s
                                                     </Badge>
                                                 </Table.Td>
@@ -1226,7 +1262,7 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                 onClose={closeSus}
                 title={
                     <Group gap="xs">
-                        <ThemeIcon size="sm" color="red" variant="light" radius="sm">
+                        <ThemeIcon size="sm" color="alert" variant="light" radius="sm">
                             <Icon path={mdiShieldAlert} size={0.7} />
                         </ThemeIcon>
                         <Text fw={700}>{t('game.cheat_analysis.suspicion_details', 'Suspicion Details')}</Text>
@@ -1313,9 +1349,8 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                 )}
             </Modal>
 
-            {/* Global Search Header */}
-            <Group justify="space-between" mb="lg" align="flex-start">
-                <Title order={3}>{t('game.cheat_analysis.title', 'Cheat Analysis')}</Title>
+            {/* Global search toolbar (page title is owned by the CheatCheck banner) */}
+            <Group justify="flex-end" mb="md" align="center">
                 <SmartSearch
                     value={globalSearch}
                     onChange={setGlobalSearch}
@@ -1325,135 +1360,42 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                 />
             </Group>
 
-            <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing="md">
-                {/* ── High Risk Teams card ── */}
-                <UnstyledButton onClick={() => setActiveTab('suspicion')}>
-                    <Card
-                        shadow="sm"
-                        padding="md"
-                        radius="md"
-                        withBorder
-                        className={`${classes.summaryCard} ${activeTab === 'suspicion' ? classes.summaryCardActive : ''}`}
-                    >
-                        <Group justify="space-between" mb={6}>
-                            <Text fw={600} size="sm" c="dimmed" tt="uppercase" style={{ letterSpacing: '0.04em' }}>{t('game.cheat_analysis.card.hard_evidence', 'Hard Evidence')}</Text>
-                            <ThemeIcon
-                                size="md"
-                                radius="sm"
-                                variant="gradient"
-                                gradient={{ from: 'red.7', to: 'orange.5', deg: 135 }}
-                            >
-                                <Icon path={mdiShieldAlert} size={0.7} />
-                            </ThemeIcon>
-                        </Group>
-                        <Title order={2} c="red" lh={1}>
-                            {summaryStats.highRiskTeams}
-                        </Title>
-                        <Text size="xs" c="dimmed" mt={4}>{t('game.cheat_analysis.card.evidenced_sub', '{{auto}} more flagged for automation', { auto: summaryStats.automationFlagged })}</Text>
-                        <Box className={classes.scoreBar} mt={8}>
-                            <Box
-                                className={classes.scoreBarFill}
-                                style={{
-                                    width: `${summaryStats.highRiskPct}%`,
-                                    backgroundColor: 'var(--mantine-color-red-5)',
-                                }}
-                            />
-                        </Box>
-                    </Card>
-                </UnstyledButton>
-
-                {/* ── IP Anomalies card ── */}
-                <UnstyledButton onClick={() => setActiveTab('ip')}>
-                    <Card
-                        shadow="sm"
-                        padding="md"
-                        radius="md"
-                        withBorder
-                        className={`${classes.summaryCard} ${activeTab === 'ip' ? classes.summaryCardActive : ''}`}
-                    >
-                        <Group justify="space-between" mb={6}>
-                            <Text fw={600} size="sm" c="dimmed" tt="uppercase" style={{ letterSpacing: '0.04em' }}>{t('game.cheat_analysis.card.ip_anomalies', 'IP Anomalies')}</Text>
-                            <ThemeIcon
-                                size="md"
-                                radius="sm"
-                                variant="gradient"
-                                gradient={{ from: 'blue.7', to: 'cyan.4', deg: 135 }}
-                            >
-                                <Icon path={mdiIpNetwork} size={0.7} />
-                            </ThemeIcon>
-                        </Group>
-                        <Title order={2} lh={1}>{summaryStats.ipAnomalies}</Title>
-                        <Text size="xs" c="dimmed" mt={4}>{t('game.cheat_analysis.card.ip_anomalies_sub', 'Suspicious IP activities')}</Text>
-                        <Box className={classes.scoreBar} mt={8}>
-                            <Box
-                                className={classes.scoreBarFill}
-                                style={{ width: `${Math.min(summaryStats.ipAnomalies * 8, 100)}%`, backgroundColor: 'var(--mantine-color-blue-5)' }}
-                            />
-                        </Box>
-                    </Card>
-                </UnstyledButton>
-
-                {/* ── Abnormal Solves card ── */}
-                <UnstyledButton onClick={() => setActiveTab('solve')}>
-                    <Card
-                        shadow="sm"
-                        padding="md"
-                        radius="md"
-                        withBorder
-                        className={`${classes.summaryCard} ${activeTab === 'solve' ? classes.summaryCardActive : ''}`}
-                    >
-                        <Group justify="space-between" mb={6}>
-                            <Text fw={600} size="sm" c="dimmed" tt="uppercase" style={{ letterSpacing: '0.04em' }}>{t('game.cheat_analysis.card.abnormal_solves', 'Abnormal Solves')}</Text>
-                            <ThemeIcon
-                                size="md"
-                                radius="sm"
-                                variant="gradient"
-                                gradient={{ from: 'orange.6', to: 'yellow.4', deg: 135 }}
-                            >
-                                <Icon path={mdiGhost} size={0.7} />
-                            </ThemeIcon>
-                        </Group>
-                        <Title order={2} lh={1}>{summaryStats.abnormalSolves}</Title>
-                        <Text size="xs" c="dimmed" mt={4}>{t('game.cheat_analysis.card.abnormal_solves_sub', 'Solves without prerequisites')}</Text>
-                        <Box className={classes.scoreBar} mt={8}>
-                            <Box
-                                className={classes.scoreBarFill}
-                                style={{ width: `${Math.min(summaryStats.abnormalSolves * 10, 100)}%`, backgroundColor: 'var(--mantine-color-orange-5)' }}
-                            />
-                        </Box>
-                    </Card>
-                </UnstyledButton>
-
-                {/* ── Collusion Groups card ── */}
-                <UnstyledButton onClick={() => setActiveTab('collusion')}>
-                    <Card
-                        shadow="sm"
-                        padding="md"
-                        radius="md"
-                        withBorder
-                        className={`${classes.summaryCard} ${activeTab === 'collusion' ? classes.summaryCardActive : ''}`}
-                    >
-                        <Group justify="space-between" mb={6}>
-                            <Text fw={600} size="sm" c="dimmed" tt="uppercase" style={{ letterSpacing: '0.04em' }}>{t('game.cheat_analysis.card.collusion_groups', 'Collusion Groups')}</Text>
-                            <ThemeIcon
-                                size="md"
-                                radius="sm"
-                                variant="gradient"
-                                gradient={{ from: 'grape.7', to: 'pink.4', deg: 135 }}
-                            >
-                                <Icon path={mdiAccountGroup} size={0.7} />
-                            </ThemeIcon>
-                        </Group>
-                        <Title order={2} lh={1}>{summaryStats.collusionGroups}</Title>
-                        <Text size="xs" c="dimmed" mt={4}>{t('game.cheat_analysis.card.collusion_groups_sub', 'High confidence rings')}</Text>
-                        <Box className={classes.scoreBar} mt={8}>
-                            <Box
-                                className={classes.scoreBarFill}
-                                style={{ width: `${Math.min(summaryStats.collusionGroups * 12, 100)}%`, backgroundColor: 'var(--mantine-color-grape-5)' }}
-                            />
-                        </Box>
-                    </Card>
-                </UnstyledButton>
+            <SimpleGrid cols={{ base: 1, xs: 2, sm: 3, md: 5 }} spacing="md">
+                <SummaryCard
+                    label={t('game.cheat_analysis.card.hard_evidence', 'Hard Evidence')}
+                    value={summaryStats.highRiskTeams}
+                    sub={t('game.cheat_analysis.card.evidenced_sub', '{{auto}} more flagged for automation', { auto: summaryStats.automationFlagged })}
+                    icon={mdiShieldAlert} color="alert" accent
+                    active={activeTab === 'suspicion'} onClick={() => setActiveTab('suspicion')}
+                />
+                <SummaryCard
+                    label={t('game.cheat_analysis.card.ip_anomalies', 'IP Anomalies')}
+                    value={summaryStats.ipAnomalies}
+                    sub={t('game.cheat_analysis.card.ip_anomalies_sub', 'Suspicious IP activities')}
+                    icon={mdiIpNetwork} color="cyan"
+                    active={activeTab === 'ip'} onClick={() => setActiveTab('ip')}
+                />
+                <SummaryCard
+                    label={t('game.cheat_analysis.card.abnormal_solves', 'Abnormal Solves')}
+                    value={summaryStats.abnormalSolves}
+                    sub={t('game.cheat_analysis.card.abnormal_solves_sub', 'Solves without prerequisites')}
+                    icon={mdiGhost} color="orange"
+                    active={activeTab === 'solve'} onClick={() => setActiveTab('solve')}
+                />
+                <SummaryCard
+                    label={t('game.cheat_analysis.card.collusion_groups', 'Collusion Groups')}
+                    value={summaryStats.collusionGroups}
+                    sub={t('game.cheat_analysis.card.collusion_groups_sub', 'High confidence rings')}
+                    icon={mdiAccountGroup} color="violet"
+                    active={activeTab === 'collusion'} onClick={() => setActiveTab('collusion')}
+                />
+                <SummaryCard
+                    label={t('game.cheat_analysis.tab.identity', 'Identity Overlap')}
+                    value={summaryStats.identityOverlaps}
+                    sub={t('game.cheat_analysis.card.identity_sub', 'Cross-team IP / fingerprint')}
+                    icon={mdiFingerprint} color="gray"
+                    active={activeTab === 'identity'} onClick={() => setActiveTab('identity')}
+                />
             </SimpleGrid>
 
             <Paper shadow="md" p="md" radius="md">
@@ -1463,7 +1405,7 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                             value="suspicion"
                             leftSection={<Icon path={mdiShieldAlert} size={0.75} />}
                             rightSection={
-                                <Badge size="xs" variant="filled" color={(report?.suspicionList?.filter((x: any) => x.band === 'evidenced' || x.band === 'investigate').length ?? 0) > 0 ? 'red' : 'gray'} circle>
+                                <Badge size="xs" variant="filled" color={(report?.suspicionList?.filter((x: any) => x.band === 'evidenced' || x.band === 'investigate').length ?? 0) > 0 ? 'alert' : 'gray'} circle>
                                     {report?.suspicionList?.length ?? 0}
                                 </Badge>
                             }
@@ -1496,7 +1438,7 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                             value="collusion"
                             leftSection={<Icon path={mdiAccountGroup} size={0.75} />}
                             rightSection={
-                                <Badge size="xs" variant="filled" color={(report?.collusionGroups?.length ?? 0) > 0 ? 'grape' : 'gray'} circle>
+                                <Badge size="xs" variant="filled" color={(report?.collusionGroups?.length ?? 0) > 0 ? 'violet' : 'gray'} circle>
                                     {report?.collusionGroups?.length ?? 0}
                                 </Badge>
                             }
@@ -1520,7 +1462,7 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                         <Group justify="space-between" mb="md">
                             <Group gap="xs">
                                 <Title order={4}>{t('game.cheat_analysis.suspicion_rankings', 'Suspicion Rankings')}</Title>
-                                <Badge variant="light" color="red">
+                                <Badge variant="light" color="alert">
                                     {sortedSuspicionList.length}
                                     {suspSearch && report?.suspicionList?.length !== sortedSuspicionList.length && (
                                         <> / {report?.suspicionList?.length ?? 0}</>
@@ -1552,7 +1494,7 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                                             <Table.Tr>
                                                 <Table.Th w="3rem" miw="3rem" style={{ textAlign: 'center' }}>#</Table.Th>
                                                 <ThSort sorted={suspSort.key === 'teamName'} reversed={suspSort.direction === 'desc'} onSort={() => handleSort(setSuspSort, suspSort, 'teamName')} w="16rem">{t('common.label.team', 'Team')}</ThSort>
-                                                <ThSort sorted={suspSort.key === 'score'} reversed={suspSort.direction === 'desc'} onSort={() => handleSort(setSuspSort, suspSort, 'score')} w="9rem">{t('game.cheat_analysis.score', 'Score')}</ThSort>
+                                                <ThSort sorted={suspSort.key === 'score'} reversed={suspSort.direction === 'desc'} onSort={() => handleSort(setSuspSort, suspSort, 'score')} w="11rem">{t('game.cheat_analysis.risk', 'Risk')}</ThSort>
                                                 <Table.Th w="11rem" miw="11rem">{t('admin.label.participation_status', 'Status')}</Table.Th>
                                                 <Table.Th w="4rem" miw="4rem" style={{ textAlign: 'center' }}>{t('game.cheat_analysis.view', 'View')}</Table.Th>
                                             </Table.Tr>
@@ -1586,7 +1528,7 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                         ) : (
                             <Center className={classes.emptyState} py="xl">
                                 <Stack align="center" gap="xs">
-                                    <ThemeIcon size={48} radius="xl" color="green" variant="light">
+                                    <ThemeIcon size={48} radius="xl" color="brand" variant="light">
                                         <Icon path={mdiCheckCircle} size={1.4} />
                                     </ThemeIcon>
                                     <Text fw={600} size="md">{t('game.cheat_analysis.all_clear', 'All Clear')}</Text>
@@ -1600,7 +1542,7 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                         <Group justify="space-between" mb="md">
                             <Group gap="xs">
                                 <Title order={4}>{t('game.cheat_analysis.tab.ip_analysis', 'IP Analysis')}</Title>
-                                <Badge variant="light" color="blue">
+                                <Badge variant="light" color="cyan">
                                     {report?.ipAnalysis?.length ?? 0}
                                 </Badge>
                             </Group>
@@ -1656,7 +1598,7 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                         ) : (
                             <Center className={classes.emptyState} py="xl">
                                 <Stack align="center" gap="xs">
-                                    <ThemeIcon size={48} radius="xl" color="green" variant="light">
+                                    <ThemeIcon size={48} radius="xl" color="brand" variant="light">
                                         <Icon path={mdiCheckCircle} size={1.4} />
                                     </ThemeIcon>
                                     <Text fw={600} size="md">{t('game.cheat_analysis.all_clear', 'All Clear')}</Text>
@@ -1726,7 +1668,7 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                         ) : (
                             <Center className={classes.emptyState} py="xl">
                                 <Stack align="center" gap="xs">
-                                    <ThemeIcon size={48} radius="xl" color="green" variant="light">
+                                    <ThemeIcon size={48} radius="xl" color="brand" variant="light">
                                         <Icon path={mdiCheckCircle} size={1.4} />
                                     </ThemeIcon>
                                     <Text fw={600} size="md">{t('game.cheat_analysis.all_clear', 'All Clear')}</Text>
@@ -1740,7 +1682,7 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                         <Group justify="space-between" mb="md">
                             <Group gap="xs">
                                 <Title order={4}>{t('game.cheat_analysis.card.collusion_groups', 'Collusion Groups')}</Title>
-                                <Badge variant="light" color="grape">
+                                <Badge variant="light" color="violet">
                                     {report?.collusionGroups?.length ?? 0}
                                 </Badge>
                             </Group>
@@ -1795,7 +1737,7 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                         ) : (
                             <Center className={classes.emptyState} py="xl">
                                 <Stack align="center" gap="xs">
-                                    <ThemeIcon size={48} radius="xl" color="green" variant="light">
+                                    <ThemeIcon size={48} radius="xl" color="brand" variant="light">
                                         <Icon path={mdiCheckCircle} size={1.4} />
                                     </ThemeIcon>
                                     <Text fw={600} size="md">{t('game.cheat_analysis.all_clear', 'All Clear')}</Text>
@@ -1845,8 +1787,8 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                                                         variant="filled"
                                                         color={
                                                             ov.kind === 'fingerprint'
-                                                                // One browser across teams is conclusive; keep it red.
-                                                                ? 'red'
+                                                                // One browser across teams is conclusive — alarm color.
+                                                                ? 'alert'
                                                                 // Shared IP: the more teams, the likelier it's just a
                                                                 // campus/CGNAT egress — desaturate toward gray.
                                                                 : ov.teamCount <= 2 ? 'orange' : ov.teamCount <= 4 ? 'yellow' : 'gray'
@@ -1863,7 +1805,7 @@ export const CheatInfo: FC<CheatInfoProps> = ({ report, mutate }) => {
                         ) : (
                             <Center className={classes.emptyState} py="xl">
                                 <Stack align="center" gap="xs">
-                                    <ThemeIcon size={48} radius="xl" color="green" variant="light">
+                                    <ThemeIcon size={48} radius="xl" color="brand" variant="light">
                                         <Icon path={mdiCheckCircle} size={1.4} />
                                     </ThemeIcon>
                                     <Text fw={600} size="md">{t('game.cheat_analysis.all_clear', 'All Clear')}</Text>

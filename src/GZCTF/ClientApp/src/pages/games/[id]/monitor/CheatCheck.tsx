@@ -51,7 +51,7 @@ const CheatCheck: FC = () => {
         return (
             <WithGameMonitor>
                 <Alert
-                    color="red"
+                    color="alert"
                     title={t('game.content.cheat.load_failed', 'Failed to load report')}
                     icon={<Icon path={mdiAlertCircle} size={1} />}
                 >
@@ -65,12 +65,7 @@ const CheatCheck: FC = () => {
             <Stack gap="md" w="100%">
                 {/* ── Page header ──────────────────────── */}
                 <Group gap="sm" align="center">
-                    <ThemeIcon
-                        size="lg"
-                        radius="md"
-                        variant="gradient"
-                        gradient={{ from: 'red.7', to: 'orange.5', deg: 135 }}
-                    >
+                    <ThemeIcon size="lg" radius="md" variant="light" color="alert">
                         <Icon path={mdiShieldSearch} size={0.9} />
                     </ThemeIcon>
                     <Box>
@@ -93,7 +88,7 @@ const CheatCheck: FC = () => {
                 >
                     <Tabs.List
                         style={{
-                            borderBottom: '1px solid var(--mantine-color-dark-4)',
+                            borderBottom: '1px solid light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-5))',
                             paddingBottom: 4,
                             marginBottom: 8,
                         }}
