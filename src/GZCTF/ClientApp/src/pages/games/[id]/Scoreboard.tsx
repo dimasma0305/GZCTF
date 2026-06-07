@@ -39,18 +39,26 @@ const Scoreboard: FC = () => {
   const isMobile = useIsMobile(1080)
   const isVertical = useIsMobile()
 
-  // Derive presence of each engine from teamInfo.challenges. The three boards
+  // Derive presence of each engine to pick the board(s) to show. The three boards
   // are independent: jeopardy uses ScoreboardTable, A&D uses AdScoreboardTable
-  // (which includes hills as columns alongside services), KotH uses the new
-  // dedicated KothScoreboardTable from /Ad/Koth/Scoreboard.
+  // (which includes hills as columns alongside services), KotH uses the dedicated
+  // KothScoreboardTable from /Ad/Koth/Scoreboard.
+  //
+  // Detect from the PUBLIC scoreboard's challenge list so anonymous (logged-out)
+  // visitors get the correct board — the richer teamInfo (/Details) is
+  // [RequireUser]-gated and 401s for the public, which would otherwise collapse an
+  // A&D/KotH game to an empty jeopardy table. Prefer teamInfo when present (logged
+  // in) for parity, else fall back to the public scoreboard.
   const { hasJeopardyChallenges, hasAdChallenges, hasKothChallenges } = useMemo(() => {
-    const all = Object.values(teamInfo?.challenges ?? {}).flat()
+    const fromTeam = Object.values(teamInfo?.challenges ?? {}).flat()
+    const fromBoard = Object.values(scoreboard?.challenges ?? {}).flat()
+    const all = fromTeam.length > 0 ? fromTeam : fromBoard
     return {
       hasJeopardyChallenges: all.some((c) => c.type !== 'AttackDefense' && c.type !== 'KingOfTheHill'),
       hasAdChallenges: all.some((c) => c.type === 'AttackDefense'),
       hasKothChallenges: all.some((c) => c.type === 'KingOfTheHill'),
     }
-  }, [teamInfo])
+  }, [teamInfo, scoreboard])
 
   const presentTabs = (hasJeopardyChallenges ? 1 : 0) + (hasAdChallenges ? 1 : 0) + (hasKothChallenges ? 1 : 0)
   const showTabs = presentTabs >= 2
