@@ -1,9 +1,11 @@
 import { showNotification } from '@mantine/notifications'
 import { mdiCheck, mdiClose } from '@mdi/js'
 import { Icon } from '@mdi/react'
+import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import { useSWRConfig } from 'swr'
+import { setAuthSession } from '@Utils/AuthState'
 import api from '@Api'
 
 export const useUser = () => {
@@ -38,6 +40,15 @@ export const useUser = () => {
       setTimeout(() => revalidate({ retryCount: retryCount }), 10000)
     },
   })
+
+  // Feed the global 401 interceptor's "is there a session?" belief. A loaded
+  // profile means logged in; a 401 on the profile probe means anonymous (or
+  // expired). This is what lets public pages render for logged-out visitors
+  // instead of redirecting them to login on an optional [RequireUser] fetch.
+  useEffect(() => {
+    if (user) setAuthSession(true)
+    else if (error?.status === 401) setAuthSession(false)
+  }, [user, error])
 
   return { user, error, mutate }
 }

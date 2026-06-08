@@ -12,6 +12,7 @@ import { SWRConfig } from 'swr'
 import routes from '~react-pages'
 import { ErrorFallback } from '@Components/ErrorFallback'
 import { WsrxProvider } from '@Components/WsrxProvider'
+import { shouldRedirectOnUnauthorized } from '@Utils/AuthState'
 import { localCacheProvider } from '@Utils/Cache'
 import { useLanguage } from '@Utils/I18n'
 import { useCustomTheme } from '@Utils/ThemeOverride'
@@ -37,13 +38,17 @@ const authAwareFetcher = async (args: Parameters<typeof rawFetcher>[0]) => {
   } catch (e: unknown) {
     const status = (e as { status?: number } | undefined)?.status
     const path = typeof args === 'string' ? args : args[0]
-    const isAuthEndpoint = path.includes('/account/') || path.includes('/info')
+    // Only a genuine session expiry redirects. An anonymous visitor on a public
+    // page (e.g. a scoreboard that fires an optional [RequireUser] /details
+    // fetch) must render the public view, not bounce to login.
     if (
-      status === 401 &&
-      !authRedirectInFlight &&
-      !isAuthEndpoint &&
       typeof window !== 'undefined' &&
-      !window.location.pathname.startsWith('/account/')
+      shouldRedirectOnUnauthorized({
+        status,
+        requestPath: path,
+        pathname: window.location.pathname,
+        redirectInFlight: authRedirectInFlight,
+      })
     ) {
       authRedirectInFlight = true
       try {
