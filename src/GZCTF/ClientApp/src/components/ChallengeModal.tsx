@@ -509,6 +509,11 @@ export const ChallengeModal: FC<ChallengeModalProps> = (props) => {
           {deadline}
         </>
       )}
+      {/* A&D/KotH shown as a post-end practice container: keep the team's
+          defended-service backup (snapshot) download available here. */}
+      {isPracticeContainer && gameId && (
+        <AdChallengePanel gameId={gameId} challengeId={challenge?.id ?? 0} snapshotOnly />
+      )}
       <Divider label={attemptsInfo} my={attemptsInfo ? '-0.4rem' : undefined} />
       <form
         onSubmit={(e) => {

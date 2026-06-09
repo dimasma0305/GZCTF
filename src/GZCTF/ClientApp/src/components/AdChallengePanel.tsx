@@ -37,6 +37,13 @@ const statusColor = (s?: string | null) => {
 interface AdChallengePanelProps {
   gameId: number
   challengeId: number
+  /**
+   * Render ONLY the post-game snapshot (service backup) download, hiding the
+   * live defending/SSH/reset state. Used after the game ends in practice mode,
+   * where the challenge is shown as a standard practice container but the team's
+   * defended-service backup must still be downloadable.
+   */
+  snapshotOnly?: boolean
 }
 
 /**
@@ -46,7 +53,7 @@ interface AdChallengePanelProps {
  * Toolkit modal (sidebar button) so this panel only shows live per-team
  * operational state.
  */
-export const AdChallengePanel: FC<AdChallengePanelProps> = ({ gameId, challengeId }) => {
+export const AdChallengePanel: FC<AdChallengePanelProps> = ({ gameId, challengeId, snapshotOnly }) => {
   const { t } = useTranslation()
   const { adState, mutate: mutateState } = useAdState(gameId)
   const { data: sshKey } = api.game.useAdGameGetSshKey(gameId)
@@ -55,6 +62,35 @@ export const AdChallengePanel: FC<AdChallengePanelProps> = ({ gameId, challengeI
   const service: AdTeamServiceStateModel | undefined = adState?.services.find(
     (s) => s.challengeId === challengeId
   )
+
+  // The team's post-game service backup (the defended container, as a loadable
+  // Docker image). Stays available after the game ends so players can keep it.
+  const snapshotDownload = service && service.snapshotAvailable ? (
+    <Group gap={6} align="center" wrap="nowrap">
+      <Text size="xs" c="dimmed">
+        {t('game.content.ad.snapshot', 'Post-game snapshot')}:
+      </Text>
+      <Tooltip
+        label={t('game.tooltip.ad.snapshot',
+          'Download your container as a loadable Docker image (docker load -i …)')}
+      >
+        <Button
+          component="a"
+          href={api.game.gameAdDownloadSnapshotUrl(gameId, service.adTeamServiceId)}
+          download
+          size="compact-xs"
+          variant="light"
+          leftSection={<Icon path={mdiDownload} size={0.7} />}
+        >
+          {t('game.button.ad.download_snapshot', 'Download .tar.gz')}
+        </Button>
+      </Tooltip>
+    </Group>
+  ) : null
+
+  // Post-end practice: the challenge is shown as a standard container, but the
+  // team's service backup must still be reachable — render just that.
+  if (snapshotOnly) return snapshotDownload
 
   // Render the `ssh <id>@host -p <port>` snippet the player runs to shell
   // into their container for THIS challenge. Host/port come from the SSH
@@ -276,28 +312,7 @@ export const AdChallengePanel: FC<AdChallengePanelProps> = ({ gameId, challengeI
 
       {renderSshHint()}
 
-      {service.snapshotAvailable && (
-        <Group gap={6} align="center" wrap="nowrap">
-          <Text size="xs" c="dimmed">
-            {t('game.content.ad.snapshot', 'Post-game snapshot')}:
-          </Text>
-          <Tooltip
-            label={t('game.tooltip.ad.snapshot',
-              'Download your container as a loadable Docker image (docker load -i …)')}
-          >
-            <Button
-              component="a"
-              href={api.game.gameAdDownloadSnapshotUrl(gameId, service.adTeamServiceId)}
-              download
-              size="compact-xs"
-              variant="light"
-              leftSection={<Icon path={mdiDownload} size={0.7} />}
-            >
-              {t('game.button.ad.download_snapshot', 'Download .tar.gz')}
-            </Button>
-          </Tooltip>
-        </Group>
-      )}
+      {snapshotDownload}
     </Stack>
   )
 }
