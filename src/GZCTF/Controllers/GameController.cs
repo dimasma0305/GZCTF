@@ -1335,9 +1335,13 @@ public class GameController(
         ChallengeDetailModel model;
         GameInstance? instance = null;
 
-        // A&D and KotH are both managed outside the GameInstance table — synthesize
-        // the detail model for either rather than going through the instance path.
-        if (rawChallenge.Type.UsesAdEngine())
+        // A&D and KotH are managed by the live A&D engine during the game, so we
+        // synthesize a minimal detail model (description + AdChallengePanel). But
+        // once the game has ENDED in practice mode they fall back to the standard
+        // per-team container flow (AllowsPracticeContainer) — so take the normal
+        // instance path then, which populates the container context the modal needs
+        // to render the standard "Start instance" UI.
+        if (rawChallenge.Type.UsesAdEngine() && !rawChallenge.AllowsPracticeContainer(context.Game!))
         {
             // A&D / KotH challenges aren't backed by a GameInstance, but they can
             // still ship a downloadable attachment (e.g. the service source so
@@ -1847,6 +1851,13 @@ public class GameController(
             return BadRequest(
                 new RequestResponse(localizer[nameof(Resources.Program.Game_ContainerCreationNotAllowed)]));
 
+        // A&D / KotH share IsContainer(), but their per-team service is owned by the
+        // live A&D engine during the game — only let players spin up a standalone
+        // practice container once the game has ended in practice mode.
+        if (instance.Challenge.Type.UsesAdEngine() && !instance.Challenge.AllowsPracticeContainer(context.Game!))
+            return BadRequest(
+                new RequestResponse(localizer[nameof(Resources.Program.Game_ContainerCreationNotAllowed)]));
+
         if (instance.IsContainerOperationTooFrequent)
             return RequestResponse.Result(localizer[nameof(Resources.Program.Game_OperationTooFrequent)],
                 StatusCodes.Status429TooManyRequests);
@@ -1910,6 +1921,10 @@ public class GameController(
             return BadRequest(
                 new RequestResponse(localizer[nameof(Resources.Program.Game_ContainerCreationNotAllowed)]));
 
+        if (instance.Challenge.Type.UsesAdEngine() && !instance.Challenge.AllowsPracticeContainer(context.Game!))
+            return BadRequest(
+                new RequestResponse(localizer[nameof(Resources.Program.Game_ContainerCreationNotAllowed)]));
+
         if (instance.Container is null)
             return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Game_ContainerNotCreated)]));
 
@@ -1959,6 +1974,10 @@ public class GameController(
                 StatusCodes.Status404NotFound));
 
         if (!instance.Challenge.Type.IsContainer())
+            return BadRequest(
+                new RequestResponse(localizer[nameof(Resources.Program.Game_ContainerCreationNotAllowed)]));
+
+        if (instance.Challenge.Type.UsesAdEngine() && !instance.Challenge.AllowsPracticeContainer(context.Game!))
             return BadRequest(
                 new RequestResponse(localizer[nameof(Resources.Program.Game_ContainerCreationNotAllowed)]));
 

@@ -181,4 +181,22 @@ public class GameChallenge : Challenge
     // round), so anti-fingerprinting is unaffected by sharing one window size.
 
     #endregion
+
+    /// <summary>
+    /// True when this A&amp;D / KotH challenge may be launched as a standalone
+    /// <em>practice</em> container — i.e. a normal per-team instance with its own
+    /// connection address, like a DynamicContainer — rather than the live
+    /// defending-service / hill model. Only after the game has ENDED and only in
+    /// practice mode, and only if it actually ships a container image+port. The
+    /// live A&amp;D engine owns these challenges during the game (rounds, checker,
+    /// per-team service); once it's over they fall back to the standard container
+    /// flow so players can keep practising. Gating every call site on this keeps
+    /// the feature completely inert while a game is running.
+    /// </summary>
+    public bool AllowsPracticeContainer(Game game) =>
+        Type.UsesAdEngine()
+        && game.PracticeMode
+        && DateTimeOffset.UtcNow > game.EndTimeUtc
+        && !string.IsNullOrEmpty(ContainerImage)
+        && ExposePort is not null;
 }

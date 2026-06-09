@@ -148,6 +148,11 @@ export const ChallengeModal: FC<ChallengeModalProps> = (props) => {
   // default OriginalScore (e.g. "100 pts") in the header — meaningless for a hill.
   const isKoth = challenge?.type === ChallengeType.KingOfTheHill
   const isAd = challenge?.type === ChallengeType.AttackDefense || isKoth
+  // Once an A&D/KotH game has ENDED in practice mode, its challenges fall back to
+  // the standard per-team practice container (its own connection address) instead
+  // of the live defending-service / hill panel — the backend gates this the same
+  // way (GameChallenge.AllowsPracticeContainer) and serves the container context.
+  const isPracticeContainer = isAd && !!gameEnded && !!practiceMode
   const { t } = useTranslation()
   const theme = useMantineTheme()
   const { locale } = useLanguage()
@@ -203,7 +208,8 @@ export const ChallengeModal: FC<ChallengeModalProps> = (props) => {
   const isLimitReached = (challenge?.limit && (challenge.attempts ?? 0) >= challenge.limit) || false
 
   const isContainer =
-    challenge?.type === ChallengeType.StaticContainer || challenge?.type === ChallengeType.DynamicContainer
+    challenge?.type === ChallengeType.StaticContainer || challenge?.type === ChallengeType.DynamicContainer ||
+    isPracticeContainer
 
   const title = (
     <Stack gap="xs">
@@ -479,7 +485,7 @@ export const ChallengeModal: FC<ChallengeModalProps> = (props) => {
     </Stack>
   )
 
-  const footer = isAd && gameId ? (
+  const footer = isAd && gameId && !isPracticeContainer ? (
     <Stack gap="xs" className={classes.footer}>
       <Divider />
       {/* A&D/KotH challenges can ship a downloadable attachment (e.g. the

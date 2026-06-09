@@ -86,6 +86,24 @@ public class GameInstanceRepository(
 
                     instance.FlagId = flags[pos].Id;
                     break;
+
+                case ChallengeType.AttackDefense:
+                case ChallengeType.KingOfTheHill:
+                    // After the game ends in practice mode an A&D/KotH service can be
+                    // launched as a standalone practice container — it needs an
+                    // injectable dynamic flag just like a DynamicContainer. The live
+                    // A&D engine uses AdFlags (not this FlagContext), and the guard
+                    // below means this only ever runs once the game is over, so it
+                    // can't interfere with a running event.
+                    var adGame = await Context.Games.FindAsync([challenge.GameId], token);
+                    if (adGame is not null && challenge.AllowsPracticeContainer(adGame))
+                        instance.FlagContext = new()
+                        {
+                            Challenge = challenge,
+                            Flag = challenge.GenerateDynamicFlag(part),
+                            IsOccupied = true
+                        };
+                    break;
             }
 
             // instance.FlagContext is null by default
