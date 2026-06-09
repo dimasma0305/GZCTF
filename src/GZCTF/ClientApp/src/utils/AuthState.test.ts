@@ -2,10 +2,12 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { hasAuthSession, setAuthSession, shouldRedirectOnUnauthorized } from './AuthState'
 
+// A PROTECTED page (challenges) is the base — a genuine session expiry here
+// should still bounce to login. Public pages are exercised explicitly below.
 const base = {
   status: 401 as number | undefined,
   requestPath: '/api/game/19/details',
-  pathname: '/games/19/scoreboard',
+  pathname: '/games/19/challenges',
   redirectInFlight: false,
   hasSession: true,
 }
@@ -22,10 +24,19 @@ test('REGRESSION: anonymous visitor on a public scoreboard does NOT redirect', (
   // The reported bug: GET /games/19/scoreboard#jeopardy bounced logged-out
   // users to login because the page fires an optional [RequireUser] /details
   // fetch that 401s. With no session, that 401 must be ignored.
-  assert.equal(shouldRedirectOnUnauthorized({ ...base, hasSession: false }), false)
+  assert.equal(shouldRedirectOnUnauthorized({ ...base, pathname: '/games/19/scoreboard', hasSession: false }), false)
 })
 
-test('genuine session expiry (had a session) DOES redirect', () => {
+test('REGRESSION: EXPIRED session on a PUBLIC page (landing/scoreboard/list) does NOT redirect', () => {
+  // The follow-up bug: an expired/stale session (hasSession=true) on the public
+  // game landing or scoreboard still bounced to login. Public pages must render
+  // the logged-out view, never redirect — even with a believed session.
+  for (const pathname of ['/games', '/games/19', '/games/19/scoreboard', '/games/19/scoreboard/', '/', '/about', '/posts/3']) {
+    assert.equal(shouldRedirectOnUnauthorized({ ...base, pathname, hasSession: true }), false, pathname)
+  }
+})
+
+test('genuine session expiry on a PROTECTED page (challenges) DOES redirect', () => {
   assert.equal(shouldRedirectOnUnauthorized({ ...base, hasSession: true }), true)
 })
 

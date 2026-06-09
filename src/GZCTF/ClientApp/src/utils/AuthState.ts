@@ -43,11 +43,31 @@ export interface UnauthorizedRedirectContext {
 }
 
 /**
+ * Pages that anyone (logged out) may view. A 401 from an optional [RequireUser]
+ * enrichment fetch on one of these must NEVER bounce to login — not even when a
+ * session was believed to exist but has since expired. The visitor just sees the
+ * public (logged-out) view and can re-login from the navbar. Protected pages
+ * (challenges, submit, monitor, admin, account management, team management) are
+ * NOT listed, so a genuine session expiry there still redirects.
+ */
+const PUBLIC_PAGE_PATTERNS: RegExp[] = [
+  /^\/$/, // home
+  /^\/games\/?$/, // games list
+  /^\/games\/\d+\/?$/, // game landing
+  /^\/games\/\d+\/scoreboard\/?$/, // public scoreboard
+  /^\/posts(\/|$)/, // posts list + detail
+  /^\/about\/?$/, // about
+]
+
+export const isPublicPage = (pathname: string): boolean =>
+  PUBLIC_PAGE_PATTERNS.some((re) => re.test(pathname))
+
+/**
  * Pure decision for the global fetcher: should a failed request bounce the
  * visitor to the login page? Only a real session expiry (we believe a session
- * exists) on a non-auth endpoint of a non-account page qualifies. Anonymous
- * visitors hitting an optional [RequireUser] endpoint on a public page do NOT
- * redirect — that was the scoreboard-forces-login bug.
+ * exists) on a non-auth endpoint of a NON-PUBLIC, non-account page qualifies.
+ * Anonymous visitors — and expired-session visitors on a public page like the
+ * game landing or scoreboard — render the public view instead of redirecting.
  */
 export const shouldRedirectOnUnauthorized = (ctx: UnauthorizedRedirectContext): boolean => {
   const { status, requestPath, pathname, redirectInFlight } = ctx
@@ -58,6 +78,7 @@ export const shouldRedirectOnUnauthorized = (ctx: UnauthorizedRedirectContext): 
     hasSession &&
     !redirectInFlight &&
     !isAuthEndpoint &&
-    !pathname.startsWith('/account/')
+    !pathname.startsWith('/account/') &&
+    !isPublicPage(pathname)
   )
 }
