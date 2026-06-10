@@ -211,20 +211,20 @@ public partial class AccountController
             return OAuthError("userinfo_failed");
         }
 
-        var (providerKey, email, emailVerified, name) = ParseUserInfo(scheme, userInfo);
+        var (providerKey, email, emailVerified, name, avatarUrl) = ParseUserInfo(scheme, userInfo);
         if (string.IsNullOrEmpty(providerKey))
             return OAuthError("no_info");
 
-        return await HandleExternalIdentityAsync(scheme, providerKey, email, emailVerified, name,
-            dbContext, stateData.ReturnUrl, token);
+        return await HandleExternalIdentityAsync(scheme, providerKey, email, emailVerified, name, avatarUrl,
+            http, dbContext, stateData.ReturnUrl, token);
     }
 
     /// <summary>
     /// Create/link/sign-in for a resolved external identity. Shared by all providers.
     /// </summary>
     private async Task<IActionResult> HandleExternalIdentityAsync(
-        string provider, string providerKey, string? email, bool emailVerified, string? name,
-        AppDbContext dbContext, string safeReturn, CancellationToken token)
+        string provider, string providerKey, string? email, bool emailVerified, string? name, string? avatarUrl,
+        HttpClient http, AppDbContext dbContext, string safeReturn, CancellationToken token)
     {
         // Admin-approval mode: ActiveOnRegister=false AND email confirmation is NOT the gate,
         // so EmailConfirmed doubles as the manual "approved" flag an admin flips.
@@ -241,6 +241,7 @@ public partial class AccountController
                 return OAuthError("await_approval");
             if (await CheckAntiCheatConflictAsync(user, null, dbContext, token) is not null)
                 return OAuthError("anti_cheat");
+            await TrySetOAuthAvatarAsync(user, avatarUrl, http, token);
             await CompleteExternalSignInAsync(user, provider);
             return LocalRedirect(safeReturn);
         }
@@ -272,6 +273,7 @@ public partial class AccountController
                 return OAuthError("await_approval");
             if (await CheckAntiCheatConflictAsync(user, null, dbContext, token) is not null)
                 return OAuthError("anti_cheat");
+            await TrySetOAuthAvatarAsync(user, avatarUrl, http, token);
             await CompleteExternalSignInAsync(user, provider);
             return LocalRedirect(safeReturn);
         }
@@ -309,6 +311,7 @@ public partial class AccountController
         if (await CheckAntiCheatConflictAsync(newUser, null, dbContext, token) is not null)
             return OAuthError("anti_cheat");
 
+        await TrySetOAuthAvatarAsync(newUser, avatarUrl, http, token);
         await CompleteExternalSignInAsync(newUser, provider);
         return LocalRedirect(safeReturn);
     }
@@ -426,6 +429,54 @@ public partial class AccountController
         return null;
     }
 
+    /// <summary>
+    /// Best-effort: import the provider's profile picture as the user's avatar. Only sets one
+    /// when the user has none (never overwrites a chosen avatar). The image goes through the
+    /// same resize/normalise path as a manual upload. The caller persists the user afterwards.
+    /// </summary>
+    private async Task TrySetOAuthAvatarAsync(UserInfo user, string? avatarUrl, HttpClient http, CancellationToken token)
+    {
+        if (string.IsNullOrEmpty(avatarUrl) || user.AvatarHash is not null)
+            return;
+
+        // SSRF guard: only fetch https URLs from the providers' known CDNs.
+        if (!Uri.TryCreate(avatarUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
+            return;
+        var host = uri.Host;
+        var allowed = host.EndsWith(".googleusercontent.com", StringComparison.OrdinalIgnoreCase)
+            || host.Equals("cdn.discordapp.com", StringComparison.OrdinalIgnoreCase)
+            || host.EndsWith(".discordapp.com", StringComparison.OrdinalIgnoreCase);
+        if (!allowed)
+            return;
+
+        try
+        {
+            using var resp = await http.GetAsync(uri, token);
+            if (!resp.IsSuccessStatusCode)
+                return;
+            var contentType = resp.Content.Headers.ContentType?.MediaType ?? "image/png";
+            if (!contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+                return;
+            var bytes = await resp.Content.ReadAsByteArrayAsync(token);
+            if (bytes.Length is 0 or > 5 * 1024 * 1024)
+                return;
+
+            using var ms = new MemoryStream(bytes);
+            var file = new FormFile(ms, 0, bytes.Length, "avatar", "avatar")
+            {
+                Headers = new HeaderDictionary(),
+                ContentType = contentType
+            };
+            var avatar = await blobService.CreateOrUpdateImage(file, "avatar", 300, token);
+            if (avatar is not null)
+                user.AvatarHash = avatar.Hash;
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "Failed to import OAuth avatar for {User}", user.UserName);
+        }
+    }
+
     /// <summary>Public callback URL registered with every provider (single, shared).</summary>
     private string OAuthCallbackUrl() => $"{Request.Scheme}://{Request.Host}{OAuthCallbackPath}";
 
@@ -474,8 +525,8 @@ public partial class AccountController
         }
     }
 
-    /// <summary>Extract (providerKey, email, emailVerified, displayName) from a provider's userinfo JSON.</summary>
-    private static (string key, string? email, bool emailVerified, string? name) ParseUserInfo(
+    /// <summary>Extract (providerKey, email, emailVerified, displayName, avatarUrl) from userinfo JSON.</summary>
+    private static (string key, string? email, bool emailVerified, string? name, string? avatarUrl) ParseUserInfo(
         string scheme, JsonElement u)
     {
         string? Str(string p) =>
@@ -485,13 +536,20 @@ public partial class AccountController
             && (v.ValueKind == JsonValueKind.True
                 || (v.ValueKind == JsonValueKind.String && bool.TryParse(v.GetString(), out var b) && b));
 
-        return scheme switch
+        switch (scheme)
         {
-            GoogleProvider => (Str("sub") ?? string.Empty, Str("email"), Bool("email_verified"), Str("name")),
-            DiscordProvider => (Str("id") ?? string.Empty, Str("email"), Bool("verified"),
-                Str("global_name") ?? Str("username")),
-            _ => (string.Empty, null, false, null)
-        };
+            case GoogleProvider:
+                return (Str("sub") ?? string.Empty, Str("email"), Bool("email_verified"), Str("name"), Str("picture"));
+            case DiscordProvider:
+                var id = Str("id") ?? string.Empty;
+                var avatarHash = Str("avatar");
+                var avatarUrl = !string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(avatarHash)
+                    ? $"https://cdn.discordapp.com/avatars/{id}/{avatarHash}.png?size=256"
+                    : null;
+                return (id, Str("email"), Bool("verified"), Str("global_name") ?? Str("username"), avatarUrl);
+            default:
+                return (string.Empty, null, false, null, null);
+        }
     }
 
     /// <summary>
