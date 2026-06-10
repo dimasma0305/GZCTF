@@ -22,14 +22,25 @@ internal sealed class ConfigureExternalOAuthOptions(IOptionsMonitor<OAuthConfig>
 {
     private readonly byte[] _xorKey = configuration["XorKey"]?.ToUTF8Bytes() ?? [];
 
+    // The Google/Discord handlers are registered unconditionally so credentials can be
+    // applied live from the admin UI. But they implement IAuthenticationRequestHandler, so
+    // the auth middleware resolves their options on EVERY request — and OAuthOptions.Validate
+    // throws on an empty ClientId/ClientSecret. When a provider is unconfigured we therefore
+    // feed a non-empty placeholder so validation passes; the provider stays truly off because
+    // the ExternalLogin endpoint and sign-in buttons gate on OAuthConfig.{Google,Discord}Enabled
+    // (real credential presence), so the scheme is never actually challenged.
+    private const string DisabledPlaceholder = "gzctf-oauth-disabled";
+
     public void Configure(string? name, GoogleOptions options)
     {
         if (name != GoogleDefaults.AuthenticationScheme)
             return;
 
         var config = oauth.CurrentValue;
-        options.ClientId = config.GoogleClientId ?? string.Empty;
-        options.ClientSecret = DecodeSecret(config.GoogleClientSecret);
+        var secret = DecodeSecret(config.GoogleClientSecret);
+        var configured = !string.IsNullOrWhiteSpace(config.GoogleClientId) && !string.IsNullOrWhiteSpace(secret);
+        options.ClientId = configured ? config.GoogleClientId! : DisabledPlaceholder;
+        options.ClientSecret = configured ? secret : DisabledPlaceholder;
 
         // Surface Google's verified-email flag (newer userinfo: email_verified;
         // older: verified_email) so the callback can require a verified email.
@@ -49,8 +60,10 @@ internal sealed class ConfigureExternalOAuthOptions(IOptionsMonitor<OAuthConfig>
             return;
 
         var config = oauth.CurrentValue;
-        options.ClientId = config.DiscordClientId ?? string.Empty;
-        options.ClientSecret = DecodeSecret(config.DiscordClientSecret);
+        var secret = DecodeSecret(config.DiscordClientSecret);
+        var configured = !string.IsNullOrWhiteSpace(config.DiscordClientId) && !string.IsNullOrWhiteSpace(secret);
+        options.ClientId = configured ? config.DiscordClientId! : DisabledPlaceholder;
+        options.ClientSecret = configured ? secret : DisabledPlaceholder;
 
         // "identify" is requested by default; "email" is needed to read the address.
         if (!options.Scope.Contains("email"))

@@ -108,24 +108,32 @@ public class AccountPolicy
 /// </remarks>
 public class OAuthConfig
 {
+    // The CacheFlush attributes evict the cached ClientConfig (/api/config) when any
+    // credential changes, so the sign-in buttons appear/disappear immediately on save
+    // (the EnableGoogleAuth/EnableDiscordAuth flags are derived from these).
+
     /// <summary>
     /// Google OAuth client id
     /// </summary>
+    [CacheFlush(CacheKey.ClientConfig)]
     public string? GoogleClientId { get; set; }
 
     /// <summary>
     /// Google OAuth client secret (XOR-obfuscated at rest)
     /// </summary>
+    [CacheFlush(CacheKey.ClientConfig)]
     public string? GoogleClientSecret { get; set; }
 
     /// <summary>
     /// Discord OAuth client id
     /// </summary>
+    [CacheFlush(CacheKey.ClientConfig)]
     public string? DiscordClientId { get; set; }
 
     /// <summary>
     /// Discord OAuth client secret (XOR-obfuscated at rest)
     /// </summary>
+    [CacheFlush(CacheKey.ClientConfig)]
     public string? DiscordClientSecret { get; set; }
 
     /// <summary>UI surrogate — true when <see cref="GoogleClientSecret"/> is set.
