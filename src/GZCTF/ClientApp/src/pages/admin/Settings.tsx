@@ -1069,13 +1069,11 @@ const Configs: FC = () => {
           <Text size="sm" c="dimmed">
             {t(
               'admin.content.settings.oauth.redirect_hint',
-              'Register these provider redirect URIs (HTTPS required), then enter the client id + secret. For Discord, enable the identify + email scopes.',
+              'Register this one redirect URI (HTTPS required) with BOTH providers, then enter the client id + secret. For Discord, enable the identify + email scopes.',
             )}
           </Text>
           <Text size="xs" c="dimmed" ff="monospace">
-            {window.location.origin}/api/oauth/signin-google
-            <br />
-            {window.location.origin}/api/oauth/signin-discord
+            {window.location.origin}/api/oauth/callback
           </Text>
           <Divider label="Google" labelPosition="left" />
           <SimpleGrid cols={2}>

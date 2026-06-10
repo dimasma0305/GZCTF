@@ -33,9 +33,10 @@ services:
       # Primary path: configure these in the admin UI at /admin/settings -> OAuth
       # (DB-backed, secrets obfuscated, applies live without a restart). A provider's
       # sign-in button appears only when BOTH its client id and secret are set.
-      # Register an OAuth app per provider and add its public redirect URI:
-      #   Google  -> https://<your-host>/api/oauth/signin-google   (Google Cloud Console)
-      #   Discord -> https://<your-host>/api/oauth/signin-discord  (Discord Developer Portal; scopes: identify, email)
+      # Register ONE shared redirect URI with BOTH providers (the provider is recovered from
+      # the OAuth state, so a single callback URL serves all):
+      #   https://<your-host>/api/oauth/callback
+      #   (Google Cloud Console + Discord Developer Portal; Discord scopes: identify, email)
       # The platform must see the public https scheme (configure ProxyTrust/forwarded
       # headers) so the redirect_uri sent to the provider matches what you registered.
       # These env vars are an optional bootstrap alternative to the admin UI:

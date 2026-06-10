@@ -64,6 +64,10 @@ const Login: FC = () => {
         'account.oauth.error.email_unverified',
         'Your provider account email is not verified, so it cannot be used to sign in.',
       ),
+      oauth_email_conflict: t(
+        'account.oauth.error.email_conflict',
+        'An unverified account already uses this email. Verify that account or contact an administrator.',
+      ),
       oauth_no_email: t('account.oauth.error.no_email', 'The provider did not share an email address.'),
       oauth_email_domain: t('account.oauth.error.email_domain', 'Your email domain is not allowed on this platform.'),
       oauth_account_disabled: t('account.oauth.error.account_disabled', 'This account has been disabled.'),
