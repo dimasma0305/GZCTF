@@ -2,8 +2,6 @@ import {
   Avatar,
   Box,
   Button,
-  Center,
-  Divider,
   Grid,
   Group,
   Image,
@@ -11,23 +9,25 @@ import {
   Paper,
   SimpleGrid,
   Stack,
+  Tabs,
   Text,
   Textarea,
   TextInput,
   Title,
+  Tooltip,
 } from '@mantine/core'
 import { Dropzone } from '@mantine/dropzone'
 import { notifications, showNotification, updateNotification } from '@mantine/notifications'
-import { mdiChartBar, mdiCheck, mdiClose } from '@mdi/js'
+import { mdiAccountOutline, mdiChartBox, mdiCheck, mdiClose } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import { FC, useEffect, useMemo, useState } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
-import { Link } from 'react-router'
+import { useSearchParams } from 'react-router'
 import { PasswordChangeModal } from '@Components/PasswordChangeModal'
 import { WithNavBar } from '@Components/WithNavbar'
+import { StatsPanel } from '@Components/account/StatsPanel'
 import { showErrorMsg, tryGetErrorMsg } from '@Utils/Shared'
 import { IMAGE_MIME_TYPES } from '@Utils/Shared'
-import { useIsMobile } from '@Utils/ThemeOverride'
 import { usePageTitle } from '@Hooks/usePageTitle'
 import { useUser } from '@Hooks/useUser'
 import api, { ProfileUpdateModel } from '@Api'
@@ -36,6 +36,11 @@ import misc from '@Styles/Misc.module.css'
 const Profile: FC = () => {
   const [dropzoneOpened, setDropzoneOpened] = useState(false)
   const { user, mutate } = useUser()
+
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab = searchParams.get('tab') === 'stats' ? 'stats' : 'profile'
+  const setActiveTab = (tab: string | null) =>
+    setSearchParams(tab && tab !== 'profile' ? { tab } : {}, { replace: true })
 
   const [profile, setProfile] = useState<ProfileUpdateModel>({
     userName: user?.userName,
@@ -59,8 +64,6 @@ const Profile: FC = () => {
   const [pwdChangeOpened, setPwdChangeOpened] = useState(false)
 
   const [email, setEmail] = useState('')
-
-  const isMobile = useIsMobile()
 
   const { t } = useTranslation()
 
@@ -168,43 +171,18 @@ const Profile: FC = () => {
     }
   }
 
-  const context = (
-    <>
-      <Title order={2}>{t('account.title.profile')}</Title>
-      <Divider mt="xs" mb="md" />
-      <Stack gap="md" m="auto">
-        <Group wrap="nowrap">
-          <TextInput
-            label={t('account.label.username')}
-            type="text"
-            w="100%"
-            value={profile.userName ?? 'ctfer'}
-            disabled={disabled}
-            onChange={(event) => setProfile({ ...profile, userName: event.target.value })}
-          />
-          <Center>
-            <Avatar
-              alt="avatar"
-              radius={40}
-              size={80}
-              src={user?.avatar}
-              role="button"
-              tabIndex={0}
-              aria-label={t('account.button.change_avatar', 'Change avatar')}
-              style={{ cursor: 'pointer' }}
-              onClick={() => setDropzoneOpened(true)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault()
-                  setDropzoneOpened(true)
-                }
-              }}
-            >
-              {user?.userName?.slice(0, 1) ?? 'U'}
-            </Avatar>
-          </Center>
-        </Group>
-        <SimpleGrid cols={2}>
+  const profilePanel = (
+    <Paper withBorder radius="md" p="lg" maw={640} mx="auto" w="100%">
+      <Stack gap="md">
+        <TextInput
+          label={t('account.label.username')}
+          type="text"
+          w="100%"
+          value={profile.userName ?? 'ctfer'}
+          disabled={disabled}
+          onChange={(event) => setProfile({ ...profile, userName: event.target.value })}
+        />
+        <SimpleGrid cols={{ base: 1, xs: 2 }}>
           <TextInput
             label={t('account.label.email')}
             type="email"
@@ -248,53 +226,72 @@ const Profile: FC = () => {
           maxRows={4}
           onChange={(event) => setProfile({ ...profile, bio: event.target.value })}
         />
-        <Box m="auto" w="100%">
-          <Grid grow>
-            <Grid.Col span={4}>
-              <Button fullWidth variant="outline" disabled={disabled} onClick={() => setMailEditOpened(true)}>
-                {t('account.button.update_email')}
-              </Button>
-            </Grid.Col>
-            <Grid.Col span={4}>
-              <Button fullWidth variant="outline" disabled={disabled} onClick={() => setPwdChangeOpened(true)}>
-                {t('account.button.change_password')}
-              </Button>
-            </Grid.Col>
-            <Grid.Col span={4}>
-              <Button fullWidth disabled={disabled} onClick={onChangeProfile}>
-                {t('account.button.save_profile')}
-              </Button>
-            </Grid.Col>
-            <Grid.Col span={12}>
-              <Button
-                fullWidth
-                variant="light"
-                component={Link}
-                to="/account/stats"
-                leftSection={<Icon path={mdiChartBar} size={0.9} />}
-              >
-                {t('account.button.view_stats', 'View My Stats')}
-              </Button>
-            </Grid.Col>
-          </Grid>
-        </Box>
+        <Grid grow>
+          <Grid.Col span={{ base: 12, xs: 4 }}>
+            <Button fullWidth variant="outline" disabled={disabled} onClick={() => setMailEditOpened(true)}>
+              {t('account.button.update_email')}
+            </Button>
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, xs: 4 }}>
+            <Button fullWidth variant="outline" disabled={disabled} onClick={() => setPwdChangeOpened(true)}>
+              {t('account.button.change_password')}
+            </Button>
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, xs: 4 }}>
+            <Button fullWidth disabled={disabled} onClick={onChangeProfile}>
+              {t('account.button.save_profile')}
+            </Button>
+          </Grid.Col>
+        </Grid>
       </Stack>
-    </>
+    </Paper>
   )
 
   return (
     <WithNavBar minWidth={0}>
-      {isMobile ? (
-        <Box mt="md" p="sm">
-          {context}
-        </Box>
-      ) : (
-        <Center h="100vh">
-          <Paper w="55%" maw={600} shadow="sm" p="5%">
-            {context}
-          </Paper>
-        </Center>
-      )}
+      <Stack p="md" maw={880} mx="auto" gap="lg" w="100%">
+        {/* Shared header */}
+        <Group wrap="nowrap">
+          <Tooltip label={t('account.button.change_avatar', 'Change avatar')} withArrow>
+            <Avatar
+              src={user?.avatar}
+              size={56}
+              radius="md"
+              color="brand"
+              role="button"
+              tabIndex={0}
+              style={{ cursor: 'pointer' }}
+              onClick={() => setDropzoneOpened(true)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  setDropzoneOpened(true)
+                }
+              }}
+            >
+              {user?.userName?.[0]?.toUpperCase()}
+            </Avatar>
+          </Tooltip>
+          <div>
+            <Title order={3} lineClamp={1}>{user?.userName ?? t('account.title.profile')}</Title>
+            <Text size="sm" c="dimmed">{user?.email}</Text>
+          </div>
+        </Group>
+
+        <Tabs value={activeTab} onChange={setActiveTab} keepMounted={false}>
+          <Tabs.List mb="md">
+            <Tabs.Tab value="profile" leftSection={<Icon path={mdiAccountOutline} size={0.8} />}>
+              {t('account.title.profile')}
+            </Tabs.Tab>
+            <Tabs.Tab value="stats" leftSection={<Icon path={mdiChartBox} size={0.8} />}>
+              {t('account.title.stats', 'My Stats')}
+            </Tabs.Tab>
+          </Tabs.List>
+
+          <Tabs.Panel value="profile">{profilePanel}</Tabs.Panel>
+          <Tabs.Panel value="stats"><StatsPanel /></Tabs.Panel>
+        </Tabs>
+      </Stack>
 
       <PasswordChangeModal
         opened={pwdChangeOpened}
