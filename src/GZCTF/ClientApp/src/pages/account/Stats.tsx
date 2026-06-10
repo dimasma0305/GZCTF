@@ -1,31 +1,50 @@
 import {
+  ActionIcon,
+  Avatar,
   Badge,
+  Box,
   Button,
   Center,
   Group,
-  Loader,
   Paper,
   ScrollArea,
   SimpleGrid,
+  Skeleton,
   Stack,
   Table,
   Text,
   ThemeIcon,
   Title,
+  Tooltip,
+  useMantineColorScheme,
+  useMantineTheme,
 } from '@mantine/core'
-import { mdiStar, mdiTrophy, mdiPuzzle, mdiFire, mdiAlertCircleOutline, mdiRefresh } from '@mdi/js'
+import {
+  mdiAlertCircleOutline,
+  mdiChevronRight,
+  mdiFire,
+  mdiMedal,
+  mdiPuzzle,
+  mdiRefresh,
+  mdiStar,
+  mdiTrophy,
+} from '@mdi/js'
 import { Icon } from '@mdi/react'
 import type { EChartsOption } from 'echarts'
 import dayjs from 'dayjs'
+import relativeTime from 'dayjs/plugin/relativeTime'
 import { FC, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import useSWR from 'swr'
 import { EchartsContainer } from '@Components/charts/EchartsContainer'
 import { WithNavBar } from '@Components/WithNavbar'
+import { useUser } from '@Hooks/useUser'
 import { usePageTitle } from '@Hooks/usePageTitle'
 import { useLanguage } from '@Utils/I18n'
-import { useMantineTheme, useMantineColorScheme } from '@mantine/core'
+import classes from './Stats.module.css'
+
+dayjs.extend(relativeTime)
 
 interface UserStatsModel {
   totalSolves: number
@@ -42,6 +61,8 @@ const CATEGORY_COLORS: Record<string, string> = {
   Pentest: 'indigo', OSINT: 'grape',
 }
 
+const catColor = (cat: string) => CATEGORY_COLORS[cat] ?? 'blue'
+
 const fetcher = (url: string) =>
   fetch(url, { credentials: 'include' }).then((r) => {
     if (!r.ok) throw new Error(`Request failed with status ${r.status}`)
@@ -51,40 +72,79 @@ const fetcher = (url: string) =>
 const Stats: FC = () => {
   const { t } = useTranslation()
   const { locale } = useLanguage()
+  const { user } = useUser()
   const theme = useMantineTheme()
   const { colorScheme } = useMantineColorScheme()
+  const navigate = useNavigate()
 
   usePageTitle(t('account.title.stats', 'My Stats'))
 
   const { data: stats, error, isLoading, mutate } = useSWR<UserStatsModel>('/api/account/stats', fetcher)
 
+  const sortedCategories = useMemo(
+    () => Object.entries(stats?.solvesByCategory ?? {}).sort((a, b) => b[1] - a[1]),
+    [stats],
+  )
+
+  const topCategory = sortedCategories[0]
+  const bestGameId = useMemo(() => {
+    if (!stats?.games.length) return null
+    return stats.games.reduce((best, g) => (g.solves > best.solves ? g : best)).gameId
+  }, [stats])
+
   const categoryChartOption = useMemo((): EChartsOption => {
-    if (!stats) return {}
-    const entries = Object.entries(stats.solvesByCategory).sort((a, b) => b[1] - a[1])
+    if (!sortedCategories.length) return {}
+    // Render top→bottom in descending order (ECharts category axis draws bottom-up).
+    const entries = [...sortedCategories].reverse()
     return {
       backgroundColor: 'transparent',
-      tooltip: { trigger: 'axis' },
-      grid: { left: 80, right: 20, top: 20, bottom: 20 },
-      xAxis: { type: 'value', minInterval: 1 },
-      yAxis: { type: 'category', data: entries.map(([cat]) => cat) },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+      grid: { left: 76, right: 32, top: 8, bottom: 8, containLabel: false },
+      xAxis: {
+        type: 'value',
+        minInterval: 1,
+        axisLine: { show: false },
+        axisTick: { show: false },
+        splitLine: { lineStyle: { opacity: 0.25 } },
+      },
+      yAxis: {
+        type: 'category',
+        data: entries.map(([cat]) => cat),
+        axisLine: { show: false },
+        axisTick: { show: false },
+      },
       series: [{
         type: 'bar',
-        data: entries.map(([, count]) => count),
-        itemStyle: {
-          color: (params: any) => {
-            const cat = entries[params.dataIndex][0]
-            return theme.colors[CATEGORY_COLORS[cat] ?? 'blue'][5]
+        barWidth: '60%',
+        data: entries.map(([cat, count]) => ({
+          value: count,
+          itemStyle: {
+            color: theme.colors[catColor(cat)][colorScheme === 'dark' ? 6 : 5],
+            borderRadius: [0, 4, 4, 0],
           },
-        },
-        label: { show: true, position: 'right' },
+        })),
+        label: { show: true, position: 'right', fontWeight: 600 },
       }],
     }
-  }, [stats, theme, colorScheme])
+  }, [sortedCategories, theme, colorScheme])
 
   if (isLoading) {
     return (
       <WithNavBar minWidth={0}>
-        <Center h="80vh"><Loader /></Center>
+        <Stack p="md" maw={960} mx="auto" gap="lg" w="100%">
+          <Group>
+            <Skeleton h={56} w={56} radius="md" />
+            <Stack gap={6}>
+              <Skeleton h={22} w={180} radius="sm" />
+              <Skeleton h={14} w={120} radius="sm" />
+            </Stack>
+          </Group>
+          <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md">
+            {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} h={132} radius="md" />)}
+          </SimpleGrid>
+          <Skeleton h={220} radius="md" />
+          <Skeleton h={240} radius="md" />
+        </Stack>
       </WithNavBar>
     )
   }
@@ -107,78 +167,139 @@ const Stats: FC = () => {
     )
   }
 
+  const summaryCards = [
+    {
+      key: 'solves',
+      icon: mdiPuzzle,
+      color: 'teal',
+      value: stats.totalSolves,
+      label: t('account.stats.total_solves', 'Total Solves'),
+    },
+    {
+      key: 'bloods',
+      icon: mdiFire,
+      color: 'orange',
+      value: stats.totalFirstBloods,
+      label: t('account.stats.first_bloods', 'First Bloods'),
+    },
+    {
+      key: 'games',
+      icon: mdiTrophy,
+      color: 'blue',
+      value: stats.gamesParticipated,
+      label: t('account.stats.games', 'Games Played'),
+    },
+    {
+      key: 'top',
+      icon: mdiMedal,
+      color: topCategory ? catColor(topCategory[0]) : 'gray',
+      value: topCategory ? topCategory[0] : '—',
+      sub: topCategory ? t('account.stats.solve_count', '{{count}} solves', { count: topCategory[1] }) : undefined,
+      label: t('account.stats.top_category', 'Top Category'),
+    },
+  ]
+
   return (
     <WithNavBar minWidth={0}>
-      <Stack p="md" maw={960} mx="auto" gap="lg">
-        <Title order={3}>{t('account.title.stats', 'My Stats')}</Title>
+      <Stack p="md" maw={960} mx="auto" gap="lg" w="100%">
+        {/* Header */}
+        <Group justify="space-between" wrap="nowrap">
+          <Group wrap="nowrap">
+            <Avatar src={user?.avatar} size={56} radius="md" color="brand">
+              {user?.userName?.[0]?.toUpperCase()}
+            </Avatar>
+            <div>
+              <Title order={3} lineClamp={1}>{user?.userName ?? t('account.title.stats', 'My Stats')}</Title>
+              <Text size="sm" c="dimmed">{t('account.stats.subtitle', 'Your CTF performance')}</Text>
+            </div>
+          </Group>
+          <Tooltip label={t('common.button.refresh', 'Refresh')} withArrow>
+            <ActionIcon variant="light" size="lg" onClick={() => mutate()}>
+              <Icon path={mdiRefresh} size={0.9} />
+            </ActionIcon>
+          </Tooltip>
+        </Group>
 
         {/* Summary cards */}
-        <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
-          <Paper p="md" withBorder radius="md" ta="center">
-            <ThemeIcon size="xl" color="teal" variant="light" mx="auto" mb="xs">
-              <Icon path={mdiPuzzle} size={1.2} />
-            </ThemeIcon>
-            <Text size="2rem" fw={700} c="teal">{stats.totalSolves}</Text>
-            <Text size="sm" c="dimmed">{t('account.stats.total_solves', 'Total Solves')}</Text>
-          </Paper>
-          <Paper p="md" withBorder radius="md" ta="center">
-            <ThemeIcon size="xl" color="orange" variant="light" mx="auto" mb="xs">
-              <Icon path={mdiFire} size={1.2} />
-            </ThemeIcon>
-            <Text size="2rem" fw={700} c="orange">{stats.totalFirstBloods}</Text>
-            <Text size="sm" c="dimmed">{t('account.stats.first_bloods', 'First Bloods')}</Text>
-          </Paper>
-          <Paper p="md" withBorder radius="md" ta="center">
-            <ThemeIcon size="xl" color="blue" variant="light" mx="auto" mb="xs">
-              <Icon path={mdiTrophy} size={1.2} />
-            </ThemeIcon>
-            <Text size="2rem" fw={700} c="blue">{stats.gamesParticipated}</Text>
-            <Text size="sm" c="dimmed">{t('account.stats.games', 'Games Played')}</Text>
-          </Paper>
+        <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md">
+          {summaryCards.map((card) => (
+            <Paper key={card.key} withBorder radius="md" p={0} className={classes.statCard} style={{ overflow: 'hidden' }}>
+              <Box h={3} bg={`${card.color}.5`} />
+              <Stack gap={6} p="md" align="center">
+                <ThemeIcon size="xl" color={card.color} variant="light" radius="md">
+                  <Icon path={card.icon} size={1.2} />
+                </ThemeIcon>
+                <Text size={typeof card.value === 'number' ? '1.9rem' : '1.25rem'} fw={800} c={card.color} lineClamp={1} ta="center">
+                  {card.value}
+                </Text>
+                <Text size="xs" c="dimmed" ta="center">{card.label}</Text>
+                {card.sub && <Text size="xs" c="dimmed" ta="center">{card.sub}</Text>}
+              </Stack>
+            </Paper>
+          ))}
         </SimpleGrid>
 
-        {/* Category breakdown chart */}
-        {Object.keys(stats.solvesByCategory).length > 0 && (
+        {/* Category breakdown */}
+        {sortedCategories.length > 0 && (
           <Paper p="md" withBorder radius="md">
             <Text fw={600} mb="sm">{t('account.stats.by_category', 'Solves by Category')}</Text>
             <EchartsContainer
               option={categoryChartOption}
-              style={{ height: Math.max(160, Object.keys(stats.solvesByCategory).length * 36) }}
+              style={{ height: Math.max(150, sortedCategories.length * 34) }}
             />
+            <Group gap="xs" mt="sm">
+              {sortedCategories.map(([cat, count]) => (
+                <Badge key={cat} color={catColor(cat)} variant="light" radius="sm">
+                  {cat} · {count}
+                </Badge>
+              ))}
+            </Group>
           </Paper>
         )}
 
-        {/* Games table */}
+        {/* Game history */}
         {stats.games.length > 0 && (
           <Paper p="md" withBorder radius="md">
             <Text fw={600} mb="sm">{t('account.stats.game_history', 'Game History')}</Text>
             <ScrollArea>
-              <Table striped highlightOnHover>
+              <Table highlightOnHover verticalSpacing="sm" miw={420}>
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th>{t('common.label.game')}</Table.Th>
                     <Table.Th>{t('common.label.time')}</Table.Th>
                     <Table.Th ta="right">{t('account.stats.solves', 'Solves')}</Table.Th>
+                    <Table.Th w={32} />
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
                   {stats.games.map((g) => (
-                    <Table.Tr key={g.gameId}>
+                    <Table.Tr
+                      key={g.gameId}
+                      className={classes.clickRow}
+                      onClick={() => navigate(`/games/${g.gameId}`)}
+                    >
                       <Table.Td>
-                        <Link to={`/games/${g.gameId}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-                          <Group gap="xs">
-                            <Icon path={mdiStar} size={0.7} color={theme.colors.yellow[5]} />
-                            <Text size="sm">{g.gameTitle}</Text>
-                          </Group>
-                        </Link>
+                        <Group gap="xs" wrap="nowrap">
+                          <Icon
+                            path={g.gameId === bestGameId ? mdiTrophy : mdiStar}
+                            size={0.7}
+                            color={g.gameId === bestGameId ? theme.colors.yellow[5] : theme.colors.gray[5]}
+                          />
+                          <Text size="sm" lineClamp={1} fw={g.gameId === bestGameId ? 600 : 400}>
+                            {g.gameTitle}
+                          </Text>
+                        </Group>
                       </Table.Td>
                       <Table.Td>
-                        <Badge variant="light" color="gray" size="sm">
-                          {dayjs(g.endTimeUtc).locale(locale).format('YYYY-MM-DD')}
-                        </Badge>
+                        <Tooltip label={dayjs(g.endTimeUtc).locale(locale).format('LLL')} withArrow openDelay={300}>
+                          <Text size="xs" c="dimmed">{dayjs(g.endTimeUtc).locale(locale).fromNow()}</Text>
+                        </Tooltip>
                       </Table.Td>
                       <Table.Td ta="right">
-                        <Text size="sm" fw={600} c="teal">{g.solves}</Text>
+                        <Badge color="teal" variant="light" radius="sm">{g.solves}</Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        <Icon path={mdiChevronRight} size={0.8} color={theme.colors.gray[5]} />
                       </Table.Td>
                     </Table.Tr>
                   ))}
@@ -188,11 +309,15 @@ const Stats: FC = () => {
           </Paper>
         )}
 
+        {/* Empty state */}
         {stats.totalSolves === 0 && (
-          <Center h="30vh">
-            <Stack align="center" gap="xs">
+          <Center py={48}>
+            <Stack align="center" gap="sm">
               <Icon path={mdiPuzzle} size={3} color={theme.colors.gray[5]} />
               <Text c="dimmed">{t('account.stats.empty', 'No solves yet — go play some CTFs!')}</Text>
+              <Button component={Link} to="/games" variant="light" leftSection={<Icon path={mdiTrophy} size={0.9} />}>
+                {t('account.stats.browse_games', 'Browse Games')}
+              </Button>
             </Stack>
           </Center>
         )}
