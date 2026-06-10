@@ -128,6 +128,17 @@ public class AdminController(
             HasPassword = registry.HasPassword,
         };
 
+        var oauth = serviceProvider.GetRequiredService<IOptionsSnapshot<OAuthConfig>>().Value;
+        var safeOAuth = new OAuthConfig
+        {
+            GoogleClientId = oauth.GoogleClientId,
+            GoogleClientSecret = oauth.HasGoogleClientSecret ? string.Empty : null,
+            DiscordClientId = oauth.DiscordClientId,
+            DiscordClientSecret = oauth.HasDiscordClientSecret ? string.Empty : null,
+            HasGoogleClientSecret = oauth.HasGoogleClientSecret,
+            HasDiscordClientSecret = oauth.HasDiscordClientSecret,
+        };
+
         var containerProvider = serviceProvider.GetRequiredService<IOptionsSnapshot<ContainerProvider>>().Value;
         var isK8s = containerProvider.Type == ContainerProviderType.Kubernetes;
 
@@ -139,6 +150,7 @@ public class AdminController(
             BuildRegistry = safeBuildRegistry,
             Email = safeEmail,
             Captcha = safeCaptcha,
+            OAuth = safeOAuth,
             Registry = safeRegistry,
             ProxyTrust = serviceProvider.GetRequiredService<IOptionsSnapshot<ProxyTrustConfig>>().Value,
             ContainerProvider = new ContainerProviderInfoModel
@@ -251,6 +263,24 @@ public class AdminController(
                     registryModel.Password = Convert.ToBase64String(
                         Codec.Xor(registryModel.Password.ToUTF8Bytes(), xorKey));
             }
+        }
+
+        // OAuthConfig — two secrets (Google + Discord), same preserve-on-blank + XOR
+        // pattern. Client ids are public and saved as-is.
+        if (model.OAuth is { } oauthModel)
+        {
+            var existing = serviceProvider.GetRequiredService<IOptionsSnapshot<OAuthConfig>>().Value;
+            var xorKey = configService.GetXorKey();
+
+            string? ObfuscateOrKeep(string? incoming, string? stored) =>
+                string.IsNullOrEmpty(incoming)
+                    ? stored // empty from the form means "leave the stored secret alone"
+                    : xorKey.Length > 0
+                        ? Convert.ToBase64String(Codec.Xor(incoming.ToUTF8Bytes(), xorKey))
+                        : incoming;
+
+            oauthModel.GoogleClientSecret = ObfuscateOrKeep(oauthModel.GoogleClientSecret, existing.GoogleClientSecret);
+            oauthModel.DiscordClientSecret = ObfuscateOrKeep(oauthModel.DiscordClientSecret, existing.DiscordClientSecret);
         }
 
         // save all config properties

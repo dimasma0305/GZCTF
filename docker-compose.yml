@@ -26,13 +26,15 @@ services:
       - ConnectionStrings__Redis=redis:6379,password=gzctf
       - XorKey=gzctf-xor-key
       # --- External OAuth login (Google / Discord) ---
-      # A provider's sign-in button appears only when BOTH its client id and secret are
-      # set (handlers are built at startup, so this is NOT editable from the admin UI).
+      # Primary path: configure these in the admin UI at /admin/settings -> OAuth
+      # (DB-backed, secrets obfuscated, applies live without a restart). A provider's
+      # sign-in button appears only when BOTH its client id and secret are set.
       # Register an OAuth app per provider and add its public redirect URI:
       #   Google  -> https://<your-host>/signin-google   (Google Cloud Console)
       #   Discord -> https://<your-host>/signin-discord   (Discord Developer Portal; scopes: identify, email)
       # The platform must see the public https scheme (configure ProxyTrust/forwarded
       # headers) so the redirect_uri sent to the provider matches what you registered.
+      # These env vars are an optional bootstrap alternative to the admin UI:
       # - OAuthConfig__GoogleClientId=${GZCTF_GOOGLE_CLIENT_ID:-}
       # - OAuthConfig__GoogleClientSecret=${GZCTF_GOOGLE_CLIENT_SECRET:-}
       # - OAuthConfig__DiscordClientId=${GZCTF_DISCORD_CLIENT_ID:-}

@@ -578,6 +578,7 @@
         "container": "Containers",
         "email": "Email",
         "captcha": "Captcha",
+        "oauth": "OAuth",
         "registry_pull": "Pull creds",
         "build_registry": "Build push",
         "diagnostics": "Diagnostics"

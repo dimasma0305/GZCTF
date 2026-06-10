@@ -98,13 +98,13 @@ public class AccountPolicy
 /// External OAuth login providers (Google, Discord).
 /// </summary>
 /// <remarks>
-/// Configured at startup from environment/appsettings only — the authentication
-/// handlers are built once at boot, so unlike most config this is NOT hot-reloadable
-/// via the admin settings UI. A provider's sign-in button only appears, and its
-/// endpoints only function, when BOTH its client id and client secret are present.
-/// Env vars (docker-compose): <c>OAuthConfig__GoogleClientId</c>,
-/// <c>OAuthConfig__GoogleClientSecret</c>, <c>OAuthConfig__DiscordClientId</c>,
-/// <c>OAuthConfig__DiscordClientSecret</c>.
+/// Admin-editable from /admin/settings (DB-backed like <see cref="EmailConfig"/>); the
+/// client secrets are XOR-obfuscated at rest by <see cref="AdminController.UpdateConfigs"/>
+/// and blanked on read (the <c>HasXClientSecret</c> surrogates surface presence). The
+/// authentication handlers read these via <c>IOptionsMonitor</c> and are tied to the config
+/// reload token, so changes apply WITHOUT a restart. A provider's sign-in button appears and
+/// its endpoints function only when BOTH its client id and secret are set. Can also be
+/// bootstrapped from env (<c>OAuthConfig__GoogleClientId</c>, etc.).
 /// </remarks>
 public class OAuthConfig
 {
@@ -114,7 +114,7 @@ public class OAuthConfig
     public string? GoogleClientId { get; set; }
 
     /// <summary>
-    /// Google OAuth client secret
+    /// Google OAuth client secret (XOR-obfuscated at rest)
     /// </summary>
     public string? GoogleClientSecret { get; set; }
 
@@ -124,15 +124,36 @@ public class OAuthConfig
     public string? DiscordClientId { get; set; }
 
     /// <summary>
-    /// Discord OAuth client secret
+    /// Discord OAuth client secret (XOR-obfuscated at rest)
     /// </summary>
     public string? DiscordClientSecret { get; set; }
 
+    /// <summary>UI surrogate — true when <see cref="GoogleClientSecret"/> is set.
+    /// Writable so the settings GET can carry presence across the transport-blanked copy.</summary>
+    private bool? _hasGoogleSecret;
+    [AutoSaveIgnore]
+    public bool HasGoogleClientSecret
+    {
+        get => _hasGoogleSecret ?? !string.IsNullOrEmpty(GoogleClientSecret);
+        set => _hasGoogleSecret = value;
+    }
+
+    /// <summary>UI surrogate — true when <see cref="DiscordClientSecret"/> is set.</summary>
+    private bool? _hasDiscordSecret;
+    [AutoSaveIgnore]
+    public bool HasDiscordClientSecret
+    {
+        get => _hasDiscordSecret ?? !string.IsNullOrEmpty(DiscordClientSecret);
+        set => _hasDiscordSecret = value;
+    }
+
     [JsonIgnore]
+    [AutoSaveIgnore]
     public bool GoogleEnabled =>
         !string.IsNullOrWhiteSpace(GoogleClientId) && !string.IsNullOrWhiteSpace(GoogleClientSecret);
 
     [JsonIgnore]
+    [AutoSaveIgnore]
     public bool DiscordEnabled =>
         !string.IsNullOrWhiteSpace(DiscordClientId) && !string.IsNullOrWhiteSpace(DiscordClientSecret);
 }

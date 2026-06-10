@@ -1,8 +1,8 @@
-using System.Security.Claims;
-using System.Text.Json;
-using GZCTF.Models.Internal;
+using AspNet.Security.OAuth.Discord;
+using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Options;
 
 namespace GZCTF.Extensions.Startup;
 
@@ -30,42 +30,24 @@ internal static class IdentityExtension
                 });
             });
 
-            // External OAuth providers. Registered only when configured (client id +
-            // secret present) — see OAuthConfig. Both use the default external sign-in
-            // scheme (IdentityConstants.ExternalScheme set above), which the account
-            // controller's external-callback flow consumes via SignInManager.
-            var oauth = builder.Configuration.GetSection(nameof(OAuthConfig)).Get<OAuthConfig>();
-            if (oauth?.GoogleEnabled == true)
-                authBuilder.AddGoogle(options =>
-                {
-                    options.ClientId = oauth.GoogleClientId!;
-                    options.ClientSecret = oauth.GoogleClientSecret!;
-                    // Surface Google's verified-email flag so the callback can require a
-                    // provider-verified email before linking/creating. Newer userinfo uses
-                    // "email_verified"; older uses "verified_email".
-                    options.Events.OnCreatingTicket = ctx =>
-                    {
-                        if (IsJsonTrue(ctx.User, "email_verified") || IsJsonTrue(ctx.User, "verified_email"))
-                            ctx.Identity?.AddClaim(new Claim(ContextHelper.ExternalEmailVerifiedClaimType, "true"));
-                        return Task.CompletedTask;
-                    };
-                });
-            if (oauth?.DiscordEnabled == true)
-                authBuilder.AddDiscord(options =>
-                {
-                    options.ClientId = oauth.DiscordClientId!;
-                    options.ClientSecret = oauth.DiscordClientSecret!;
-                    // "identify" is requested by default; "email" is needed to read the
-                    // address. Discord's user object exposes a boolean "verified" (email
-                    // verified) — surface it for the callback's verified-email gate.
-                    options.Scope.Add("email");
-                    options.Events.OnCreatingTicket = ctx =>
-                    {
-                        if (IsJsonTrue(ctx.User, "verified"))
-                            ctx.Identity?.AddClaim(new Claim(ContextHelper.ExternalEmailVerifiedClaimType, "true"));
-                        return Task.CompletedTask;
-                    };
-                });
+            // External OAuth providers (Google + Discord). Registered unconditionally; their
+            // credentials come from the DB-backed OAuthConfig via ConfigureExternalOAuthOptions
+            // (admin-editable at /admin/settings). The ConfigurationChangeTokenSource ties each
+            // scheme's options to the config reload token, so credential changes apply WITHOUT a
+            // restart. Both use the default external sign-in scheme (IdentityConstants.ExternalScheme
+            // set above), which the account controller's external-callback flow consumes. An
+            // unconfigured provider validates as disabled (empty client id) and is never
+            // challenged — the ExternalLogin endpoint + the sign-in buttons gate on OAuthConfig.
+            authBuilder.AddGoogle(_ => { });
+            authBuilder.AddDiscord(_ => { });
+            builder.Services.AddSingleton<IConfigureOptions<GoogleOptions>, ConfigureExternalOAuthOptions>();
+            builder.Services.AddSingleton<IConfigureOptions<DiscordAuthenticationOptions>, ConfigureExternalOAuthOptions>();
+            builder.Services.AddSingleton<IOptionsChangeTokenSource<GoogleOptions>>(
+                new ConfigurationChangeTokenSource<GoogleOptions>(
+                    GoogleDefaults.AuthenticationScheme, builder.Configuration));
+            builder.Services.AddSingleton<IOptionsChangeTokenSource<DiscordAuthenticationOptions>>(
+                new ConfigurationChangeTokenSource<DiscordAuthenticationOptions>(
+                    DiscordAuthenticationDefaults.AuthenticationScheme, builder.Configuration));
 
             builder.Services.AddIdentityCore<UserInfo>(options =>
                 {
@@ -87,15 +69,4 @@ internal static class IdentityExtension
             );
         }
     }
-
-    /// <summary>
-    /// Whether <paramref name="json"/> has a property <paramref name="key"/> that is a JSON
-    /// boolean <c>true</c> (or the string "true"). Used to read provider verified-email flags.
-    /// </summary>
-    private static bool IsJsonTrue(JsonElement json, string key) =>
-        json.ValueKind == JsonValueKind.Object
-        && json.TryGetProperty(key, out var value)
-        && (value.ValueKind == JsonValueKind.True
-            || (value.ValueKind == JsonValueKind.String
-                && bool.TryParse(value.GetString(), out var parsed) && parsed));
 }

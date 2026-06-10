@@ -418,6 +418,9 @@ export interface ConfigEditModel {
   email?: EmailConfig | null;
   /** Captcha provider for login / register flows. */
   captcha?: CaptchaConfig | null;
+  /** External OAuth login providers (Google / Discord). Client secrets are
+   *  XOR-obfuscated at rest and blanked on read. Changes apply without a restart. */
+  oAuth?: OAuthConfig | null;
   /** Pull credentials for a private image registry. */
   registry?: RegistryConfig | null;
   /** Reverse-proxy trust list — admin-editable override for the
@@ -426,6 +429,24 @@ export interface ConfigEditModel {
   /** Read-only view of the active container backend (Docker / Kubernetes).
    *  Set at startup; populated on GET, ignored on PUT. */
   containerProvider?: ContainerProviderInfoModel | null;
+}
+
+/** External OAuth login providers (Google, Discord). Admin-editable; client
+ *  secrets are XOR-obfuscated at rest and blanked on read (the hasX surrogates
+ *  surface presence). Changes apply without a restart. */
+export interface OAuthConfig {
+  /** Google OAuth client id */
+  googleClientId?: string | null;
+  /** Google OAuth client secret (XOR-obfuscated at rest) */
+  googleClientSecret?: string | null;
+  /** Discord OAuth client id */
+  discordClientId?: string | null;
+  /** Discord OAuth client secret (XOR-obfuscated at rest) */
+  discordClientSecret?: string | null;
+  /** Whether a Google client secret is stored */
+  hasGoogleClientSecret?: boolean;
+  /** Whether a Discord client secret is stored */
+  hasDiscordClientSecret?: boolean;
 }
 
 /** The active container backend. */

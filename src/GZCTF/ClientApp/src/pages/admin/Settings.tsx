@@ -39,6 +39,7 @@ import {
   mdiHammerWrench,
   mdiHeartPulse,
   mdiInformationOutline,
+  mdiKeyChainVariant,
   mdiKubernetes,
   mdiPackageVariantClosed,
   mdiRestore,
@@ -68,6 +69,7 @@ import api, {
   EmailConfig,
   GlobalConfig,
   MyIpInfoModel,
+  OAuthConfig,
   ProxyTrustConfig,
   RegistryConfig,
 } from '@Api'
@@ -85,6 +87,7 @@ const Configs: FC = () => {
   const [buildRegistry, setBuildRegistry] = useState<BuildRegistryConfig | null>()
   const [email, setEmail] = useState<EmailConfig | null>()
   const [captcha, setCaptcha] = useState<CaptchaConfig | null>()
+  const [oauth, setOAuth] = useState<OAuthConfig | null>()
   const [registry, setRegistry] = useState<RegistryConfig | null>()
   const [proxyTrust, setProxyTrust] = useState<ProxyTrustConfig | null>()
   // Local-only state for the "Send test email" button — never
@@ -105,6 +108,7 @@ const Configs: FC = () => {
     | 'build_registry'
     | 'email'
     | 'captcha'
+    | 'oauth'
     | 'registry_pull'
     | 'diagnostics'
   const [activeSection, setActiveSection] = useState<SectionKey>('platform')
@@ -125,6 +129,7 @@ const Configs: FC = () => {
       setBuildRegistry(configs.buildRegistry)
       setEmail(configs.email)
       setCaptcha(configs.captcha)
+      setOAuth(configs.oAuth)
       setRegistry(configs.registry)
       setProxyTrust(configs.proxyTrust)
       setColor(configs.globalConfig?.customTheme)
@@ -139,6 +144,7 @@ const Configs: FC = () => {
         buildRegistry: configs.buildRegistry,
         email: configs.email,
         captcha: configs.captcha,
+        oauth: configs.oAuth,
         registry: configs.registry,
         proxyTrust: configs.proxyTrust,
       })
@@ -154,6 +160,7 @@ const Configs: FC = () => {
     buildRegistry,
     email,
     captcha,
+    oauth,
     registry,
     proxyTrust,
   })
@@ -185,10 +192,15 @@ const Configs: FC = () => {
           : captchaConfigured
             ? 'configured'
             : 'attention',
+      oauth:
+        (oauth?.googleClientId && oauth?.hasGoogleClientSecret) ||
+        (oauth?.discordClientId && oauth?.hasDiscordClientSecret)
+          ? 'configured'
+          : 'inactive',
       registry_pull: registry?.isConfigured ? 'configured' : 'inactive',
       diagnostics: 'configured',
     }
-  }, [accountPolicy, buildRegistry, email, captcha, registry])
+  }, [accountPolicy, buildRegistry, email, captcha, oauth, registry])
 
   const navItems: { key: SectionKey; icon: string }[] = [
     { key: 'platform', icon: mdiViewDashboardOutline },
@@ -196,6 +208,7 @@ const Configs: FC = () => {
     { key: 'container', icon: mdiCubeOutline },
     { key: 'email', icon: mdiEmailOutline },
     { key: 'captcha', icon: mdiShieldCheckOutline },
+    { key: 'oauth', icon: mdiKeyChainVariant },
     { key: 'registry_pull', icon: mdiPackageVariantClosed },
     { key: 'build_registry', icon: mdiHammerWrench },
     { key: 'diagnostics', icon: mdiHeartPulse },
@@ -331,6 +344,7 @@ const Configs: FC = () => {
       buildRegistry,
       email,
       captcha,
+      oAuth: oauth,
       registry,
       proxyTrust,
     })
@@ -1038,6 +1052,71 @@ const Configs: FC = () => {
               </Button>
             </Group>
           )}
+        </Stack>
+
+        )}
+        {activeSection === 'oauth' && (
+        <Stack gap="sm">
+          <Group justify="space-between">
+            <Title order={2}>{t('admin.content.settings.oauth.title', 'OAuth Login')}</Title>
+            <SectionHelp
+              description={t(
+                'admin.content.settings.oauth.description',
+                'Let users sign in with Google or Discord. A provider turns on once both its client id and secret are set. Changes apply immediately — no restart needed.',
+              )}
+            />
+          </Group>
+          <Text size="sm" c="dimmed">
+            {t(
+              'admin.content.settings.oauth.redirect_hint',
+              'Register these provider redirect URIs (HTTPS required), then enter the client id + secret. For Discord, enable the identify + email scopes.',
+            )}
+          </Text>
+          <Text size="xs" c="dimmed" ff="monospace">
+            {window.location.origin}/signin-google
+            <br />
+            {window.location.origin}/signin-discord
+          </Text>
+          <Divider label="Google" labelPosition="left" />
+          <SimpleGrid cols={2}>
+            <TextInput
+              label={t('admin.content.settings.oauth.google_client_id.label', 'Google client ID')}
+              disabled={disabled}
+              value={oauth?.googleClientId ?? ''}
+              onChange={(e) => setOAuth({ ...oauth, googleClientId: e.currentTarget.value })}
+            />
+            <PasswordInput
+              label={t('admin.content.settings.oauth.google_client_secret.label', 'Google client secret')}
+              placeholder={
+                oauth?.hasGoogleClientSecret
+                  ? t('admin.content.settings.oauth.secret_configured', '(configured — leave blank to keep)')
+                  : ''
+              }
+              disabled={disabled}
+              value={oauth?.googleClientSecret ?? ''}
+              onChange={(e) => setOAuth({ ...oauth, googleClientSecret: e.currentTarget.value })}
+            />
+          </SimpleGrid>
+          <Divider label="Discord" labelPosition="left" />
+          <SimpleGrid cols={2}>
+            <TextInput
+              label={t('admin.content.settings.oauth.discord_client_id.label', 'Discord client ID')}
+              disabled={disabled}
+              value={oauth?.discordClientId ?? ''}
+              onChange={(e) => setOAuth({ ...oauth, discordClientId: e.currentTarget.value })}
+            />
+            <PasswordInput
+              label={t('admin.content.settings.oauth.discord_client_secret.label', 'Discord client secret')}
+              placeholder={
+                oauth?.hasDiscordClientSecret
+                  ? t('admin.content.settings.oauth.secret_configured', '(configured — leave blank to keep)')
+                  : ''
+              }
+              disabled={disabled}
+              value={oauth?.discordClientSecret ?? ''}
+              onChange={(e) => setOAuth({ ...oauth, discordClientSecret: e.currentTarget.value })}
+            />
+          </SimpleGrid>
         </Stack>
 
         )}

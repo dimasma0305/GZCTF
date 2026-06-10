@@ -39,6 +39,14 @@ public class ConfigEditModel
     public CaptchaConfig? Captcha { get; set; }
 
     /// <summary>
+    /// External OAuth login providers (Google / Discord). Client secrets are
+    /// XOR-obfuscated at rest and blanked on read (HasXClientSecret surrogates
+    /// surface presence). Changes apply without a restart — the auth handler
+    /// options are tied to the config reload token.
+    /// </summary>
+    public OAuthConfig? OAuth { get; set; }
+
+    /// <summary>
     /// Pull credentials for a private image registry. Single-entry —
     /// covers the common "we host private images on ghcr.io" case.
     /// </summary>
