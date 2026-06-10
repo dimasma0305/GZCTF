@@ -46,9 +46,12 @@ public interface ISubmissionRepository : IRepository
     /// <summary>
     /// Recent submissions for the public attack-feed seed. Includes both
     /// accepted and rejected answers so the page can render history on load.
+    /// <paramref name="beforeUtc"/> bounds the seed to submissions at/before that
+    /// instant (pass the game's EndTimeUtc) so post-game practice solves don't
+    /// surface on the public feed.
     /// </summary>
     public Task<Submission[]> GetRecentSubmissionsForAttackFeed(int gameId, int limit,
-        CancellationToken token = default);
+        DateTimeOffset? beforeUtc = null, CancellationToken token = default);
 
     /// <summary>
     /// Get submissions for a specific team, ordered by time descending

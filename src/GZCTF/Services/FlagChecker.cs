@@ -127,21 +127,28 @@ public class FlagChecker(
 
                                 // Access-event-based cheat checks. Best-effort: must never
                                 // block accept-path side effects, which have already run.
-                                try
+                                // Skipped once the game has ended: cheat correlation is a
+                                // live-game concern, and post-game practice solves (now real
+                                // Accepted submissions via the practice FlagContext) must not
+                                // add suspicion to the just-ended game's report.
+                                if (item.Game!.EndTimeUtc > DateTimeOffset.UtcNow)
                                 {
-                                    var detector = scope.ServiceProvider
-                                        .GetRequiredService<IContainerAccessSubmissionDetector>();
-                                    var providerOptions = scope.ServiceProvider
-                                        .GetRequiredService<IOptions<ContainerProvider>>().Value;
-                                    var platformProxyEnabled =
-                                        providerOptions.PortMappingType == ContainerPortMappingType.PlatformProxy;
-                                    await detector.RunChecks(item, platformProxyEnabled, token);
-                                }
-                                catch (Exception ex)
-                                {
-                                    logger.LogError(ex,
-                                        "ContainerAccessSubmissionDetector failed for submission {Id}",
-                                        item.Id);
+                                    try
+                                    {
+                                        var detector = scope.ServiceProvider
+                                            .GetRequiredService<IContainerAccessSubmissionDetector>();
+                                        var providerOptions = scope.ServiceProvider
+                                            .GetRequiredService<IOptions<ContainerProvider>>().Value;
+                                        var platformProxyEnabled =
+                                            providerOptions.PortMappingType == ContainerPortMappingType.PlatformProxy;
+                                        await detector.RunChecks(item, platformProxyEnabled, token);
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        logger.LogError(ex,
+                                            "ContainerAccessSubmissionDetector failed for submission {Id}",
+                                            item.Id);
+                                    }
                                 }
                                 break;
                             }

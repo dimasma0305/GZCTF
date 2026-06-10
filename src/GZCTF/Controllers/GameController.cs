@@ -128,6 +128,14 @@ public class GameController(
             return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Game_NotFound)],
                 StatusCodes.Status404NotFound));
 
+        // Hidden (draft/unpublished) games must not leak via direct ID enumeration to
+        // anonymous or ordinary users — only monitors/admins may preview them. The games
+        // list already filters Hidden; this closes the by-ID path. Mirrors the
+        // AttackFeed/KothHills/AdGameController Hidden gates.
+        if (gameInfo.Hidden && !await ContextHelper.HasMonitor(HttpContext))
+            return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Game_NotFound)],
+                StatusCodes.Status404NotFound));
+
         var count = await participationRepository.GetParticipationCount(id, token);
 
         Participation? part = null;
@@ -359,10 +367,17 @@ public class GameController(
             return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Game_NotFound)],
                 StatusCodes.Status404NotFound));
 
+        var isMonitor = await ContextHelper.HasMonitor(HttpContext);
+
+        // Hidden (draft/unpublished) games are not publicly viewable by ID; only
+        // monitors/admins may preview their board. Closes anonymous ID enumeration.
+        if (game.Hidden && !isMonitor)
+            return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Game_NotFound)],
+                StatusCodes.Status404NotFound));
+
         if (DateTimeOffset.UtcNow < game.StartTimeUtc)
             return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Game_NotStarted)]));
 
-        var isMonitor = await ContextHelper.HasMonitor(HttpContext);
         var now = DateTimeOffset.UtcNow;
         var isFrozenView = !isMonitor
                            && game.FreezeTimeUtc is { } freeze
@@ -433,7 +448,7 @@ public class GameController(
             (game.FreezeTimeUtc is { } freeze && nowUtc >= freeze && nowUtc < game.EndTimeUtc))
             return Ok(Array.Empty<AttackEvent>());
 
-        var subs = await submissionRepository.GetRecentSubmissionsForAttackFeed(id, limit, token);
+        var subs = await submissionRepository.GetRecentSubmissionsForAttackFeed(id, limit, game.EndTimeUtc, token);
 
         // Seed events use a coarse SubmissionType (Normal vs. Unaccepted). The
         // live hub delivers precise blood types once FlagChecker resolves them.
@@ -658,6 +673,12 @@ public class GameController(
         var game = await gameRepository.GetGameById(id, token);
 
         if (game is null)
+            return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Game_NotFound)],
+                StatusCodes.Status404NotFound));
+
+        // Hidden (draft/unpublished) games' notices (which often carry hints) must not
+        // leak via direct ID to anonymous/ordinary users — only monitors/admins.
+        if (game.Hidden && !await ContextHelper.HasMonitor(HttpContext))
             return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Game_NotFound)],
                 StatusCodes.Status404NotFound));
 

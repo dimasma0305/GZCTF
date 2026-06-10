@@ -77,10 +77,12 @@ public class SubmissionRepository(
 
     private async Task SendAttackEventInternal(Submission submission, SubmissionType type)
     {
-        // Gate the live attack feed: never broadcast for Hidden (draft) games, and
-        // suppress during the ICPC freeze window [FreezeTimeUtc, EndTimeUtc) so the
-        // unauth'd AttackHub can't be used to watch late-game scoring the frozen
-        // scoreboard hides. Mirrors the REST AttackFeed + scoreboard-freeze gates.
+        // Gate the live attack feed: never broadcast for Hidden (draft) games, suppress
+        // during the ICPC freeze window [FreezeTimeUtc, EndTimeUtc) so the unauth'd
+        // AttackHub can't be used to watch late-game scoring the frozen scoreboard hides,
+        // and suppress once the game has ended so post-game practice solves (which now
+        // produce real Accepted submissions via the practice FlagContext) aren't
+        // broadcast/attributed to teams. Mirrors the REST AttackFeed + scoreboard gates.
         var gate = await Context.Games.AsNoTracking()
             .Where(g => g.Id == submission.GameId)
             .Select(g => new { g.Hidden, g.FreezeTimeUtc, g.EndTimeUtc })
@@ -88,7 +90,8 @@ public class SubmissionRepository(
         if (gate is null || gate.Hidden)
             return;
         var nowUtc = DateTimeOffset.UtcNow;
-        if (gate.FreezeTimeUtc is { } freeze && nowUtc >= freeze && nowUtc < gate.EndTimeUtc)
+        if (nowUtc >= gate.EndTimeUtc ||
+            (gate.FreezeTimeUtc is { } freeze && nowUtc >= freeze && nowUtc < gate.EndTimeUtc))
             return;
 
         // Prefer navigation-loaded data; fall back to projection if missing.
@@ -135,16 +138,25 @@ public class SubmissionRepository(
     }
 
     public Task<Submission[]> GetRecentSubmissionsForAttackFeed(int gameId, int limit,
-        CancellationToken token = default) =>
-        Context.Submissions
+        DateTimeOffset? beforeUtc = null, CancellationToken token = default)
+    {
+        var query = Context.Submissions
             .AsNoTracking()
             .Where(s => s.GameId == gameId
-                        && (s.Status == AnswerResult.Accepted || s.Status == AnswerResult.WrongAnswer))
+                        && (s.Status == AnswerResult.Accepted || s.Status == AnswerResult.WrongAnswer));
+
+        // Bound to in-game submissions (pass the game's EndTimeUtc) so post-game
+        // practice solves don't trickle onto the public seed once the game has ended.
+        if (beforeUtc is { } cutoff)
+            query = query.Where(s => s.SubmitTimeUtc <= cutoff);
+
+        return query
             .Include(s => s.Team)
             .Include(s => s.GameChallenge)
             .OrderByDescending(s => s.SubmitTimeUtc)
             .Take(limit)
             .ToArrayAsync(token);
+    }
 
 
     private IQueryable<Submission> GetSubmissionsByType(AnswerResult? type = null)

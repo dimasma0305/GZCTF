@@ -195,7 +195,14 @@ public class GameInstanceRepository(
             CPUCount = challenge.CPUCount ?? 1,
             MemoryLimit = challenge.MemoryLimit ?? 64,
             StorageLimit = challenge.StorageLimit ?? 256,
-            NetworkMode = challenge.NetworkMode ?? NetworkMode.Open,
+            // A&D/KotH challenges carry their egress policy on AdAllowEgress, not the
+            // jeopardy NetworkMode field. Post-game practice instances launch through this
+            // generic path, so honour AdAllowEgress here too — otherwise an operator who
+            // isolated an A&D challenge (AdAllowEgress=false → Isolated in-game) would see
+            // its practice container silently regain full internet egress on the Open bridge.
+            NetworkMode = challenge.Type.UsesAdEngine()
+                ? (challenge.AdAllowEgress ? NetworkMode.Open : NetworkMode.Isolated)
+                : challenge.NetworkMode ?? NetworkMode.Open,
             EnableTrafficCapture = challenge.EnableTrafficCapture && game.IsActive,
             ExposedPort = challenge.ExposePort ??
                           throw new ArgumentException(
