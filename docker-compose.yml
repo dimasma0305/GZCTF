@@ -25,6 +25,10 @@ services:
       - ConnectionStrings__Database=Host=postgres;Database=gzctf;Username=gzctf;Password=gzctf
       - ConnectionStrings__Redis=redis:6379,password=gzctf
       - XorKey=gzctf-xor-key
+      # Public scheme for absolute-URL generation (OAuth redirect_uri, email links) when
+      # behind a TLS-terminating proxy. X-Forwarded-Proto is honoured if the proxy sends
+      # it; this is the fallback when it doesn't. Set to http only for a plain-HTTP host.
+      - PublicScheme=https
       # --- External OAuth login (Google / Discord) ---
       # Primary path: configure these in the admin UI at /admin/settings -> OAuth
       # (DB-backed, secrets obfuscated, applies live without a restart). A provider's

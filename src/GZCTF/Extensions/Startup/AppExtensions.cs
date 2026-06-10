@@ -62,6 +62,24 @@ internal static class AppExtensions
 
             app.UseForwardedHeaders();
 
+            // Behind a TLS-terminating reverse proxy the container only sees http on the
+            // proxy→container hop, and the proxy's source IP isn't a default "known proxy",
+            // so UseForwardedHeaders won't promote the scheme. Honour X-Forwarded-Proto
+            // directly here (the container is only reachable via the proxy) so generated
+            // absolute URLs — OAuth redirect_uri, confirmation/reset email links — use the
+            // public https origin instead of http. PublicScheme (env) forces a scheme when
+            // the proxy doesn't send the header; set PublicScheme=https for an HTTPS gateway.
+            var forcedScheme = app.Configuration["PublicScheme"];
+            app.Use(async (context, next) =>
+            {
+                var proto = context.Request.Headers["X-Forwarded-Proto"].FirstOrDefault();
+                if (!string.IsNullOrEmpty(proto))
+                    context.Request.Scheme = proto.Split(',')[0].Trim();
+                else if (!string.IsNullOrEmpty(forcedScheme))
+                    context.Request.Scheme = forcedScheme;
+                await next();
+            });
+
             if (app.Environment.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();
