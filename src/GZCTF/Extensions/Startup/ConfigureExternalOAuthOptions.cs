@@ -41,6 +41,9 @@ internal sealed class ConfigureExternalOAuthOptions(IOptionsMonitor<OAuthConfig>
         var configured = !string.IsNullOrWhiteSpace(config.GoogleClientId) && !string.IsNullOrWhiteSpace(secret);
         options.ClientId = configured ? config.GoogleClientId! : DisabledPlaceholder;
         options.ClientSecret = configured ? secret : DisabledPlaceholder;
+        // Unified OAuth gateway: keep every provider callback under /api/oauth/* (default
+        // is /signin-google). This is the redirect URI to register in the provider console.
+        options.CallbackPath = "/api/oauth/signin-google";
 
         // Surface Google's verified-email flag (newer userinfo: email_verified;
         // older: verified_email) so the callback can require a verified email.
@@ -64,6 +67,9 @@ internal sealed class ConfigureExternalOAuthOptions(IOptionsMonitor<OAuthConfig>
         var configured = !string.IsNullOrWhiteSpace(config.DiscordClientId) && !string.IsNullOrWhiteSpace(secret);
         options.ClientId = configured ? config.DiscordClientId! : DisabledPlaceholder;
         options.ClientSecret = configured ? secret : DisabledPlaceholder;
+        // Unified OAuth gateway: keep every provider callback under /api/oauth/* (default
+        // is /signin-discord). This is the redirect URI to register in the provider console.
+        options.CallbackPath = "/api/oauth/signin-discord";
 
         // "identify" is requested by default; "email" is needed to read the address.
         if (!options.Scope.Contains("email"))

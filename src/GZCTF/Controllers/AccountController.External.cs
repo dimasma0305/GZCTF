@@ -37,12 +37,12 @@ public partial class AccountController
     /// <param name="returnUrl">Local URL to return to after sign-in (defaults to <c>/</c>)</param>
     /// <response code="302">Redirect to the provider's authorization endpoint</response>
     /// <response code="400">Unknown or disabled provider</response>
-    [HttpGet]
+    [HttpGet("/api/oauth/{provider}")]
     [EnableRateLimiting(nameof(RateLimiter.LimitPolicy.Register))]
     [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status400BadRequest)]
     public IActionResult ExternalLogin(
         [FromServices] IOptionsSnapshot<Models.Internal.OAuthConfig> oauthConfig,
-        [FromQuery] string provider,
+        [FromRoute] string provider,
         [FromQuery] string? returnUrl = null)
     {
         var scheme = NormalizeProvider(provider);
@@ -78,7 +78,7 @@ public partial class AccountController
     /// <param name="remoteError">Error reported by the provider, if any</param>
     /// <param name="token"></param>
     /// <response code="302">Redirect into the SPA (success or error)</response>
-    [HttpGet]
+    [HttpGet("/api/oauth/callback")]
     [EnableRateLimiting(nameof(RateLimiter.LimitPolicy.Register))]
     public async Task<IActionResult> ExternalCallback(
         [FromServices] AppDbContext dbContext,

@@ -27,7 +27,7 @@ export const OAuthButtons: FC = () => {
 
   const from = params.get('from') ?? '/'
   const go = (provider: string) => {
-    window.location.href = `/api/account/externalLogin?provider=${provider}&returnUrl=${encodeURIComponent(from)}`
+    window.location.href = `/api/oauth/${provider}?returnUrl=${encodeURIComponent(from)}`
   }
 
   return (
@@ -38,7 +38,7 @@ export const OAuthButtons: FC = () => {
           fullWidth
           variant="default"
           leftSection={<Icon path={mdiGoogle} size={0.9} />}
-          onClick={() => go('Google')}
+          onClick={() => go('google')}
         >
           {t('account.oauth.google', 'Continue with Google')}
         </Button>
@@ -48,7 +48,7 @@ export const OAuthButtons: FC = () => {
           fullWidth
           variant="default"
           leftSection={<Icon path={mdiDiscordPath} size={0.9} />}
-          onClick={() => go('Discord')}
+          onClick={() => go('discord')}
         >
           {t('account.oauth.discord', 'Continue with Discord')}
         </Button>

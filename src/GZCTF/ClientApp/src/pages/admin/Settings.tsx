@@ -1073,9 +1073,9 @@ const Configs: FC = () => {
             )}
           </Text>
           <Text size="xs" c="dimmed" ff="monospace">
-            {window.location.origin}/signin-google
+            {window.location.origin}/api/oauth/signin-google
             <br />
-            {window.location.origin}/signin-discord
+            {window.location.origin}/api/oauth/signin-discord
           </Text>
           <Divider label="Google" labelPosition="left" />
           <SimpleGrid cols={2}>
