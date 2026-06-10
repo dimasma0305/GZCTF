@@ -7,6 +7,7 @@ import { FC, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router'
 import { AccountView } from '@Components/AccountView'
+import { OAuthButtons } from '@Components/OAuthButtons'
 import { Captcha, useCaptchaRef } from '@Components/Captcha'
 import { StrengthPasswordInput } from '@Components/StrengthPasswordInput'
 import { encryptApiData } from '@Utils/Crypto'
@@ -217,6 +218,7 @@ const Register: FC = () => {
       <Button type="submit" fullWidth onClick={onRegister} disabled={disabled}>
         {t('account.button.register')}
       </Button>
+      <OAuthButtons />
     </AccountView>
   )
 }

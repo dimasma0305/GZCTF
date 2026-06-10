@@ -3234,6 +3234,10 @@ export interface ClientConfig {
   renewalWindow?: number;
   /** Enable browser fingerprinting in Login/Register */
   enableBrowserFingerprint?: boolean;
+  /** Whether Google OAuth sign-in is configured and available */
+  enableGoogleAuth?: boolean;
+  /** Whether Discord OAuth sign-in is configured and available */
+  enableDiscordAuth?: boolean;
 }
 
 /** Client CAPTCHA information */

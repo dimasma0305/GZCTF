@@ -95,6 +95,49 @@ public class AccountPolicy
 }
 
 /// <summary>
+/// External OAuth login providers (Google, Discord).
+/// </summary>
+/// <remarks>
+/// Configured at startup from environment/appsettings only — the authentication
+/// handlers are built once at boot, so unlike most config this is NOT hot-reloadable
+/// via the admin settings UI. A provider's sign-in button only appears, and its
+/// endpoints only function, when BOTH its client id and client secret are present.
+/// Env vars (docker-compose): <c>OAuthConfig__GoogleClientId</c>,
+/// <c>OAuthConfig__GoogleClientSecret</c>, <c>OAuthConfig__DiscordClientId</c>,
+/// <c>OAuthConfig__DiscordClientSecret</c>.
+/// </remarks>
+public class OAuthConfig
+{
+    /// <summary>
+    /// Google OAuth client id
+    /// </summary>
+    public string? GoogleClientId { get; set; }
+
+    /// <summary>
+    /// Google OAuth client secret
+    /// </summary>
+    public string? GoogleClientSecret { get; set; }
+
+    /// <summary>
+    /// Discord OAuth client id
+    /// </summary>
+    public string? DiscordClientId { get; set; }
+
+    /// <summary>
+    /// Discord OAuth client secret
+    /// </summary>
+    public string? DiscordClientSecret { get; set; }
+
+    [JsonIgnore]
+    public bool GoogleEnabled =>
+        !string.IsNullOrWhiteSpace(GoogleClientId) && !string.IsNullOrWhiteSpace(GoogleClientSecret);
+
+    [JsonIgnore]
+    public bool DiscordEnabled =>
+        !string.IsNullOrWhiteSpace(DiscordClientId) && !string.IsNullOrWhiteSpace(DiscordClientSecret);
+}
+
+/// <summary>
 /// Container policy
 /// </summary>
 public class ContainerPolicy
@@ -460,6 +503,16 @@ public partial class ClientConfig
     /// </summary>
     public bool EnableBrowserFingerprint { get; set; }
 
+    /// <summary>
+    /// Whether Google OAuth sign-in is configured and available
+    /// </summary>
+    public bool EnableGoogleAuth { get; set; }
+
+    /// <summary>
+    /// Whether Discord OAuth sign-in is configured and available
+    /// </summary>
+    public bool EnableDiscordAuth { get; set; }
+
     [JsonIgnore]
     public DateTimeOffset UpdateTimeUtc { get; set; } = DateTimeOffset.UtcNow;
 
@@ -469,10 +522,12 @@ public partial class ClientConfig
             serviceProvider.GetRequiredService<IOptionsSnapshot<ContainerPolicy>>().Value,
             serviceProvider.GetRequiredService<IOptionsSnapshot<ContainerProvider>>().Value,
             serviceProvider.GetRequiredService<IOptionsSnapshot<ManagedConfig>>().Value,
-            serviceProvider.GetRequiredService<IOptionsSnapshot<AccountPolicy>>().Value);
+            serviceProvider.GetRequiredService<IOptionsSnapshot<AccountPolicy>>().Value,
+            serviceProvider.GetRequiredService<IOptionsSnapshot<OAuthConfig>>().Value);
 
     private static ClientConfig FromConfigs(GlobalConfig globalConfig, ContainerPolicy containerPolicy,
-        ContainerProvider containerProvider, ManagedConfig managedConfig, AccountPolicy accountPolicy) =>
+        ContainerProvider containerProvider, ManagedConfig managedConfig, AccountPolicy accountPolicy,
+        OAuthConfig oauthConfig) =>
         new()
         {
             Title = globalConfig.Title,
@@ -485,7 +540,9 @@ public partial class ClientConfig
             DefaultLifetime = containerPolicy.DefaultLifetime,
             ExtensionDuration = containerPolicy.ExtensionDuration,
             RenewalWindow = containerPolicy.RenewalWindow,
-            EnableBrowserFingerprint = accountPolicy.EnableBrowserFingerprint
+            EnableBrowserFingerprint = accountPolicy.EnableBrowserFingerprint,
+            EnableGoogleAuth = oauthConfig.GoogleEnabled,
+            EnableDiscordAuth = oauthConfig.DiscordEnabled
         };
 }
 

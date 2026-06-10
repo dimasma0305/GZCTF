@@ -7,6 +7,7 @@ import { FC, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { AccountView } from '@Components/AccountView'
+import { OAuthButtons } from '@Components/OAuthButtons'
 import { Captcha, useCaptchaRef } from '@Components/Captcha'
 import { encryptApiData } from '@Utils/Crypto'
 import { tryGetClientError } from '@Utils/Shared'
@@ -46,6 +47,43 @@ const Login: FC = () => {
       }, 200)
     }
   }, [user, needRedirect])
+
+  // Surface OAuth callback errors redirected here as ?error=oauth_* (the backend redirects
+  // to /account/login on any external sign-in failure or admin-approval-pending outcome).
+  useEffect(() => {
+    const error = params.get('error')
+    if (!error?.startsWith('oauth_')) return
+
+    const messages: Record<string, string> = {
+      oauth_await_approval: t(
+        'account.oauth.error.await_approval',
+        'Your account was created and is awaiting administrator approval.',
+      ),
+      oauth_register_disabled: t('account.oauth.error.register_disabled', 'Registration is currently disabled.'),
+      oauth_email_unverified: t(
+        'account.oauth.error.email_unverified',
+        'Your provider account email is not verified, so it cannot be used to sign in.',
+      ),
+      oauth_no_email: t('account.oauth.error.no_email', 'The provider did not share an email address.'),
+      oauth_email_domain: t('account.oauth.error.email_domain', 'Your email domain is not allowed on this platform.'),
+      oauth_account_disabled: t('account.oauth.error.account_disabled', 'This account has been disabled.'),
+      oauth_anti_cheat: t(
+        'account.oauth.error.anti_cheat',
+        'Sign-in was blocked by an anti-cheat policy (duplicate IP or device).',
+      ),
+    }
+    const isInfo = error === 'oauth_await_approval'
+    showNotification({
+      color: isInfo ? 'orange' : 'red',
+      title: isInfo
+        ? t('account.oauth.error.info_title', 'Almost there')
+        : t('account.oauth.error.title', 'Sign-in failed'),
+      message:
+        messages[error] ??
+        t('account.oauth.error.generic', 'External sign-in failed. Please try again or use your password.'),
+      icon: <Icon path={isInfo ? mdiCheck : mdiClose} size={1} />,
+    })
+  }, [])
 
   const executeLogin = async () => {
     const unameInvalid = uname.length === 0
@@ -218,6 +256,7 @@ const Login: FC = () => {
           </Button>
         </Grid.Col>
       </Grid>
+      <OAuthButtons />
     </AccountView>
   )
 }

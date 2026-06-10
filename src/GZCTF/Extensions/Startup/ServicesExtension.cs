@@ -30,6 +30,7 @@ internal static class ServicesExtension
         {
             builder.AddConfig<EmailConfig>();
             builder.AddConfig<AccountPolicy>();
+            builder.AddConfig<OAuthConfig>();
             builder.AddConfig<GlobalConfig>();
             builder.AddConfig<ManagedConfig>();
             builder.AddConfig<ContainerPolicy>();

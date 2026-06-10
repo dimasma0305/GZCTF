@@ -11,6 +11,12 @@ public static class ContextHelper
 {
     public const string BrowserFingerprintClaimType = "gzctf:browser_fingerprint";
 
+    /// <summary>
+    /// Claim added during external OAuth sign-in when the provider reported the email
+    /// address as verified. Set to "true" by the provider handlers' OnCreatingTicket.
+    /// </summary>
+    public const string ExternalEmailVerifiedClaimType = "gzctf:email_verified";
+
     public static string? GetValidBrowserFingerprint(ClaimsPrincipal? user)
     {
         var fingerprint = user?.FindFirstValue(BrowserFingerprintClaimType);
