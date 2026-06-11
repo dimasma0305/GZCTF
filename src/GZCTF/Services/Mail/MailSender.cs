@@ -16,6 +16,15 @@ public sealed class MailSender : IMailSender, IDisposable
     private readonly CancellationTokenSource _cancellationTokenSource = new();
     private readonly ILogger<MailSender> _logger;
     private readonly ConcurrentQueue<MailContent> _mailQueue = new();
+
+    // Backpressure + retry for the queue. The queue is no longer cleared on a transient SMTP
+    // failure (that dropped mail users were told was sent), so it must be BOUNDED — else a
+    // reachable-then-persistently-down SMTP would grow it without limit — and the worker must
+    // RETRY on its own — else mail queued just before a lull would sit undelivered until the next
+    // unrelated enqueue. `_retryScheduled` (0/1) coalesces pending delayed re-signals.
+    private const int MaxQueuedMails = 1000;
+    private static readonly TimeSpan MailRetryDelay = TimeSpan.FromSeconds(30);
+    private int _retryScheduled;
     private EmailConfig? _options;
     private readonly AsyncManualResetEvent _resetEvent = new();
     private SmtpClient? _smtpClient;
@@ -507,16 +516,40 @@ public sealed class MailSender : IMailSender, IDisposable
                 // A transient connect/auth failure happens BEFORE anything is dequeued, so the old
                 // `_mailQueue.Clear()` here discarded every queued recipient's mail — including
                 // confirm/reset links the user was already told (HTTP 200) had been sent. Do NOT
-                // clear: leave the items queued so they retry on the next signal (next enqueue or
-                // config change), once SMTP recovers. (The genuinely-unconfigured case is still
-                // drained above, with an operator log.)
+                // clear: leave the items queued and re-attempt on a delay so a recovered SMTP drains
+                // the backlog on its own (not only on the next unrelated enqueue). The queue is
+                // bounded at enqueue time, so this can't grow without limit.
                 _logger.LogErrorMessage(e, StaticLocalizer[nameof(Resources.Program.MailSender_MailSendFailed)]);
+                ScheduleMailRetry();
             }
             finally
             {
                 try { await _smtpClient!.DisconnectAsync(true, _cancellationToken); } catch { }
             }
         }
+    }
+
+    /// <summary>
+    /// After a failed batch, re-signal the worker on a delay so a recovered SMTP server drains a
+    /// preserved backlog without waiting for the next unrelated enqueue. Coalesced via
+    /// <see cref="_retryScheduled"/> so repeated failures don't stack timers.
+    /// </summary>
+    private void ScheduleMailRetry()
+    {
+        if (_mailQueue.IsEmpty)
+            return;
+        if (Interlocked.CompareExchange(ref _retryScheduled, 1, 0) != 0)
+            return; // a retry is already pending
+
+        _ = Task.Run(async () =>
+        {
+            try { await Task.Delay(MailRetryDelay, _cancellationToken); }
+            catch (OperationCanceledException) { return; }
+            finally { Interlocked.Exchange(ref _retryScheduled, 0); }
+
+            if (!_cancellationToken.IsCancellationRequested && !_mailQueue.IsEmpty)
+                _resetEvent.Set();
+        });
     }
 
     private bool EnqueueMailTask(string? userName, string? email, string? resetLink, MailType type,
@@ -529,6 +562,17 @@ public sealed class MailSender : IMailSender, IDisposable
         {
             _logger.SystemLog(StaticLocalizer[nameof(Resources.Program.MailSender_InvalidRequest)],
                 TaskStatus.Failed);
+            return false;
+        }
+
+        // Bounded queue: drop (with a log) once the backlog is saturated, so a persistently-down
+        // SMTP server can't grow the in-memory queue without limit. The queue is preserved across
+        // transient failures and retried, so under normal operation it stays near-empty.
+        if (_mailQueue.Count >= MaxQueuedMails)
+        {
+            _logger.SystemLog(
+                $"Mail queue full ({MaxQueuedMails}); dropping mail to {email}. SMTP may be down — check EmailConfig.",
+                TaskStatus.Failed, LogLevel.Warning);
             return false;
         }
 
