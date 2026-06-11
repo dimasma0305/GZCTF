@@ -46,6 +46,12 @@ internal static class AppBuilderExtensions
             {
                 http.AddStandardResilienceHandler();
                 http.AddServiceDiscovery();
+                // Always send a User-Agent. .NET's HttpClient sends none by default, but some
+                // upstreams reject UA-less requests — notably Discord's Cloudflare-fronted API/CDN
+                // (used by the OAuth login token/userinfo calls and avatar import), which documents
+                // UA-less requests as block-eligible (403 / Cloudflare error 1010).
+                http.ConfigureHttpClient(c =>
+                    c.DefaultRequestHeaders.UserAgent.ParseAdd("GZCTF (+https://github.com/GZTimeWalker/GZCTF)"));
             });
         }
 

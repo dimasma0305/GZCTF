@@ -113,16 +113,32 @@ public sealed class GitRepoSyncService(ILogger<GitRepoSyncService> logger)
 
         if (!Directory.Exists(gitDir))
         {
-            // Fresh clone. --depth 1 because we only ever look at HEAD;
-            // we never inspect history. --single-branch keeps the fetch
-            // surface small on repos with hundreds of feature branches.
-            logger.LogInformation("GitRepoSync: cloning {Url} → {Dir}", repoUrl, repoDir);
-            await RunGitAsync(kindDir, [
-                .. authArgs,
-                "clone", "--depth", "1", "--single-branch",
-                .. (string.IsNullOrEmpty(loc.Ref) ? Array.Empty<string>() : new[] { "--branch", loc.Ref }),
-                repoUrl, id.ToString()
-            ], ct);
+            if (IsCommitSha(loc.Ref))
+            {
+                // `git clone --branch <sha>` is REJECTED by git (--branch accepts only a branch/tag
+                // name), which left a SHA-pinned binding permanently wedged with no .git dir. GitHub's
+                // upload-pack has allowReachableSHA1InWant, so init + fetch the SHA directly (the same
+                // path the steady-state fetch uses). --depth 1: we only ever look at HEAD.
+                logger.LogInformation("GitRepoSync: init+fetch commit {Ref} of {Url} → {Dir}",
+                    loc.Ref, repoUrl, repoDir);
+                await RunGitAsync(kindDir, ["init", id.ToString()], ct);
+                await RunGitAsync(repoDir, ["remote", "add", "origin", repoUrl], ct);
+                await RunGitAsync(repoDir, [.. authArgs, "fetch", "--depth", "1", "origin", "--", loc.Ref!], ct);
+                await RunGitAsync(repoDir, ["reset", "--hard", "FETCH_HEAD"], ct);
+            }
+            else
+            {
+                // Fresh clone (default branch, or a pinned branch/tag). --depth 1 because we only ever
+                // look at HEAD; we never inspect history. --single-branch keeps the fetch surface small
+                // on repos with hundreds of feature branches.
+                logger.LogInformation("GitRepoSync: cloning {Url} → {Dir}", repoUrl, repoDir);
+                await RunGitAsync(kindDir, [
+                    .. authArgs,
+                    "clone", "--depth", "1", "--single-branch",
+                    .. (string.IsNullOrEmpty(loc.Ref) ? Array.Empty<string>() : new[] { "--branch", loc.Ref }),
+                    repoUrl, id.ToString()
+                ], ct);
+            }
         }
         else
         {
@@ -275,6 +291,24 @@ public sealed class GitRepoSyncService(ILogger<GitRepoSyncService> logger)
             if (string.IsNullOrEmpty(destRef) || destRef == "HEAD")
                 throw new InvalidOperationException(
                     "Could not resolve current branch name for push; checkout is detached.");
+        }
+        else if (IsCommitSha(loc.Ref))
+        {
+            // Can't push an edit to a commit SHA.
+            throw new InvalidOperationException(
+                $"PushOnEdit cannot push to a commit-SHA ref ('{loc.Ref}'); pin the binding to a writable branch.");
+        }
+        else
+        {
+            // loc.Ref is a branch OR a tag. A tag checks out as DETACHED HEAD, so the old unconditional
+            // `push HEAD:refs/heads/<loc.Ref>` created a PHANTOM BRANCH refs/heads/<tag> distinct from
+            // refs/tags/<tag> — invisible to the read-sync that reads the tag. Only push when the ref
+            // is a real branch (HEAD attached to it); refuse a tag with a clear message.
+            var current = (await RunGitAsync(repoDir, ["rev-parse", "--abbrev-ref", "HEAD"], ct)).Trim();
+            if (string.IsNullOrEmpty(current) || current == "HEAD")
+                throw new InvalidOperationException(
+                    $"PushOnEdit cannot push to a tag ref ('{loc.Ref}'); the checkout is detached. Pin the binding to a writable branch.");
+            destRef = current;
         }
 
         // --depth 1 in clone means the local repo is shallow; the push
@@ -454,6 +488,14 @@ public sealed class GitRepoSyncService(ILogger<GitRepoSyncService> logger)
     /// <para>Works identically for classic <c>ghp_</c> and fine-grained
     /// <c>github_pat_</c> tokens.</para>
     /// </summary>
+    /// <summary>
+    /// True when the ref is a full 40-hex commit SHA. Such a ref can't be used with
+    /// <c>git clone --branch</c> (branch/tag names only) and can't be pushed to, so it takes the
+    /// init+fetch-by-SHA read path and is rejected on PushOnEdit.
+    /// </summary>
+    internal static bool IsCommitSha(string? r) =>
+        !string.IsNullOrEmpty(r) && r.Length == 40 && r.All(Uri.IsHexDigit);
+
     internal static string[] BuildAuthArgs(string? authToken)
     {
         if (string.IsNullOrEmpty(authToken)) return [];

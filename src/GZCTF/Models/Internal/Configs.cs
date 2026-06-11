@@ -582,6 +582,16 @@ public class SmtpConfig
     public string Host { get; set; } = "127.0.0.1";
     public int Port { get; set; } = 587;
     public bool BypassCertVerify { get; set; }
+
+    /// <summary>
+    /// TLS mode for the SMTP connection, as a MailKit <c>SecureSocketOptions</c> name
+    /// (<c>Auto</c> | <c>None</c> | <c>SslOnConnect</c> | <c>StartTls</c> | <c>StartTlsWhenAvailable</c>).
+    /// Empty/unset = <c>Auto</c> (the prior behavior: implicit TLS on 465, opportunistic STARTTLS
+    /// otherwise). Set <c>StartTls</c> to REQUIRE STARTTLS so a server (or a STARTTLS-stripping MITM)
+    /// that doesn't advertise it fails LOUDLY instead of silently sending credentials/reset links in
+    /// cleartext. Leave unset for a local/plaintext relay.
+    /// </summary>
+    public string? SecureSocketOption { get; set; }
 }
 
 public class EmailConfig

@@ -354,7 +354,19 @@ public sealed class AdEgressIsolationService(
     // (Docker may have created it under legacy or nft).
     private static void AppendPreamble(StringBuilder sb)
     {
-        sb.AppendLine("apk add --no-cache iptables ipset >/dev/null 2>&1 || true");
+        // iptables + ipset run from THIS (alpine) helper's filesystem against the host netns; they
+        // aren't in bare alpine, so install them. If apk fails (air-gapped host / mirror down) AND
+        // they aren't already present, ABORT LOUDLY (exit 3) — the old `apk add ... || true` swallowed
+        // the failure and let the script run on with a MISSING binary and still exit 0, silently
+        // no-op'ing the egress containment control with the operator none the wiser. (A baked helper
+        // image with the tools preinstalled would remove the runtime apk dependency entirely — TODO.)
+        sb.AppendLine("if ! command -v iptables >/dev/null 2>&1 || ! command -v ipset >/dev/null 2>&1; then");
+        sb.AppendLine("  apk add --no-cache iptables ipset >/dev/null 2>&1 || true");
+        sb.AppendLine("fi");
+        sb.AppendLine("if ! command -v iptables >/dev/null 2>&1 || ! command -v ipset >/dev/null 2>&1; then");
+        sb.AppendLine("  echo 'iptables/ipset unavailable (apk add failed and not preinstalled) - egress isolation NOT applied' >&2");
+        sb.AppendLine("  exit 3");
+        sb.AppendLine("fi");
         sb.AppendLine("IPT=iptables");
         sb.AppendLine("if ! \"$IPT\" -S DOCKER-USER >/dev/null 2>&1; then");
         sb.AppendLine("  if iptables-legacy -S DOCKER-USER >/dev/null 2>&1; then IPT=iptables-legacy;");
@@ -394,7 +406,9 @@ public sealed class AdEgressIsolationService(
             waitCts.CancelAfter(TimeSpan.FromSeconds(30));
             var wait = await docker.Containers.WaitContainerAsync(id, waitCts.Token);
             if (wait.StatusCode != 0)
-                logger.LogWarning("AdEgressIsolation: helper exited {Code}", wait.StatusCode);
+                logger.LogWarning(
+                    "AdEgressIsolation: helper exited {Code} — egress isolation rules may NOT have been applied this pass (exit 3 = iptables/ipset unavailable on the host; check connectivity to the apk mirror or bake a helper image with them preinstalled)",
+                    wait.StatusCode);
         }
         finally
         {

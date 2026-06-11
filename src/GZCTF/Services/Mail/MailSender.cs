@@ -3,6 +3,7 @@ using System.Net.Security;
 using System.Text;
 using GZCTF.Models.Internal;
 using MailKit.Net.Smtp;
+using MailKit.Security;
 using Microsoft.Extensions.Localization;
 using Microsoft.Extensions.Options;
 using MimeKit;
@@ -110,7 +111,7 @@ public sealed class MailSender : IMailSender, IDisposable
             // surfaced immediately rather than at first send.
             try
             {
-                client.Connect(opts.Smtp.Host, opts.Smtp.Port);
+                client.Connect(opts.Smtp.Host, opts.Smtp.Port, ResolveSecureSocket(opts.Smtp));
                 client.Authenticate(opts.UserName, DecryptPassword(opts.Password));
                 client.Disconnect(true);
             }
@@ -196,7 +197,7 @@ public sealed class MailSender : IMailSender, IDisposable
         try
         {
             using var client = BuildSmtpClient(config);
-            await client.ConnectAsync(config.Smtp.Host, config.Smtp.Port, cancellationToken: token);
+            await client.ConnectAsync(config.Smtp.Host, config.Smtp.Port, ResolveSecureSocket(config.Smtp), token);
 
             if (!string.IsNullOrEmpty(config.UserName))
                 await client.AuthenticateAsync(config.UserName, passwordPlain, token);
@@ -327,7 +328,7 @@ public sealed class MailSender : IMailSender, IDisposable
         {
             if (client.IsConnected)
                 try { await client.DisconnectAsync(true, token); } catch { /* ignore */ }
-            await client.ConnectAsync(_options.Smtp.Host, _options.Smtp.Port, cancellationToken: token);
+            await client.ConnectAsync(_options.Smtp.Host, _options.Smtp.Port, ResolveSecureSocket(_options.Smtp), token);
             await client.AuthenticateAsync(_options.UserName, DecryptPassword(_options.Password), token);
         }
 
@@ -502,7 +503,7 @@ public sealed class MailSender : IMailSender, IDisposable
             {
                 if (!_smtpClient.IsConnected)
                     await _smtpClient.ConnectAsync(_options!.Smtp!.Host, _options.Smtp.Port,
-                        cancellationToken: _cancellationToken);
+                        ResolveSecureSocket(_options.Smtp), _cancellationToken);
 
                 if (!_smtpClient.IsAuthenticated)
                     await _smtpClient.AuthenticateAsync(_options!.UserName, DecryptPassword(_options.Password),
@@ -551,6 +552,19 @@ public sealed class MailSender : IMailSender, IDisposable
                 _resetEvent.Set();
         });
     }
+
+    /// <summary>
+    /// Resolve the MailKit TLS mode for a connect. An explicit operator choice (SmtpConfig
+    /// .SecureSocketOption) wins — letting an admin REQUIRE encryption (e.g. "StartTls") so a server
+    /// or STARTTLS-stripping MITM that doesn't advertise it fails loudly instead of silently sending
+    /// credentials + reset links in cleartext. Unset = Auto (the prior behavior: implicit TLS on 465,
+    /// opportunistic STARTTLS otherwise — safe for a local plaintext relay).
+    /// </summary>
+    private static SecureSocketOptions ResolveSecureSocket(SmtpConfig smtp) =>
+        !string.IsNullOrWhiteSpace(smtp.SecureSocketOption)
+        && Enum.TryParse<SecureSocketOptions>(smtp.SecureSocketOption, ignoreCase: true, out var opt)
+            ? opt
+            : SecureSocketOptions.Auto;
 
     private bool EnqueueMailTask(string? userName, string? email, string? resetLink, MailType type,
         IStringLocalizer<Program> localizer, IOptionsSnapshot<GlobalConfig> options)

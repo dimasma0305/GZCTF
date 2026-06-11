@@ -95,6 +95,18 @@ public class KubernetesManager : IContainerManager
         if (pullFlag && string.IsNullOrEmpty(flagDir))
             flagDir = "/gzctf-flag"; // FlagFilePath must be under a subdir; guard root
 
+        var limits = new Dictionary<string, ResourceQuantity>
+        {
+            ["cpu"] = new($"{config.CPUCount * 100}m"),
+            ["memory"] = new($"{config.MemoryLimit}Mi"),
+        };
+        // StorageLimit <= 0 is the "no quota / unlimited" sentinel (matches DockerManager, which
+        // omits the quota). On K8s a literal `ephemeral-storage: 0Mi` is NOT "unlimited" — the
+        // kubelet treats it as a hard zero-byte cap and EVICTS the pod the moment it (or its shared
+        // emptyDir flag volume) writes anything. So only set the limit when it's a real positive cap.
+        if (config.StorageLimit > 0)
+            limits["ephemeral-storage"] = new($"{config.StorageLimit}Mi");
+
         var challenge = new V1Container
         {
             Name = name,
@@ -104,12 +116,7 @@ public class KubernetesManager : IContainerManager
             Ports = [new V1ContainerPort { ContainerPort = config.ExposedPort }],
             Resources = new V1ResourceRequirements
             {
-                Limits = new Dictionary<string, ResourceQuantity>
-                {
-                    ["cpu"] = new($"{config.CPUCount * 100}m"),
-                    ["memory"] = new($"{config.MemoryLimit}Mi"),
-                    ["ephemeral-storage"] = new($"{config.StorageLimit}Mi")
-                },
+                Limits = limits,
                 Requests = new Dictionary<string, ResourceQuantity>
                 {
                     ["cpu"] = new("10m"), ["memory"] = new("32Mi")

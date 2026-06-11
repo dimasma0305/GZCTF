@@ -81,7 +81,9 @@ public class ContainerAccessSubmissionDetectorTest
         var sus = new RecordingSuspicionService();
         var ip = new StubIpAttribution();
         var options = Options.Create(cfg ?? new CheatDetectionConfig());
-        var det = new ContainerAccessSubmissionDetector(db, sus, ip, options, NullLogger<ContainerAccessSubmissionDetector>.Instance);
+        // ipHelper was removed from the detector (it now reads submission.User.IP directly); the
+        // StubIpAttribution is still returned for the few tests that reference the tuple slot.
+        var det = new ContainerAccessSubmissionDetector(db, sus, options, NullLogger<ContainerAccessSubmissionDetector>.Instance);
         return (det, sus, ip, db);
     }
 
