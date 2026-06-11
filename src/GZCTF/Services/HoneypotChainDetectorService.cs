@@ -98,13 +98,18 @@ public class HoneypotChainDetectorService(
         var participations = await db.Participations
             .AsNoTracking()
             .Where(p => ids.Contains(p.Id))
-            .Select(p => new { p.Id, p.GameId })
+            .Select(p => new { p.Id, p.GameId, p.Game.EndTimeUtc })
             .ToListAsync(token);
         var lookup = participations.ToDictionary(p => p.Id);
 
         foreach (var group in groups)
         {
             if (!lookup.TryGetValue(group.ParticipationId, out var part)) continue;
+
+            // Don't raise suspicion for a game that has already ended: this background sweep
+            // runs continuously, so post-game (practice) honeypot hits would otherwise add
+            // HoneypotChain events to the finished game's cheat report.
+            if (part.EndTimeUtc <= DateTimeOffset.UtcNow) continue;
 
             // Fire HoneypotChain AT MOST ONCE per (participation, game). The bait set grows
             // and the window slides between sweeps, so the per-(Participation, Type, Details)

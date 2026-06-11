@@ -164,7 +164,14 @@ public class FlagChecker(
                                 await eventRepository.AddEvent(
                                     GameEvent.FromSubmission(item, type, ans, StaticLocalizer), token);
 
-                                var result = await instanceRepository.CheckCheat(item, token);
+                                // Flag-sharing (StolenFlag) detection is a live-game concern.
+                                // Skip it once the game has ended so a post-game practice solve
+                                // (submitting another team's old dynamic flag) can't add cheat
+                                // suspicion to the just-ended game's report — matching the
+                                // ContainerAccessSubmissionDetector gate above.
+                                var result = item.Game!.EndTimeUtc > DateTimeOffset.UtcNow
+                                    ? await instanceRepository.CheckCheat(item, token)
+                                    : new CheatCheckInfo();
                                 ans = result.AnswerResult;
 
                                 if (ans == AnswerResult.CheatDetected)

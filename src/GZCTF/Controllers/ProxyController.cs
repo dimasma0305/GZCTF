@@ -88,21 +88,6 @@ public class ProxyController(
         if (ipAddress is null)
             return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Container_AddressResolveFailed)]));
 
-        // Enforce the per-container connection cap only AFTER validation succeeds:
-        // the early returns above (non-proxy / unresolvable IP) must not consume a
-        // slot, since only DoContainerProxy's finally releases it. Pairs with the
-        // atomic read-modify-write in IncreaseConnectionCount.
-        var key = CacheKey.ConnectionCount(id);
-        if (!await IncreaseConnectionCount(key))
-            return BadRequest(
-                new RequestResponse(localizer[nameof(Resources.Program.Container_ConnectionLimitExceeded)]));
-
-        TrafficWriter? writer = null;
-        IPEndPoint client;
-        IPEndPoint target;
-        int realRemotePort;
-        try
-        {
         var clientIp = HttpContext.Connection.RemoteIpAddress ?? IPAddress.Loopback;
 
         var gi = container.GameInstance;
@@ -120,9 +105,8 @@ public class ProxyController(
             ? gi.Challenge.EnableTrafficCapture
             : sharedInfo?.EnableTrafficCapture ?? false;
 
-        // Resolve the accessing user/participation once: a shared container has no owning team,
-        // so its capture is attributed to the team that is CONNECTING (from the session); the
-        // per-team access log below reuses these too.
+        // Resolve the accessing user/participation once: used for the connection cap (below),
+        // capture attribution (shared has no owner → the CONNECTING team), and the access log.
         Guid? accessUserId = null;
         string? accessUserName = null;
         int? accessParticipationId = null;
@@ -139,6 +123,24 @@ public class ProxyController(
             }
         }
 
+        // Enforce the connection cap only AFTER validation succeeds (the early returns above
+        // must not consume a slot — only DoContainerProxy's finally releases it). Per-team
+        // containers are naturally isolated (one container per team = its own 32-slot pool); a
+        // SHARED container is one container for ALL teams, so scope the cap per accessing team —
+        // otherwise one team can saturate the pool and DoS the shared service for everyone.
+        var key = sharedInfo is not null && accessParticipationId is { } capPid
+            ? $"{CacheKey.ConnectionCount(id)}:{capPid}"
+            : CacheKey.ConnectionCount(id);
+        if (!await IncreaseConnectionCount(key))
+            return BadRequest(
+                new RequestResponse(localizer[nameof(Resources.Program.Container_ConnectionLimitExceeded)]));
+
+        TrafficWriter? writer = null;
+        IPEndPoint client;
+        IPEndPoint target;
+        int realRemotePort;
+        try
+        {
         if (_enableTrafficCapture && captureEnabled && challengeId is { } cid)
         {
             // Per-team → the owning team; shared → the accessing team (no owner). When a shared
@@ -222,7 +224,7 @@ public class ProxyController(
             throw;
         }
 
-        return await DoContainerProxy(id, client, target, writer, realRemotePort, token);
+        return await DoContainerProxy(id, key, client, target, writer, realRemotePort, token);
     }
 
     /// <summary>
@@ -266,11 +268,11 @@ public class ProxyController(
         IPEndPoint client = new(clientIp, clientPort);
         IPEndPoint target = new(ipAddress, container.Port);
 
-        return await DoContainerProxy(id, client, target, null, client.Port, token);
+        return await DoContainerProxy(id, CacheKey.ConnectionCount(id), client, target, null, client.Port, token);
     }
 
-    private async Task<IActionResult> DoContainerProxy(Guid id, IPEndPoint client, IPEndPoint target,
-        TrafficWriter? writer, int realClientPort, CancellationToken token = default)
+    private async Task<IActionResult> DoContainerProxy(Guid id, string connectionKey, IPEndPoint client,
+        IPEndPoint target, TrafficWriter? writer, int realClientPort, CancellationToken token = default)
     {
         using var socket = new Socket(target.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
 
@@ -319,7 +321,7 @@ public class ProxyController(
             else
                 writer?.Dispose();
 
-            await DecreaseConnectionCount(CacheKey.ConnectionCount(id));
+            await DecreaseConnectionCount(connectionKey);
         }
 
         return new EmptyResult();

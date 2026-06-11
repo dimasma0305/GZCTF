@@ -6,6 +6,7 @@ using GZCTF.Models.Request.Edit;
 using GZCTF.Models.Request.Game;
 using GZCTF.Models.Request.Info;
 using GZCTF.Repositories.Interface;
+using GZCTF.Services;
 using GZCTF.Services.Cache;
 using GZCTF.Services.Container.Manager;
 using GZCTF.Services.Transfer;
@@ -41,6 +42,7 @@ public class EditController(
     IGameNoticeRepository gameNoticeRepository,
     IGameRepository gameRepository,
     IContainerManager containerService,
+    AdContainerManager adContainerManager,
     IBlobRepository blobService,
     GameExportService exportService,
     GameImportService importService,
@@ -1172,6 +1174,15 @@ public class EditController(
                 StatusCodes.Status404NotFound));
 
         var wasAdEngine = res.Type.UsesAdEngine();
+
+        // A&D/KotH containers live in AdTeamService / KothTarget rows, which RemoveChallenge
+        // cascade-deletes — once gone, the reconciler can never resolve the running containers
+        // again, so they'd leak until the game's EndTimeUtc reaper. Tear them down first, while
+        // the rows still exist. (Whole-game DELETE is already covered by DeleteGame's
+        // DestroyContainersForGameAsync; this closes the per-challenge delete path.)
+        if (wasAdEngine)
+            await adContainerManager.DestroyContainersForChallengeAsync(cId, token);
+
         await challengeRepository.RemoveChallenge(res, true, token);
 
         // Always flush scoreboard

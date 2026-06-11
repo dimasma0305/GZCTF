@@ -984,16 +984,35 @@ public sealed class AdContainerManager(
     /// still resolve the container records. Nulls ContainerId as it goes so a
     /// concurrent reconciler pass won't double-destroy.</para>
     /// </summary>
-    public async Task DestroyContainersForGameAsync(int gameId, CancellationToken token = default)
+    public Task DestroyContainersForGameAsync(int gameId, CancellationToken token = default)
+        => DestroyContainersInternalAsync(gameId, null, token);
+
+    /// <summary>
+    /// Tear down the A&amp;D / KotH containers (and KotH cooldown chains) for a SINGLE
+    /// challenge — called when an A&amp;D or KotH challenge is being DELETED mid-game.
+    /// Same rationale as <see cref="DestroyContainersForGameAsync"/>: the row delete
+    /// cascades the AdTeamService / KothTarget records away, so the reconciler can never
+    /// find the orphaned containers again and they'd run until the game's EndTimeUtc cron.
+    /// Must run BEFORE the challenge rows are removed.
+    /// </summary>
+    public Task DestroyContainersForChallengeAsync(int challengeId, CancellationToken token = default)
+        => DestroyContainersInternalAsync(null, challengeId, token);
+
+    private async Task DestroyContainersInternalAsync(int? gameId, int? challengeId,
+        CancellationToken token = default)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var containerManager = scope.ServiceProvider.GetRequiredService<IContainerManager>();
         var dockerProvider = scope.ServiceProvider.GetService<IContainerProvider<DockerClient, DockerMetadata>>();
 
-        // A&D service containers for this game (TeamId=<participationId>).
-        var services = await db.AdTeamServices
-            .Where(ts => ts.ContainerId != null && ts.Participation.GameId == gameId)
+        // A&D service containers (TeamId=<participationId>), scoped to a game or a single challenge.
+        var servicesQuery = db.AdTeamServices.Where(ts => ts.ContainerId != null);
+        if (gameId is { } sgid)
+            servicesQuery = servicesQuery.Where(ts => ts.Participation.GameId == sgid);
+        if (challengeId is { } scid)
+            servicesQuery = servicesQuery.Where(ts => ts.ChallengeId == scid);
+        var services = await servicesQuery
             .Include(ts => ts.Container)
             .ToListAsync(token);
 
@@ -1022,9 +1041,13 @@ public sealed class AdContainerManager(
             }
         }
 
-        // KotH hill containers for this game (TeamId=koth-<challengeId>) + cooldown chains.
-        var hills = await db.KothTargets
-            .Where(t => t.GameId == gameId)
+        // KotH hill containers (TeamId=koth-<challengeId>) + cooldown chains, same scoping.
+        var hillsQuery = db.KothTargets.AsQueryable();
+        if (gameId is { } hgid)
+            hillsQuery = hillsQuery.Where(t => t.GameId == hgid);
+        if (challengeId is { } hcid)
+            hillsQuery = hillsQuery.Where(t => t.ChallengeId == hcid);
+        var hills = await hillsQuery
             .Include(t => t.Container)
             .ToListAsync(token);
 
@@ -1059,8 +1082,9 @@ public sealed class AdContainerManager(
             }
         }
 
+        var scopeDesc = challengeId is { } cidLog ? $"challenge {cidLog}" : $"game {gameId}";
         logger.SystemLog(
-            $"A&D/KotH containers torn down for deleted game {gameId}: services={services.Count} hills={hills.Count}",
+            $"A&D/KotH containers torn down for deleted {scopeDesc}: services={services.Count} hills={hills.Count}",
             TaskStatus.Success, LogLevel.Information);
     }
 
