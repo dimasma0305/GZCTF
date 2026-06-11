@@ -15,7 +15,6 @@ namespace GZCTF.Services;
 public class HoneypotService(
     IServiceScopeFactory scopeFactory,
     ISuspicionService suspicionService,
-    IHubContext<AdminHub, IAdminClient> hubContext,
     ILogger<HoneypotService> logger) : IHoneypotService
 {
     private static readonly TimeSpan IpAttributionWindow = TimeSpan.FromMinutes(60);
@@ -113,14 +112,11 @@ public class HoneypotService(
             logger.LogError(ex, "HoneypotService record failed for bait={Bait}", notice.Bait);
         }
 
-        try
-        {
-            await hubContext.Clients.All.ReceivedHoneypotHit(notice);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "HoneypotService broadcast failed for bait={Bait}", notice.Bait);
-        }
+        // No live AdminHub broadcast for honeypot hits: there is no client consumer of
+        // ReceivedHoneypotHit (unlike ReceivedFlagEgress, which has the FlagEgress admin tab), so
+        // broadcasting to Clients.All on every bait hit serialized a model nobody reads. Honeypot
+        // hits remain surfaced via the SuspicionEvent record (cheat report) + the log above. If a
+        // honeypot admin tab is added later, re-introduce the broadcast alongside its consumer.
     }
 
     private static string BuildDetails(HoneypotHitModel notice, string? probe)

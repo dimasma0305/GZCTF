@@ -25,12 +25,9 @@ public interface IContainerAccessSubmissionDetector
 public sealed class ContainerAccessSubmissionDetector(
     AppDbContext db,
     ISuspicionService suspicion,
-    IIpAttributionHelper ipHelper,
     IOptions<CheatDetectionConfig> options,
     ILogger<ContainerAccessSubmissionDetector> logger) : IContainerAccessSubmissionDetector
 {
-    private static readonly TimeSpan SubmitterIpWindow = TimeSpan.FromSeconds(5);
-
     public async Task RunChecks(Submission submission, bool platformProxyEnabled, CancellationToken token = default)
     {
         if (!platformProxyEnabled)

@@ -144,11 +144,20 @@ const Instances: FC = () => {
 
   useEffect(() => {
     if (instances) {
-      const teams = [...new Map(instances.data.map((instance) => [instance.team!.id, instance.team!])).values()]
+      // Shared StaticContainers have no owning team (and the row carries team=null), so filter
+      // teamless rows before deduping — otherwise `instance.team!.id` throws on the null and
+      // crashes the whole page. (Matches the optional-chaining used for filtering/rendering below.)
+      const teams = [
+        ...new Map(
+          instances.data.filter((i) => i.team).map((instance) => [instance.team!.id, instance.team!]),
+        ).values(),
+      ]
       setTeams(teams)
 
       const challenges = [
-        ...new Map(instances.data.map((instance) => [instance.challenge!.id, instance.challenge!])).values(),
+        ...new Map(
+          instances.data.filter((i) => i.challenge).map((instance) => [instance.challenge!.id, instance.challenge!]),
+        ).values(),
       ]
       setChallenge(challenges)
     }

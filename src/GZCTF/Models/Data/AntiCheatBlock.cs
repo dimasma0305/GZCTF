@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 
 namespace GZCTF.Models.Data;
@@ -45,6 +46,10 @@ public sealed class AntiCheatBlock
     public DateTimeOffset OccurredAtUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
+// Serialize as a string ("Ip"/"Fingerprint"), matching every other API enum (Utils/Enums.cs) and
+// the client's generated TS union. Without this the global JSON config (no JsonStringEnumConverter)
+// emits the raw byte 0/1, so the admin anti-cheat page's `kind === 'Ip'` checks always fail.
+[JsonConverter(typeof(JsonStringEnumConverter<AntiCheatBlockKind>))]
 public enum AntiCheatBlockKind : byte
 {
     Ip = 0,
