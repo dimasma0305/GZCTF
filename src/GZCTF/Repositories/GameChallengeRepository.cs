@@ -6,7 +6,8 @@ namespace GZCTF.Repositories;
 
 public class GameChallengeRepository(
     AppDbContext context,
-    IBlobRepository blobRepository
+    IBlobRepository blobRepository,
+    IContainerRepository containerRepository
 ) : RepositoryBase(context),
     IGameChallengeRepository
 {
@@ -67,6 +68,29 @@ public class GameChallengeRepository(
 
     public async Task RemoveChallenge(GameChallenge challenge, bool save = true, CancellationToken token = default)
     {
+        // Destroy any running containers BEFORE deleting the rows — both per-team (linked via
+        // GameInstance) and the shared one (GameChallenge.SharedContainerId). RemoveChallenge is
+        // the common sink for per-challenge delete (EditController) and whole-game delete
+        // (GameRepository.DeleteGame), so doing it here covers both. Otherwise RemoveChallenge
+        // only deletes DB rows and the real Docker/K8s containers run orphaned until the idle
+        // cron reaps them. (A&D/KotH containers are torn down separately by AdContainerManager.)
+        if (challenge.Type.IsContainer())
+        {
+            foreach (var container in await Context.GameInstances
+                         .Where(i => i.ChallengeId == challenge.Id && i.ContainerId != null)
+                         .Select(i => i.Container)
+                         .ToListAsync(token))
+                if (container is not null)
+                    await containerRepository.DestroyContainer(container, token);
+
+            if (challenge.SharedContainerId is { } sharedId)
+            {
+                var shared = await Context.Containers.FirstOrDefaultAsync(c => c.Id == sharedId, token);
+                if (shared is not null)
+                    await containerRepository.DestroyContainer(shared, token);
+            }
+        }
+
         await blobRepository.DeleteAttachment(challenge.Attachment, token);
 
         await LoadFlags(challenge, token);

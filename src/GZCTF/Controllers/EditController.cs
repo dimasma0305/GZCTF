@@ -903,6 +903,13 @@ public class EditController(
 
         res.Update(model);
 
+        // If this challenge no longer uses a shared container — the operator unticked "Shared
+        // instance" or retyped it away from StaticContainer — but a shared one is still live,
+        // destroy it now so it isn't orphaned (the create path has switched to per-team, and
+        // the IsEnabled switch below only tears down on a disable, which an edit doesn't do).
+        if (res.SharedContainerId is not null && !res.UsesSharedContainer)
+            await instanceRepository.DestroyAllContainers(res, token);
+
         switch (model.IsEnabled)
         {
             case true:
