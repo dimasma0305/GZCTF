@@ -98,6 +98,7 @@ public static class ChallengeYamlSerializer
                     ? null
                     : ch.NetworkMode.ToString(),
                 EnableTrafficCapture = ch.EnableTrafficCapture ? true : null,
+                EnableSharedContainer = ch.EnableSharedContainer ? true : null,
                 FlagTemplate = string.IsNullOrEmpty(ch.FlagTemplate) ? null : ch.FlagTemplate,
             };
         }

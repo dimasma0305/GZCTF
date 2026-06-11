@@ -183,6 +183,11 @@ public class FlagsSection
     public bool EnableTrafficCapture { get; set; }
 
     /// <summary>
+    /// Share a single container across all teams (StaticContainer only)
+    /// </summary>
+    public bool EnableSharedContainer { get; set; }
+
+    /// <summary>
     /// Dynamic flag template (null = no dynamic flag)
     /// </summary>
     [MaxLength(Limits.MaxFlagTemplateLength, ErrorMessage = "Flag template is too long")]

@@ -153,5 +153,13 @@ public sealed class ChallengeYamlModel
 
         [YamlMember(Alias = "enableTrafficCapture")]
         public bool? EnableTrafficCapture { get; set; }
+
+        /// <summary>
+        /// When true, all teams share ONE container instead of one per team. Only honored for
+        /// <c>type: StaticContainer</c> (the static flag is the same for everyone); ignored for
+        /// every other type. Saves resources when per-team isolation isn't needed.
+        /// </summary>
+        [YamlMember(Alias = "enableSharedContainer")]
+        public bool? EnableSharedContainer { get; set; }
     }
 }

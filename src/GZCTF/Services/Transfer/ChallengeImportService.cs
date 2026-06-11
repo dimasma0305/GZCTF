@@ -796,6 +796,10 @@ public sealed class ChallengeImportService(
             if (Enum.TryParse<NetworkMode>(m.Container?.NetworkMode ?? "", true, out var nm))
                 c.NetworkMode = nm;
             c.EnableTrafficCapture = m.Container?.EnableTrafficCapture ?? c.EnableTrafficCapture;
+            // Shared container: one container for all teams. Only meaningful for StaticContainer
+            // (single static flag) — force off otherwise, matching GameChallenge.Update.
+            c.EnableSharedContainer = type == ChallengeType.StaticContainer
+                                      && (m.Container?.EnableSharedContainer ?? c.EnableSharedContainer);
         }
 
         // A&D-engine per-challenge knobs (the service's own properties), shared

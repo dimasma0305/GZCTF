@@ -111,6 +111,7 @@ public static class TransferExtensions
                     Template = challenge.FlagTemplate,
                     DisableBloodBonus = challenge.DisableBloodBonus,
                     EnableTrafficCapture = challenge.EnableTrafficCapture,
+                    EnableSharedContainer = challenge.EnableSharedContainer,
                     // For dynamic challenges with FlagTemplate, don't export the template flag to Static list
                     // to avoid duplication during import
                     Static = challenge.Flags
@@ -320,6 +321,9 @@ public static class TransferExtensions
                 FlagTemplate = transfer.Flags.Template,
                 DisableBloodBonus = transfer.Flags.DisableBloodBonus,
                 EnableTrafficCapture = transfer.Flags.EnableTrafficCapture,
+                // Only StaticContainer honors a shared container (guarded again at create time).
+                EnableSharedContainer =
+                    transfer.Type == ChallengeType.StaticContainer && transfer.Flags.EnableSharedContainer,
                 Hints = transfer.Hints
             };
 
