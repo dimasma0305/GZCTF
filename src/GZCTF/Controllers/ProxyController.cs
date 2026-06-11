@@ -144,8 +144,10 @@ public class ProxyController(
         client = new(clientIp, clientPort);
         target = new(ipAddress, container.Port);
 
-        // Record the proxy access. This is purely additive — failure here must
-        // not block the proxy, so the whole block sits inside try/catch.
+        // Record the proxy access. Skipped for a shared container (GameInstance is null): it
+        // has no single owning team, so per-team access attribution / cross-team detection
+        // doesn't apply. Purely additive — failure must never block the proxy (try/catch).
+        if (container.GameInstance is not null)
         try
         {
             var accessLogger = HttpContext.RequestServices.GetRequiredService<IContainerAccessLogger>();

@@ -51,16 +51,18 @@ public class ContainerInstanceModel
     public int Port { get; set; }
 
     internal static ContainerInstanceModel FromContainer(
-        Container container, GZCTF.Models.Data.AdTeamService? adService = null)
+        Container container, GZCTF.Models.Data.AdTeamService? adService = null,
+        GZCTF.Models.Data.GameChallenge? sharedChallenge = null)
     {
-        // Prefer the GameInstance side (jeopardy + exercise); fall back to
-        // the A&D AdTeamService when provided. Callers from the admin list
-        // path pass adService for orphan-from-GameInstance rows so A&D
-        // containers also surface team + challenge metadata.
+        // Prefer the GameInstance side (jeopardy + exercise); fall back to the A&D
+        // AdTeamService, then to a shared (challenge-owned) container's challenge. Callers
+        // from the admin list pass adService / sharedChallenge for the GameInstance-null rows
+        // so A&D and shared containers also surface their challenge (shared has no single team).
         var team = container.GameInstance?.Participation.Team
                    ?? adService?.Participation.Team;
         var chal = container.GameInstance?.Challenge
-                   ?? adService?.Challenge;
+                   ?? adService?.Challenge
+                   ?? sharedChallenge;
 
         var model = new ContainerInstanceModel
         {
@@ -74,11 +76,11 @@ public class ContainerInstanceModel
             Port = container.PublicPort ?? container.Port
         };
 
-        if (team is not null && chal is not null)
-        {
-            model.Team = TeamModel.FromTeam(team);
+        // Set each independently: a shared container has a challenge but no single team.
+        if (chal is not null)
             model.Challenge = ChallengeModel.FromChallenge(chal);
-        }
+        if (team is not null)
+            model.Team = TeamModel.FromTeam(team);
 
         return model;
     }

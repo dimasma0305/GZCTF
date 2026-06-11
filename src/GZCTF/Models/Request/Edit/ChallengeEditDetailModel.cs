@@ -121,6 +121,11 @@ public class ChallengeEditDetailModel
     public bool? EnableTrafficCapture { get; set; } = false;
 
     /// <summary>
+    /// Whether all teams share a single container (StaticContainer only)
+    /// </summary>
+    public bool? EnableSharedContainer { get; set; } = false;
+
+    /// <summary>
     /// Whether to disable blood bonus
     /// </summary>
     public bool? DisableBloodBonus { get; set; } = false;
@@ -203,6 +208,7 @@ public class ChallengeEditDetailModel
             ExposePort = chal.ExposePort,
             NetworkMode = chal.NetworkMode,
             EnableTrafficCapture = chal.EnableTrafficCapture,
+            EnableSharedContainer = chal.EnableSharedContainer,
             DisableBloodBonus = chal.DisableBloodBonus,
             OriginalScore = chal.OriginalScore,
             MinScoreRate = chal.MinScoreRate,

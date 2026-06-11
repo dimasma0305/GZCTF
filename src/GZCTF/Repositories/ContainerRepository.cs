@@ -55,11 +55,23 @@ public class ContainerRepository(
                 .Where(s => s.ContainerId != null && orphanIds.Contains(s.ContainerId.Value))
                 .ToDictionaryAsync(s => s.ContainerId!.Value, token);
 
+        // Shared (challenge-owned) containers have no GameInstance and no AdTeamService —
+        // map them by GameChallenge.SharedContainerId so the admin can see/stop them too.
+        var sharedChallenges = orphanIds.Length == 0
+            ? new Dictionary<Guid, GameChallenge>()
+            : await Context.GameChallenges
+                .AsNoTracking()
+                .Where(c => c.SharedContainerId != null && orphanIds.Contains(c.SharedContainerId.Value))
+                .ToDictionaryAsync(c => c.SharedContainerId!.Value, token);
+
         return containers
-            .Where(c => c.GameInstance is not null || adServices.ContainsKey(c.Id))
+            .Where(c => c.GameInstance is not null
+                        || adServices.ContainsKey(c.Id)
+                        || sharedChallenges.ContainsKey(c.Id))
             .Select(c => ContainerInstanceModel.FromContainer(
                 c,
-                c.GameInstance is null ? adServices.GetValueOrDefault(c.Id) : null))
+                c.GameInstance is null ? adServices.GetValueOrDefault(c.Id) : null,
+                c.GameInstance is null ? sharedChallenges.GetValueOrDefault(c.Id) : null))
             .ToArray();
     }
 

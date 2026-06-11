@@ -1593,6 +1593,8 @@ export interface ChallengeEditDetailModel {
   networkMode?: NetworkMode | null;
   /** Whether to record traffic */
   enableTrafficCapture?: boolean | null;
+  /** Whether all teams share a single container (StaticContainer only) */
+  enableSharedContainer?: boolean | null;
   /** Whether to disable blood bonus */
   disableBloodBonus?: boolean | null;
   /**
@@ -1869,6 +1871,8 @@ export interface ChallengeUpdateModel {
   networkMode?: NetworkMode | null;
   /** Is traffic capture enabled (disabled by default) */
   enableTrafficCapture?: boolean | null;
+  /** Whether all teams share a single container (StaticContainer only, disabled by default) */
+  enableSharedContainer?: boolean | null;
   /** Is blood bonus disabled (enable by default) */
   disableBloodBonus?: boolean | null;
   /**
@@ -3151,6 +3155,8 @@ export interface ClientFlagContext {
   closeTime?: number | null;
   /** Connection method of the challenge instance */
   instanceEntry?: string | null;
+  /** Whether this challenge serves one container shared by all teams (read-only for players) */
+  isSharedInstance?: boolean;
   /** Attachment URL */
   url?: string | null;
   /**

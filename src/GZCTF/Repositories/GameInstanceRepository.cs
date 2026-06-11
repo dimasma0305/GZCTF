@@ -1,4 +1,5 @@
-﻿using GZCTF.Models.Internal;
+﻿using System.Collections.Concurrent;
+using GZCTF.Models.Internal;
 using GZCTF.Repositories.Interface;
 using GZCTF.Services.Container.Manager;
 using Microsoft.EntityFrameworkCore;
@@ -243,6 +244,99 @@ public class GameInstanceRepository(
         return new TaskResult<Container>(TaskStatus.Success, gameInstance.Container);
     }
 
+    // Per-challenge lock so two teams starting a shared container at once create only one.
+    // Single-instance deployment, so an in-process lock is sufficient.
+    private static readonly ConcurrentDictionary<int, SemaphoreSlim> SharedContainerLocks = new();
+
+    public Task<Container?> GetSharedContainer(GameChallenge challenge, CancellationToken token = default) =>
+        challenge.SharedContainerId is { } id
+            ? Context.Containers.FirstOrDefaultAsync(c => c.Id == id, token)
+            : Task.FromResult<Container?>(null);
+
+    public async Task<TaskResult<Container>> GetOrCreateSharedContainer(GameChallenge challenge, Game game,
+        UserInfo user, CancellationToken token = default)
+    {
+        if (string.IsNullOrEmpty(challenge.ContainerImage) || challenge.ExposePort is null)
+            return new TaskResult<Container>(TaskStatus.Failed);
+
+        var sem = SharedContainerLocks.GetOrAdd(challenge.Id, _ => new SemaphoreSlim(1, 1));
+        await sem.WaitAsync(token);
+        try
+        {
+            // Re-read the pointer from the DB INSIDE the lock. The `challenge` entity was loaded
+            // by the caller (per-request scoped DbContext) before the lock, so its in-memory
+            // SharedContainerId can be stale — a concurrent team's start may have committed a
+            // container while this request was queued. Without this requery both teams would
+            // read null and each create a container, orphaning one.
+            var currentId = await Context.GameChallenges
+                .Where(c => c.Id == challenge.Id)
+                .Select(c => c.SharedContainerId)
+                .FirstOrDefaultAsync(token);
+
+            // Reuse the live shared container if one exists, refreshing its idle timeout so
+            // active sharing keeps it alive. A dangling pointer (cron reaped the row) → recreate.
+            if (currentId is { } id)
+            {
+                var existing = await Context.Containers.FirstOrDefaultAsync(c => c.Id == id, token);
+                if (existing is not null)
+                {
+                    challenge.SharedContainerId = existing.Id; // sync the (possibly stale) entity
+                    existing.ExpectStopAt =
+                        DateTimeOffset.UtcNow.AddMinutes(containerPolicy.Value.DefaultLifetime);
+                    await SaveAsync(token);
+                    return new TaskResult<Container>(TaskStatus.Success, existing);
+                }
+
+                challenge.SharedContainerId = null;
+            }
+
+            var container = await service.CreateContainerAsync(new ContainerConfig
+            {
+                // No team/user/flag: one container serves everyone, and StaticContainer's flag
+                // is baked into the image (no per-team injection).
+                TeamId = $"shared-{challenge.Id}",
+                UserId = Guid.Empty,
+                ChallengeId = challenge.Id,
+                GameId = challenge.GameId,
+                Flag = null,
+                Image = challenge.ContainerImage,
+                CPUCount = challenge.CPUCount ?? 1,
+                MemoryLimit = challenge.MemoryLimit ?? 64,
+                StorageLimit = challenge.StorageLimit ?? 256,
+                NetworkMode = challenge.NetworkMode ?? NetworkMode.Open,
+                // Shared traffic can't be attributed per team, so don't capture it.
+                EnableTrafficCapture = false,
+                ExposedPort = challenge.ExposePort.Value
+            }, token);
+
+            if (container is null)
+            {
+                logger.SystemLog(
+                    StaticLocalizer[nameof(Resources.Program.InstanceRepository_ContainerCreationFailed),
+                        challenge.Title],
+                    TaskStatus.Failed, LogLevel.Warning);
+                return new TaskResult<Container>(TaskStatus.Failed);
+            }
+
+            container.ExpectStopAt = container.StartedAt.AddMinutes(containerPolicy.Value.DefaultLifetime);
+            await Context.Containers.AddAsync(container, token);
+            challenge.SharedContainerId = container.Id;
+            await SaveAsync(token);
+
+            // No per-team GameEvent here: GameEvent.TeamId is a required FK and a shared
+            // container has no owning team. Just log it.
+            logger.Log(
+                StaticLocalizer[nameof(Resources.Program.InstanceRepository_ContainerCreated), "shared",
+                    challenge.Title, container.LogId], user, TaskStatus.Success);
+
+            return new TaskResult<Container>(TaskStatus.Success, container);
+        }
+        finally
+        {
+            sem.Release();
+        }
+    }
+
     public async Task DestroyAllContainers(GameChallenge challenge, CancellationToken token = default)
     {
         foreach (var container in await Context.GameInstances
@@ -255,6 +349,16 @@ public class GameInstanceRepository(
                 continue;
 
             await containerRepository.DestroyContainer(container, token);
+        }
+
+        // Shared container is challenge-owned (no GameInstance), so it isn't covered above.
+        if (challenge.SharedContainerId is { } sharedId)
+        {
+            var shared = await Context.Containers.FirstOrDefaultAsync(c => c.Id == sharedId, token);
+            if (shared is not null)
+                await containerRepository.DestroyContainer(shared, token);
+            challenge.SharedContainerId = null;
+            await SaveAsync(token);
         }
     }
 

@@ -83,6 +83,10 @@ export const InstanceEntry: FC<InstanceEntryProps> = (props) => {
   const [forceShowOriginal, setForceShowOriginal] = useState(false)
   const [withContainer, setWithContainer] = useState(!!context.instanceEntry)
 
+  // Shared container: one container serves every team. Players can start/extend it but not
+  // destroy it (admin-only), and on idle-expiry we just flip back to the start view locally.
+  const isShared = context.isSharedInstance ?? false
+
   const instanceEntry = context.instanceEntry ?? ''
   const isPlatformProxy =
     config.portMapping === ContainerPortMappingType.PlatformProxy &&
@@ -294,20 +298,24 @@ export const InstanceEntry: FC<InstanceEntryProps> = (props) => {
                 time={context.closeTime}
                 extendEnabled={canExtend}
                 enableExtend={enableExtend}
-                onTimeout={onDestroy}
+                onTimeout={isShared ? () => setWithContainer(false) : onDestroy}
               />
             </Text>
             <Text size="xs" c="dimmed" fw={600}>
-              {t('challenge.content.instance.actions.note', { min: config.renewalWindow })}
+              {isShared
+                ? t('challenge.content.instance.shared.note', 'Shared by all teams — only an admin can stop it.')
+                : t('challenge.content.instance.actions.note', { min: config.renewalWindow })}
             </Text>
           </Stack>
           <Group justify="right" wrap="nowrap" gap="xs">
             <Button color="orange" onClick={onExtend} disabled={!canExtend || disabled} loading={disabled}>
               {t('challenge.button.instance.extend')}
             </Button>
-            <Button color="red" onClick={onDestroy} disabled={disabled} loading={disabled}>
-              {t('challenge.button.instance.destroy')}
-            </Button>
+            {!isShared && (
+              <Button color="red" onClick={onDestroy} disabled={disabled} loading={disabled}>
+                {t('challenge.button.instance.destroy')}
+              </Button>
+            )}
           </Group>
         </Group>
       )}

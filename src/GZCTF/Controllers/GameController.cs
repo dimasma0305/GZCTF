@@ -1415,6 +1415,16 @@ public class GameController(
             var attempts = await submissionRepository.CountSubmissions(context.Participation!.Id, challengeId, token);
 
             model = ChallengeDetailModel.FromInstance(instance, attempts, scoreboardChallenge);
+
+            // Shared container: the team's own instance owns no container — surface the
+            // challenge-owned shared container's connection (read-only for players).
+            if (instance.Challenge.UsesSharedContainer)
+            {
+                model.Context.IsSharedInstance = true;
+                var shared = await gameInstanceRepository.GetSharedContainer(instance.Challenge, token);
+                model.Context.InstanceEntry = shared?.Entry;
+                model.Context.CloseTime = shared?.ExpectStopAt;
+            }
         }
 
         if (context.User != null)
@@ -1879,6 +1889,17 @@ public class GameController(
             return BadRequest(
                 new RequestResponse(localizer[nameof(Resources.Program.Game_ContainerCreationNotAllowed)]));
 
+        // Shared container: one container serves every team. Get-or-create the challenge-owned
+        // container (idempotent) instead of the per-team flow.
+        if (instance.Challenge.UsesSharedContainer)
+            return await gameInstanceRepository.GetOrCreateSharedContainer(
+                    instance.Challenge, context.Game!, context.User!, token) switch
+            {
+                (TaskStatus.Success, var x) => Ok(ContainerInfoModel.FromContainer(x!)),
+                _ => BadRequest(
+                    new RequestResponse(localizer[nameof(Resources.Program.Game_ContainerCreationFailed)]))
+            };
+
         if (instance.IsContainerOperationTooFrequent)
             return RequestResponse.Result(localizer[nameof(Resources.Program.Game_OperationTooFrequent)],
                 StatusCodes.Status429TooManyRequests);
@@ -1946,6 +1967,25 @@ public class GameController(
             return BadRequest(
                 new RequestResponse(localizer[nameof(Resources.Program.Game_ContainerCreationNotAllowed)]));
 
+        // Shared container: extend the challenge-owned container's lifetime (keeps it alive
+        // while teams are still using it).
+        if (instance.Challenge.UsesSharedContainer)
+        {
+            var shared = await gameInstanceRepository.GetSharedContainer(instance.Challenge, token);
+            if (shared is null)
+                return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Game_ContainerNotCreated)]));
+
+            if (shared.ExpectStopAt - DateTimeOffset.UtcNow >
+                TimeSpan.FromMinutes(containerPolicy.Value.RenewalWindow))
+                return BadRequest(
+                    new RequestResponse(localizer[nameof(Resources.Program.Game_ContainerExtensionNotAvailable)]));
+
+            await containerRepository.ExtendLifetime(shared,
+                TimeSpan.FromMinutes(containerPolicy.Value.ExtensionDuration), token);
+
+            return Ok(ContainerInfoModel.FromContainer(shared));
+        }
+
         if (instance.Container is null)
             return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Game_ContainerNotCreated)]));
 
@@ -2001,6 +2041,12 @@ public class GameController(
         if (instance.Challenge.Type.UsesAdEngine() && !instance.Challenge.AllowsPracticeContainer(context.Game!))
             return BadRequest(
                 new RequestResponse(localizer[nameof(Resources.Program.Game_ContainerCreationNotAllowed)]));
+
+        // Shared container is a shared resource — a single player must not be able to tear it
+        // down for everyone. Only admins stop it (challenge disable / game end / admin action).
+        if (instance.Challenge.UsesSharedContainer)
+            return BadRequest(
+                new RequestResponse("Shared containers can only be stopped by an administrator."));
 
         if (instance.Container is null)
             return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Game_ContainerNotCreated)]));

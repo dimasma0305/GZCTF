@@ -727,6 +727,22 @@ const GameChallengeEdit: FC = () => {
                 onChange={(e) => setChallengeInfo({ ...challengeInfo, enableTrafficCapture: e.target.checked })}
               />
             </Grid.Col>
+            {type === ChallengeType.StaticContainer && (
+              <Grid.Col span={4} display="flex" className={misc.alignCenter}>
+                <Switch
+                  disabled={disabled}
+                  checked={challengeInfo.enableSharedContainer ?? false}
+                  label={SwitchLabel(
+                    t('admin.content.games.challenges.shared_container.label', 'Shared instance'),
+                    t(
+                      'admin.content.games.challenges.shared_container.description',
+                      'All teams connect to one shared container instead of one per team. Saves resources; the static flag is the same for everyone.',
+                    )
+                  )}
+                  onChange={(e) => setChallengeInfo({ ...challengeInfo, enableSharedContainer: e.target.checked })}
+                />
+              </Grid.Col>
+            )}
           </Grid>
         )}
 

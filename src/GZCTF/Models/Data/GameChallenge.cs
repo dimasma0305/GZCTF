@@ -12,6 +12,14 @@ public class GameChallenge : Challenge
     public bool EnableTrafficCapture { get; set; }
 
     /// <summary>
+    /// Whether all teams share a single container instance instead of one per team.
+    /// Only valid for <see cref="ChallengeType.StaticContainer"/> (one shared static flag).
+    /// Saves resources when per-team isolation isn't needed. The shared container is created
+    /// lazily on first start, reclaimed by the idle-timeout cron, and re-created on demand.
+    /// </summary>
+    public bool EnableSharedContainer { get; set; }
+
+    /// <summary>
     /// Whether to disable blood bonus
     /// </summary>
     public bool DisableBloodBonus { get; set; }
@@ -95,9 +103,33 @@ public class GameChallenge : Challenge
 
         // Container only
         EnableTrafficCapture = Type.IsContainer() && (model.EnableTrafficCapture ?? EnableTrafficCapture);
+
+        // Shared instance is only meaningful for StaticContainer (single shared static flag);
+        // force it off for every other type so a stale toggle can't take effect after a retype.
+        EnableSharedContainer = Type == ChallengeType.StaticContainer
+                                && (model.EnableSharedContainer ?? EnableSharedContainer);
     }
 
+    /// <summary>
+    /// True when this challenge serves one shared container to all teams (StaticContainer +
+    /// <see cref="EnableSharedContainer"/> + a valid image/port).
+    /// </summary>
+    [NotMapped]
+    public bool UsesSharedContainer =>
+        Type == ChallengeType.StaticContainer
+        && EnableSharedContainer
+        && !string.IsNullOrEmpty(ContainerImage)
+        && ExposePort is not null;
+
     #region Db Relationship
+
+    /// <summary>
+    /// The single shared container's id, when <see cref="UsesSharedContainer"/>. Points at a
+    /// <see cref="Container"/> row that has no GameInstance (challenge-owned, not team-owned).
+    /// A plain pointer (no FK): when the idle cron reaps the container the pointer is left
+    /// dangling and the get-or-create path treats a missing row as "none" and re-creates.
+    /// </summary>
+    public Guid? SharedContainerId { get; set; }
 
     /// <summary>
     /// Submissions

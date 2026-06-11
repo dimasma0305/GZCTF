@@ -52,6 +52,24 @@ public interface IGameInstanceRepository : IRepository
         Game game, CancellationToken token = default);
 
     /// <summary>
+    /// Get the existing shared container for a challenge, or null if none is alive.
+    /// </summary>
+    /// <param name="challenge">Challenge</param>
+    /// <param name="token"></param>
+    public Task<Container?> GetSharedContainer(GameChallenge challenge, CancellationToken token = default);
+
+    /// <summary>
+    /// Get-or-create the single shared container for a <see cref="GameChallenge.UsesSharedContainer"/>
+    /// challenge. Returns the existing one (lifetime refreshed) or creates a new one. Concurrency-safe.
+    /// </summary>
+    /// <param name="challenge">Challenge</param>
+    /// <param name="game">Game</param>
+    /// <param name="user">Requesting user (for the event log)</param>
+    /// <param name="token"></param>
+    public Task<TaskResult<Container>> GetOrCreateSharedContainer(GameChallenge challenge, Game game, UserInfo user,
+        CancellationToken token = default);
+
+    /// <summary>
     /// Destroy all containers of a challenge
     /// </summary>
     /// <param name="challenge">Challenge</param>
