@@ -84,6 +84,13 @@ public sealed class AdEgressIsolationService(
 
     private sealed record KothFootholdCooldown(string[] FootholdIps, string HillIp);
 
+    // Convergence memo for the empty/torn-down state: true once the chain has been flushed and
+    // no rules are applied. Without it, the "nothing to contain" and "isolation disabled" paths
+    // would re-spawn the privileged host-netns teardown helper on EVERY pass (~30s) forever on
+    // idle installs (jeopardy-only, or A&D between games) — the common steady state. Loop-confined
+    // (only read/written in ApplyOnceAsync, which runs solely on the single ExecuteAsync loop).
+    private bool _chainTornDown;
+
     /// <summary>
     /// Block <paramref name="footholdIps"/> (the cooled-down leader's own A&amp;D
     /// container IPs) → <paramref name="hillIp"/> in the host egress chain until
@@ -145,7 +152,12 @@ public sealed class AdEgressIsolationService(
 
         if (!dockerProvider.GetMetadata().Config.EnforceEgressIsolation)
         {
-            await RunHelperAsync(docker, BuildTeardownScript(), token);
+            // Tear the chain down once, then stay converged — don't re-spawn the helper every pass.
+            if (!_chainTornDown)
+            {
+                await RunHelperAsync(docker, BuildTeardownScript(), token);
+                _chainTornDown = true;
+            }
             return;
         }
 
@@ -177,7 +189,13 @@ public sealed class AdEgressIsolationService(
             // in DOCKER-USER (which filters ALL bridge traffic) until the next launch, surviving
             // IP reuse by a later game. Converge by flushing the chain to its empty state — the
             // same teardown the EnforceEgressIsolation=false path runs; a later launch reapplies.
-            await RunHelperAsync(docker, BuildTeardownScript(), token);
+            // ONE-SHOT (guarded): only flush on the transition into empty, not every idle pass,
+            // else this churns a privileged helper container every ~30s forever on idle installs.
+            if (!_chainTornDown)
+            {
+                await RunHelperAsync(docker, BuildTeardownScript(), token);
+                _chainTornDown = true;
+            }
             return;
         }
 
@@ -191,6 +209,7 @@ public sealed class AdEgressIsolationService(
             .ToList();
 
         await RunHelperAsync(docker, BuildRulesScript(validAd, validKoth, controlPlaneIps, cooldownDrops), token);
+        _chainTornDown = false; // chain now has rules — re-arm the one-shot teardown for the next idle period
         logger.SystemLog(
             $"A&D egress isolation applied: {validAd.Count} A&D container(s) + {validKoth.Count} KotH hill(s) contained"
             + $"; {controlPlaneIps.Count} control-plane IP(s) blocked; {cooldownDrops.Count} KotH cooldown drop(s)",
