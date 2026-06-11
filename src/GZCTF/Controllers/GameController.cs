@@ -697,6 +697,18 @@ public class GameController(
             return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Game_NotStarted)]));
 
         (var data, var lastModified) = await noticeRepository.GetLatestNotices(game.Id, token);
+
+        // During the ICPC freeze window [FreezeTimeUtc, EndTimeUtc), hide blood notices published
+        // at/after the freeze from non-monitors — they reveal the standings movement the frozen
+        // scoreboard conceals (the live broadcast is already suppressed in FlagChecker; this closes
+        // the polling path). After the game ends, everyone sees them again.
+        var nowUtc = DateTimeOffset.UtcNow;
+        if (game.FreezeTimeUtc is { } freeze && nowUtc >= freeze && nowUtc < game.EndTimeUtc
+            && !await ContextHelper.HasMonitor(HttpContext))
+            data = data.Where(n => !(n.PublishTimeUtc >= freeze
+                                     && n.Type is NoticeType.FirstBlood or NoticeType.SecondBlood
+                                         or NoticeType.ThirdBlood)).ToArray();
+
         var eTag = $"\"{game.Id}-{lastModified.ToUnixTimeSeconds():X}-{skip}-{count}\"";
         if (ContextHelper.IsNotModified(Request, Response, eTag, lastModified))
             return StatusCode(StatusCodes.Status304NotModified);

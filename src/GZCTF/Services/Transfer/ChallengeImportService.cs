@@ -4,6 +4,7 @@ using GZCTF.Models.Data;
 using GZCTF.Models.Internal;
 using GZCTF.Models.Request.Edit;
 using GZCTF.Repositories.Interface;
+using GZCTF.Services;
 using GZCTF.Services.Container.Build;
 using GZCTF.Storage.Interface;
 using GZCTF.Utils;
@@ -40,6 +41,8 @@ public sealed class ChallengeImportService(
     AppDbContext context,
     IHttpClientFactory httpClientFactory,
     IChallengeBuildQueue buildQueue,
+    IGameInstanceRepository instanceRepository,
+    AdContainerManager adContainerManager,
     ILogger<ChallengeImportService> logger)
 {
     static readonly HashSet<string> IgnoredDirNames = new(StringComparer.OrdinalIgnoreCase)
@@ -278,6 +281,14 @@ public sealed class ChallengeImportService(
             {
                 logger.LogWarning("ChallengeImportService: challenge '{Name}' retyped {Old} -> {New} via YAML sync",
                     model.Name, existing.Type, type);
+                // Tear down containers created under the OLD type BEFORE reassigning, else they leak
+                // for the rest of the game: A&D/KotH per-team containers are EXCLUDED from the idle
+                // reaper (GetDyingContainers) and the reconciler drops the challenge once it's no
+                // longer A&D-typed; a shared/per-team container would dangle. Mirrors the platform
+                // delete/edit teardown. Both calls are no-ops when the old type had no such containers.
+                if (existing.Type.UsesAdEngine())
+                    await adContainerManager.DestroyContainersForChallengeAsync(existing.Id, token);
+                await instanceRepository.DestroyAllContainers(existing, token);
                 existing.Type = type;
             }
         }

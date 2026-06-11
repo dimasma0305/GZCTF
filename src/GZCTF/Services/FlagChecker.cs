@@ -200,19 +200,21 @@ public class FlagChecker(
                     }
 
                     // Blood notices ("X drew first blood on C") reveal late-game standings movement.
-                    // During the ICPC freeze window they must NOT be broadcast to non-monitors —
-                    // mirror the freeze gate the attack feeds already apply (SendAttackEventInternal).
-                    // Without this, freeze hides the scoreboard but blood toasts still leak who's
-                    // solving what in the final hour.
+                    // During the ICPC freeze window they must NOT be pushed to non-monitors — mirror
+                    // the freeze gate the attack feeds apply. PERSIST the notice (so it's in the
+                    // post-game feed + monitor view + the final board derivation) but SUPPRESS the
+                    // live broadcast during freeze. The public /Notices endpoint additionally hides
+                    // in-freeze blood notices from non-monitors until the game ends, so polling can't
+                    // leak them either. (Persist-but-don't-broadcast matches the AdSnapshot pattern;
+                    // skipping AddNotice entirely would lose the notice from the feed permanently.)
                     var noticeNow = DateTimeOffset.UtcNow;
                     var inFreeze = item.Game!.FreezeTimeUtc is { } freeze
                                    && noticeNow >= freeze && noticeNow < item.Game.EndTimeUtc;
                     if (item.Game!.EndTimeUtc > noticeNow
-                        && !inFreeze
                         && type != SubmissionType.Unaccepted
                         && type != SubmissionType.Normal)
                         await gameNoticeRepository.AddNotice(
-                            GameNotice.FromSubmission(item, type, StaticLocalizer), broadcast: true, token);
+                            GameNotice.FromSubmission(item, type, StaticLocalizer), broadcast: !inFreeze, token);
 
                     item.Status = ans;
                     await submissionRepository.SendSubmission(item);
