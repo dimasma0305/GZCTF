@@ -1253,7 +1253,18 @@ public class AdminController(
             return BadRequest(
                 new RequestResponse(localizer[nameof(Resources.Program.Admin_CaptainDeletionNotAllowed)]));
 
-        await userManager.DeleteAsync(user);
+        // Clear the user's API tokens first: ApiToken.Creator is ON DELETE RESTRICT (the only
+        // non-cascade UserInfo FK), so without this userManager.DeleteAsync throws an unhandled
+        // DbUpdateException (Postgres 23503) → HTTP 500 and the user is never removed (the
+        // `return Ok()` below was dead code on that path). The audit row's purpose is served by
+        // deleting the tokens alongside their creator.
+        var dbContext = serviceProvider.GetRequiredService<AppDbContext>();
+        await dbContext.ApiTokens.Where(t => t.CreatorId == user.Id).ExecuteDeleteAsync(token);
+
+        var result = await userManager.DeleteAsync(user);
+        if (!result.Succeeded)
+            return BadRequest(new RequestResponse(
+                string.Join("; ", result.Errors.Select(e => e.Description))));
 
         return Ok();
     }

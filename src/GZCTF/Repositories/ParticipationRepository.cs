@@ -137,6 +137,12 @@ public class ParticipationRepository(
                 // clear division when rejected
                 part.Division = null;
                 part.DivisionId = null;
+                // Reclaim the participation's A&D VPN peers. A rejected participation's peer is
+                // already excluded from the WireGuard render, but its row + globally-unique /32
+                // would otherwise stay allocated forever — and because AssignedIp is globally
+                // unique, that /32 can never be reused, slowly exhausting the shared VPN /24 across
+                // game cycles. Deleting frees both the row and the IP (WG sync drops it next pass).
+                await Context.AdVpnPeers.Where(p => p.ParticipationId == part.Id).ExecuteDeleteAsync(token);
                 break;
         }
 

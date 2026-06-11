@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using GZCTF.Models.Data;
+using GZCTF.Models.Internal;
 using GZCTF.Services.CronJob;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
@@ -31,6 +32,10 @@ public class CronJobTest
 
         // Add logging
         services.AddLogging(builder => builder.AddConsole());
+
+        // The reaper only runs when email confirmation is the activation gate — otherwise
+        // !EmailConfirmed means "pending admin approval", not "abandoned signup".
+        services.Configure<AccountPolicy>(o => o.EmailConfirmationRequired = true);
 
         // Prepare test data
         var now = DateTimeOffset.UtcNow;
@@ -69,8 +74,43 @@ public class CronJobTest
         Assert.Contains(remainingUsers, u => u.UserName == "VerifiedOld");
         Assert.Contains(remainingUsers, u => u.UserName == "UnverifiedNew");
         Assert.DoesNotContain(remainingUsers, u => u.UserName == "UnverifiedOld");
-        
+
         Assert.Equal(3, remainingUsers.Count);
+    }
+
+    [Fact]
+    public async Task RemoveUnactivatedUsers_ManualApprovalMode_KeepsPendingAccounts()
+    {
+        // In manual-approval mode (EmailConfirmationRequired=false) a !EmailConfirmed account is a
+        // pending-approval registrant, not an abandoned signup. The reaper must NOT delete it —
+        // otherwise legitimate users awaiting admin approval vanish before they can be approved.
+        var services = new ServiceCollection();
+        services.AddLogging(builder => builder.AddConsole());
+        services.Configure<AccountPolicy>(o => o.EmailConfirmationRequired = false);
+
+        var now = DateTimeOffset.UtcNow;
+        var oldDate = now.AddHours(-50);
+
+        var users = new List<UserInfo>
+        {
+            new() { UserName = "PendingOld1", Email = "p1@test.com", EmailConfirmed = false, RegisterTimeUtc = oldDate },
+            new() { UserName = "PendingOld2", Email = "p2@test.com", EmailConfirmed = false, RegisterTimeUtc = oldDate }
+        };
+
+        services.AddSingleton<UserManager<UserInfo>>(sp =>
+            new FakeUserManager(users, sp.GetRequiredService<ILogger<UserManager<UserInfo>>>()));
+
+        var serviceProvider = services.BuildServiceProvider();
+        var scopeFactory = serviceProvider.GetRequiredService<IServiceScopeFactory>();
+        await using var scope = scopeFactory.CreateAsyncScope();
+
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<CronJobService>>();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<UserInfo>>();
+
+        await RuntimeCronJobs.RemoveUnactivatedUsers(scope, logger);
+
+        // Both pending-approval accounts survive even though they are old + unconfirmed.
+        Assert.Equal(2, userManager.Users.Count());
     }
 
     public class FakeUserManager : UserManager<UserInfo>

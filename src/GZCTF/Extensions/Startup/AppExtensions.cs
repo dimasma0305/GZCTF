@@ -99,9 +99,6 @@ internal static class AppExtensions
 
             app.UseRouting();
 
-            if (app.Configuration.GetValue<bool>("DisableRateLimit") is not true)
-                app.UseRateLimiter();
-
             app.UseAuthentication();
             app.Use(async (context, next) =>
             {
@@ -119,6 +116,14 @@ internal static class AppExtensions
                 }
             });
             app.UseAuthorization();
+
+            // AFTER UseAuthentication/UseAuthorization so the partition function sees the
+            // authenticated principal. Previously this ran right after UseRouting (pre-auth), so
+            // context.User carried no NameIdentifier and the per-user bucket was dead — every
+            // authenticated request fell through to the shared per-IP bucket (behind a reverse
+            // proxy, potentially one bucket for everyone). Matches Microsoft's documented ordering.
+            if (app.Configuration.GetValue<bool>("DisableRateLimit") is not true)
+                app.UseRateLimiter();
 
             if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("RequestLogging"))
                 app.UseRequestLogging();

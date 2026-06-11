@@ -44,7 +44,8 @@ public class ContainerAccessSubmissionDetectorTest
             .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
             .Options);
 
-    private static Submission MakeSubmission(Guid userId, DateTimeOffset submitAt, string? userName = "alice") => new()
+    private static Submission MakeSubmission(Guid userId, DateTimeOffset submitAt, string? userName = "alice",
+        IPAddress? submitterIp = null) => new()
     {
         Id = 1,
         ChallengeId = 1,
@@ -52,7 +53,10 @@ public class ContainerAccessSubmissionDetectorTest
         GameId = 1,
         TeamId = 100,
         UserId = userId,
-        User = new UserInfo { Id = userId, UserName = userName, Email = "a@a" },
+        // The detector reads the submitter's IP directly off the User entity (the value the accept
+        // log records) rather than the buffered Logs table. IPAddress.Any (the default) is treated
+        // as "unknown" and never fires a mismatch.
+        User = new UserInfo { Id = userId, UserName = userName, Email = "a@a", IP = submitterIp ?? IPAddress.Any },
         SubmitTimeUtc = submitAt,
         Answer = "flag{x}",
         Status = AnswerResult.Accepted,
@@ -220,9 +224,8 @@ public class ContainerAccessSubmissionDetectorTest
         db.ContainerAccessEvents.Add(Access(1, 10, userId, "1.1.1.1", submitAt.AddMinutes(-15)));
         await db.SaveChangesAsync();
 
-        ip.Result = IPAddress.Parse("2.2.2.2");
-
-        var sub = MakeSubmission(userId, submitAt);
+        // Submitter's IP (2.2.2.2) differs from the container-access IP (1.1.1.1) → mismatch.
+        var sub = MakeSubmission(userId, submitAt, submitterIp: IPAddress.Parse("2.2.2.2"));
         await det.RunChecks(sub, platformProxyEnabled: true);
 
         Assert.Contains(sus.Calls, c => c.Type == SuspicionType.AccessIpMismatchAtSubmission);
@@ -237,9 +240,8 @@ public class ContainerAccessSubmissionDetectorTest
         db.ContainerAccessEvents.Add(Access(1, 10, userId, "1.1.1.1", submitAt.AddMinutes(-15)));
         await db.SaveChangesAsync();
 
-        ip.Result = IPAddress.Parse("1.1.1.1");
-
-        var sub = MakeSubmission(userId, submitAt);
+        // Submitter's IP matches the container-access IP (1.1.1.1) → no mismatch.
+        var sub = MakeSubmission(userId, submitAt, submitterIp: IPAddress.Parse("1.1.1.1"));
         await det.RunChecks(sub, platformProxyEnabled: true);
 
         Assert.DoesNotContain(sus.Calls, c => c.Type == SuspicionType.AccessIpMismatchAtSubmission);
@@ -254,8 +256,7 @@ public class ContainerAccessSubmissionDetectorTest
         db.ContainerAccessEvents.Add(Access(1, 10, userId, "1.1.1.1", submitAt.AddMinutes(-15)));
         await db.SaveChangesAsync();
 
-        ip.Result = null; // helper failed to resolve
-
+        // Submitter IP unknown (User.IP defaults to IPAddress.Any) → never fires a mismatch.
         var sub = MakeSubmission(userId, submitAt);
         await det.RunChecks(sub, platformProxyEnabled: true);
 

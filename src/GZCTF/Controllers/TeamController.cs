@@ -147,9 +147,15 @@ public partial class TeamController(
             return RequestResponse.Result(localizer[nameof(Resources.Program.Auth_AccessForbidden)],
                 StatusCodes.Status403Forbidden);
 
+        var oldName = team.Name;
         team.UpdateInfo(model);
 
         await teamRepository.SaveAsync(token);
+
+        // A rename must invalidate the scoreboard caches, otherwise the board keeps the old name
+        // (7-day sliding cache; A&D/KotH boards never auto-regenerate once paused/ended).
+        if (!string.Equals(oldName, team.Name, StringComparison.Ordinal))
+            await teamRepository.FlushScoreboardCacheForTeam(team.Id, token);
 
         return Ok(TeamInfoModel.FromTeam(team));
     }

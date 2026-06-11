@@ -492,9 +492,15 @@ public class GameInstanceRepository(
             var withinDeadline = !challenge.DeadlineUtc.HasValue ||
                                  updateSub.SubmitTimeUtc <= challenge.DeadlineUtc.Value;
 
-            // Blood bonus is only awarded if submission is within both game window and deadline
+            // Blood bonus is only awarded if submission is within both game window and deadline.
+            // Require GetScore too, matching the scoreboard's blood-slot rule (GameRepository
+            // GenScoreboard: `BloodEligible && ScoreEligible`): a team that cannot receive points
+            // must not consume a blood slot, otherwise the submit-time announced tier diverges
+            // from the tier the scoreboard ultimately shows.
             var hasBloodPermission = withinGameWindow && withinDeadline && !challenge.DisableBloodBonus &&
                                      HasPermission(participation.Division, GamePermission.GetBlood,
+                                         submission.ChallengeId) &&
+                                     HasPermission(participation.Division, GamePermission.GetScore,
                                          submission.ChallengeId);
 
             var submissionType = SubmissionType.Normal;
@@ -547,9 +553,15 @@ public class GameInstanceRepository(
                 on participation.DivisionId equals division.Id into divisionJoin
             from div in divisionJoin.DefaultIfEmpty()
             where participation.Status == ParticipationStatus.Accepted
+                  // Require BOTH GetBlood and GetScore, matching the scoreboard's blood-slot rule
+                  // (a non-scoring team doesn't consume a blood slot) so this prior-solve count
+                  // agrees with the tier the scoreboard assigns.
                   && (cfg != null
                       ? cfg.Permissions.HasFlag(GamePermission.GetBlood)
-                      : div == null || div.DefaultPermissions.HasFlag(GamePermission.GetBlood))
+                        && cfg.Permissions.HasFlag(GamePermission.GetScore)
+                      : div == null
+                        || (div.DefaultPermissions.HasFlag(GamePermission.GetBlood)
+                            && div.DefaultPermissions.HasFlag(GamePermission.GetScore)))
             select participation.Id;
 
         // Now, count FirstSolves for the challenge with eligible participations and time window

@@ -12,6 +12,15 @@ public class DivisionRepository(AppDbContext context, CacheHelper cacheHelper)
     {
         await cacheHelper.RemoveAsync(CacheKey.GameCache(gameId), token);
         await cacheHelper.FlushScoreboardCache(gameId, token);
+
+        // Division names/permissions also feed the A&D/KotH boards, which FlushScoreboardCache
+        // doesn't cover and which never auto-regenerate once a game is paused/ended. Flush them
+        // (IncludingFrozen — a division rename/delete can land mid-freeze) for A&D/KotH games.
+        if (await Context.GameChallenges.AnyAsync(
+                c => c.GameId == gameId
+                     && (c.Type == ChallengeType.AttackDefense || c.Type == ChallengeType.KingOfTheHill),
+                token))
+            await cacheHelper.FlushAdScoreboardCacheIncludingFrozen(gameId, token);
     }
 
     public async Task<Division> CreateDivision(Game game, DivisionCreateModel model, CancellationToken token = default)

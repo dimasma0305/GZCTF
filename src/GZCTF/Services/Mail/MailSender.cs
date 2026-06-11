@@ -356,7 +356,13 @@ public sealed class MailSender : IMailSender, IDisposable
                     $"<p>An account has been created for you on <strong>{platform}</strong>.</p>" +
                     $"<p><strong>Username:</strong> <code>{userName}</code></p>" +
                     "<p>Click the button below to set your own password. " +
-                    "This link is valid for 24 hours and can only be used once.</p>";
+                    // Must match the actual password-reset token lifespan
+                    // (DataProtectionTokenProviderOptions.TokenLifespan = 3h, IdentityExtension):
+                    // GeneratePasswordResetTokenAsync uses that global lifespan. The previous
+                    // "24 hours" copy over-promised by 8x and locked out imported users who clicked
+                    // later. For a genuine 24h window, register a dedicated PasswordReset token
+                    // provider with a 24h lifespan and update both this copy and the provider.
+                    "This link is valid for 3 hours and can only be used once.</p>";
 
                 var body = new StringBuilder(template)
                     .Replace("{title}", "Set Your Password")
@@ -498,9 +504,12 @@ public sealed class MailSender : IMailSender, IDisposable
             }
             catch (Exception e)
             {
-                // Failed to establish SMTP connection, clear the queue
-                _mailQueue.Clear();
-
+                // A transient connect/auth failure happens BEFORE anything is dequeued, so the old
+                // `_mailQueue.Clear()` here discarded every queued recipient's mail — including
+                // confirm/reset links the user was already told (HTTP 200) had been sent. Do NOT
+                // clear: leave the items queued so they retry on the next signal (next enqueue or
+                // config change), once SMTP recovers. (The genuinely-unconfigured case is still
+                // drained above, with an operator log.)
                 _logger.LogErrorMessage(e, StaticLocalizer[nameof(Resources.Program.MailSender_MailSendFailed)]);
             }
             finally

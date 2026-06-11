@@ -3,9 +3,11 @@ using GZCTF.Repositories.Interface;
 using GZCTF.Services.Cache;
 using GZCTF.Services.Cache.Handlers;
 using GZCTF.Services.Traffic;
+using GZCTF.Models.Internal;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Options;
 
 // ReSharper disable UnusedMember.Global
 
@@ -71,6 +73,16 @@ public static class RuntimeCronJobs
     [CronJob("0 */4 * * *")]
     public static async Task RemoveUnactivatedUsers(AsyncServiceScope scope, ILogger<CronJobService> logger)
     {
+        // This reaper deletes accounts that registered but never CONFIRMED THEIR EMAIL — its
+        // predicate is `!EmailConfirmed`. That premise only holds when email confirmation is the
+        // activation gate. In admin-approval mode (EmailConfirmationRequired=false) a !EmailConfirmed
+        // account means "pending admin approval" (password AND OAuth paths create it that way), not
+        // an abandoned signup — so running the reaper there silently deletes legitimate registrants
+        // before an admin can approve them. Skip entirely unless email confirmation is required.
+        var accountPolicy = scope.ServiceProvider.GetRequiredService<IOptionsSnapshot<AccountPolicy>>().Value;
+        if (!accountPolicy.EmailConfirmationRequired)
+            return;
+
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<UserInfo>>();
         var timeThreshold = DateTimeOffset.UtcNow.AddHours(-48);
 
@@ -81,12 +93,23 @@ public static class RuntimeCronJobs
         if (usersToDelete.Count == 0)
             return;
 
+        var deleted = 0;
         foreach (var user in usersToDelete)
         {
-            await userManager.DeleteAsync(user);
+            // Don't let one undeletable user (e.g. a RESTRICT FK) abort the whole run.
+            try
+            {
+                var result = await userManager.DeleteAsync(user);
+                if (result.Succeeded)
+                    deleted++;
+            }
+            catch (Exception e)
+            {
+                logger.LogError(e, "Failed to remove unactivated user {User}", user.Id);
+            }
         }
 
-        logger.SystemLog(StaticLocalizer[nameof(Resources.Program.CronJob_RemoveUnactivatedUsers), usersToDelete.Count],
+        logger.SystemLog(StaticLocalizer[nameof(Resources.Program.CronJob_RemoveUnactivatedUsers), deleted],
             TaskStatus.Success, LogLevel.Information);
     }
 

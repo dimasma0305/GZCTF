@@ -95,10 +95,14 @@ public class GameChallengeRepository(
 
         await LoadFlags(challenge, token);
 
-        // only dynamic attachment challenge's flag contexts have attachment
-        if (challenge.Type == ChallengeType.DynamicAttachment)
-            foreach (var flag in challenge.Flags)
-                await blobRepository.DeleteAttachment(flag.Attachment, token);
+        // Release flag-context attachments for ANY type, not just DynamicAttachment. Flag-level
+        // local attachments are canonically a DynamicAttachment feature, but a mis-typed import
+        // (or a type change after attachments were added) can leave one on another type's flags;
+        // the old DynamicAttachment-only guard then orphaned those Attachment rows + never
+        // decremented the LocalFile ref-count, leaking the physical file. DeleteAttachment is
+        // null-safe and only touches Local-typed attachments, so this is safe for flags w/o files.
+        foreach (var flag in challenge.Flags)
+            await blobRepository.DeleteAttachment(flag.Attachment, token);
 
         Context.RemoveRange(challenge.Flags);
         Context.Remove(challenge);

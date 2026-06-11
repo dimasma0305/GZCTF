@@ -374,8 +374,12 @@ public class GameImportService(
             try
             {
                 // After database rollback, LocalFile records for newly uploaded files are gone
-                // We need to delete the physical files directly from storage
-                var path = StoragePath.Combine(PathHelper.Uploads, hash[..2], hash);
+                // We need to delete the physical files directly from storage. The canonical blob
+                // layout is uploads/{hash[..2]}/{hash[2..4]}/{hash} (StoreBlob/DeleteBlob/
+                // CopyFileByHashAsync all use the 3-segment form). The previous 2-segment path
+                // (missing hash[2..4]) never matched, so every failed import orphaned its newly
+                // uploaded blobs forever — no GC reaps a file whose LocalFile row was rolled back.
+                var path = StoragePath.Combine(PathHelper.Uploads, hash[..2], hash[2..4], hash);
 
                 await blobStorage.DeleteAsync(path, ct);
             }

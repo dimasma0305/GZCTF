@@ -1,10 +1,17 @@
 ﻿using GZCTF.Models.Request.Info;
 using GZCTF.Repositories.Interface;
+using GZCTF.Services;
+using GZCTF.Services.Cache;
 using Microsoft.EntityFrameworkCore;
 
 namespace GZCTF.Repositories;
 
-public class TeamRepository(AppDbContext context) : RepositoryBase(context), ITeamRepository
+public class TeamRepository(
+    ILogger<TeamRepository> logger,
+    CacheHelper cacheHelper,
+    IParticipationRepository participationRepository,
+    AdContainerManager adContainerManager,
+    AppDbContext context) : RepositoryBase(context), ITeamRepository
 {
     public async Task<bool> AnyActiveGame(Team team, CancellationToken token = default)
     {
@@ -42,10 +49,83 @@ public class TeamRepository(AppDbContext context) : RepositoryBase(context), ITe
         return team;
     }
 
-    public Task DeleteTeam(Team team, CancellationToken token = default)
+    public async Task DeleteTeam(Team team, CancellationToken token = default)
     {
-        Context.Remove(team);
-        return SaveAsync(token);
+        // Load the team's participations (with their writeup blob) so we can reap per-team
+        // resources BEFORE the cascade deletes the rows the teardown keys off. Mirrors
+        // GameRepository.DeleteGame, which had this teardown while DeleteTeam was a bare cascade
+        // that orphaned live A&D containers + host flag files and leaked writeup PDFs.
+        var parts = await Context.Participations
+            .Where(p => p.TeamId == team.Id)
+            .Include(p => p.Writeup)
+            .ToListAsync(token);
+
+        // Tear down A&D service containers (+ host flag-mount files) per participation, BEFORE the
+        // cascade — once the AdTeamService rows are gone the reconciler can't find the containers
+        // (they'd run until game end) and the host flag file would never be cleaned. Per-team only:
+        // KotH hills are shared per challenge, so they stay up for the remaining teams. Best-effort:
+        // a container-daemon hiccup must not block the delete (matches DeleteGame).
+        foreach (var part in parts)
+        {
+            try
+            {
+                await adContainerManager.DestroyContainersForParticipationAsync(part.Id, token);
+            }
+            catch (Exception e)
+            {
+                logger.SystemLog(
+                    $"A&D container teardown during team delete failed (continuing): participation={part.Id}: {e.Message}",
+                    TaskStatus.Failed, LogLevel.Warning);
+            }
+        }
+
+        var gameIds = parts.Select(p => p.GameId).Distinct().ToList();
+
+        var trans = await BeginTransactionAsync(token);
+        try
+        {
+            // RemoveParticipation deletes each participation's writeup blob (ref-count) + row,
+            // instead of letting the bare team cascade orphan the blob on disk.
+            foreach (var part in parts)
+                await participationRepository.RemoveParticipation(part, false, token);
+
+            Context.Remove(team);
+            await SaveAsync(token);
+            await trans.CommitAsync(token);
+        }
+        catch
+        {
+            await trans.RollbackAsync(token);
+            throw;
+        }
+
+        // Flush scoreboard caches for every game the team was in — otherwise the deleted team's
+        // row lingers on the board for up to 7 days. A&D/KotH families don't auto-regenerate once
+        // a game is paused/ended, so flush them (IncludingFrozen) when the game uses that engine.
+        await FlushScoreboardsForGames(gameIds, token);
+    }
+
+    public async Task FlushScoreboardCacheForTeam(int teamId, CancellationToken token = default)
+    {
+        var gameIds = await Context.Participations
+            .Where(p => p.TeamId == teamId)
+            .Select(p => p.GameId)
+            .Distinct()
+            .ToListAsync(token);
+        await FlushScoreboardsForGames(gameIds, token);
+    }
+
+    private async Task FlushScoreboardsForGames(IReadOnlyCollection<int> gameIds, CancellationToken token)
+    {
+        foreach (var gameId in gameIds)
+        {
+            await cacheHelper.FlushScoreboardCache(gameId, token);
+            if (await Context.GameChallenges.AnyAsync(
+                    c => c.GameId == gameId
+                         && (c.Type == ChallengeType.AttackDefense || c.Type == ChallengeType.KingOfTheHill),
+                    token))
+                await cacheHelper.FlushAdScoreboardCacheIncludingFrozen(gameId, token);
+        }
     }
 
     public Task<Team?> GetTeamById(int id, CancellationToken token = default) =>

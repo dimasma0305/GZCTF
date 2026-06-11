@@ -985,7 +985,7 @@ public sealed class AdContainerManager(
     /// concurrent reconciler pass won't double-destroy.</para>
     /// </summary>
     public Task DestroyContainersForGameAsync(int gameId, CancellationToken token = default)
-        => DestroyContainersInternalAsync(gameId, null, token);
+        => DestroyContainersInternalAsync(gameId, null, null, token);
 
     /// <summary>
     /// Tear down the A&amp;D / KotH containers (and KotH cooldown chains) for a SINGLE
@@ -996,9 +996,20 @@ public sealed class AdContainerManager(
     /// Must run BEFORE the challenge rows are removed.
     /// </summary>
     public Task DestroyContainersForChallengeAsync(int challengeId, CancellationToken token = default)
-        => DestroyContainersInternalAsync(null, challengeId, token);
+        => DestroyContainersInternalAsync(null, challengeId, null, token);
 
-    private async Task DestroyContainersInternalAsync(int? gameId, int? challengeId,
+    /// <summary>
+    /// Tear down the A&amp;D service containers (+ host flag-mount files) for a SINGLE
+    /// participation (team) — called when a TEAM is being deleted mid-game. Same rationale as
+    /// the game/challenge variants: deleting the team cascade-removes its AdTeamService rows, so
+    /// the reconciler can never find the containers again and they'd run until game end (and the
+    /// host flag file would leak forever). Must run BEFORE the participation rows are removed.
+    /// KotH hills are per-challenge/shared (not per-team), so they are intentionally NOT touched.
+    /// </summary>
+    public Task DestroyContainersForParticipationAsync(int participationId, CancellationToken token = default)
+        => DestroyContainersInternalAsync(null, null, participationId, token);
+
+    private async Task DestroyContainersInternalAsync(int? gameId, int? challengeId, int? participationId,
         CancellationToken token = default)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
@@ -1006,12 +1017,15 @@ public sealed class AdContainerManager(
         var containerManager = scope.ServiceProvider.GetRequiredService<IContainerManager>();
         var dockerProvider = scope.ServiceProvider.GetService<IContainerProvider<DockerClient, DockerMetadata>>();
 
-        // A&D service containers (TeamId=<participationId>), scoped to a game or a single challenge.
+        // A&D service containers (TeamId=<participationId>), scoped to a game, a single challenge,
+        // or a single participation (team).
         var servicesQuery = db.AdTeamServices.Where(ts => ts.ContainerId != null);
         if (gameId is { } sgid)
             servicesQuery = servicesQuery.Where(ts => ts.Participation.GameId == sgid);
         if (challengeId is { } scid)
             servicesQuery = servicesQuery.Where(ts => ts.ChallengeId == scid);
+        if (participationId is { } spid)
+            servicesQuery = servicesQuery.Where(ts => ts.ParticipationId == spid);
         var services = await servicesQuery
             .Include(ts => ts.Container)
             .ToListAsync(token);
@@ -1042,14 +1056,22 @@ public sealed class AdContainerManager(
         }
 
         // KotH hill containers (TeamId=koth-<challengeId>) + cooldown chains, same scoping.
-        var hillsQuery = db.KothTargets.AsQueryable();
-        if (gameId is { } hgid)
-            hillsQuery = hillsQuery.Where(t => t.GameId == hgid);
-        if (challengeId is { } hcid)
-            hillsQuery = hillsQuery.Where(t => t.ChallengeId == hcid);
-        var hills = await hillsQuery
-            .Include(t => t.Container)
-            .ToListAsync(token);
+        // A KotH hill is per-challenge/shared, NOT per-team — so a pure per-participation teardown
+        // (team delete) must leave every hill running for the remaining teams.
+        List<KothTarget> hills;
+        if (participationId is { } && gameId is null && challengeId is null)
+        {
+            hills = [];
+        }
+        else
+        {
+            var hillsQuery = db.KothTargets.AsQueryable();
+            if (gameId is { } hgid)
+                hillsQuery = hillsQuery.Where(t => t.GameId == hgid);
+            if (challengeId is { } hcid)
+                hillsQuery = hillsQuery.Where(t => t.ChallengeId == hcid);
+            hills = await hillsQuery.Include(t => t.Container).ToListAsync(token);
+        }
 
         foreach (var target in hills)
         {

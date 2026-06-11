@@ -157,8 +157,15 @@ public sealed class ContainerAccessSubmissionDetector(
                 var userName = submission.User?.UserName;
                 if (!string.IsNullOrEmpty(userName) && submitterAccessIps.Count > 0)
                 {
-                    var submitterIp = await ipHelper.ResolveUserIpAt(db, userName, submission.SubmitTimeUtc, SubmitterIpWindow, token);
-                    if (submitterIp is not null)
+                    // Use the submitter's IP directly from the loaded User entity. This is the EXACT
+                    // value the accept-log row records (the Serilog DB sink writes submission.User.IP),
+                    // so it's equivalent to resolving from Logs — WITHOUT the buffering bug: the Logs
+                    // table is written by a BUFFERED sink, so the just-emitted accept row isn't
+                    // persisted yet when this synchronous detector runs, and ResolveUserIpAt therefore
+                    // returned a stale/no IP → the AccessIpMismatch signal effectively never fired.
+                    var submitterIp = submission.User?.IP;
+                    if (submitterIp is not null
+                        && !submitterIp.Equals(IPAddress.Any) && !submitterIp.Equals(IPAddress.IPv6Any))
                     {
                         var submitterIpString = NormalizeIp(submitterIp);
                         if (!submitterAccessIps.Contains(submitterIpString))

@@ -588,7 +588,19 @@ public class AssetsController(
                 i.Participation.Team.Name))
             .ToListAsync(cancellationToken);
 
+        // Writeup PDFs are also served through this generic /assets/{hash} route, but the rest of
+        // the writeup subsystem (list/download) is admin-only. Without a target here they fell
+        // through the `Targets.Count == 0 ⇒ allow` default and were world-readable to anyone who
+        // learned the content hash. Emitting a target with SourceTeamId = the owning team makes
+        // IsDownloadAllowed require Admin OR a member of that team — matching the subsystem's authz.
+        var writeupTargets = await context.Participations
+            .AsNoTracking()
+            .Where(p => p.Writeup != null && p.Writeup.Hash == hash)
+            .Select(p => new DownloadTarget(p.GameId, 0, "Writeup", p.TeamId, p.Team.Name))
+            .ToListAsync(cancellationToken);
+
         staticTargets.AddRange(dynamicTargets);
+        staticTargets.AddRange(writeupTargets);
         return staticTargets;
     }
 

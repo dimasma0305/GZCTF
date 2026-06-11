@@ -87,4 +87,11 @@ public interface ITeamRepository : IRepository
     /// <param name="token"></param>
     /// <returns></returns>
     public Task DeleteTeam(Team team, CancellationToken token = default);
+
+    /// <summary>
+    /// Flush the jeopardy + A&amp;D/KotH scoreboard caches for every game the team participates in.
+    /// Call after a team rename so the board doesn't keep showing the stale name (the scoreboard
+    /// caches are 7-day sliding and the A&amp;D/KotH families don't auto-regenerate once paused/ended).
+    /// </summary>
+    public Task FlushScoreboardCacheForTeam(int teamId, CancellationToken token = default);
 }
