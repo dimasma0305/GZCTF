@@ -914,13 +914,18 @@ public class EditController(
             !model.IsValidFlagTemplate())
             return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Challenge_FlagTooTrivial)]));
 
+        var wasSharedManaged = res.UsesSharedContainer; // capture BEFORE the model mutates it
         res.Update(model);
 
-        // If this challenge no longer uses a shared container — the operator unticked "Shared
-        // instance" or retyped it away from StaticContainer — but a shared one is still live,
-        // destroy it now so it isn't orphaned (the create path has switched to per-team, and
-        // the IsEnabled switch below only tears down on a disable, which an edit doesn't do).
-        if (res.SharedContainerId is not null && !res.UsesSharedContainer)
+        // If the shared-vs-per-team mode FLIPPED in either direction, the containers created under
+        // the old mode are now managed by the other path and would be stranded:
+        //   • shared → per-team (untick / retype away from StaticContainer): the live shared
+        //     container is orphaned.
+        //   • per-team → shared (tick "Shared instance" mid-game): the existing per-team containers
+        //     become unmanageable zombies that keep consuming each team's ContainerCountLimit slot.
+        // DestroyAllContainers reaps both per-team (via GameInstance) and the shared one, so the new
+        // mode starts clean. (The IsEnabled switch below only tears down on a disable, not an edit.)
+        if (wasSharedManaged != res.UsesSharedContainer)
             await instanceRepository.DestroyAllContainers(res, token);
 
         switch (model.IsEnabled)

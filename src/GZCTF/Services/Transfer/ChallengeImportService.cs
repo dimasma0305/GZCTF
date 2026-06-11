@@ -268,6 +268,18 @@ public sealed class ChallengeImportService(
         {
             challenge = existing;
             kind = OutcomeKind.Updated;
+            // A `type:` change in the bound YAML is the ONLY retype path (the platform UI has no Type
+            // field). Reassign Type, else the row keeps its OLD Type while ResolveBuildIntent and
+            // ApplyYamlToChallenge below apply every type-DEPENDENT field for the NEW type — A&D knobs
+            // on a row still typed StaticContainer, EnableSharedContainer force-flipped, a dangling
+            // SharedContainerId — a permanently inconsistent row. Containers created under the old type
+            // self-heal via the idle reaper / the next shared get-or-create.
+            if (existing.Type != type)
+            {
+                logger.LogWarning("ChallengeImportService: challenge '{Name}' retyped {Old} -> {New} via YAML sync",
+                    model.Name, existing.Type, type);
+                existing.Type = type;
+            }
         }
 
         // Apply build-intent decision to the challenge row up-front.

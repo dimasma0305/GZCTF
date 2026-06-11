@@ -199,7 +199,16 @@ public class FlagChecker(
                             }
                     }
 
-                    if (item.Game!.EndTimeUtc > DateTimeOffset.UtcNow
+                    // Blood notices ("X drew first blood on C") reveal late-game standings movement.
+                    // During the ICPC freeze window they must NOT be broadcast to non-monitors —
+                    // mirror the freeze gate the attack feeds already apply (SendAttackEventInternal).
+                    // Without this, freeze hides the scoreboard but blood toasts still leak who's
+                    // solving what in the final hour.
+                    var noticeNow = DateTimeOffset.UtcNow;
+                    var inFreeze = item.Game!.FreezeTimeUtc is { } freeze
+                                   && noticeNow >= freeze && noticeNow < item.Game.EndTimeUtc;
+                    if (item.Game!.EndTimeUtc > noticeNow
+                        && !inFreeze
                         && type != SubmissionType.Unaccepted
                         && type != SubmissionType.Normal)
                         await gameNoticeRepository.AddNotice(

@@ -1674,7 +1674,14 @@ public class GameController(
             var currentAttempts =
                 await submissionRepository.CountSubmissions(context.Participation!.Id, challengeId, token);
 
-            if (instance.Challenge.SubmissionLimit > 0 && currentAttempts >= instance.Challenge.SubmissionLimit)
+            // Practice mode (after the game has ended) waives the per-challenge deadline so players
+            // can keep practising — but SubmissionLimit counts live-game + practice attempts in one
+            // unbounded total, so a low-limit challenge would give ZERO practice attempts post-game,
+            // contradicting that intent. Waive the limit in the practice phase too (same precedence
+            // as the deadline waiver above).
+            var inPracticePhase = context.Game!.PracticeMode && submitTime > context.Game.EndTimeUtc;
+            if (instance.Challenge.SubmissionLimit > 0 && !inPracticePhase
+                && currentAttempts >= instance.Challenge.SubmissionLimit)
             {
                 return BadRequest(
                     new RequestResponse(localizer[nameof(Resources.Program.Challenge_SubmissionLimitExceeded)]));
