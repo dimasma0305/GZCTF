@@ -131,7 +131,9 @@ internal static class ServicesExtension
 
             builder.Services.AddHttpClient("GitHubApi", client =>
             {
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("GZCTF");
+                // User-Agent comes from the canonical default set in ConfigureHttpClientDefaults
+                // (AppBuilderExtensions); don't ParseAdd a second product here or the header stacks
+                // into "GZCTF (+url) GZCTF".
                 client.Timeout = TimeSpan.FromMinutes(2);
             });
 

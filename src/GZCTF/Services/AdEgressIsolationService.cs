@@ -153,11 +153,11 @@ public sealed class AdEgressIsolationService(
         if (!dockerProvider.GetMetadata().Config.EnforceEgressIsolation)
         {
             // Tear the chain down once, then stay converged — don't re-spawn the helper every pass.
-            if (!_chainTornDown)
-            {
-                await RunHelperAsync(docker, BuildTeardownScript(), token);
+            // Latch ONLY on a successful teardown: if the helper exits non-zero (e.g. iptables/ipset
+            // unavailable) the rules are NOT removed, so leaving _chainTornDown false retries next pass
+            // instead of permanently latching "converged" while stale host-wide DROP rules leak.
+            if (!_chainTornDown && await RunHelperAsync(docker, BuildTeardownScript(), token))
                 _chainTornDown = true;
-            }
             return;
         }
 
@@ -191,11 +191,10 @@ public sealed class AdEgressIsolationService(
             // same teardown the EnforceEgressIsolation=false path runs; a later launch reapplies.
             // ONE-SHOT (guarded): only flush on the transition into empty, not every idle pass,
             // else this churns a privileged helper container every ~30s forever on idle installs.
-            if (!_chainTornDown)
-            {
-                await RunHelperAsync(docker, BuildTeardownScript(), token);
+            // Latch only on a SUCCESSFUL teardown so a failed pass (tools unavailable) retries rather
+            // than latching "converged" while stale rules leak.
+            if (!_chainTornDown && await RunHelperAsync(docker, BuildTeardownScript(), token))
                 _chainTornDown = true;
-            }
             return;
         }
 
@@ -374,7 +373,10 @@ public sealed class AdEgressIsolationService(
         sb.AppendLine("fi");
     }
 
-    private async Task RunHelperAsync(DockerClient docker, string script, CancellationToken token)
+    /// <summary>Run the privileged host-netns helper. Returns true iff it exited 0 (rules actually
+    /// applied/torn down). Callers gate convergence state on this so a failed pass is retried, not
+    /// latched as done.</summary>
+    private async Task<bool> RunHelperAsync(DockerClient docker, string script, CancellationToken token)
     {
         string? id = null;
         try
@@ -406,9 +408,19 @@ public sealed class AdEgressIsolationService(
             waitCts.CancelAfter(TimeSpan.FromSeconds(30));
             var wait = await docker.Containers.WaitContainerAsync(id, waitCts.Token);
             if (wait.StatusCode != 0)
+            {
                 logger.LogWarning(
-                    "AdEgressIsolation: helper exited {Code} — egress isolation rules may NOT have been applied this pass (exit 3 = iptables/ipset unavailable on the host; check connectivity to the apk mirror or bake a helper image with them preinstalled)",
+                    "AdEgressIsolation: helper exited {Code} — egress isolation rules may NOT have been applied/removed this pass (exit 3 = iptables/ipset unavailable on the host; check connectivity to the apk mirror or bake a helper image with them preinstalled)",
                     wait.StatusCode);
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception e)
+        {
+            logger.LogError(e, "AdEgressIsolation: helper run failed");
+            return false;
         }
         finally
         {

@@ -560,11 +560,22 @@ public sealed class MailSender : IMailSender, IDisposable
     /// credentials + reset links in cleartext. Unset = Auto (the prior behavior: implicit TLS on 465,
     /// opportunistic STARTTLS otherwise — safe for a local plaintext relay).
     /// </summary>
-    private static SecureSocketOptions ResolveSecureSocket(SmtpConfig smtp) =>
-        !string.IsNullOrWhiteSpace(smtp.SecureSocketOption)
-        && Enum.TryParse<SecureSocketOptions>(smtp.SecureSocketOption, ignoreCase: true, out var opt)
-            ? opt
-            : SecureSocketOptions.Auto;
+    private SecureSocketOptions ResolveSecureSocket(SmtpConfig smtp)
+    {
+        var raw = smtp.SecureSocketOption;
+        if (string.IsNullOrWhiteSpace(raw))
+            return SecureSocketOptions.Auto;
+        // Enum.TryParse ALONE accepts any integer-looking string (e.g. "99") and the comma/flags form,
+        // returning an UNDEFINED value that MailKit treats like None → silent plaintext, defeating the
+        // whole point of letting the operator require TLS. Require a DEFINED member; otherwise warn and
+        // fall back to Auto so a typo is visible instead of silently downgrading.
+        if (Enum.TryParse<SecureSocketOptions>(raw, ignoreCase: true, out var opt) && Enum.IsDefined(opt))
+            return opt;
+        _logger.LogWarning(
+            "Invalid SmtpConfig.SecureSocketOption '{Value}' — expected one of Auto/None/SslOnConnect/StartTls/StartTlsWhenAvailable; falling back to Auto.",
+            raw);
+        return SecureSocketOptions.Auto;
+    }
 
     private bool EnqueueMailTask(string? userName, string? email, string? resetLink, MailType type,
         IStringLocalizer<Program> localizer, IOptionsSnapshot<GlobalConfig> options)

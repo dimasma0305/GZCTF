@@ -113,31 +113,31 @@ public sealed class GitRepoSyncService(ILogger<GitRepoSyncService> logger)
 
         if (!Directory.Exists(gitDir))
         {
-            if (IsCommitSha(loc.Ref))
+            // Try a normal clone --branch FIRST. It resolves any real ref — a branch OR a tag, INCLUDING
+            // a (pathological but legal) 40-hex branch name — so genuine refs always win and we don't
+            // misroute them by guessing "SHA" from shape. Only if the clone fails AND the ref looks like
+            // a commit SHA do we fall back to init + fetch-by-OID (clone --branch rejects a raw SHA, but
+            // GitHub's upload-pack has allowReachableSHA1InWant). --depth 1: we only ever look at HEAD.
+            logger.LogInformation("GitRepoSync: cloning {Url} → {Dir}", repoUrl, repoDir);
+            try
             {
-                // `git clone --branch <sha>` is REJECTED by git (--branch accepts only a branch/tag
-                // name), which left a SHA-pinned binding permanently wedged with no .git dir. GitHub's
-                // upload-pack has allowReachableSHA1InWant, so init + fetch the SHA directly (the same
-                // path the steady-state fetch uses). --depth 1: we only ever look at HEAD.
-                logger.LogInformation("GitRepoSync: init+fetch commit {Ref} of {Url} → {Dir}",
-                    loc.Ref, repoUrl, repoDir);
-                await RunGitAsync(kindDir, ["init", id.ToString()], ct);
-                await RunGitAsync(repoDir, ["remote", "add", "origin", repoUrl], ct);
-                await RunGitAsync(repoDir, [.. authArgs, "fetch", "--depth", "1", "origin", "--", loc.Ref!], ct);
-                await RunGitAsync(repoDir, ["reset", "--hard", "FETCH_HEAD"], ct);
-            }
-            else
-            {
-                // Fresh clone (default branch, or a pinned branch/tag). --depth 1 because we only ever
-                // look at HEAD; we never inspect history. --single-branch keeps the fetch surface small
-                // on repos with hundreds of feature branches.
-                logger.LogInformation("GitRepoSync: cloning {Url} → {Dir}", repoUrl, repoDir);
                 await RunGitAsync(kindDir, [
                     .. authArgs,
                     "clone", "--depth", "1", "--single-branch",
                     .. (string.IsNullOrEmpty(loc.Ref) ? Array.Empty<string>() : new[] { "--branch", loc.Ref }),
                     repoUrl, id.ToString()
                 ], ct);
+            }
+            catch when (IsCommitSha(loc.Ref))
+            {
+                logger.LogInformation("GitRepoSync: clone --branch failed for SHA {Ref}; init+fetch-by-commit",
+                    loc.Ref);
+                if (Directory.Exists(repoDir))
+                    Directory.Delete(repoDir, true); // clear any partial dir the failed clone left
+                await RunGitAsync(kindDir, ["init", id.ToString()], ct);
+                await RunGitAsync(repoDir, ["remote", "add", "origin", repoUrl], ct);
+                await RunGitAsync(repoDir, [.. authArgs, "fetch", "--depth", "1", "origin", "--", loc.Ref!], ct);
+                await RunGitAsync(repoDir, ["reset", "--hard", "FETCH_HEAD"], ct);
             }
         }
         else
@@ -292,22 +292,17 @@ public sealed class GitRepoSyncService(ILogger<GitRepoSyncService> logger)
                 throw new InvalidOperationException(
                     "Could not resolve current branch name for push; checkout is detached.");
         }
-        else if (IsCommitSha(loc.Ref))
-        {
-            // Can't push an edit to a commit SHA.
-            throw new InvalidOperationException(
-                $"PushOnEdit cannot push to a commit-SHA ref ('{loc.Ref}'); pin the binding to a writable branch.");
-        }
         else
         {
-            // loc.Ref is a branch OR a tag. A tag checks out as DETACHED HEAD, so the old unconditional
-            // `push HEAD:refs/heads/<loc.Ref>` created a PHANTOM BRANCH refs/heads/<tag> distinct from
-            // refs/tags/<tag> — invisible to the read-sync that reads the tag. Only push when the ref
-            // is a real branch (HEAD attached to it); refuse a tag with a clear message.
+            // loc.Ref is a branch, a tag, or a commit SHA. A tag or SHA checks out as DETACHED HEAD, so
+            // the old unconditional `push HEAD:refs/heads/<loc.Ref>` created a PHANTOM BRANCH (or tried
+            // to push to a SHA) — invisible to the read-sync. Decide from the ACTUAL checkout state, not
+            // the ref's shape: only push when HEAD is attached to a real branch (so a 40-hex BRANCH name
+            // still pushes correctly); refuse a detached (tag/SHA) checkout with a clear message.
             var current = (await RunGitAsync(repoDir, ["rev-parse", "--abbrev-ref", "HEAD"], ct)).Trim();
             if (string.IsNullOrEmpty(current) || current == "HEAD")
                 throw new InvalidOperationException(
-                    $"PushOnEdit cannot push to a tag ref ('{loc.Ref}'); the checkout is detached. Pin the binding to a writable branch.");
+                    $"PushOnEdit cannot push to a tag or commit-SHA ref ('{loc.Ref}'); the checkout is detached. Pin the binding to a writable branch.");
             destRef = current;
         }
 
