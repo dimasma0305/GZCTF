@@ -151,12 +151,19 @@ public partial class AccountController(
             return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Model_PasswordRequired)]));
 
 
-        var user = new UserInfo 
-        { 
-            UserName = model.UserName, 
-            Email = model.Email, 
+        var user = new UserInfo
+        {
+            UserName = model.UserName,
+            Email = model.Email,
             // Auto-assign Admin role in development for testing
-            Role = environment.IsDevelopment() ? Role.Admin : Role.User 
+            Role = environment.IsDevelopment() ? Role.Admin : Role.User,
+            // Stamp at creation so the 48h "unactivated user" reaper measures time-since-
+            // registration. Without this, RegisterTimeUtc stays at epoch 0 on the admin-
+            // approval path (EmailConfirmed=false, never email-verified), so RemoveUnactivatedUsers
+            // (every 4h, WHERE !EmailConfirmed && RegisterTimeUtc < now-48h) deletes the pending
+            // account before an admin can approve it. The email-confirmation path re-stamps this
+            // in Verify (harmless — that path also sets EmailConfirmed=true).
+            RegisterTimeUtc = DateTimeOffset.UtcNow
         };
 
         user.UpdateByHttpContext(HttpContext);

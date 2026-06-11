@@ -1367,6 +1367,17 @@ public class AdminController(
         await transaction.CommitAsync(token);
         await cacheHelper.FlushScoreboardCache(participation.GameId, token);
 
+        // Participation.Status is a scoring input for the A&D/KotH boards too (they filter
+        // Accepted), but those cache families don't auto-regenerate once a game is paused or
+        // ended — exactly when a disqualification ruling happens. FlushScoreboardCache only
+        // covers jeopardy, so flush the A&D/KotH family (incl. frozen, since a status change
+        // can predate the freeze) for A&D/KotH games. Cheap no-op otherwise.
+        if (await dbContext.GameChallenges.AnyAsync(
+                c => c.GameId == participation.GameId
+                     && (c.Type == ChallengeType.AttackDefense || c.Type == ChallengeType.KingOfTheHill),
+                token))
+            await cacheHelper.FlushAdScoreboardCacheIncludingFrozen(participation.GameId, token);
+
         return Ok();
     }
 

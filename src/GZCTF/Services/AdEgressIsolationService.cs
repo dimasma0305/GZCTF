@@ -169,8 +169,17 @@ public sealed class AdEgressIsolationService(
 
         var validAd = adIps.Where(IsValidIp).Distinct().ToList();
         var validKoth = kothIps.Where(IsValidIp).Distinct().ToList();
-        if (validAd.Count == 0 && validKoth.Count == 0)
-            return; // nothing to contain yet
+        if (validAd.Count == 0 && validKoth.Count == 0 && _kothCooldowns.IsEmpty)
+        {
+            // Nothing left to contain — but the previous game's container IPs, control-plane
+            // DROP rules, and any KotH cooldown rule are still live in GZCTF_AD_ISO. The old
+            // code returned WITHOUT touching the chain, so those stale rules leaked host-wide
+            // in DOCKER-USER (which filters ALL bridge traffic) until the next launch, surviving
+            // IP reuse by a later game. Converge by flushing the chain to its empty state — the
+            // same teardown the EnforceEgressIsolation=false path runs; a later launch reapplies.
+            await RunHelperAsync(docker, BuildTeardownScript(), token);
+            return;
+        }
 
         // gzctf's own IPs — denied as a destination so a popped container can't
         // hit the control-plane API on the shared challenge bridge.

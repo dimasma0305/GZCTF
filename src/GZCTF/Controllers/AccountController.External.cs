@@ -289,7 +289,11 @@ public partial class AccountController
             UserName = await GenerateUniqueUserNameAsync(name, email),
             Email = email,
             EmailConfirmed = !requiresManualApproval, // provider-verified above
-            Role = environment.IsDevelopment() ? Role.Admin : Role.User
+            Role = environment.IsDevelopment() ? Role.Admin : Role.User,
+            // Stamp at creation (see AccountController.Register): otherwise an OAuth sign-up
+            // awaiting manual approval (EmailConfirmed=false) keeps RegisterTimeUtc at epoch 0
+            // and RemoveUnactivatedUsers deletes it within 4h, before an admin can approve.
+            RegisterTimeUtc = DateTimeOffset.UtcNow
         };
         newUser.UpdateByHttpContext(HttpContext);
 

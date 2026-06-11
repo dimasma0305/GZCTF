@@ -132,13 +132,18 @@ public static class ChallengeYamlSerializer
     }
 
     /// <summary>
-    /// True for a platform auto-built image tag (<c>gzctf-auto/{game}/{slug}[-checker]:{sha}</c>).
-    /// These are generated from a Dockerfile in the package on every import and are not part of
-    /// the authored source, so they must never be serialized back into the pushed yaml — doing so
-    /// turns a "build me" challenge into a "pull this registry image" one on the next sync.
+    /// True for a platform auto-built image tag. These are generated from a Dockerfile in the
+    /// package on every import and are not part of the authored source, so they must never be
+    /// serialized back into the pushed yaml — doing so turns a "build me" challenge into a
+    /// "pull this registry image" one on the next sync.
+    /// <para>Matches BOTH forms the builder emits: the local-only <c>gzctf-auto/{game}/{slug}:{sha}</c>
+    /// and the registry-pushed <c>{server}/{ns}/gzctf-auto/{game}/{slug}:{sha}</c> (PushOnBuild).
+    /// The earlier <c>StartsWith</c> form missed the registry variant, so a PushOnBuild deployment
+    /// re-serialized the pushed digest into challenge.yml and lost build intent on the next sync.
+    /// Uses the same <c>Contains("gzctf-auto/")</c> convention as AdminController's image GC.</para>
     /// </summary>
     private static bool IsAutoBuiltTag(string? image) =>
-        !string.IsNullOrEmpty(image) && image.StartsWith("gzctf-auto/", StringComparison.Ordinal);
+        !string.IsNullOrEmpty(image) && image.Contains("gzctf-auto/", StringComparison.Ordinal);
 
     /// <summary>
     /// The importer prepends <c>"Author: **X**\n\n"</c> to the

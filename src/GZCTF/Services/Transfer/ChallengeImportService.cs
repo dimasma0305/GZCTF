@@ -336,7 +336,22 @@ public sealed class ChallengeImportService(
                     case EnqueueResult.Enqueued:
                         challenge.BuildStatus = ChallengeBuildStatus.Queued;
                         challenge.LastBuildLog = null;
-                        await context.SaveChangesAsync(token);
+                        try
+                        {
+                            await context.SaveChangesAsync(token);
+                        }
+                        catch (DbUpdateConcurrencyException)
+                        {
+                            // The build worker can pick the job up and ExecuteUpdate(
+                            // BuildStatus=Building) on this xmin-tracked row before this tracked
+                            // save commits. That's a benign, healthy transition (Queued→Building),
+                            // NOT an import failure — but the generic catch below would otherwise
+                            // flip BuildStatus=Failed and report a healthy auto-build as a failed
+                            // import in the binding scan. Reload so the tracker matches the DB
+                            // (Building) and any later save (the checker auto-build below) uses the
+                            // fresh token.
+                            await context.Entry(challenge).ReloadAsync(token);
+                        }
                         break;
                     case EnqueueResult.AlreadyPending:
                         // Existing build will satisfy this re-import too.

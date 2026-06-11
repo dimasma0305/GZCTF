@@ -798,6 +798,17 @@ public class EditController(
     public async Task<IActionResult> FlushScoreboardCache([FromRoute] int id, CancellationToken token)
     {
         await cacheHelper.FlushScoreboardCache(id, token);
+
+        // The operator's manual escape hatch must be able to repair a stale A&D/KotH board
+        // too: FlushScoreboardCache only covers the jeopardy family, and the A&D/KotH boards
+        // (incl. frozen) don't auto-regenerate once a game is paused/ended, so without this
+        // the button can't fix them. Cheap no-op for games without an A&D/KotH challenge.
+        if (await dbContext.GameChallenges.AnyAsync(
+                c => c.GameId == id
+                     && (c.Type == ChallengeType.AttackDefense || c.Type == ChallengeType.KingOfTheHill),
+                token))
+            await cacheHelper.FlushAdScoreboardCacheIncludingFrozen(id, token);
+
         return Ok();
     }
 
@@ -2055,7 +2066,11 @@ public class EditController(
                 !(declared.StartsWith("./") || declared.StartsWith("../") || declared.StartsWith('/') ||
                   declared.Equals("Dockerfile", StringComparison.OrdinalIgnoreCase) ||
                   declared.EndsWith("/Dockerfile", StringComparison.OrdinalIgnoreCase) ||
-                  declared.StartsWith("gzctf-auto/", StringComparison.OrdinalIgnoreCase)))
+                  // Both the local-only (gzctf-auto/…) and registry-pushed
+                  // ({server}/{ns}/gzctf-auto/…) auto-built forms are rebuildable from the
+                  // package's Dockerfile; Contains catches the registry variant that StartsWith
+                  // missed (which wrongly rejected manual Rebuild as "ships a registry image").
+                  declared.Contains("gzctf-auto/", StringComparison.OrdinalIgnoreCase)))
             {
                 challenge.BuildStatus = ChallengeBuildStatus.NotApplicable;
                 challenge.LastBuildLog =

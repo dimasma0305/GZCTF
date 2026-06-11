@@ -85,6 +85,16 @@ public interface IContainerRepository : IRepository
     /// </summary>
     public Task<SharedContainerChallengeInfo?> GetSharedContainerChallenge(Guid containerId,
         CancellationToken token = default);
+
+    /// <summary>
+    /// True if the container is bound to a real instance/service — a jeopardy/exercise
+    /// <c>GameInstance</c>/<c>ExerciseInstance</c> (by <c>ContainerId</c>), an A&amp;D
+    /// <c>AdTeamService</c>, a KotH <c>KothTarget</c>, or a challenge's shared container
+    /// (<c>GameChallenge.SharedContainerId</c>). Used by the admin NoInstance proxy to reject
+    /// real player/team containers (the vestigial <c>Container.GameInstanceId</c> reverse-FK is
+    /// never populated, so it cannot be used for this check).
+    /// </summary>
+    public Task<bool> IsInstanceLinkedContainer(Guid containerId, CancellationToken token = default);
 }
 
 /// <summary>Minimal challenge context for a shared container's traffic capture.</summary>

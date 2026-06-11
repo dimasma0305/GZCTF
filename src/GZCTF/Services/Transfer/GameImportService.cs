@@ -420,6 +420,12 @@ public class GameImportService(
             FlagTemplate = transferChallenge.Flags.Template,
             DisableBloodBonus = transferChallenge.Flags.DisableBloodBonus,
             EnableTrafficCapture = transferChallenge.Flags.EnableTrafficCapture,
+            // Only StaticContainer honors a shared container (guarded again at create time).
+            // Without this the whole-game ZIP import dropped the flag that export writes, so a
+            // resource-saving shared-container game silently reverted to per-team on round-trip.
+            EnableSharedContainer =
+                transferChallenge.Type == ChallengeType.StaticContainer
+                && transferChallenge.Flags.EnableSharedContainer,
 
             // Container settings
             ContainerImage = transferChallenge.Container?.Image,
@@ -435,6 +441,18 @@ public class GameImportService(
             // Hints
             Hints = transferChallenge.Hints
         };
+
+        // Attack & Defense per-challenge config — mirror TransferExtensions.ToChallenge() (the
+        // unit-tested mapper this hand-built importer must not diverge from). Without it an
+        // imported A&D challenge lost its checker image AND fell back to the column defaults
+        // (AdAllowEgress=true), silently re-opening egress on an exported air-gapped challenge.
+        if (transferChallenge.Type.IsAttackDefense() && transferChallenge.Ad is { } ad)
+        {
+            challenge.AdCheckerImage = ad.CheckerImage;
+            if (ad.AllowEgress is { } ae) challenge.AdAllowEgress = ae;
+            if (ad.AllowSelfReset is { } asr) challenge.AdAllowSelfReset = asr;
+            if (ad.SshRequiresFlag is { } srf) challenge.AdSshRequiresFlag = srf;
+        }
 
         // Create challenge
         challenge = await challengeRepository.CreateChallenge(game, challenge, ct);

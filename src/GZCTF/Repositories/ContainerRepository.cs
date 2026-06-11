@@ -76,7 +76,20 @@ public class ContainerRepository(
     }
 
     public Task<Container[]> GetDyingContainers(CancellationToken token = default) =>
-        Context.Containers.Where(c => c.ExpectStopAt < DateTimeOffset.UtcNow).ToArrayAsync(token);
+        // Exclude containers still owned by a live A&D/KotH service. Those are created with
+        // ExpectStopAt = game.EndTimeUtc, so the instant the game ends they look "dying" to
+        // this generic reaper — but AdContainerManager owns their teardown and captures the
+        // post-game snapshot/diff BEFORE destroying (DestroyContainer here takes no snapshot).
+        // If ContainerChecker won the race it would permanently lose that data. Once the
+        // reconciler has snapshotted + destroyed the docker container and nulled
+        // AdTeamService/KothTarget.ContainerId, the row is no longer referenced here and this
+        // reaper cleans up the orphaned DB row on its next pass. Shared StaticContainers are
+        // intentionally still reaped (idle-expiry is their lifecycle).
+        Context.Containers
+            .Where(c => c.ExpectStopAt < DateTimeOffset.UtcNow
+                        && !Context.AdTeamServices.Any(t => t.ContainerId == c.Id)
+                        && !Context.KothTargets.Any(t => t.ContainerId == c.Id))
+            .ToArrayAsync(token);
 
     public Task ExtendLifetime(Container container, TimeSpan time, CancellationToken token = default)
     {
@@ -86,6 +99,13 @@ public class ContainerRepository(
 
     public async Task<bool> ValidateContainer(Guid guid, CancellationToken token = default) =>
         await Context.Containers.AnyAsync(c => c.Id == guid, token);
+
+    public async Task<bool> IsInstanceLinkedContainer(Guid containerId, CancellationToken token = default) =>
+        await Context.GameInstances.AnyAsync(i => i.ContainerId == containerId, token)
+        || await Context.ExerciseInstances.AnyAsync(x => x.ContainerId == containerId, token)
+        || await Context.AdTeamServices.AnyAsync(t => t.ContainerId == containerId, token)
+        || await Context.KothTargets.AnyAsync(t => t.ContainerId == containerId, token)
+        || await Context.GameChallenges.AnyAsync(c => c.SharedContainerId == containerId, token);
 
     public async Task<string[]> GetStaticChallengeFlags(int challengeId, CancellationToken token = default) =>
         await Context.Set<FlagContext>()

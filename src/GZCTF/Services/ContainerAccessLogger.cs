@@ -1,6 +1,7 @@
 using GZCTF.Models;
 using GZCTF.Models.Data;
 using GZCTF.Models.Internal;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace GZCTF.Services;
@@ -82,6 +83,20 @@ public sealed class ContainerAccessLogger(
         if (ctx.AccessingUserId is null) return;
         if (ctx.AccessingParticipationId is null) return;
         if (ctx.AccessingParticipationId == ctx.ContainerOwnerParticipationId) return;
+
+        // Cross-team correlation is a LIVE-game concern. After a game ends, A&D/KotH (and any)
+        // challenges relaunch as standard practice containers reached through this SAME proxy
+        // path (commit dca9dada), so a post-game practice cross-team open would otherwise pin
+        // the top-weight HARD CrossTeamContainerAccess signal on the just-ended game's cheat
+        // report. Gate it like the sibling post-game detectors (FlagChecker CheckCheat,
+        // ContainerAccessSubmissionDetector, HoneypotChain). The forensic ContainerAccessEvent
+        // row written above is kept regardless. The lookup only runs on the cross-team path,
+        // not on every proxy open.
+        var endTimeUtc = await db.Games
+            .Where(g => g.Id == ctx.GameId)
+            .Select(g => (DateTimeOffset?)g.EndTimeUtc)
+            .FirstOrDefaultAsync(token);
+        if (endTimeUtc is { } end && end <= DateTimeOffset.UtcNow) return;
 
         try
         {

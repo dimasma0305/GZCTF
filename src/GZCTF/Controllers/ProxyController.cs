@@ -128,10 +128,11 @@ public class ProxyController(
         // containers are naturally isolated (one container per team = its own 32-slot pool); a
         // SHARED container is one container for ALL teams, so scope the cap per accessing team —
         // otherwise one team can saturate the pool and DoS the shared service for everyone.
-        var key = sharedInfo is not null && accessParticipationId is { } capPid
-            ? $"{CacheKey.ConnectionCount(id)}:{capPid}"
+        var isSharedCapKey = sharedInfo is not null && accessParticipationId is { } capPid;
+        var key = isSharedCapKey
+            ? $"{CacheKey.ConnectionCount(id)}:{accessParticipationId}"
             : CacheKey.ConnectionCount(id);
-        if (!await IncreaseConnectionCount(key))
+        if (!await IncreaseConnectionCount(key, seedIfMissing: isSharedCapKey))
             return BadRequest(
                 new RequestResponse(localizer[nameof(Resources.Program.Container_ConnectionLimitExceeded)]));
 
@@ -253,7 +254,13 @@ public class ProxyController(
 
         var container = await containerRepository.GetContainerById(id, token);
 
-        if (container is null || container.GameInstanceId is not null || !container.IsProxy)
+        // Reject anything bound to a real instance/service: this admin endpoint is for
+        // throwaway test (NoInstance) containers only, and unlike ProxyForInstance it applies
+        // no per-team connection cap, traffic capture, or cross-team access logging. The old
+        // `container.GameInstanceId is not null` check was inert (that reverse-FK is never
+        // populated), so a real player/team container GUID would route through here uncapped.
+        if (container is null || !container.IsProxy
+            || await containerRepository.IsInstanceLinkedContainer(id, token))
             return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Container_NotFound)],
                 StatusCodes.Status404NotFound));
 
@@ -459,7 +466,7 @@ public class ProxyController(
     private static SemaphoreSlim ConnCountLock(string key) =>
         ConnCountLocks[(int)((uint)key.GetHashCode() % (uint)ConnCountLocks.Length)];
 
-    private async Task<bool> IncreaseConnectionCount(string key)
+    private async Task<bool> IncreaseConnectionCount(string key, bool seedIfMissing = false)
     {
         var gate = ConnCountLock(key);
         await gate.WaitAsync();
@@ -468,7 +475,18 @@ public class ProxyController(
             var bytes = await cache.GetAsync(key);
 
             if (bytes is null)
-                return false;
+            {
+                // The BASE key is always pre-seeded by ValidateContainer (0 valid / -1 DoS
+                // sentinel), so a null there means "unknown container" → reject. A DERIVED
+                // per-team cap key (shared containers) is never seeded by ValidateContainer;
+                // null just means "no slots used yet". Container validity is already proven by
+                // the base-key ValidateContainer call earlier in ProxyForInstance, so seed it
+                // to the first slot under this same lock (atomic — no seed-then-increment race).
+                if (!seedIfMissing)
+                    return false;
+                await cache.SetAsync(key, BitConverter.GetBytes(1), StoreOption);
+                return true;
+            }
 
             var count = BitConverter.ToInt32(bytes);
 

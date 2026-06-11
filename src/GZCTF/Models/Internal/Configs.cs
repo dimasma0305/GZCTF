@@ -773,6 +773,12 @@ public class HashPowConfig
     // How many leading zeros the hash should have
     private int _difficulty = 18;
 
+    // Flush the cached client captcha info when the PoW difficulty changes — the client must
+    // compute the PoW at the SAME difficulty the server (live IOptionsSnapshot) verifies against,
+    // else a stale widget solves the old difficulty and verification fails. The attribute must
+    // live on this scalar: ConfigService.MapConfigsInternal only reads CacheFlush on value-type
+    // properties (it recurses THROUGH the parent HashPow class property without reading its attrs).
+    [CacheFlush(CacheKey.CaptchaConfig)]
     public int Difficulty
     {
         set => _difficulty = value;
@@ -782,6 +788,11 @@ public class HashPowConfig
 
 public class CaptchaConfig
 {
+    // The cached client captcha info (CacheKey.CaptchaConfig, /api/captcha) must refresh when
+    // ANY of these change, not just AccountPolicy.UseCaptcha — otherwise the browser keeps a
+    // stale provider/site-key widget after a live /admin/settings change. (SecretKey is
+    // server-only and never served to the client, so it needs no client-cache flush.)
+    [CacheFlush(CacheKey.CaptchaConfig)]
     public CaptchaProvider Provider { get; set; }
 
     /// <summary>
@@ -792,7 +803,11 @@ public class CaptchaConfig
     public string? SecretKey { get; set; }
 
     /// <summary>Browser-side site key — public, served as-is.</summary>
+    [CacheFlush(CacheKey.CaptchaConfig)]
     public string? SiteKey { get; set; }
+
+    // CacheFlush lives on HashPowConfig.Difficulty (the scalar), not here — ConfigService
+    // only reads the attribute on value-type properties and recurses through this one.
     public HashPowConfig HashPow { get; set; } = new();
 
     /// <summary>UI surrogate — true when <see cref="SecretKey"/> is

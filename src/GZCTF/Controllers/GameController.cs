@@ -293,6 +293,17 @@ public class GameController(
         await transaction.CommitAsync(token);
         await cacheHelper.FlushScoreboardCache(part.GameId, token);
 
+        // Auto-accept flips Participation.Status, which is also a scoring input for the
+        // A&D/KotH boards (they filter Accepted). FlushScoreboardCache only covers jeopardy,
+        // so flush the A&D/KotH family for A&D/KotH games when the status changed. Cheap no-op
+        // otherwise. (Frozen variant not needed: a join only ever ADDS an Accepted team during
+        // the live game, never alters a pre-freeze snapshot.)
+        if (shouldAcceptWithoutReview && await dbContext.GameChallenges.AnyAsync(
+                c => c.GameId == part.GameId
+                     && (c.Type == ChallengeType.AttackDefense || c.Type == ChallengeType.KingOfTheHill),
+                token))
+            await cacheHelper.FlushAdScoreboardCache(part.GameId, token);
+
         logger.Log(StaticLocalizer[nameof(Resources.Program.Game_JoinSucceeded), team.Name, game.Title], user,
             TaskStatus.Success);
 

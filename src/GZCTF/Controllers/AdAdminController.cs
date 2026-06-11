@@ -797,14 +797,24 @@ public class AdAdminController(
         var container = await containerRepository.GetContainerById(containerGuid, token);
         if (container is null) return Ok(); // already gone — idempotent
 
-        // Only ever reap a throwaway inspector here: never a jeopardy/exercise
-        // instance, nor any team's live A&D service container. Without this an
-        // authorized GUID would let this endpoint tear down real player/team
-        // containers (in this or any other game) — SpawnInspector containers
-        // carry no instance link and aren't referenced by any AdTeamService.
-        var isInstance = container.GameInstanceId is not null || container.ExerciseInstanceId is not null;
-        var isTeamService = await db.AdTeamServices.AnyAsync(t => t.ContainerId == container.Id, token);
-        if (isInstance || isTeamService) return NotFound();
+        // Only ever reap a throwaway inspector here: never a jeopardy/exercise instance, a
+        // shared StaticContainer, nor any team's live A&D/KotH container. Without this an
+        // authorized GUID would let this endpoint tear down real player/team containers (in
+        // this or any other game) — SpawnInspector containers carry no instance link and
+        // aren't referenced by any AdTeamService.
+        //
+        // Determine "is a real instance container" from the side EF actually populates: the
+        // reverse-FK columns Container.GameInstanceId / Container.ExerciseInstanceId are
+        // VESTIGIAL (never written — the live relationship is GameInstance.ContainerId /
+        // ExerciseInstance.ContainerId), so the old `container.GameInstanceId is not null`
+        // checks were dead (always false) and left jeopardy/exercise/shared containers
+        // destroyable cross-game. Query the owning tables by ContainerId instead.
+        var isLinked = await db.GameInstances.AnyAsync(i => i.ContainerId == container.Id, token)
+            || await db.ExerciseInstances.AnyAsync(x => x.ContainerId == container.Id, token)
+            || await db.AdTeamServices.AnyAsync(t => t.ContainerId == container.Id, token)
+            || await db.KothTargets.AnyAsync(t => t.ContainerId == container.Id, token)
+            || await db.GameChallenges.AnyAsync(c => c.SharedContainerId == container.Id, token);
+        if (isLinked) return NotFound();
 
         await containerRepository.DestroyContainer(container, token);
         return Ok();

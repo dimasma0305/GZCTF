@@ -161,7 +161,8 @@ public static class TransferExtensions
                 {
                     CheckerImage = challenge.AdCheckerImage ?? string.Empty,
                     AllowEgress = challenge.AdAllowEgress,
-                    AllowSelfReset = challenge.AdAllowSelfReset
+                    AllowSelfReset = challenge.AdAllowSelfReset,
+                    SshRequiresFlag = challenge.AdSshRequiresFlag
                 };
             }
 
@@ -349,6 +350,7 @@ public static class TransferExtensions
                 challenge.AdCheckerImage = ad.CheckerImage;
                 if (ad.AllowEgress is { } ae) challenge.AdAllowEgress = ae;
                 if (ad.AllowSelfReset is { } asr) challenge.AdAllowSelfReset = asr;
+                if (ad.SshRequiresFlag is { } srf) challenge.AdSshRequiresFlag = srf;
             }
 
             return challenge;

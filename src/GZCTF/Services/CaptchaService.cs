@@ -36,9 +36,13 @@ public abstract class ModelWithCaptcha
     public string? Challenge { get; set; }
 }
 
-public class CaptchaServiceBase(IOptions<CaptchaConfig>? options) : ICaptchaService
+public class CaptchaServiceBase(IOptionsSnapshot<CaptchaConfig> options) : ICaptchaService
 {
-    protected readonly CaptchaConfig? Config = options?.Value;
+    // IOptionsSnapshot (scoped), NOT IOptions (singleton): read the captcha config per request
+    // so a live /admin/settings change to the provider / keys / difficulty takes effect WITHOUT
+    // a process restart. The services are registered scoped and a dispatcher selects the concrete
+    // provider by the LIVE Provider value each request — see AddCaptchaService.
+    protected readonly CaptchaConfig Config = options.Value;
 
     public ClientCaptchaInfoModel ClientInfo() => new(Config);
 
@@ -47,10 +51,13 @@ public class CaptchaServiceBase(IOptions<CaptchaConfig>? options) : ICaptchaServ
         Task.FromResult(true);
 }
 
-public sealed class CloudflareTurnstile(IOptions<CaptchaConfig>? options, IConfiguration configuration)
+public sealed class CloudflareTurnstile(IOptionsSnapshot<CaptchaConfig> options, IConfiguration configuration)
     : CaptchaServiceBase(options)
 {
-    private readonly HttpClient _httpClient = new();
+    // Static/shared: this service is now SCOPED (per request) so the config can be read live,
+    // but a per-request `new HttpClient()` would leak handlers / exhaust sockets. One shared
+    // client for the app lifetime is the correct pattern for an outbound verify call.
+    private static readonly HttpClient _httpClient = new();
 
     /// <summary>XOR key used to reverse the obfuscation written by
     /// <c>AdminController.UpdateConfigs</c> at /admin/settings save
@@ -61,7 +68,7 @@ public sealed class CloudflareTurnstile(IOptions<CaptchaConfig>? options, IConfi
     public override async Task<bool> VerifyAsync(ModelWithCaptcha model, HttpContext context,
         CancellationToken token = default)
     {
-        if (Config is null || string.IsNullOrWhiteSpace(Config.SecretKey))
+        if (string.IsNullOrWhiteSpace(Config.SecretKey))
             return true;
 
         if (string.IsNullOrEmpty(model.Challenge) || context.Connection.RemoteIpAddress is null)
@@ -104,7 +111,7 @@ public sealed class CloudflareTurnstile(IOptions<CaptchaConfig>? options, IConfi
     }
 }
 
-public sealed class HashPow(IOptions<CaptchaConfig>? options, IDistributedCache cache) :
+public sealed class HashPow(IOptionsSnapshot<CaptchaConfig> options, IDistributedCache cache) :
     CaptchaServiceBase(options)
 {
     private const int AnswerLength = 8;
@@ -112,9 +119,6 @@ public sealed class HashPow(IOptions<CaptchaConfig>? options, IDistributedCache 
     public override async Task<bool> VerifyAsync(ModelWithCaptcha model, HttpContext context,
         CancellationToken token = default)
     {
-        if (Config is null)
-            return true;
-
         if (string.IsNullOrWhiteSpace(model.Challenge))
             return false;
 
@@ -146,22 +150,47 @@ public sealed class HashPow(IOptions<CaptchaConfig>? options, IDistributedCache 
     }
 }
 
+/// <summary>
+/// The <see cref="ICaptchaService"/> actually injected by controllers. Selects the concrete
+/// provider from the LIVE <see cref="CaptchaConfig.Provider"/> on every call, so enabling or
+/// rotating captcha at /admin/settings takes effect WITHOUT a process restart. Previously the
+/// implementation was bound to the STARTUP provider via <c>AddSingleton&lt;ICaptchaService, T&gt;</c>,
+/// so an admin turning captcha on live kept hitting the no-op base service — a silent security bypass.
+/// </summary>
+public sealed class CaptchaServiceDispatcher(
+    IOptionsSnapshot<CaptchaConfig> options,
+    IServiceProvider services) : ICaptchaService
+{
+    private ICaptchaService Active() => options.Value.Provider switch
+    {
+        CaptchaProvider.HashPow => services.GetRequiredService<HashPow>(),
+        CaptchaProvider.CloudflareTurnstile => services.GetRequiredService<CloudflareTurnstile>(),
+        _ => services.GetRequiredService<CaptchaServiceBase>()
+    };
+
+    public Task<bool> VerifyAsync(ModelWithCaptcha model, HttpContext context, CancellationToken token = default)
+        => Active().VerifyAsync(model, context, token);
+
+    public ClientCaptchaInfoModel ClientInfo() => Active().ClientInfo();
+}
+
 public static class CaptchaServiceExtension
 {
     extension(IServiceCollection services)
     {
         internal IServiceCollection AddCaptchaService(IConfiguration configuration)
         {
-            var config = configuration.GetSection(nameof(CaptchaConfig)).Get<CaptchaConfig>() ?? new();
-
             services.Configure<CaptchaConfig>(configuration.GetSection(nameof(CaptchaConfig)));
 
-            return config.Provider switch
-            {
-                CaptchaProvider.HashPow => services.AddSingleton<ICaptchaService, HashPow>(),
-                CaptchaProvider.CloudflareTurnstile => services.AddSingleton<ICaptchaService, CloudflareTurnstile>(),
-                _ => services.AddSingleton<ICaptchaService, CaptchaServiceBase>()
-            };
+            // Register all providers + the dispatcher, scoped, instead of binding ICaptchaService
+            // to the startup provider. The dispatcher picks by the live provider each request and
+            // each provider reads IOptionsSnapshot<CaptchaConfig>, so config is fully live-editable.
+            services.AddScoped<CaptchaServiceBase>();
+            services.AddScoped<HashPow>();
+            services.AddScoped<CloudflareTurnstile>();
+            services.AddScoped<ICaptchaService, CaptchaServiceDispatcher>();
+
+            return services;
         }
     }
 }
