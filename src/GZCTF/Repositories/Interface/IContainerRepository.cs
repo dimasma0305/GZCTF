@@ -77,4 +77,15 @@ public interface IContainerRepository : IRepository
     /// container-owning team or a different team.
     /// </summary>
     public Task<int?> GetUserParticipationIdInGame(Guid userId, int gameId, CancellationToken token = default);
+
+    /// <summary>
+    /// Resolve the challenge that owns a shared container (a container with no GameInstance,
+    /// referenced by <c>GameChallenge.SharedContainerId</c>), or null if the container isn't a
+    /// shared one. Used by the proxy to attribute traffic capture per accessing team.
+    /// </summary>
+    public Task<SharedContainerChallengeInfo?> GetSharedContainerChallenge(Guid containerId,
+        CancellationToken token = default);
 }
+
+/// <summary>Minimal challenge context for a shared container's traffic capture.</summary>
+public sealed record SharedContainerChallengeInfo(int ChallengeId, int GameId, bool EnableTrafficCapture);

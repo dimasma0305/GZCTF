@@ -105,37 +105,74 @@ public class ProxyController(
         {
         var clientIp = HttpContext.Connection.RemoteIpAddress ?? IPAddress.Loopback;
 
-        var enable = _enableTrafficCapture && container.EnableTrafficCapture;
+        var gi = container.GameInstance;
 
-        if (enable)
+        // Resolve the challenge/game context. Per-team containers get it from GameInstance;
+        // a shared container (GameInstance == null) gets it from the owning GameChallenge
+        // (SharedContainerId). sharedInfo stays null for a normal per-team container.
+        var sharedInfo = gi is null
+            ? await containerRepository.GetSharedContainerChallenge(id, token)
+            : null;
+
+        int? challengeId = gi?.ChallengeId ?? sharedInfo?.ChallengeId;
+        int? gameId = gi?.Participation.GameId ?? sharedInfo?.GameId;
+        var captureEnabled = gi is not null
+            ? gi.Challenge.EnableTrafficCapture
+            : sharedInfo?.EnableTrafficCapture ?? false;
+
+        // Resolve the accessing user/participation once: a shared container has no owning team,
+        // so its capture is attributed to the team that is CONNECTING (from the session); the
+        // per-team access log below reuses these too.
+        Guid? accessUserId = null;
+        string? accessUserName = null;
+        int? accessParticipationId = null;
+        var isAdmin = false;
+        if (HttpContext.User?.Identity?.IsAuthenticated == true && gameId is { } gid)
         {
-            // For dynamic-flag challenges (DynamicContainer / DynamicAttachment) the
-            // per-team flag lives on GameInstance.FlagContext. For StaticContainer the
-            // flag is shared across teams and lives on GameChallenge.Flags. Without this
-            // fallback the egress tracer would silently no-op on static challenges.
-            string? flag = container.GameInstance!.FlagContext?.Flag;
-            var isStaticFlag = false;
-
-            if (string.IsNullOrEmpty(flag) &&
-                container.GameInstance!.Challenge.Type == ChallengeType.StaticContainer)
+            var idStr = HttpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (Guid.TryParse(idStr, out var parsed))
             {
-                var staticFlags = await containerRepository.GetStaticChallengeFlags(
-                    container.GameInstance!.ChallengeId, token);
-                flag = staticFlags.FirstOrDefault();
-                isStaticFlag = !string.IsNullOrEmpty(flag);
+                accessUserId = parsed;
+                accessUserName = HttpContext.User.Identity.Name;
+                accessParticipationId = await containerRepository.GetUserParticipationIdInGame(parsed, gid, token);
+                isAdmin = await ContextHelper.HasMonitor(HttpContext);
             }
+        }
 
-            var descriptor = new TrafficRecorderDescriptor(
-                ContainerId: id,
-                ChallengeId: container.GameInstance!.ChallengeId,
-                ParticipationId: container.GameInstance!.ParticipationId,
-                GameId: container.GameInstance!.Participation.GameId,
-                Flag: flag,
-                IsStaticFlag: isStaticFlag,
-                Metadata: container.GenerateMetadata(JsonOptions),
-                ConnectionId: HttpContext.Connection.Id,
-                RemoteIpAddress: HttpContext.Connection.RemoteIpAddress);
-            writer = trafficRegistry.AcquireWriter(descriptor);
+        if (_enableTrafficCapture && captureEnabled && challengeId is { } cid)
+        {
+            // Per-team → the owning team; shared → the accessing team (no owner). When a shared
+            // connection can't be attributed to a participant (e.g. an admin preview), skip it.
+            var captureParticipationId = gi?.ParticipationId ?? accessParticipationId;
+            if (captureParticipationId is { } pid)
+            {
+                // Dynamic challenges carry a per-team flag on GameInstance.FlagContext.
+                // StaticContainer (per-team or shared) shares one static flag from GameChallenge.Flags.
+                string? flag = gi?.FlagContext?.Flag;
+                var isStaticFlag = false;
+                var isStaticType = gi is null || gi.Challenge.Type == ChallengeType.StaticContainer;
+                if (string.IsNullOrEmpty(flag) && isStaticType)
+                {
+                    var staticFlags = await containerRepository.GetStaticChallengeFlags(cid, token);
+                    flag = staticFlags.FirstOrDefault();
+                    isStaticFlag = !string.IsNullOrEmpty(flag);
+                }
+
+                var descriptor = new TrafficRecorderDescriptor(
+                    ContainerId: id,
+                    ChallengeId: cid,
+                    ParticipationId: pid,
+                    GameId: gameId ?? 0,
+                    Flag: flag,
+                    IsStaticFlag: isStaticFlag,
+                    Metadata: container.GenerateMetadata(JsonOptions),
+                    ConnectionId: HttpContext.Connection.Id,
+                    RemoteIpAddress: HttpContext.Connection.RemoteIpAddress,
+                    // Per-team containers run flag-egress scanning; shared containers (no
+                    // owning team, one shared static flag) get the raw pcap only.
+                    ScanFlagEgress: gi is not null);
+                writer = trafficRegistry.AcquireWriter(descriptor);
+            }
         }
 
         realRemotePort = HttpContext.Connection.RemotePort;
@@ -144,44 +181,25 @@ public class ProxyController(
         client = new(clientIp, clientPort);
         target = new(ipAddress, container.Port);
 
-        // Record the proxy access. Skipped for a shared container (GameInstance is null): it
-        // has no single owning team, so per-team access attribution / cross-team detection
-        // doesn't apply. Purely additive — failure must never block the proxy (try/catch).
-        if (container.GameInstance is not null)
+        // Record the proxy access for cross-team detection. Per-team only: a shared container
+        // has no owning team, so owner-vs-accessor comparison is meaningless. Purely additive —
+        // failure must never block the proxy (try/catch).
+        if (gi is not null)
         try
         {
             var accessLogger = HttpContext.RequestServices.GetRequiredService<IContainerAccessLogger>();
-
-            Guid? userId = null;
-            string? userName = null;
-            int? accessingParticipationId = null;
-            var isAdmin = false;
-
-            if (HttpContext.User?.Identity?.IsAuthenticated == true)
-            {
-                var idStr = HttpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
-                if (Guid.TryParse(idStr, out var parsed))
-                {
-                    userId = parsed;
-                    userName = HttpContext.User.Identity.Name;
-                    accessingParticipationId = await containerRepository
-                        .GetUserParticipationIdInGame(parsed,
-                            container.GameInstance!.Participation.GameId, token);
-                    isAdmin = await ContextHelper.HasMonitor(HttpContext);
-                }
-            }
 
             var userAgent = HttpContext.Request.Headers.UserAgent.ToString();
             if (userAgent.Length > 512) userAgent = userAgent[..512];
 
             await accessLogger.LogAccess(new ContainerAccessContext(
                 ContainerId: id,
-                ChallengeId: container.GameInstance!.ChallengeId,
-                ContainerOwnerParticipationId: container.GameInstance!.ParticipationId,
-                GameId: container.GameInstance!.Participation.GameId,
-                AccessingUserId: userId,
-                AccessingUserName: userName,
-                AccessingParticipationId: accessingParticipationId,
+                ChallengeId: gi.ChallengeId,
+                ContainerOwnerParticipationId: gi.ParticipationId,
+                GameId: gi.Participation.GameId,
+                AccessingUserId: accessUserId,
+                AccessingUserName: accessUserName,
+                AccessingParticipationId: accessParticipationId,
                 RemoteIp: clientIp.ToString(),
                 UserAgent: string.IsNullOrEmpty(userAgent) ? null : userAgent,
                 IsAdmin: isAdmin,

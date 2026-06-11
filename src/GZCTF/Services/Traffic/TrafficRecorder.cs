@@ -45,7 +45,7 @@ internal sealed class TrafficRecorder : IAsyncDisposable
     readonly IBlobStorage _storage;
     readonly ILogger _logger;
 
-    public Guid RegistryKey { get; }
+    public TrafficRecorderKey RegistryKey { get; }
     public string BlobPath { get; }
 
     readonly string _tempFile;
@@ -71,16 +71,16 @@ internal sealed class TrafficRecorder : IAsyncDisposable
     bool _capWarned;
     readonly Timer _idleTimer;
 
-    readonly Action<Guid, TrafficRecorder> _onArchived;
+    readonly Action<TrafficRecorderKey, TrafficRecorder> _onArchived;
 
     internal TrafficRecorder(
-        Guid registryKey,
+        TrafficRecorderKey registryKey,
         string blobPath,
         byte[]? metadata,
         IPAddress remoteAddress,
         IBlobStorage storage,
         ILogger logger,
-        Action<Guid, TrafficRecorder> onArchived)
+        Action<TrafficRecorderKey, TrafficRecorder> onArchived)
     {
         RegistryKey = registryKey;
         BlobPath = blobPath;

@@ -304,7 +304,8 @@ public class GameInstanceRepository(
                 MemoryLimit = challenge.MemoryLimit ?? 64,
                 StorageLimit = challenge.StorageLimit ?? 256,
                 NetworkMode = challenge.NetworkMode ?? NetworkMode.Open,
-                // Shared traffic can't be attributed per team, so don't capture it.
+                // Capture is decided proxy-side per ACCESSING team (a shared container has no
+                // owning team); the container manager ignores this flag, so leave it false.
                 EnableTrafficCapture = false,
                 ExposedPort = challenge.ExposePort.Value
             }, token);

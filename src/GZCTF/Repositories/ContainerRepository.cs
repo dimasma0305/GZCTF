@@ -102,6 +102,14 @@ public class ContainerRepository(
             .Select(up => (int?)up.ParticipationId)
             .FirstOrDefaultAsync(token);
 
+    public async Task<SharedContainerChallengeInfo?> GetSharedContainerChallenge(Guid containerId,
+        CancellationToken token = default) =>
+        await Context.GameChallenges
+            .AsNoTracking()
+            .Where(c => c.SharedContainerId == containerId)
+            .Select(c => new SharedContainerChallengeInfo(c.Id, c.GameId, c.EnableTrafficCapture))
+            .FirstOrDefaultAsync(token);
+
     public async Task<bool> DestroyContainer(Container container, CancellationToken token = default)
     {
         try

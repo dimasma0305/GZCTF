@@ -17,7 +17,20 @@ public readonly record struct TrafficRecorderDescriptor(
     bool IsStaticFlag,
     byte[]? Metadata,
     string ConnectionId,
-    IPAddress? RemoteIpAddress);
+    IPAddress? RemoteIpAddress,
+    // Whether to run flag-egress inspection (per-team containers only). A shared container
+    // serves all teams the SAME static flag, so per-team egress attribution is meaningless and
+    // its single ContainerId-keyed FlagEgress slot would just be overwritten per team — so we
+    // capture the raw per-team pcap but skip egress scanning for it.
+    bool ScanFlagEgress = true);
+
+/// <summary>
+/// Recorder identity. Keyed by (container, participation) so a SHARED container — one
+/// container serving many teams — gets a separate recorder/pcap per accessing team. A normal
+/// per-team container has exactly one participation, so this is one recorder per container,
+/// unchanged from the previous container-only key.
+/// </summary>
+public readonly record struct TrafficRecorderKey(Guid ContainerId, int ParticipationId);
 
 /// <summary>
 /// Singleton registry managing all active TrafficRecorders.
@@ -33,7 +46,7 @@ public sealed class TrafficRecorderRegistry(
     ILoggerFactory loggerFactory,
     FlagEgressService flagEgress) : IAsyncDisposable
 {
-    readonly ConcurrentDictionary<Guid, Lazy<TrafficRecorder>> _recorders = new();
+    readonly ConcurrentDictionary<TrafficRecorderKey, Lazy<TrafficRecorder>> _recorders = new();
 
     /// <summary>
     /// Acquire a TrafficWriter for the given container.
@@ -42,7 +55,7 @@ public sealed class TrafficRecorderRegistry(
     /// </summary>
     internal TrafficWriter AcquireWriter(TrafficRecorderDescriptor descriptor)
     {
-        var key = descriptor.ContainerId;
+        var key = new TrafficRecorderKey(descriptor.ContainerId, descriptor.ParticipationId);
 
         while (true)
         {
@@ -74,9 +87,11 @@ public sealed class TrafficRecorderRegistry(
     {
         // always try to archive the recorder, to avoid a race condition
         // where the same recorder is acquiring after the `GetOrAdd`
-        // in which case this recorder would not clean up
-        if (_recorders.TryRemove(containerId, out var recorder))
-            await recorder.Value.ArchiveAsync();
+        // in which case this recorder would not clean up. A shared container has one
+        // recorder PER accessing team, so archive every key under this container id.
+        foreach (var key in _recorders.Keys.Where(k => k.ContainerId == containerId).ToArray())
+            if (_recorders.TryRemove(key, out var recorder))
+                await recorder.Value.ArchiveAsync();
 
         flagEgress.UnregisterRecorder(containerId);
     }
@@ -93,14 +108,18 @@ public sealed class TrafficRecorderRegistry(
         _recorders.Clear();
     }
 
-    Lazy<TrafficRecorder> CreateRecorder(Guid key, TrafficRecorderDescriptor descriptor)
+    Lazy<TrafficRecorder> CreateRecorder(TrafficRecorderKey key, TrafficRecorderDescriptor descriptor)
     {
         // Inspector registration must happen before the recorder is returned so
         // that the first CaptureNetworkStream packet finds an inspector ready.
         // Note: scanning is performed at the CaptureNetworkStream seam (not in
         // the recorder's write loop) so the recorder's metadata packet — which
         // intentionally contains the flag string — never reaches the inspector.
-        flagEgress.RegisterRecorder(descriptor);
+        // Skipped for shared containers (ScanFlagEgress=false): FlagEgress is keyed by
+        // ContainerId alone, so per-team registrations would collide, and a shared static
+        // flag makes per-team egress attribution meaningless anyway.
+        if (descriptor.ScanFlagEgress)
+            flagEgress.RegisterRecorder(descriptor);
 
         return new(() => new TrafficRecorder(
             registryKey: key,
@@ -112,12 +131,12 @@ public sealed class TrafficRecorderRegistry(
             onArchived: OnRecorderArchived));
     }
 
-    void OnRecorderArchived(Guid key, TrafficRecorder recorder)
+    void OnRecorderArchived(TrafficRecorderKey key, TrafficRecorder recorder)
     {
         if (_recorders.TryGetValue(key, out var current) &&
             current.IsValueCreated &&
             ReferenceEquals(current.Value, recorder))
-            _recorders.TryRemove(new KeyValuePair<Guid, Lazy<TrafficRecorder>>(key, current));
+            _recorders.TryRemove(new KeyValuePair<TrafficRecorderKey, Lazy<TrafficRecorder>>(key, current));
     }
 
     static string BuildBlobPath(TrafficRecorderDescriptor descriptor)

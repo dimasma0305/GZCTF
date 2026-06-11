@@ -45,7 +45,9 @@ public sealed class TrafficWriter : IDisposable
         DateTimeOffset timestamp)
     {
         if (_disposed) return;
-        _flagEgress.Inspect(_recorder.RegistryKey, data, direction, source, dest, timestamp);
+        // FlagEgress inspectors are keyed by container (one per container, scanning for that
+        // challenge's flag), so pass the container id from the composite recorder key.
+        _flagEgress.Inspect(_recorder.RegistryKey.ContainerId, data, direction, source, dest, timestamp);
     }
 
     public void Dispose()
