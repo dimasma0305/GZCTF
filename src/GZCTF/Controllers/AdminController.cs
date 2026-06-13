@@ -1938,6 +1938,7 @@ public class AdminController(
                 Attempt = a.Attempt,
                 Status = a.Status,
                 Digest = a.Digest,
+                ImageRef = a.ImageRef,
                 LogTail = a.LogTail,
                 ErrorMessage = a.ErrorMessage,
                 DurationMs = a.DurationMs

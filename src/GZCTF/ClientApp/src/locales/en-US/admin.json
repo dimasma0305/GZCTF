@@ -910,6 +910,7 @@
         "trigger": "Trigger",
         "attempt": "Attempt",
         "status": "Status",
+        "image": "Image",
         "duration": "Duration",
         "detail": "Result"
       },

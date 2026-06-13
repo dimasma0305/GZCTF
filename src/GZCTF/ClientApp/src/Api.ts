@@ -1774,6 +1774,8 @@ export interface ChallengeBuildAuditModel {
   attempt: number
   status: ChallengeBuildStatus
   digest?: string | null
+  /** The image ref this build produced (local autobuilt tag or pushed registry tag); null on failure. */
+  imageRef?: string | null
   logTail?: string | null
   errorMessage?: string | null
   durationMs: number

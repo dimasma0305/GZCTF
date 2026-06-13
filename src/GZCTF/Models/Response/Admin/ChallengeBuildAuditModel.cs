@@ -23,6 +23,8 @@ public sealed class ChallengeBuildAuditModel
     public int Attempt { get; set; }
     public ChallengeBuildStatus Status { get; set; }
     public string? Digest { get; set; }
+    /// <summary>The image ref this build produced (local autobuilt tag or pushed registry tag); null on failure.</summary>
+    public string? ImageRef { get; set; }
     public string? LogTail { get; set; }
     public string? ErrorMessage { get; set; }
     public long DurationMs { get; set; }

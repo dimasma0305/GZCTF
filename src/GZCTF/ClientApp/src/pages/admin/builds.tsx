@@ -7,6 +7,7 @@ import {
   Checkbox,
   Code,
   Container,
+  CopyButton,
   Group,
   Loader,
   Modal,
@@ -414,6 +415,7 @@ const Builds: FC = () => {
                       <Table.Th>{t('admin.content.builds.column.trigger')}</Table.Th>
                       <Table.Th>{t('admin.content.builds.column.attempt')}</Table.Th>
                       <Table.Th>{t('admin.content.builds.column.status')}</Table.Th>
+                      <Table.Th>{t('admin.content.builds.column.image', 'Image')}</Table.Th>
                       <Table.Th>{t('admin.content.builds.column.duration')}</Table.Th>
                       <Table.Th>{t('admin.content.builds.column.detail')}</Table.Th>
                       <Table.Th />
@@ -477,6 +479,28 @@ const Builds: FC = () => {
                           >
                             {b.status}
                           </Badge>
+                        </Table.Td>
+                        <Table.Td maw={320}>
+                          {b.imageRef ? (
+                            <Group gap={4} wrap="nowrap" miw={0}>
+                              <Tooltip label={b.imageRef} multiline w={400}>
+                                <Code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {b.imageRef}
+                                </Code>
+                              </Tooltip>
+                              <CopyButton value={b.imageRef} timeout={1500}>
+                                {({ copied, copy }) => (
+                                  <Tooltip label={copied ? t('admin.button.builds.copied') : t('admin.button.builds.copy')}>
+                                    <ActionIcon variant="subtle" size="sm" color={copied ? 'teal' : 'gray'} onClick={copy}>
+                                      <Icon path={copied ? mdiCheck : mdiContentCopy} size={0.7} />
+                                    </ActionIcon>
+                                  </Tooltip>
+                                )}
+                              </CopyButton>
+                            </Group>
+                          ) : (
+                            <Text size="xs" c="dimmed">—</Text>
+                          )}
                         </Table.Td>
                         <Table.Td>
                           <Text size="sm" ff="monospace">{formatDuration(b.durationMs)}</Text>
@@ -582,6 +606,21 @@ const Builds: FC = () => {
                   : t('admin.button.builds.copy')}
               </Button>
             </Group>
+            {logRow.imageRef && (
+              <Group gap={6} wrap="nowrap">
+                <Text size="xs" c="dimmed">{t('admin.content.builds.column.image', 'Image')}:</Text>
+                <Code style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {logRow.imageRef}
+                </Code>
+                <CopyButton value={logRow.imageRef} timeout={1500}>
+                  {({ copied, copy }) => (
+                    <ActionIcon variant="subtle" size="sm" color={copied ? 'teal' : 'gray'} onClick={copy}>
+                      <Icon path={copied ? mdiCheck : mdiContentCopy} size={0.7} />
+                    </ActionIcon>
+                  )}
+                </CopyButton>
+              </Group>
+            )}
             {logRow.errorMessage && (
               <Code c="red" block style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>
                 {logRow.errorMessage}

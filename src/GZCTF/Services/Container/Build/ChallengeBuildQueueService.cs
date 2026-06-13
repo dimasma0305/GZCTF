@@ -343,6 +343,10 @@ public sealed class ChallengeBuildQueueService(
                 auditRow.DurationMs = stopwatch.ElapsedMilliseconds;
                 auditRow.LogTail = Truncate(logTail, 32 * 1024);
                 auditRow.Digest = result?.Digest;
+                // Record the produced image ref so the build history tracks which
+                // image this attempt yielded, independent of the challenge row's
+                // live pointer (which a later rebuild overwrites). Success-only.
+                auditRow.ImageRef = success ? result?.ImageTag : null;
                 auditRow.ErrorMessage = success ? null : truncatedErr;
                 auditRow.Status = success
                     ? ChallengeBuildStatus.Success

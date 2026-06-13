@@ -64,6 +64,17 @@ public sealed class ChallengeBuildAudit
     [MaxLength(128)]
     public string? Digest { get; set; }
 
+    /// <summary>
+    /// The image reference this build produced — the local autobuilt tag
+    /// (<c>gzctf-auto/{gameId}/{slug}:{shortSha}</c>) or, when a push registry is
+    /// configured, the pushed registry tag. Set on success only; null for failed /
+    /// not-applicable rows. Lets the build history track <em>which</em> image each
+    /// attempt produced even after the challenge's live <c>ContainerImage</c> /
+    /// <c>AdCheckerImage</c> pointer has been overwritten by a later rebuild.
+    /// </summary>
+    [MaxLength(512)]
+    public string? ImageRef { get; set; }
+
     [MaxLength(32768)]
     public string? LogTail { get; set; }
 
