@@ -248,12 +248,12 @@ services:
   # TEMP (bottleneck investigation): Grafana's all-in-one OTLP backend — receives
   # OTLP push from gzctf and stores traces (Tempo) / metrics (Prometheus) / logs
   # (Loki), all explorable in Grafana. Remove this + the Telemetry__* env after.
-  otel-lgtm:
-    image: grafana/otel-lgtm
-    ports:
-      - "127.0.0.1:3001:3000"   # Grafana UI → http://127.0.0.1:3001 (explore traces/metrics/logs)
-    networks:
-      - default
+  # otel-lgtm:
+  #   image: grafana/otel-lgtm
+  #   ports:
+  #     - "127.0.0.1:3001:3000"   # Grafana UI → http://127.0.0.1:3001 (explore traces/metrics/logs)
+  #   networks:
+  #     - default
 
 volumes:
   postgres_data:
