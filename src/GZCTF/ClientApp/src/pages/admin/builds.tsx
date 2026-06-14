@@ -548,10 +548,24 @@ const Builds: FC = () => {
                         <Table.Td>
                           <Text size="sm" ff="monospace">{formatDuration(b.durationMs)}</Text>
                         </Table.Td>
-                        <Table.Td maw={420}>
+                        <Table.Td maw={420} style={{ maxWidth: 420 }}>
                           {b.errorMessage ? (
+                            // Hard single-line truncation: build errors can be long, unbroken
+                            // strings (sha256 layer ids) that would otherwise stretch the cell
+                            // and break the table layout. Full text is in the tooltip + modal.
                             <Tooltip label={b.errorMessage} multiline w={400}>
-                              <Code c="red">{b.errorMessage.slice(0, 80)}{b.errorMessage.length > 80 ? '…' : ''}</Code>
+                              <Code
+                                c="red"
+                                style={{
+                                  display: 'block',
+                                  maxWidth: 400,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                {b.errorMessage}
+                              </Code>
                             </Tooltip>
                           ) : b.digest ? (
                             <Code>{b.digest.slice(0, 19)}</Code>

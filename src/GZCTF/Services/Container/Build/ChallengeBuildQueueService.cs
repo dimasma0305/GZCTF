@@ -450,7 +450,17 @@ public sealed class ChallengeBuildQueueService(
             || e.Contains("temporarily unavailable")
             || e.Contains("503")
             || e.Contains("504")
-            || e.Contains("502");
+            || e.Contains("502")
+            // Docker image-store / layer-graph races: a shared layer was pruned or
+            // re-tagged by a concurrent build (or the image-management delete) while this
+            // build was committing its layers. The graph self-heals, so a rebuild succeeds.
+            // Seen as "failed to export image: failed to set parent … unknown parent image"
+            // and "failed to get digest … imagedb/content/sha256/…: no such file".
+            || e.Contains("failed to set parent")
+            || e.Contains("unknown parent image")
+            || e.Contains("failed to export image")
+            || e.Contains("failed to get digest")
+            || e.Contains("layer does not exist");
     }
 
     static string Truncate(string s, int max)
