@@ -58,6 +58,24 @@ const STATUS_COLOR: Record<ChallengeBuildStatus, string> = {
 const STATUS_VARIANT = (s: ChallengeBuildStatus): 'filled' | 'light' =>
   s === 'Failed' ? 'filled' : 'light'
 
+// The summary chips count GROUPED statuses (e.g. the "building" chip = Building + Queued,
+// "failed" = Failed + MissingDockerfile, "registry" = NotApplicable + None). A chip's
+// filter must therefore match that whole group — otherwise clicking a chip whose rows are
+// all the sibling status (e.g. 15 Queued rows under "building") filters to the empty
+// primary status and shows "No build history yet". These groups expand the three chip keys;
+// the standalone dropdown statuses (Queued, MissingDockerfile) fall through to exact match.
+const FILTER_GROUPS: Partial<Record<ChallengeBuildStatus, ChallengeBuildStatus[]>> = {
+  Building: ['Building', 'Queued'],
+  Failed: ['Failed', 'MissingDockerfile'],
+  NotApplicable: ['NotApplicable', 'None'],
+}
+
+const matchesFilter = (status: ChallengeBuildStatus, filter: ChallengeBuildStatus | ''): boolean => {
+  if (!filter) return true
+  const group = FILTER_GROUPS[filter]
+  return group ? group.includes(status) : status === filter
+}
+
 const formatDuration = (ms: number) => {
   if (!ms) return '—'
   if (ms < 1000) return `${ms}ms`
@@ -82,8 +100,12 @@ const Builds: FC = () => {
   const { data: inProgress } = api.admin.useAdminListBuildsInProgress(
     { refreshInterval: 2000 },
   )
+  // Load the history UNFILTERED and filter client-side (below). The status filter
+  // is applied in-memory so the summary chips always reflect true totals — if we
+  // pushed `status` to the server, selecting a chip would refetch only that one
+  // status and every chip's count (computed from the loaded set) would collapse to 0.
   const { data: history, mutate: mutateHistory } = api.admin.useAdminListBuilds(
-    { count: 100, status: statusFilter || undefined },
+    { count: 200 },
     { refreshInterval: 5000 },
   )
 
@@ -119,8 +141,16 @@ const Builds: FC = () => {
     }
   }, [history])
 
-  const allChecked = (history?.length ?? 0) > 0 && history!.every((b) => selected.has(b.id))
-  const someChecked = (history?.length ?? 0) > 0 && history!.some((b) => selected.has(b.id))
+  // Rows actually shown in the table = full history filtered client-side by the active
+  // chip/dropdown. Summary + failedCount above stay on the FULL history so the chips
+  // keep their real counts even while a filter is applied.
+  const shownHistory = useMemo(
+    () => (history ?? []).filter((b) => matchesFilter(b.status, statusFilter)),
+    [history, statusFilter],
+  )
+
+  const allChecked = shownHistory.length > 0 && shownHistory.every((b) => selected.has(b.id))
+  const someChecked = shownHistory.length > 0 && shownHistory.some((b) => selected.has(b.id))
 
   const toggleOne = (id: number) => {
     setSelected((prev) => {
@@ -132,19 +162,18 @@ const Builds: FC = () => {
   }
 
   const toggleAll = () => {
-    if (!history) return
+    if (shownHistory.length === 0) return
     setSelected((prev) => {
-      // If the visible page is fully checked, clear everything;
+      // If the visible (filtered) rows are fully checked, clear them;
       // otherwise add every visible id (preserving any prior selection
-      // that's been scrolled off — there's no pagination today but
-      // this future-proofs the behavior).
-      if (history.every((b) => prev.has(b.id))) {
+      // for rows hidden by the current filter).
+      if (shownHistory.every((b) => prev.has(b.id))) {
         const next = new Set(prev)
-        history.forEach((b) => next.delete(b.id))
+        shownHistory.forEach((b) => next.delete(b.id))
         return next
       }
       const next = new Set(prev)
-      history.forEach((b) => next.add(b.id))
+      shownHistory.forEach((b) => next.add(b.id))
       return next
     })
   }
@@ -396,6 +425,19 @@ const Builds: FC = () => {
                 <Text c="dimmed">{t('admin.content.builds.empty')}</Text>
               </Stack>
             </Center>
+          ) : shownHistory.length === 0 ? (
+            // History HAS rows, but none match the active filter — don't say "no history".
+            <Center h="30vh">
+              <Stack gap={6} align="center">
+                <Title order={4}>{t('admin.content.builds.no_match_title', 'No matching builds')}</Title>
+                <Text c="dimmed">
+                  {t('admin.content.builds.no_match', 'No builds match this filter.')}
+                </Text>
+                <Button size="xs" variant="default" onClick={() => setStatusFilter('')}>
+                  {t('admin.content.builds.clear_filter', 'Clear filter')}
+                </Button>
+              </Stack>
+            </Center>
           ) : (
             <Paper p="xs" withBorder>
               <ScrollArea>
@@ -422,7 +464,7 @@ const Builds: FC = () => {
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
-                    {history.map((b) => (
+                    {shownHistory.map((b) => (
                       <Table.Tr
                         key={b.id}
                         bg={selected.has(b.id) ? 'var(--mantine-color-blue-light)' : undefined}
