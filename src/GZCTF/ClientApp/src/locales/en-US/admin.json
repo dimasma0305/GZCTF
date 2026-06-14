@@ -885,6 +885,10 @@
     "builds": {
       "title": "Image builds",
       "subtitle": "History of every challenge image build attempt — auto-fired by imports and scans, plus operator-triggered rebuilds.",
+      "tab": {
+        "log": "Build log",
+        "images": "Images on disk"
+      },
       "empty_title": "No build history yet",
       "empty": "Builds will appear here once a challenge with a local Dockerfile is imported.",
       "no_match_title": "No matching builds",

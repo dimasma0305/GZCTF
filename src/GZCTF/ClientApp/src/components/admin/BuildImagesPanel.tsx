@@ -16,19 +16,13 @@ import {
 } from '@mantine/core'
 import { useModals } from '@mantine/modals'
 import { showNotification } from '@mantine/notifications'
-import {
-  mdiCheck,
-  mdiContentCopy,
-  mdiDatabaseOutline,
-  mdiDeleteOutline,
-  mdiRefresh,
-} from '@mdi/js'
+import { mdiCheck, mdiContentCopy, mdiDatabaseOutline, mdiDeleteOutline, mdiRefresh } from '@mdi/js'
 import { Icon } from '@mdi/react'
+import cx from 'clsx'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import { FC, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import cx from 'clsx'
 import { showErrorMsg } from '@Utils/Shared'
 import api, { BuildImageModel } from '@Api'
 import tableClasses from '@Styles/Table.module.css'
@@ -63,14 +57,15 @@ export const BuildImagesPanel: FC = () => {
 
   // Poll every 30s — each refresh hits the docker daemon (heavier than a DB read), and the
   // manual refresh button covers the "I just deleted something" case.
-  const { data: images, mutate, isLoading } = api.admin.useAdminListBuildImages({
+  const {
+    data: images,
+    mutate,
+    isLoading,
+  } = api.admin.useAdminListBuildImages({
     refreshInterval: 30000,
   })
 
-  const totalBytes = useMemo(
-    () => (images ?? []).reduce((sum, img) => sum + img.sizeBytes, 0),
-    [images],
-  )
+  const totalBytes = useMemo(() => (images ?? []).reduce((sum, img) => sum + img.sizeBytes, 0), [images])
 
   // Delete every gzctf-auto tag of one image (usually one, sometimes a registry mirror
   // too). force=true overrides the daemon's "in use by a container" refusal (409).
@@ -97,7 +92,7 @@ export const BuildImagesPanel: FC = () => {
             <Text size="sm">
               {t(
                 'admin.content.builds.images.in_use_body',
-                'This image is in use by a running container. Force-delete it anyway? The container may break until rebuilt.',
+                'This image is in use by a running container. Force-delete it anyway? The container may break until rebuilt.'
               )}
             </Text>
           ),
@@ -200,14 +195,29 @@ export const BuildImagesPanel: FC = () => {
                     <Table.Td>
                       <Group gap={4} wrap="nowrap" miw={0}>
                         <Tooltip label={img.tags.join('\n')} multiline w={420}>
-                          <Code style={{ display: 'block', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <Code
+                            style={{
+                              display: 'block',
+                              flex: 1,
+                              minWidth: 0,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
                             {shortTag(img.tags[0])}
                             {img.tags.length > 1 ? ` +${img.tags.length - 1}` : ''}
                           </Code>
                         </Tooltip>
                         <CopyButton value={img.tags[0]} timeout={1500}>
                           {({ copied, copy }) => (
-                            <Tooltip label={copied ? t('admin.button.builds.copied', 'Copied') : t('admin.button.builds.copy', 'Copy')}>
+                            <Tooltip
+                              label={
+                                copied
+                                  ? t('admin.button.builds.copied', 'Copied')
+                                  : t('admin.button.builds.copy', 'Copy')
+                              }
+                            >
                               <ActionIcon variant="subtle" size="sm" color={copied ? 'teal' : 'gray'} onClick={copy}>
                                 <Icon path={copied ? mdiCheck : mdiContentCopy} size={0.7} />
                               </ActionIcon>
@@ -224,7 +234,9 @@ export const BuildImagesPanel: FC = () => {
                       </Badge>
                     </Table.Td>
                     <Table.Td>
-                      <Text size="sm" ff="monospace">{formatBytes(img.sizeBytes)}</Text>
+                      <Text size="sm" ff="monospace">
+                        {formatBytes(img.sizeBytes)}
+                      </Text>
                     </Table.Td>
                     <Table.Td>
                       {img.createdUtc ? (
@@ -232,7 +244,9 @@ export const BuildImagesPanel: FC = () => {
                           <Text size="sm">{dayjs(img.createdUtc).fromNow()}</Text>
                         </Tooltip>
                       ) : (
-                        <Text size="xs" c="dimmed">—</Text>
+                        <Text size="xs" c="dimmed">
+                          —
+                        </Text>
                       )}
                     </Table.Td>
                     <Table.Td>
@@ -254,12 +268,7 @@ export const BuildImagesPanel: FC = () => {
                     <Table.Td>
                       <Group justify="flex-end">
                         <Tooltip label={t('admin.button.builds.delete', 'Delete')}>
-                          <ActionIcon
-                            variant="subtle"
-                            color="red"
-                            disabled={busy}
-                            onClick={() => onDelete(img)}
-                          >
+                          <ActionIcon variant="subtle" color="red" disabled={busy} onClick={() => onDelete(img)}>
                             <Icon path={mdiDeleteOutline} size={0.9} />
                           </ActionIcon>
                         </Tooltip>
