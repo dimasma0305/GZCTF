@@ -1807,6 +1807,23 @@ export interface PruneResultModel {
   messages?: string[]
 }
 
+/** One gzctf-auto/* image present on the local docker daemon. */
+export interface BuildImageModel {
+  /** Docker image id (sha256:…) shared across this image's tags. */
+  id: string
+  /** The gzctf-auto/* repo tags pointing at this image. */
+  tags: string[]
+  /** On-disk image size in bytes. */
+  sizeBytes: number
+  createdUtc?: string | null
+  /** True when a challenge's ContainerImage / AdCheckerImage still points here. */
+  referenced: boolean
+  /** Titles of the challenges referencing this image. */
+  referencedBy: string[]
+  /** True when this is an A&D/KotH checker image. */
+  isChecker: boolean
+}
+
 /** Challenge update information (Edit) */
 export interface ChallengeUpdateModel {
   /**
@@ -5090,6 +5107,47 @@ export class Api<
       this.request<PruneResultModel, RequestResponse>({
         path: `/api/admin/builds/pruneimages`,
         method: "POST",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description List gzctf-auto/* images on the local docker daemon (size, age, referenced-by).
+     * @tags Admin
+     * @name AdminListBuildImages
+     * @request GET:/api/admin/builds/images
+     */
+    adminListBuildImages: (params: RequestParams = {}) =>
+      this.request<BuildImageModel[], RequestResponse>({
+        path: `/api/admin/builds/images`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    useAdminListBuildImages: (
+      options?: SWRConfiguration,
+      doFetch: boolean = true,
+    ) =>
+      useSWR<BuildImageModel[], RequestResponse>(
+        doFetch ? `/api/admin/builds/images` : null,
+        options,
+      ),
+
+    /**
+     * @description Delete a single gzctf-auto/* image from the local docker daemon by tag.
+     * @tags Admin
+     * @name AdminDeleteBuildImage
+     * @request DELETE:/api/admin/builds/images
+     */
+    adminDeleteBuildImage: (
+      query: { tag: string; force?: boolean },
+      params: RequestParams = {},
+    ) =>
+      this.request<PruneResultModel, RequestResponse>({
+        path: `/api/admin/builds/images`,
+        method: "DELETE",
+        query,
         format: "json",
         ...params,
       }),

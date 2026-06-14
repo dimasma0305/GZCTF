@@ -928,6 +928,29 @@
         "service": "service",
         "checker_help": "A&D/KotH functional checker image (built from ./checker)",
         "challenge_help": "The challenge's own service image"
+      },
+      "images": {
+        "title": "Images on disk",
+        "summary_one": "{{count}} image · {{size}}",
+        "summary_other": "{{count}} images · {{size}}",
+        "refresh": "Refresh",
+        "empty": "No build images on disk.",
+        "deleted": "Image deleted",
+        "in_use": "in use ({{count}})",
+        "orphan": "orphan",
+        "delete_title": "Delete image",
+        "delete_referenced": "Still referenced by: {{titles}}. Deleting it will break the next launch/check until rebuilt.",
+        "delete_orphan": "No challenge references this image — safe to remove.",
+        "in_use_title": "Image in use",
+        "in_use_body": "This image is in use by a running container. Force-delete it anyway? The container may break until rebuilt.",
+        "force_delete": "Force delete",
+        "column": {
+          "image": "Image",
+          "kind": "Kind",
+          "size": "Size",
+          "created": "Created",
+          "usage": "Usage"
+        }
       }
     },
     "review": {

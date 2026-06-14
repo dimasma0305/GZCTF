@@ -2068,6 +2068,23 @@ public class AdminController(
     }
 
     /// <summary>
+    /// Resolve the Docker container provider, or <c>null</c> when the platform is running
+    /// in Kubernetes mode (only <c>IContainerProvider&lt;Kubernetes, …&gt;</c> is registered
+    /// then — see ContainerServiceExtension). Resolved through <see cref="HttpContext"/>
+    /// rather than <c>[FromServices]</c> so an unregistered provider yields a clean 400
+    /// instead of a 500 at action-binding time. Image management is a local-daemon concept;
+    /// the K8s runtime pulls from a registry and has nothing to list/delete here.
+    /// </summary>
+    private Services.Container.Provider.IContainerProvider<Docker.DotNet.DockerClient,
+        Services.Container.Provider.DockerMetadata>? ResolveDockerProvider() =>
+        HttpContext.RequestServices.GetService<
+            Services.Container.Provider.IContainerProvider<Docker.DotNet.DockerClient,
+                Services.Container.Provider.DockerMetadata>>();
+
+    private static readonly RequestResponse DockerOnlyImageMgmt =
+        new("Image management is only available with the Docker container provider.");
+
+    /// <summary>
     /// Garbage-collect <c>gzctf-auto/*</c> images on the local docker
     /// daemon that no live <see cref="GameChallenge.ContainerImage"/>
     /// points at. After the registry-push feature shipped, every
@@ -2085,10 +2102,11 @@ public class AdminController(
     [ProducesResponseType(typeof(Models.Response.Admin.PruneResultModel), StatusCodes.Status200OK)]
     public async Task<IActionResult> PruneOrphanBuildImages(
         [FromServices] AppDbContext dbContext,
-        [FromServices] Services.Container.Provider.IContainerProvider<Docker.DotNet.DockerClient,
-            Services.Container.Provider.DockerMetadata> dockerProvider,
         CancellationToken token)
     {
+        var dockerProvider = ResolveDockerProvider();
+        if (dockerProvider is null) return BadRequest(DockerOnlyImageMgmt);
+
         // Build the keep-set from current ContainerImage AND AdCheckerImage values.
         // Each can be either the bare local tag (gzctf-auto/...) or the registry-prefixed
         // tag — derive the local form from the registry one so both versions are kept.
@@ -2161,6 +2179,147 @@ public class AdminController(
             Removed = removed,
             Messages = messages.ToArray()
         });
+    }
+
+    /// <summary>
+    /// List the <c>gzctf-auto/*</c> images present on the local docker daemon, with size,
+    /// age, and whether a challenge still references each one. Lets operators see what's
+    /// using disk on /admin/builds and delete images individually (vs the blunt
+    /// "prune orphans" sweep). Sorted largest-first.
+    /// </summary>
+    [RequireAdmin]
+    [HttpGet("Builds/Images")]
+    [ProducesResponseType(typeof(Models.Response.Admin.BuildImageModel[]), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListBuildImages(
+        [FromServices] AppDbContext dbContext,
+        CancellationToken token)
+    {
+        var dockerProvider = ResolveDockerProvider();
+        if (dockerProvider is null) return BadRequest(DockerOnlyImageMgmt);
+
+        // Map each referenced gzctf-auto tag (and its bare local form) → the titles of the
+        // challenges pointing at it, so the UI can warn before deleting a live image.
+        var refs = await dbContext.GameChallenges
+            .Where(c => (c.ContainerImage != null && c.ContainerImage.Contains("gzctf-auto/"))
+                        || (c.AdCheckerImage != null && c.AdCheckerImage.Contains("gzctf-auto/")))
+            .Select(c => new { c.Title, c.ContainerImage, c.AdCheckerImage })
+            .ToListAsync(token);
+
+        var tagToTitles = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        void AddRef(string? img, string title)
+        {
+            if (string.IsNullOrEmpty(img) || !img.Contains("gzctf-auto/", StringComparison.Ordinal))
+                return;
+            void Add(string t)
+            {
+                if (!tagToTitles.TryGetValue(t, out var set))
+                    tagToTitles[t] = set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                set.Add(title);
+            }
+            Add(img);
+            var idx = img.IndexOf("gzctf-auto/", StringComparison.Ordinal);
+            if (idx > 0) Add(img[idx..]);
+        }
+        foreach (var r in refs)
+        {
+            AddRef(r.ContainerImage, r.Title);
+            AddRef(r.AdCheckerImage, r.Title);
+        }
+
+        var client = dockerProvider.GetProvider();
+        var images = await client.Images.ListImagesAsync(
+            new Docker.DotNet.Models.ImagesListParameters { All = false }, token);
+
+        var rows = new List<Models.Response.Admin.BuildImageModel>();
+        foreach (var img in images)
+        {
+            if (img.RepoTags is null) continue;
+            var gzTags = img.RepoTags
+                .Where(t => t.Contains("gzctf-auto/", StringComparison.Ordinal))
+                .ToArray();
+            if (gzTags.Length == 0) continue;
+
+            var titles = gzTags
+                .SelectMany(t => tagToTitles.TryGetValue(t, out var s)
+                    ? (IEnumerable<string>)s : Array.Empty<string>())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            // The auto-built checker repo is gzctf-auto/{game}/{id}-{slug}-checker:{sha};
+            // detect by the repo segment (before the tag) ending in "-checker". A tag with
+            // no ':' (LastIndexOf == -1) falls back to t.Length so the whole string is tested.
+            var isChecker = gzTags.Any(t =>
+                t[..(t.LastIndexOf(':') is var c and >= 0 ? c : t.Length)]
+                    .EndsWith("-checker", StringComparison.Ordinal));
+
+            rows.Add(new Models.Response.Admin.BuildImageModel
+            {
+                Id = img.ID,
+                Tags = gzTags,
+                SizeBytes = img.Size,
+                CreatedUtc = img.Created,
+                Referenced = titles.Length > 0,
+                ReferencedBy = titles,
+                IsChecker = isChecker,
+            });
+        }
+
+        return Ok(rows.OrderByDescending(r => r.SizeBytes).ToArray());
+    }
+
+    /// <summary>
+    /// Delete a single <c>gzctf-auto/*</c> image (by tag) from the local docker daemon.
+    /// Restricted to the platform's own namespace so this can't be used to remove arbitrary
+    /// host images. Without <paramref name="force"/> the daemon refuses if a container is
+    /// using the image (returns 409); the operator can retry with force=true to override.
+    /// </summary>
+    [RequireAdmin]
+    [HttpDelete("Builds/Images")]
+    [ProducesResponseType(typeof(Models.Response.Admin.PruneResultModel), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DeleteBuildImage(
+        [FromQuery] string tag,
+        [FromQuery] bool force = false,
+        CancellationToken token = default)
+    {
+        if (string.IsNullOrWhiteSpace(tag) || !tag.Contains("gzctf-auto/", StringComparison.Ordinal))
+            return BadRequest(new RequestResponse("Only gzctf-auto/* build images can be deleted here."));
+
+        var dockerProvider = ResolveDockerProvider();
+        if (dockerProvider is null) return BadRequest(DockerOnlyImageMgmt);
+
+        // Audit trail for a destructive op: there's no structured audit log yet, so record
+        // who deleted which image (and whether it was forced) in the system log.
+        logger.SystemLog(
+            $"Admin {User.Identity?.Name} deleting build image {tag}{(force ? " (force)" : "")}",
+            TaskStatus.Pending, LogLevel.Information);
+
+        var client = dockerProvider.GetProvider();
+        try
+        {
+            var resp = await client.Images.DeleteImageAsync(tag,
+                new Docker.DotNet.Models.ImageDeleteParameters { Force = force, NoPrune = false },
+                token);
+            return Ok(new Models.Response.Admin.PruneResultModel { Removed = resp?.Count ?? 0 });
+        }
+        catch (Docker.DotNet.DockerApiException e)
+            when (e.StatusCode == System.Net.HttpStatusCode.Conflict)
+        {
+            return Conflict(new RequestResponse(
+                "Image is in use by a container. Stop the container or retry with force.",
+                StatusCodes.Status409Conflict));
+        }
+        catch (Docker.DotNet.DockerImageNotFoundException)
+        {
+            // Already gone — treat as success so the UI just refreshes the list.
+            return Ok(new Models.Response.Admin.PruneResultModel { Removed = 0 });
+        }
+        catch (Exception e)
+        {
+            return BadRequest(new RequestResponse(e.Message));
+        }
     }
 
     /// <summary>

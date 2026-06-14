@@ -64,3 +64,32 @@ public sealed class PruneResultModel
     public int Removed { get; set; }
     public string[] Messages { get; set; } = [];
 }
+
+/// <summary>
+/// One <c>gzctf-auto/*</c> image present on the local docker daemon, surfaced on
+/// <c>/admin/builds</c> so operators can see what's taking disk and delete images
+/// directly. <see cref="Referenced"/> challenges are still pointed at this image —
+/// deleting one of those will break the next launch/check until rebuilt.
+/// </summary>
+public sealed class BuildImageModel
+{
+    /// <summary>Docker image id (sha256:…), shared across all of this image's tags.</summary>
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>The <c>gzctf-auto/*</c> repo tags pointing at this image (one image can carry several).</summary>
+    public string[] Tags { get; set; } = [];
+
+    /// <summary>On-disk image size in bytes (as reported by the daemon).</summary>
+    public long SizeBytes { get; set; }
+
+    public DateTimeOffset? CreatedUtc { get; set; }
+
+    /// <summary>True when a challenge's ContainerImage / AdCheckerImage still points here.</summary>
+    public bool Referenced { get; set; }
+
+    /// <summary>Titles of the challenges referencing this image (for the "in use by …" warning).</summary>
+    public string[] ReferencedBy { get; set; } = [];
+
+    /// <summary>True when this is an A&amp;D/KotH checker image (its repo ends with <c>-checker</c>).</summary>
+    public bool IsChecker { get; set; }
+}

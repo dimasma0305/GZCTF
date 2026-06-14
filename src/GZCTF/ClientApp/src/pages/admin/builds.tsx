@@ -42,6 +42,7 @@ dayjs.extend(relativeTime)
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { AdminPage } from '@Components/admin/AdminPage'
+import { BuildImagesPanel } from '@Components/admin/BuildImagesPanel'
 import { showErrorMsg } from '@Utils/Shared'
 import api, { ChallengeBuildAuditModel, ChallengeBuildStatus } from '@Api'
 
@@ -600,6 +601,9 @@ const Builds: FC = () => {
               </ScrollArea>
             </Paper>
           )}
+
+          {/* Images actually present on the docker daemon — see & delete individually. */}
+          <BuildImagesPanel />
         </Stack>
       </Container>
 
