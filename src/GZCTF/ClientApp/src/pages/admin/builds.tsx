@@ -41,10 +41,12 @@ import { FC, useMemo, useState } from 'react'
 dayjs.extend(relativeTime)
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import cx from 'clsx'
 import { AdminPage } from '@Components/admin/AdminPage'
 import { BuildImagesPanel } from '@Components/admin/BuildImagesPanel'
 import { showErrorMsg } from '@Utils/Shared'
 import api, { ChallengeBuildAuditModel, ChallengeBuildStatus } from '@Api'
+import tableClasses from '@Styles/Table.module.css'
 
 const STATUS_COLOR: Record<ChallengeBuildStatus, string> = {
   None: 'gray',
@@ -442,7 +444,18 @@ const Builds: FC = () => {
           ) : (
             <Paper p="xs" withBorder>
               <ScrollArea>
-                <Table withTableBorder striped highlightOnHover>
+                {/* Fixed layout + explicit column widths so one long cell (an image ref or
+                    a sha-laden error) can't stretch the table and squeeze the rest. The
+                    Detail column is the flexible one (w=100%); miw keeps columns usable on
+                    narrow screens — the ScrollArea scrolls horizontally instead of crushing. */}
+                <Table
+                  withTableBorder
+                  striped
+                  highlightOnHover
+                  w="100%"
+                  miw={1200}
+                  className={cx(tableClasses.table, tableClasses.fixed)}
+                >
                   <Table.Thead>
                     <Table.Tr>
                       <Table.Th w={36}>
@@ -453,15 +466,15 @@ const Builds: FC = () => {
                           aria-label={t('admin.content.builds.select_all')}
                         />
                       </Table.Th>
-                      <Table.Th>{t('admin.content.builds.column.when')}</Table.Th>
-                      <Table.Th>{t('admin.content.builds.column.challenge')}</Table.Th>
-                      <Table.Th>{t('admin.content.builds.column.trigger')}</Table.Th>
-                      <Table.Th>{t('admin.content.builds.column.attempt')}</Table.Th>
-                      <Table.Th>{t('admin.content.builds.column.status')}</Table.Th>
-                      <Table.Th>{t('admin.content.builds.column.image', 'Image')}</Table.Th>
-                      <Table.Th>{t('admin.content.builds.column.duration')}</Table.Th>
-                      <Table.Th>{t('admin.content.builds.column.detail')}</Table.Th>
-                      <Table.Th />
+                      <Table.Th w="8.5rem">{t('admin.content.builds.column.when')}</Table.Th>
+                      <Table.Th w="13rem">{t('admin.content.builds.column.challenge')}</Table.Th>
+                      <Table.Th w="6rem">{t('admin.content.builds.column.trigger')}</Table.Th>
+                      <Table.Th w="4.5rem">{t('admin.content.builds.column.attempt')}</Table.Th>
+                      <Table.Th w="8.5rem">{t('admin.content.builds.column.status')}</Table.Th>
+                      <Table.Th w="13rem">{t('admin.content.builds.column.image', 'Image')}</Table.Th>
+                      <Table.Th w="6rem">{t('admin.content.builds.column.duration')}</Table.Th>
+                      <Table.Th w="100%">{t('admin.content.builds.column.detail')}</Table.Th>
+                      <Table.Th w="7rem" />
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
@@ -486,12 +499,14 @@ const Builds: FC = () => {
                           </Stack>
                         </Table.Td>
                         <Table.Td>
-                          <Group gap={6} wrap="nowrap">
+                          <Group gap={6} wrap="nowrap" miw={0}>
                             <Anchor
                               component={Link}
                               to={`/admin/games/${b.gameId}/challenges`}
                               size="sm"
                               fw="bold"
+                              truncate
+                              style={{ minWidth: 0 }}
                             >
                               {b.challengeTitle || `#${b.challengeId}`}
                             </Anchor>
@@ -523,11 +538,11 @@ const Builds: FC = () => {
                             {b.status}
                           </Badge>
                         </Table.Td>
-                        <Table.Td maw={320}>
+                        <Table.Td>
                           {b.imageRef ? (
                             <Group gap={4} wrap="nowrap" miw={0}>
                               <Tooltip label={b.imageRef} multiline w={400}>
-                                <Code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                <Code style={{ display: 'block', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                   {b.imageRef}
                                 </Code>
                               </Tooltip>
@@ -548,17 +563,17 @@ const Builds: FC = () => {
                         <Table.Td>
                           <Text size="sm" ff="monospace">{formatDuration(b.durationMs)}</Text>
                         </Table.Td>
-                        <Table.Td maw={420} style={{ maxWidth: 420 }}>
+                        <Table.Td>
                           {b.errorMessage ? (
-                            // Hard single-line truncation: build errors can be long, unbroken
-                            // strings (sha256 layer ids) that would otherwise stretch the cell
-                            // and break the table layout. Full text is in the tooltip + modal.
+                            // Single-line truncation within the flex column: build errors can
+                            // be long, unbroken strings (sha256 layer ids). Full text in the
+                            // tooltip + log modal.
                             <Tooltip label={b.errorMessage} multiline w={400}>
                               <Code
                                 c="red"
                                 style={{
                                   display: 'block',
-                                  maxWidth: 400,
+                                  maxWidth: '100%',
                                   overflow: 'hidden',
                                   textOverflow: 'ellipsis',
                                   whiteSpace: 'nowrap',

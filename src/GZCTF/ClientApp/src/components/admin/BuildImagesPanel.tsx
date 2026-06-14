@@ -28,8 +28,10 @@ import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import { FC, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import cx from 'clsx'
 import { showErrorMsg } from '@Utils/Shared'
 import api, { BuildImageModel } from '@Api'
+import tableClasses from '@Styles/Table.module.css'
 
 dayjs.extend(relativeTime)
 
@@ -174,24 +176,31 @@ export const BuildImagesPanel: FC = () => {
       ) : (
         <Paper p="xs" withBorder>
           <ScrollArea>
-            <Table withTableBorder striped highlightOnHover>
+            <Table
+              withTableBorder
+              striped
+              highlightOnHover
+              w="100%"
+              miw={760}
+              className={cx(tableClasses.table, tableClasses.fixed)}
+            >
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th>{t('admin.content.builds.images.column.image', 'Image')}</Table.Th>
-                  <Table.Th>{t('admin.content.builds.images.column.kind', 'Kind')}</Table.Th>
-                  <Table.Th>{t('admin.content.builds.images.column.size', 'Size')}</Table.Th>
-                  <Table.Th>{t('admin.content.builds.images.column.created', 'Created')}</Table.Th>
-                  <Table.Th>{t('admin.content.builds.images.column.usage', 'Usage')}</Table.Th>
-                  <Table.Th />
+                  <Table.Th w="100%">{t('admin.content.builds.images.column.image', 'Image')}</Table.Th>
+                  <Table.Th w="6rem">{t('admin.content.builds.images.column.kind', 'Kind')}</Table.Th>
+                  <Table.Th w="6rem">{t('admin.content.builds.images.column.size', 'Size')}</Table.Th>
+                  <Table.Th w="8rem">{t('admin.content.builds.images.column.created', 'Created')}</Table.Th>
+                  <Table.Th w="9rem">{t('admin.content.builds.images.column.usage', 'Usage')}</Table.Th>
+                  <Table.Th w="4rem" />
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {images.map((img) => (
                   <Table.Tr key={img.id}>
-                    <Table.Td maw={380}>
+                    <Table.Td>
                       <Group gap={4} wrap="nowrap" miw={0}>
                         <Tooltip label={img.tags.join('\n')} multiline w={420}>
-                          <Code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <Code style={{ display: 'block', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {shortTag(img.tags[0])}
                             {img.tags.length > 1 ? ` +${img.tags.length - 1}` : ''}
                           </Code>
@@ -226,7 +235,7 @@ export const BuildImagesPanel: FC = () => {
                         <Text size="xs" c="dimmed">—</Text>
                       )}
                     </Table.Td>
-                    <Table.Td maw={220}>
+                    <Table.Td>
                       {img.referenced ? (
                         <Tooltip label={img.referencedBy.join(', ')} multiline w={300}>
                           <Badge size="sm" color="blue" variant="light" style={{ cursor: 'default' }}>
