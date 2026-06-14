@@ -306,6 +306,23 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) :
                 .OnDelete(DeleteBehavior.SetNull);
         });
 
+        builder.Entity<SuspicionEvent>(entity =>
+        {
+            // RelatedParticipation is an *optional* cross-team pointer (e.g. the
+            // other team in a SharedIP/CrossTeamIP event). Convention leaves the
+            // nullable FK at ClientSetNull → DB-level NO ACTION, which makes a
+            // game/team delete throw 23503 when participations are removed in a
+            // different batch than the event's primary participation (the event is
+            // only cascade-removed via ParticipationId). SetNull mirrors the sibling
+            // KothControlResult.ControllingParticipation: drop the dangling pointer,
+            // keep the suspicion record (the primary ParticipationId FK still
+            // cascades the row away on a full game/participation delete).
+            entity.HasOne(e => e.RelatedParticipation)
+                .WithMany()
+                .HasForeignKey(e => e.RelatedParticipationId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
         builder.Entity<GameChallenge>(entity =>
         {
             entity.Property(e => e.Hints)
