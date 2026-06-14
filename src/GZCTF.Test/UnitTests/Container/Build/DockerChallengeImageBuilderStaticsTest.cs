@@ -1,5 +1,7 @@
 using System;
+using System.IO;
 using System.Text;
+using System.Threading.Tasks;
 using GZCTF.Services.Container.Build;
 using GZCTF.Utils;
 using Xunit;
@@ -34,6 +36,90 @@ public class DockerChallengeImageBuilderStaticsTest
         // After stripping non-alphanumerics, nothing's left — we need
         // a valid docker tag, so the builder substitutes a default.
         Assert.Equal("challenge", DockerChallengeImageBuilder.NormalizeSlug("!!!"));
+    }
+
+    #endregion
+
+    #region WriteContextTarAsync — content-hash determinism
+
+    // Lay down a throwaway build context with the given relative files.
+    private static string MakeContext(params (string rel, string content)[] files)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "gzctf-test-" + Guid.NewGuid().ToString("N"));
+        foreach (var (rel, content) in files)
+        {
+            var full = Path.Combine(dir, rel.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+            File.WriteAllText(full, content);
+        }
+        return dir;
+    }
+
+    private static async Task<string> TarDigest(string dir)
+    {
+        var outPath = Path.Combine(Path.GetTempPath(), "gzctf-test-" + Guid.NewGuid().ToString("N") + ".tar.gz");
+        try
+        {
+            return await DockerChallengeImageBuilder.WriteContextTarAsync(dir, outPath, default);
+        }
+        finally
+        {
+            try { File.Delete(outPath); } catch { /* best effort */ }
+        }
+    }
+
+    [Fact]
+    public async Task WriteContextTar_SameContent_StableAcrossMtimesAndReruns()
+    {
+        // This is the regression guard for "multiple images per challenge": a fresh
+        // PaxTarEntry stamps DateTimeOffset.UtcNow as mtime, so before the fix the same
+        // content hashed differently on every build. The digest must ignore file mtimes.
+        var dir = MakeContext(
+            ("Dockerfile", "FROM scratch\n"),
+            ("src/app.py", "print('hi')\n"),
+            ("README.md", "# challenge\n"));
+        try
+        {
+            var first = await TarDigest(dir);
+
+            // Bump every file's mtime — the prime drift source — then re-tar.
+            var future = DateTime.UtcNow.AddDays(3);
+            foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+                File.SetLastWriteTimeUtc(f, future);
+
+            var second = await TarDigest(dir);
+
+            Assert.Equal(first, second);
+            Assert.Equal(64, first.Length); // SHA-256 as lowercase hex
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public async Task WriteContextTar_SameContent_DifferentDirsAndCreateOrder_SameDigest()
+    {
+        // Two independent contexts with identical {path,content} but files created in a
+        // different order must hash the same — proves the ordinal-path sort makes entry
+        // order independent of filesystem enumeration order.
+        var a = MakeContext(("Dockerfile", "FROM scratch\n"), ("a/b/c.txt", "data\n"));
+        var b = MakeContext(("a/b/c.txt", "data\n"), ("Dockerfile", "FROM scratch\n"));
+        try
+        {
+            Assert.Equal(await TarDigest(a), await TarDigest(b));
+        }
+        finally { Directory.Delete(a, true); Directory.Delete(b, true); }
+    }
+
+    [Fact]
+    public async Task WriteContextTar_DifferentContent_DifferentDigest()
+    {
+        var a = MakeContext(("Dockerfile", "FROM scratch\n"));
+        var b = MakeContext(("Dockerfile", "FROM alpine\n"));
+        try
+        {
+            Assert.NotEqual(await TarDigest(a), await TarDigest(b));
+        }
+        finally { Directory.Delete(a, true); Directory.Delete(b, true); }
     }
 
     #endregion

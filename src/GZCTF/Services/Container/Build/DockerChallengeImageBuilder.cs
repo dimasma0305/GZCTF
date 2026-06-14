@@ -32,6 +32,15 @@ public sealed class DockerChallengeImageBuilder(
     private static readonly TimeSpan PushTimeout = TimeSpan.FromMinutes(10);
     private const int LogTailBytes = 32 * 1024;
 
+    // Fixed per-entry tar metadata so the context tar is byte-stable for identical content
+    // (deterministic content-hash tag — see BuildAsync). A fixed, non-zero date avoids any
+    // "implausibly old timestamp" tar warnings that a 1970 epoch can trigger.
+    private static readonly DateTimeOffset BuildEntryMTime =
+        new(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
+    private const UnixFileMode BuildEntryMode =
+        UnixFileMode.UserRead | UnixFileMode.UserWrite |
+        UnixFileMode.GroupRead | UnixFileMode.OtherRead; // 0644
+
     public async Task<ChallengeBuildResult> BuildAsync(
         ChallengeBuildRequest req,
         CancellationToken token,
@@ -52,28 +61,12 @@ public sealed class DockerChallengeImageBuilder(
 
         try
         {
-            // Tar+gzip the context dir, computing SHA256 over the
-            // compressed bytes as we go for tag determinism.
-            using var sha = SHA256.Create();
-            await using (var fs = File.Create(contextTar))
-            await using (var hashing = new CryptoStream(fs, sha, CryptoStreamMode.Write, leaveOpen: false))
-            await using (var gz = new GZipStream(hashing, CompressionLevel.Fastest, leaveOpen: false))
-            await using (var tar = new TarWriter(gz, leaveOpen: false))
-            {
-                foreach (var f in Directory.EnumerateFiles(req.ContextDir, "*", SearchOption.AllDirectories))
-                {
-                    var rel = Path.GetRelativePath(req.ContextDir, f).Replace('\\', '/');
-                    if (rel.StartsWith("..", StringComparison.Ordinal)) continue;
-                    var entry = new PaxTarEntry(TarEntryType.RegularFile, rel)
-                    {
-                        DataStream = File.OpenRead(f)
-                    };
-                    await tar.WriteEntryAsync(entry, token);
-                    entry.DataStream?.Dispose();
-                }
-            }
-
-            var digest = Convert.ToHexString(sha.Hash!).ToLowerInvariant();
+            // Write the build context to a gzip'd tar and get back a STABLE content hash
+            // (see WriteContextTarAsync). Identical challenge content always yields the same
+            // digest → the same gzctf-auto tag → a re-import reuses the existing image
+            // instead of minting a fresh tag every time (the churn that left multiple images
+            // per challenge on disk).
+            var digest = await WriteContextTarAsync(req.ContextDir, contextTar, token);
             var tag = $"gzctf-auto/{req.GameId}/{slug}:{digest[..12]}";
 
             // Fast path: if the local tag already exists, skip the
@@ -615,6 +608,47 @@ public sealed class DockerChallengeImageBuilder(
         foreach (var p in SecretPatterns)
             line = p.Replace(line, "***SCRUBBED***");
         return line;
+    }
+
+    /// <summary>
+    /// Gzip-tar the build context at <paramref name="contextDir"/> into
+    /// <paramref name="outputTarGzPath"/> and return the lowercase hex SHA-256 of the
+    /// NORMALIZED, uncompressed tar payload. The digest is a STABLE content hash:
+    /// byte-identical challenge content always produces the same digest, regardless of
+    /// filesystem enumeration order or file mtimes, so a re-import of unchanged content
+    /// hits the cached image instead of minting a new <c>gzctf-auto</c> tag.
+    ///
+    /// <para>Determinism is achieved by (1) sorting entries by ordinal relative path,
+    /// (2) pinning each entry's mtime + mode to fixed values (a fresh PaxTarEntry
+    /// otherwise stamps <c>DateTimeOffset.UtcNow</c>), and (3) hashing the tar bytes
+    /// rather than the gzip output so the gzip header/level can't perturb the digest.</para>
+    /// </summary>
+    internal static async Task<string> WriteContextTarAsync(
+        string contextDir, string outputTarGzPath, CancellationToken token)
+    {
+        using var sha = SHA256.Create();
+        await using (var fs = File.Create(outputTarGzPath))
+        await using (var gz = new GZipStream(fs, CompressionLevel.Fastest, leaveOpen: false))
+        await using (var hashing = new CryptoStream(gz, sha, CryptoStreamMode.Write, leaveOpen: false))
+        await using (var tar = new TarWriter(hashing, leaveOpen: false))
+        {
+            var entries = Directory.EnumerateFiles(contextDir, "*", SearchOption.AllDirectories)
+                .Select(full => (full, rel: Path.GetRelativePath(contextDir, full).Replace('\\', '/')))
+                .Where(x => !x.rel.StartsWith("..", StringComparison.Ordinal))
+                .OrderBy(x => x.rel, StringComparer.Ordinal);
+            foreach (var (full, rel) in entries)
+            {
+                var entry = new PaxTarEntry(TarEntryType.RegularFile, rel)
+                {
+                    DataStream = File.OpenRead(full),
+                    ModificationTime = BuildEntryMTime,
+                    Mode = BuildEntryMode,
+                };
+                await tar.WriteEntryAsync(entry, token);
+                entry.DataStream?.Dispose();
+            }
+        }
+        return Convert.ToHexString(sha.Hash!).ToLowerInvariant();
     }
 
     static void AppendTail(StringBuilder sb, string line)
