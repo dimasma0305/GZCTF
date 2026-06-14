@@ -2066,6 +2066,47 @@ public class EditController(
                 ? topLevel[0]
                 : workDir;
 
+            // Symmetric checker rebuild: an A&D/KotH challenge with an auto-built checker
+            // (./checker in the package, AdCheckerImage empty/template/gzctf-auto) has a
+            // SECOND image the service-image build never touches. Rebuild it too so the
+            // operator's "Rebuild" genuinely refreshes both — otherwise a pruned/stale
+            // checker stays broken and every check InternalErrors. Returns true when this
+            // challenge HAS an auto-built checker that we (re)enqueued or that's already
+            // building — used to give a registry-service challenge a sensible response
+            // instead of a bare 404 when its only buildable artifact is the checker.
+            // Best-effort and deduped on (challengeId, Checker): a failure here must not
+            // fail the request.
+            bool TryEnqueueCheckerRebuild()
+            {
+                if (!challenge.Type.UsesAdEngine()
+                    || !Services.Transfer.ChallengeImportService.IsCheckerAutoBuildable(challenge.AdCheckerImage))
+                    return false;
+                // Already building → nothing to enqueue, but the checker IS being handled.
+                if (buildQueue.IsPending(challenge.Id, Services.Container.Build.ChallengeBuildKind.Checker))
+                    return true;
+                if (!Services.Transfer.ChallengeImportService.TryResolveCheckerContext(
+                        packageDir, out var checkerCtx, out var checkerDf))
+                    return false;
+
+                var checkerSnap = Path.Combine(Path.GetTempPath(), $"gzctf-build-{Guid.NewGuid():N}");
+                try
+                {
+                    CopyDirRecursive(checkerCtx, checkerSnap);
+                    var checkerEnqueue = buildQueue.Enqueue(new Services.Container.Build.ChallengeBuildJob(
+                        challenge.Id, challenge.GameId, challenge.Title,
+                        checkerSnap, checkerDf, BuildTrigger.Manual,
+                        Kind: Services.Container.Build.ChallengeBuildKind.Checker));
+                    if (checkerEnqueue != Services.Container.Build.EnqueueResult.Enqueued)
+                        try { Directory.Delete(checkerSnap, recursive: true); } catch { /* best effort */ }
+                }
+                catch (Exception ex)
+                {
+                    try { Directory.Delete(checkerSnap, recursive: true); } catch { /* best effort */ }
+                    logger.LogError(ex, "Rebuild: checker enqueue failed for challenge {Cid}", challenge.Id);
+                }
+                return true;
+            }
+
             var declared = challenge.ContainerImage?.Trim();
             if (string.IsNullOrEmpty(declared) ||
                 !(declared.StartsWith("./") || declared.StartsWith("../") || declared.StartsWith('/') ||
@@ -2077,10 +2118,23 @@ public class EditController(
                   // missed (which wrongly rejected manual Rebuild as "ships a registry image").
                   declared.Contains("gzctf-auto/", StringComparison.OrdinalIgnoreCase)))
             {
+                // Service image is a published registry ref — not rebuildable. But an
+                // A&D/KotH challenge can ship a registry SERVICE image and STILL have an
+                // auto-built ./checker; the checker rebuild is independent of the service
+                // image, so attempt it before bailing. If we did, this isn't a no-op 404.
+                var checkerHandled = TryEnqueueCheckerRebuild();
                 challenge.BuildStatus = ChallengeBuildStatus.NotApplicable;
-                challenge.LastBuildLog =
-                    "Rebuild skipped: this challenge ships a published registry image. Re-upload to change.";
+                challenge.LastBuildLog = checkerHandled
+                    ? "Service image is a published registry image (not rebuilt); checker image rebuild enqueued."
+                    : "Rebuild skipped: this challenge ships a published registry image. Re-upload to change.";
                 await dbContext.SaveChangesAsync(token);
+                if (checkerHandled)
+                    return Accepted(new Models.Response.Admin.ChallengeAuditModel
+                    {
+                        ArchiveAvailable = true,
+                        BuildStatus = challenge.BuildStatus,
+                        LastBuildLog = challenge.LastBuildLog
+                    });
                 return NotFound(new RequestResponse(
                     "Rebuild is only valid for challenges with a local Dockerfile.",
                     StatusCodes.Status404NotFound));
@@ -2175,6 +2229,9 @@ public class EditController(
                         503));
             }
 
+            // Service image enqueued above; rebuild the checker image too (if any).
+            TryEnqueueCheckerRebuild();
+
             return Accepted(new Models.Response.Admin.ChallengeAuditModel
             {
                 ArchiveAvailable = true,
@@ -2199,9 +2256,21 @@ public class EditController(
     {
         Directory.CreateDirectory(dst);
         foreach (var f in Directory.EnumerateFiles(src))
+        {
+            // Skip symlinks: a link inside the (untrusted) build context would otherwise
+            // copy the TARGET's content — host kubeconfig, A&D flags, WireGuard keys — into
+            // the snapshot and bake it into the image. Mirrors ChallengeImportService's
+            // symlink-stripping copy and the archive extractors. Defense-in-depth: the
+            // archive extractor already drops symlink entries, so on-disk contexts reaching
+            // here are link-free today, but this no longer depends on that invariant.
+            if ((new FileInfo(f).Attributes & FileAttributes.ReparsePoint) != 0) continue;
             System.IO.File.Copy(f, Path.Combine(dst, Path.GetFileName(f)));
+        }
         foreach (var d in Directory.EnumerateDirectories(src))
+        {
+            if ((new DirectoryInfo(d).Attributes & FileAttributes.ReparsePoint) != 0) continue;
             CopyDirRecursive(d, Path.Combine(dst, Path.GetFileName(d)));
+        }
     }
 
     /// <summary>

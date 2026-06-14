@@ -2089,22 +2089,38 @@ public class AdminController(
             Services.Container.Provider.DockerMetadata> dockerProvider,
         CancellationToken token)
     {
-        // Build the keep-set from current ContainerImage values.
-        // ContainerImage can be either the bare local tag
-        // (gzctf-auto/...) or the registry-prefixed tag — derive the
-        // local form from the registry one so both versions are kept.
+        // Build the keep-set from current ContainerImage AND AdCheckerImage values.
+        // Each can be either the bare local tag (gzctf-auto/...) or the registry-prefixed
+        // tag — derive the local form from the registry one so both versions are kept.
+        //
+        // AdCheckerImage MUST be included: an A&D/KotH challenge's auto-built checker is a
+        // gzctf-auto/.../-checker tag that has NO long-running container holding it (it's
+        // spawned per tick), so if it falls out of the keep-set this prune deletes it and
+        // every subsequent check InternalErrors on the failed pull. Selecting only
+        // ContainerImage (the original bug) GC'd live checker images out from under running
+        // games. See project_ad_checker_image_pruned.
         var referenced = await dbContext.GameChallenges
-            .Where(c => c.ContainerImage != null && c.ContainerImage.Contains("gzctf-auto/"))
-            .Select(c => c.ContainerImage!)
+            .Where(c => (c.ContainerImage != null && c.ContainerImage.Contains("gzctf-auto/"))
+                        || (c.AdCheckerImage != null && c.AdCheckerImage.Contains("gzctf-auto/")))
+            .Select(c => new { c.ContainerImage, c.AdCheckerImage })
             .ToListAsync(token);
 
         var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var img in referenced)
+
+        void KeepImage(string? img)
         {
+            if (string.IsNullOrEmpty(img) || !img.Contains("gzctf-auto/", StringComparison.Ordinal))
+                return;
             keep.Add(img); // as stored
             // If it's a registry-prefixed tag, also keep the bare local form.
             var idx = img.IndexOf("gzctf-auto/", StringComparison.Ordinal);
             if (idx > 0) keep.Add(img[idx..]);
+        }
+
+        foreach (var row in referenced)
+        {
+            KeepImage(row.ContainerImage);
+            KeepImage(row.AdCheckerImage);
         }
 
         var client = dockerProvider.GetProvider();
@@ -2148,9 +2164,12 @@ public class AdminController(
     }
 
     /// <summary>
-    /// Bulk-rebuild every <c>Failed</c> / <c>MissingDockerfile</c>
-    /// challenge in a game. Skips challenges with no persisted archive
-    /// (registry-image or admin-created entries) and reports the
+    /// Bulk-rebuild every challenge in a game with a broken build: a <c>Failed</c> /
+    /// <c>MissingDockerfile</c> service image, OR (for A&amp;D/KotH) a checker image whose
+    /// most-recent build failed — checker failures don't flip the service BuildStatus, so
+    /// they're pulled in via their audit rows. Each image is rebuilt independently: a
+    /// checker-only candidate's healthy service image is left untouched. Skips challenges
+    /// with no persisted archive (registry-image or admin-created entries) and reports the
     /// count.
     /// </summary>
     [RequireAdmin]
@@ -2163,11 +2182,41 @@ public class AdminController(
         [FromServices] Services.Container.Build.IChallengeBuildQueue buildQueue,
         CancellationToken token)
     {
+        // Service-image failures: the classic "rebuild failed" set.
         var candidates = await dbContext.GameChallenges
             .Where(c => c.GameId == gameId
                         && (c.BuildStatus == ChallengeBuildStatus.Failed
                             || c.BuildStatus == ChallengeBuildStatus.MissingDockerfile))
             .ToListAsync(token);
+
+        // Checker-only failures: a checker build's failure is recorded ONLY on its audit row
+        // and never flips the challenge's service BuildStatus (the worker keeps the two
+        // images' statuses independent), so a challenge with a healthy service image but a
+        // failed/pruned checker is invisible to the query above. Fold in the A&D/KotH
+        // challenges whose most-recent Checker-kind audit failed, so the bulk button also
+        // restores checker-only breakage. The Checker audit set is small and game-scoped;
+        // compute "latest per challenge" in memory to avoid fragile GroupBy→First SQL.
+        var checkerAudits = await dbContext.ChallengeBuildAudits
+            .Where(a => a.GameId == gameId
+                        && a.Kind == Services.Container.Build.ChallengeBuildKind.Checker)
+            .OrderByDescending(a => a.EnqueuedAtUtc)
+            .Select(a => new { a.ChallengeId, a.Status })
+            .ToListAsync(token);
+        var checkerFailedIds = checkerAudits
+            .GroupBy(a => a.ChallengeId)
+            .Where(g => g.First().Status is ChallengeBuildStatus.Failed
+                                          or ChallengeBuildStatus.MissingDockerfile)
+            .Select(g => g.Key)
+            .ToHashSet();
+        if (checkerFailedIds.Count > 0)
+        {
+            var have = candidates.Select(c => c.Id).ToHashSet();
+            var extra = await dbContext.GameChallenges
+                .Where(c => c.GameId == gameId && checkerFailedIds.Contains(c.Id))
+                .ToListAsync(token);
+            // have.Add returns false for ids already present → dedups against the service set.
+            candidates.AddRange(extra.Where(c => have.Add(c.Id)));
+        }
 
         var result = new Models.Response.Admin.BulkRebuildResultModel();
         var msgs = new List<string>();
@@ -2187,9 +2236,12 @@ public class AdminController(
                 continue;
             }
 
-            // Extract → snapshot → enqueue, mirroring the single-shot
-            // Rebuild endpoint. Failures here are isolated per
-            // challenge: skip the one and keep going.
+            // Extract once, then (re)build whichever of the two images need it. Failures
+            // here are isolated per challenge: skip the one and keep going. A challenge
+            // pulled in only for a checker-only failure has a healthy service BuildStatus,
+            // so its service image is left alone — only the checker is rebuilt.
+            var serviceNeedsRebuild = ch.BuildStatus is ChallengeBuildStatus.Failed
+                                                      or ChallengeBuildStatus.MissingDockerfile;
             var workDir = Path.Combine(Path.GetTempPath(), $"gzctf-bulk-{Guid.NewGuid():N}");
             try
             {
@@ -2209,45 +2261,80 @@ public class AdminController(
                     ? topLevel[0]
                     : workDir;
 
-                var srcDir = Path.Combine(packageDir, "src");
-                string contextDir = System.IO.File.Exists(Path.Combine(srcDir, "Dockerfile"))
-                    ? Path.GetFullPath(srcDir)
-                    : Path.GetFullPath(packageDir);
-                const string dockerfile = "Dockerfile";
-
-                if (!System.IO.File.Exists(Path.Combine(contextDir, dockerfile)))
+                // ── Service image — only when the service build itself failed. Its
+                // skip cases (no Dockerfile, already pending) no longer abort the
+                // iteration: the checker below must still get a chance to rebuild.
+                if (serviceNeedsRebuild)
                 {
-                    result.Skipped++;
-                    msgs.Add($"{ch.Title}: no Dockerfile in archive");
-                    continue;
+                    var srcDir = Path.Combine(packageDir, "src");
+                    string contextDir = System.IO.File.Exists(Path.Combine(srcDir, "Dockerfile"))
+                        ? Path.GetFullPath(srcDir)
+                        : Path.GetFullPath(packageDir);
+                    const string dockerfile = "Dockerfile";
+
+                    if (!System.IO.File.Exists(Path.Combine(contextDir, dockerfile)))
+                    {
+                        result.Skipped++;
+                        msgs.Add($"{ch.Title}: no Dockerfile in archive");
+                    }
+                    else if (buildQueue.IsPending(ch.Id))
+                    {
+                        // bulk action shouldn't pile up duplicate jobs.
+                        result.Skipped++;
+                        msgs.Add($"{ch.Title}: build already pending");
+                    }
+                    else
+                    {
+                        var snap = Path.Combine(Path.GetTempPath(), $"gzctf-build-{Guid.NewGuid():N}");
+                        CopyDirRecursive(contextDir, snap);
+
+                        var er = buildQueue.Enqueue(new Services.Container.Build.ChallengeBuildJob(
+                            ch.Id, ch.GameId, ch.Title, snap, dockerfile,
+                            BuildTrigger.Bulk));
+                        if (er == Services.Container.Build.EnqueueResult.Enqueued)
+                        {
+                            ch.BuildStatus = ChallengeBuildStatus.Queued;
+                            ch.LastBuildLog = null;
+                            result.Enqueued++;
+                        }
+                        else
+                        {
+                            try { Directory.Delete(snap, recursive: true); } catch { /* best effort */ }
+                            result.Skipped++;
+                            msgs.Add($"{ch.Title}: {(er == Services.Container.Build.EnqueueResult.Rejected ? "queue full" : "already pending")}");
+                        }
+                    }
                 }
 
-                // Skip challenges that already have a pending build —
-                // bulk action shouldn't pile up duplicate jobs.
-                if (buildQueue.IsPending(ch.Id))
+                // ── Checker image — independent of the service image. Runs for every A&D/KotH
+                // candidate with an auto-built checker, whether it was pulled in for a service
+                // failure or a checker-only failure. Best-effort, deduped on (challengeId, Checker).
+                if (ch.Type.UsesAdEngine()
+                    && Services.Transfer.ChallengeImportService.IsCheckerAutoBuildable(ch.AdCheckerImage)
+                    && !buildQueue.IsPending(ch.Id, Services.Container.Build.ChallengeBuildKind.Checker)
+                    && Services.Transfer.ChallengeImportService.TryResolveCheckerContext(
+                        packageDir, out var checkerCtx, out var checkerDf))
                 {
-                    result.Skipped++;
-                    msgs.Add($"{ch.Title}: build already pending");
-                    continue;
-                }
-
-                var snap = Path.Combine(Path.GetTempPath(), $"gzctf-build-{Guid.NewGuid():N}");
-                CopyDirRecursive(contextDir, snap);
-
-                var er = buildQueue.Enqueue(new Services.Container.Build.ChallengeBuildJob(
-                    ch.Id, ch.GameId, ch.Title, snap, dockerfile,
-                    BuildTrigger.Bulk));
-                if (er == Services.Container.Build.EnqueueResult.Enqueued)
-                {
-                    ch.BuildStatus = ChallengeBuildStatus.Queued;
-                    ch.LastBuildLog = null;
-                    result.Enqueued++;
-                }
-                else
-                {
-                    try { Directory.Delete(snap, recursive: true); } catch { /* best effort */ }
-                    result.Skipped++;
-                    msgs.Add($"{ch.Title}: {(er == Services.Container.Build.EnqueueResult.Rejected ? "queue full" : "already pending")}");
+                    var checkerSnap = Path.Combine(Path.GetTempPath(), $"gzctf-build-{Guid.NewGuid():N}");
+                    try
+                    {
+                        CopyDirRecursive(checkerCtx, checkerSnap);
+                        var cer = buildQueue.Enqueue(new Services.Container.Build.ChallengeBuildJob(
+                            ch.Id, ch.GameId, ch.Title, checkerSnap, checkerDf,
+                            BuildTrigger.Bulk, Kind: Services.Container.Build.ChallengeBuildKind.Checker));
+                        if (cer == Services.Container.Build.EnqueueResult.Enqueued)
+                        {
+                            result.Enqueued++;
+                            msgs.Add($"{ch.Title}: checker rebuild enqueued");
+                        }
+                        else
+                            try { Directory.Delete(checkerSnap, recursive: true); } catch { /* best effort */ }
+                    }
+                    catch (Exception cex)
+                    {
+                        try { Directory.Delete(checkerSnap, recursive: true); } catch { /* best effort */ }
+                        msgs.Add($"{ch.Title}: checker enqueue failed — {cex.Message}");
+                    }
                 }
             }
             catch (Exception ex)
@@ -2272,9 +2359,21 @@ public class AdminController(
     {
         Directory.CreateDirectory(dst);
         foreach (var f in Directory.EnumerateFiles(src))
+        {
+            // Skip symlinks: a link inside the (untrusted) build context would otherwise
+            // copy the TARGET's content — host kubeconfig, A&D flags, WireGuard keys — into
+            // the snapshot and bake it into the image. Mirrors ChallengeImportService's
+            // symlink-stripping copy and the archive extractors. Defense-in-depth: the
+            // archive extractor already drops symlink entries, so on-disk contexts reaching
+            // here are link-free today, but this no longer depends on that invariant.
+            if ((new FileInfo(f).Attributes & FileAttributes.ReparsePoint) != 0) continue;
             System.IO.File.Copy(f, Path.Combine(dst, Path.GetFileName(f)));
+        }
         foreach (var d in Directory.EnumerateDirectories(src))
+        {
+            if ((new DirectoryInfo(d).Attributes & FileAttributes.ReparsePoint) != 0) continue;
             CopyDirRecursive(d, Path.Combine(dst, Path.GetFileName(d)));
+        }
     }
 
     private IActionResult HandleIdentityError(IEnumerable<IdentityError> errors) =>

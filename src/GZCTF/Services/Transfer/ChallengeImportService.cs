@@ -414,9 +414,7 @@ public sealed class ChallengeImportService(
         if (opts.AutoApprove && type.UsesAdEngine())
         {
             var declaredChecker = model.Ad?.CheckerImage?.Trim();
-            var checkerIsBuildable = string.IsNullOrEmpty(declaredChecker)
-                                     || declaredChecker.Contains("{{");
-            if (checkerIsBuildable
+            if (IsCheckerAutoBuildable(declaredChecker)
                 && TryResolveCheckerContext(packageDir, out var checkerCtx, out var checkerDf))
             {
                 string? checkerSnap = null;
@@ -454,6 +452,22 @@ public sealed class ChallengeImportService(
     }
 
     /// <summary>
+    /// Whether a challenge's <c>ad.checkerImage</c> value means "build the checker from
+    /// the package's <c>./checker</c> folder" rather than "pull this operator-pinned
+    /// registry image". True when the value is empty (use built-in / build it), a
+    /// <c>{{template}}</c> placeholder, or a previously auto-built <c>gzctf-auto/</c> tag
+    /// (the form stored back onto <see cref="GameChallenge.AdCheckerImage"/> after a
+    /// successful checker build — so a later Rebuild re-detects it as auto-built). Any
+    /// other value is an explicit registry image the operator published; never rebuild it.
+    /// Shared by import, manual Rebuild, and BulkRebuild so all three agree on what's
+    /// auto-built.
+    /// </summary>
+    internal static bool IsCheckerAutoBuildable(string? declaredChecker) =>
+        string.IsNullOrEmpty(declaredChecker)
+        || declaredChecker.Contains("{{")
+        || declaredChecker.Contains("gzctf-auto/", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Locate a checker build context in an imported package. Convention mirrors the
     /// challenge image search: <c>./checker/src/Dockerfile</c> then
     /// <c>./checker/Dockerfile</c>. Returns false when no checker Dockerfile exists
@@ -467,7 +481,7 @@ public sealed class ChallengeImportService(
     /// secrets (kubeconfig, WG keys, AD flags) into the checker image. Same guard the
     /// challenge build (<see cref="ResolveBuildContext"/>) and the attachment path use.</para>
     /// </summary>
-    private static bool TryResolveCheckerContext(string packageDir, out string contextDir, out string dockerfile)
+    internal static bool TryResolveCheckerContext(string packageDir, out string contextDir, out string dockerfile)
     {
         contextDir = string.Empty;
         dockerfile = string.Empty;
