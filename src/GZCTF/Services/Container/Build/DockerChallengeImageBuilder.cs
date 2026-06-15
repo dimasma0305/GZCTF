@@ -318,6 +318,52 @@ public sealed class DockerChallengeImageBuilder(
         return ok;
     }
 
+    public async Task<int> DeleteGameImagesAsync(int gameId, CancellationToken token)
+    {
+        // Match every local tag for this game: bare gzctf-auto/{gameId}/{slug}:...
+        // and the registry-prefixed {ns}/gzctf-auto/{gameId}/{slug}:... form, for
+        // both the challenge and its -checker image. The trailing slash keeps
+        // game 19 from also matching games 1 or 190.
+        var marker = $"gzctf-auto/{gameId}/";
+
+        int removed = 0;
+        try
+        {
+            var images = await _client.Images.ListImagesAsync(
+                new ImagesListParameters { All = false }, token);
+
+            foreach (var img in images)
+            {
+                if (img.RepoTags is null) continue;
+                foreach (var rt in img.RepoTags)
+                {
+                    if (!rt.Contains(marker, StringComparison.Ordinal)) continue;
+                    try
+                    {
+                        // Force so a shared base layer / multi-tag image still gets
+                        // this tag removed; the game is gone so nothing should hold it.
+                        await _client.Images.DeleteImageAsync(rt,
+                            new ImageDeleteParameters { Force = true, NoPrune = false }, token);
+                        removed++;
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning("Game-image cleanup: failed to delete {Tag}: {Err}", rt, ex.Message);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning("Game-image cleanup: listing images for game {GameId} failed: {Err}", gameId, ex.Message);
+        }
+
+        if (removed > 0)
+            logger.SystemLog($"Removed {removed} autobuilt image tag(s) for deleted game {gameId}",
+                TaskStatus.Success, LogLevel.Information);
+        return removed;
+    }
+
     /// <summary>Build a fixed tag from an already-tar'd context, skipping the
     /// content-hash step (the persisted tar IS the content and its tag is known).
     /// Mirrors the docker build call in <see cref="BuildAsync"/>.</summary>

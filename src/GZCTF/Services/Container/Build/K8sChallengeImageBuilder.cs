@@ -27,4 +27,8 @@ public sealed class K8sChallengeImageBuilder : IChallengeImageBuilder
     // lose to a host prune), so there is nothing to self-heal here.
     public Task<bool> TryRestoreImageAsync(string imageTag, CancellationToken token) =>
         Task.FromResult(false);
+
+    // No local autobuilt images on the k8s runtime — nothing to delete.
+    public Task<int> DeleteGameImagesAsync(int gameId, CancellationToken token) =>
+        Task.FromResult(0);
 }

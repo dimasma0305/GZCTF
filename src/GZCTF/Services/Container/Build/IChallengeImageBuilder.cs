@@ -69,4 +69,19 @@ public interface IChallengeImageBuilder
     /// Never throws for the missing-context case — callers treat false as
     /// "leave it to the operator / re-import".</returns>
     Task<bool> TryRestoreImageAsync(string imageTag, CancellationToken token);
+
+    /// <summary>
+    /// Best-effort: delete every local autobuilt image belonging to a game,
+    /// i.e. all <c>gzctf-auto/{gameId}/*</c> tags (challenge and checker, any
+    /// slug, any digest). Called when a game is deleted — those images are
+    /// namespaced by game id, so once the game is gone they can never be
+    /// re-referenced and would otherwise leak disk forever until an operator
+    /// runs the "Prune images" sweep by hand.
+    /// </summary>
+    /// <param name="gameId">The deleted game's id.</param>
+    /// <param name="token">Cancellation token.</param>
+    /// <returns>The number of tags removed (0 on the Kubernetes runtime, which
+    /// has no local autobuilt images). Never throws — a daemon hiccup must not
+    /// block the game deletion that triggered it.</returns>
+    Task<int> DeleteGameImagesAsync(int gameId, CancellationToken token);
 }

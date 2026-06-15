@@ -4,6 +4,7 @@ using GZCTF.Repositories.Interface;
 using GZCTF.Services;
 using GZCTF.Services.Cache;
 using GZCTF.Services.Config;
+using GZCTF.Services.Container.Build;
 using Microsoft.EntityFrameworkCore;
 
 namespace GZCTF.Repositories;
@@ -16,6 +17,7 @@ public class GameRepository(
     IParticipationRepository participationRepository,
     IConfigService configService,
     AdContainerManager adContainerManager,
+    IChallengeImageBuilder imageBuilder,
     AppDbContext context) : RepositoryBase(context), IGameRepository
 {
     private readonly byte[] _xorKey = configService.GetXorKey();
@@ -290,6 +292,14 @@ public class GameRepository(
 
             await cacheHelper.RemoveAsync(CacheKey.ScoreBoard(game.Id), token);
             await cacheHelper.RemoveAsync(CacheKey.ScoreBoardFrozen(game.Id), token);
+
+            // Best-effort: drop the game's autobuilt gzctf-auto/{gameId}/* images from
+            // the local daemon. They are namespaced by game id, so once the game is
+            // gone they can never be re-referenced — without this they leak disk until
+            // an operator runs the "Prune images" sweep on /admin/builds by hand. The
+            // call never throws; do it after the commit so images go only when the
+            // game is actually deleted.
+            await imageBuilder.DeleteGameImagesAsync(game.Id, token);
 
             return TaskStatus.Success;
         }
