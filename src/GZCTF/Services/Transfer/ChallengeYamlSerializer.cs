@@ -122,9 +122,11 @@ public static class ChallengeYamlSerializer
                 AllowEgress = ch.AdAllowEgress ? null : false,
                 AllowSelfReset = ch.AdAllowSelfReset ? null : false,
                 SshRequiresFlag = ch.AdSshRequiresFlag ? true : null,
+                SelfHosted = ch.AdSelfHosted ? true : null,
             };
             if (ad.CheckerImage is not null || ad.AllowEgress is not null
-                || ad.AllowSelfReset is not null || ad.SshRequiresFlag is not null)
+                || ad.AllowSelfReset is not null || ad.SshRequiresFlag is not null
+                || ad.SelfHosted is not null)
                 model.Ad = ad;
         }
 

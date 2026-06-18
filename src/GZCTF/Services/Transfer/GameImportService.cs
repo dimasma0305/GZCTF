@@ -456,6 +456,7 @@ public class GameImportService(
             if (ad.AllowEgress is { } ae) challenge.AdAllowEgress = ae;
             if (ad.AllowSelfReset is { } asr) challenge.AdAllowSelfReset = asr;
             if (ad.SshRequiresFlag is { } srf) challenge.AdSshRequiresFlag = srf;
+            if (ad.SelfHosted is { } sh) challenge.AdSelfHosted = sh;
         }
 
         // Create challenge

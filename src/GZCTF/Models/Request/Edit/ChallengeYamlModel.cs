@@ -113,6 +113,9 @@ public sealed class ChallengeYamlModel
         [YamlMember(Alias = "sshRequiresFlag")]
         public bool? SshRequiresFlag { get; set; }
 
+        [YamlMember(Alias = "selfHosted")]
+        public bool? SelfHosted { get; set; }
+
         // tickSeconds / flagLifetimeTicks / warmupSeconds / resetCooldownMinutes
         // / allowSnapshotDownload / getflagWindowFraction / minGracePeriodSeconds
         // are EVENT-WIDE — set them in the `ad:` block of the .gzevent manifest

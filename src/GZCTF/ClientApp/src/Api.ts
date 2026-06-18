@@ -1632,6 +1632,8 @@ export interface ChallengeEditDetailModel {
   adAllowSelfReset?: boolean | null;
   /** A&D: SSH to the service container requires a captured flag for this challenge. */
   adSshRequiresFlag?: boolean | null;
+  /** A&D / KotH: the team self-hosts the service container (BYOC), connected via a GZCTF relay. */
+  adSelfHosted?: boolean | null;
   /** Current build pipeline state */
   buildStatus?: ChallengeBuildStatus;
   /** Live-updated build log tail */
@@ -1919,6 +1921,8 @@ export interface ChallengeUpdateModel {
   adAllowSelfReset?: boolean | null;
   /** A&D: SSH to the service container requires a captured flag for this challenge. */
   adSshRequiresFlag?: boolean | null;
+  /** A&D / KotH: the team self-hosts the service container (BYOC), connected via a GZCTF relay. */
+  adSelfHosted?: boolean | null;
 }
 
 /**

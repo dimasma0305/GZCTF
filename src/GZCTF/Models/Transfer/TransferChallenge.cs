@@ -131,6 +131,9 @@ public class AdSection
     /// <summary>Whether the SSH-jump login requires a captured flag for this challenge. Default false.</summary>
     public bool? SshRequiresFlag { get; set; }
 
+    /// <summary>Whether the team self-hosts the service container (BYOC, connected via a GZCTF relay). Default false.</summary>
+    public bool? SelfHosted { get; set; }
+
     // tick_seconds, flag_lifetime_ticks, reset_cooldown_minutes,
     // allow_snapshot_download, and the checker timing knobs (getflag jitter
     // window + min grace period) are all EVENT-WIDE policy and live on the

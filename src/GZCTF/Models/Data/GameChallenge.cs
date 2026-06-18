@@ -89,6 +89,7 @@ public class GameChallenge : Challenge
         AdAllowEgress = model.AdAllowEgress ?? AdAllowEgress;
         AdAllowSelfReset = model.AdAllowSelfReset ?? AdAllowSelfReset;
         AdSshRequiresFlag = model.AdSshRequiresFlag ?? AdSshRequiresFlag;
+        AdSelfHosted = model.AdSelfHosted ?? AdSelfHosted;
 
         // isEnabled should be updated alone
         IsEnabled = model.IsEnabled ?? IsEnabled;
@@ -202,6 +203,16 @@ public class GameChallenge : Challenge
     /// ssh-jump authorize path). Default false — SSH open to all keyholders.
     /// </summary>
     public bool AdSshRequiresFlag { get; set; }
+
+    /// <summary>
+    /// A&D / KotH only: when true, GZCTF does NOT host the team's service container.
+    /// Instead the team runs the service on their own machine ("bring your own
+    /// container") and connects it into the game network through a GZCTF-managed relay
+    /// endpoint on the normal challenge bridge, so the checker, attack proxy, egress
+    /// isolation, and flag rotation all continue to work unchanged against that relay.
+    /// Default false — GZCTF hosts the container as usual.
+    /// </summary>
+    public bool AdSelfHosted { get; set; }
 
     // Tick length, flag lifetime, reset cooldown, snapshot-download, and the
     // checker timing knobs (getflag jitter window + min grace period) are all

@@ -142,6 +142,9 @@ public class ChallengeUpdateModel
     /// <summary>A&amp;D — When true, SSH to the service container requires a captured flag for this challenge.</summary>
     public bool? AdSshRequiresFlag { get; set; }
 
+    /// <summary>A&amp;D — When true, the team self-hosts the service container and connects it via a GZCTF relay.</summary>
+    public bool? AdSelfHosted { get; set; }
+
     #endregion
 
     /// <summary>

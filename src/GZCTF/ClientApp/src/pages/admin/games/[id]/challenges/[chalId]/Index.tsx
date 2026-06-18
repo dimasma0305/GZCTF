@@ -823,6 +823,23 @@ const GameChallengeEdit: FC = () => {
                   />
                 </Grid.Col>
               )}
+              {/* Bring-your-own-container: the team runs the service on their own
+                  machine and connects it to the game via a GZCTF relay. Per-team
+                  service model → hide for KotH (single shared hill). */}
+              {!isKoth && (
+                <Grid.Col span={6} display="flex" className={misc.alignCenter}>
+                  <Switch
+                    disabled={disabled}
+                    checked={challengeInfo.adSelfHosted ?? false}
+                    label={SwitchLabel(
+                      t('admin.content.games.challenges.ad.self_hosted.label', 'Self-hosted (bring your own container)'),
+                      t('admin.content.games.challenges.ad.self_hosted.description',
+                        'Teams run the service container on their own machine and connect it to the game network through a GZCTF relay, instead of GZCTF hosting it. The checker, attack proxy, and flag rotation still apply.')
+                    )}
+                    onChange={(e) => setChallengeInfo({ ...challengeInfo, adSelfHosted: e.target.checked })}
+                  />
+                </Grid.Col>
+              )}
             </Grid>
           </Stack>
         )}

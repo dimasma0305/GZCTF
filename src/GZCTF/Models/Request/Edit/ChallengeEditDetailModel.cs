@@ -176,6 +176,12 @@ public class ChallengeEditDetailModel
     /// </summary>
     public bool? AdSshRequiresFlag { get; set; }
 
+    /// <summary>
+    /// A&D / KotH only: the team self-hosts the service container and connects it
+    /// into the game via a GZCTF-managed relay endpoint ("bring your own container").
+    /// </summary>
+    public bool? AdSelfHosted { get; set; }
+
     #endregion
 
     /// <summary>
@@ -224,6 +230,7 @@ public class ChallengeEditDetailModel
             AdAllowEgress = chal.AdAllowEgress,
             AdAllowSelfReset = chal.AdAllowSelfReset,
             AdSshRequiresFlag = chal.AdSshRequiresFlag,
+            AdSelfHosted = chal.AdSelfHosted,
             BuildStatus = chal.BuildStatus,
             LastBuildLog = chal.LastBuildLog
         };
