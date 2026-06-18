@@ -1,3 +1,7 @@
+using System.Buffers;
+using System.Net;
+using System.Net.Sockets;
+using System.Net.WebSockets;
 using System.Security.Cryptography;
 using GZCTF.Extensions;
 using Microsoft.AspNetCore.Authorization;
@@ -192,6 +196,131 @@ public class AdGameController(
 
         // No round yet → the warmup literal, so the sidecar always writes something.
         return Content(flag ?? "flag{warmup-no-round-yet}", "text/plain");
+    }
+
+    /// <summary>
+    /// BYOC (bring-your-own-container) agent tunnel. The team's agent opens an
+    /// outbound WebSocket here; GZCTF bridges it byte-for-byte to the team's relay
+    /// container's control port on the challenge bridge, where the relay runs the
+    /// other end of a yamux session. The relay multiplexes inbound checker/attacker
+    /// connections — and the rotating flag — back over this single tunnel, so the
+    /// team needs only one outbound HTTPS connection (no public IP / inbound rule).
+    /// <para>Auth is the <paramref name="token"/> — an HMAC of the
+    /// <c>(participation, challenge)</c> keyed by the platform XorKey, scoped to
+    /// that team's own relay. No session needed; the agent runs headless.</para>
+    /// </summary>
+    [HttpGet("Byoc/Agent/{participationId:int}/{challengeId:int}/{token}")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status101SwitchingProtocols)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> ByocAgent(int id, int participationId, int challengeId, string token,
+        CancellationToken cancelToken)
+    {
+        if (!HttpContext.WebSockets.IsWebSocketRequest)
+            return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Game_ChallengeNotFound)]));
+
+        var expected = AdTokenUtils.Hash($"adbyocagent:{participationId}:{challengeId}", configService.GetXorKey());
+        byte[] presented;
+        try { presented = Convert.FromHexString(token); }
+        catch { return Unauthorized(); }
+        if (!CryptographicOperations.FixedTimeEquals(expected, presented))
+            return Unauthorized();
+
+        // Self-hosted challenge only — defense in depth (the reconciler only
+        // launches a relay for AdSelfHosted, but never bridge to a normal box).
+        var isByoc = await db.GameChallenges
+            .AnyAsync(c => c.Id == challengeId && c.GameId == id && c.AdSelfHosted, cancelToken);
+        if (!isByoc)
+            return NotFound();
+
+        var relayIpStr = await db.AdTeamServices
+            .Where(s => s.ParticipationId == participationId && s.ChallengeId == challengeId
+                && s.Participation.GameId == id)
+            .Select(s => s.Container!.IP)
+            .FirstOrDefaultAsync(cancelToken);
+        if (string.IsNullOrEmpty(relayIpStr) || !IPAddress.TryParse(relayIpStr, out var relayIp))
+            return NotFound();
+
+        // yamux runs end-to-end between the agent and the relay; GZCTF is a
+        // transparent pipe between the WebSocket and the relay's control TCP port.
+        using var socket = new Socket(relayIp.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+        try
+        {
+            await socket.ConnectAsync(new IPEndPoint(relayIp, AdContainerManager.ByocCtlPort), cancelToken);
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "BYOC agent: cannot reach relay {Ip}:{Port} for team={Tid} challenge={Cid}",
+                relayIpStr, AdContainerManager.ByocCtlPort, participationId, challengeId);
+            return NotFound();
+        }
+
+        using var ws = await HttpContext.WebSockets.AcceptWebSocketAsync();
+        logger.LogInformation("BYOC agent connected: team={Tid} challenge={Cid} relay={Ip}",
+            participationId, challengeId, relayIpStr);
+        await BridgeWebSocketToSocketAsync(ws, socket, cancelToken);
+        return new EmptyResult();
+    }
+
+    /// <summary>
+    /// Pump bytes bidirectionally between a WebSocket and a TCP socket until
+    /// either side closes. Used to bridge a BYOC agent's WebSocket to its relay's
+    /// control port — neither side's framing is interpreted, the bytes are the
+    /// yamux session.
+    /// </summary>
+    private static async Task BridgeWebSocketToSocketAsync(WebSocket ws, Socket socket, CancellationToken token)
+    {
+        const int bufferSize = 16 * 1024;
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
+        await using var net = new NetworkStream(socket, ownsSocket: false);
+
+        async Task WsToTcp()
+        {
+            var buf = ArrayPool<byte>.Shared.Rent(bufferSize);
+            try
+            {
+                while (!cts.IsCancellationRequested)
+                {
+                    var msg = await ws.ReceiveAsync(new ArraySegment<byte>(buf), cts.Token);
+                    if (msg.MessageType == WebSocketMessageType.Close)
+                        break;
+                    if (msg.Count > 0)
+                        await net.WriteAsync(buf.AsMemory(0, msg.Count), cts.Token);
+                }
+            }
+            catch { /* peer closed / cancelled */ }
+            finally { ArrayPool<byte>.Shared.Return(buf); await cts.CancelAsync(); }
+        }
+
+        async Task TcpToWs()
+        {
+            var buf = ArrayPool<byte>.Shared.Rent(bufferSize);
+            try
+            {
+                while (!cts.IsCancellationRequested)
+                {
+                    var n = await net.ReadAsync(buf, cts.Token);
+                    if (n <= 0)
+                        break;
+                    await ws.SendAsync(new ArraySegment<byte>(buf, 0, n),
+                        WebSocketMessageType.Binary, true, cts.Token);
+                }
+            }
+            catch { /* peer closed / cancelled */ }
+            finally { ArrayPool<byte>.Shared.Return(buf); await cts.CancelAsync(); }
+        }
+
+        var a = WsToTcp();
+        var b = TcpToWs();
+        await Task.WhenAny(a, b);
+        await cts.CancelAsync();
+        try { await Task.WhenAll(a, b); } catch { /* already logged/ignored */ }
+        try
+        {
+            if (ws.State == WebSocketState.Open)
+                await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None);
+        }
+        catch { /* best effort */ }
     }
 
     private async Task<AdSubmitResultModel> ProcessSingleFlagAsync(

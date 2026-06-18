@@ -58,4 +58,15 @@ public static class AdTokenUtils
     /// </summary>
     public static string PodFlagToken(int participationId, int challengeId, byte[] key) =>
         Convert.ToHexString(Hash($"adpodflag:{participationId}:{challengeId}", key));
+
+    /// <summary>
+    /// Stable per-(participation, challenge) token for the BYOC (self-hosted)
+    /// agent tunnel endpoint (<c>GET …/Ad/Byoc/Agent/{pid}/{cid}/{token}</c>).
+    /// HMAC of the pair keyed by the XorKey, hex-encoded — unguessable and scoped
+    /// to that team's own relay. Baked into the team's generated agent config; the
+    /// endpoint re-derives and compares it. A distinct domain prefix from
+    /// <see cref="PodFlagToken"/> means neither token is usable as the other.
+    /// </summary>
+    public static string ByocAgentToken(int participationId, int challengeId, byte[] key) =>
+        Convert.ToHexString(Hash($"adbyocagent:{participationId}:{challengeId}", key));
 }
