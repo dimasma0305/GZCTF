@@ -586,7 +586,7 @@ public sealed class DockerChallengeImageBuilder(
                 {
                     ["dangling"] = new Dictionary<string, bool> { ["true"] = true }
                 } }, token);
-            if ((p?.SpaceReclaimed ?? 0) > 0)
+            if (p is { SpaceReclaimed: > 0 })
                 AppendTail(logTail, $"[cleanup] pruned dangling images: {HumanBytes(p.SpaceReclaimed)} reclaimed\n");
         }
         catch (Exception ex)

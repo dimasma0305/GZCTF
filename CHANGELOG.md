@@ -3,6 +3,13 @@
 All notable changes to [**GZCTF**](https://github.com/GZTimeWalker/GZCTF) will be documented in this file.
 
 ---
+## [1.8.6](https://github.com/GZTimeWalker/GZCTF/compare/v1.8.5..v1.8.6) - 2026-06-06
+
+### 🐛 Bug Fixes
+
+- **(web)** prevent table cell text wrapping with Mantine 9 - ([4bba99](https://github.com/GZTimeWalker/GZCTF/commit/4bba99)) by **GZTime**
+
+---
 ## [1.8.5](https://github.com/GZTimeWalker/GZCTF/compare/v1.8.4..v1.8.5) - 2026-05-01
 
 ### ⛰️ Features

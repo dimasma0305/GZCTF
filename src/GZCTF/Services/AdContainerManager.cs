@@ -805,8 +805,9 @@ public sealed class AdContainerManager(
     /// exhaust memory; the +16 KiB margin covers the tar header, 512-byte padding,
     /// the end-of-archive trailer, and any extended-header blocks.
     /// </remarks>
-    internal static async Task<string?> ReadTarSingleFileAsync(Stream tar, CancellationToken token)
+    internal static async Task<string?> ReadTarSingleFileAsync(Stream? tar, CancellationToken token)
     {
+        if (tar is null) return null;
         using var buffer = new MemoryStream();
         await using (tar)
         {

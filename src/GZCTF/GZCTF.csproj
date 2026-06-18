@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <AssemblyVersion>1.8.5.0</AssemblyVersion>
+    <AssemblyVersion>1.8.6.0</AssemblyVersion>
     <Description>GZ::CTF $(VITE_APP_GIT_NAME)-$(VITE_APP_GIT_SHA) build at $(VITE_APP_BUILD_TIMESTAMP)</Description>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -17,7 +17,7 @@
     <SpaProxyServerUrl>http://localhost:63000</SpaProxyServerUrl>
     <SpaProxyLaunchCommand>npm run dev -- --host</SpaProxyLaunchCommand>
     <Configurations>Debug;Release</Configurations>
-    <ReleaseVersion>1.8.5</ReleaseVersion>
+    <ReleaseVersion>1.8.6</ReleaseVersion>
     <WarningLevel>4</WarningLevel>
     <ServerGarbageCollection>true</ServerGarbageCollection>
     <AcceptNPOIOSMFLicense>true</AcceptNPOIOSMFLicense>
@@ -41,8 +41,14 @@
     <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" />
     <PackageReference Include="Microsoft.AspNetCore.SpaProxy" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Tasks" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tasks">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.Common" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="Npgsql.OpenTelemetry" />

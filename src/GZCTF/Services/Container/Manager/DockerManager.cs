@@ -55,6 +55,7 @@ public class DockerManager : IContainerManager
         _storageQuotaSupported ??= await ResolveStorageQuotaSupportAsync(token);
         if (_storageQuotaSupported == true)
         {
+            parameters.HostConfig ??= new();
             (parameters.HostConfig.StorageOpt ??= new Dictionary<string, string>())["size"] =
                 $"{config.StorageLimit}m";
             return;
@@ -111,7 +112,7 @@ public class DockerManager : IContainerManager
             }
             else
             {
-                _logger.LogDeletionFailedWithHttpContext(container.LogId, e.StatusCode, e.ResponseBody);
+                _logger.LogDeletionFailedWithHttpContext(container.LogId, e.StatusCode, e.ResponseBody ?? string.Empty);
                 return;
             }
         }
@@ -140,10 +141,13 @@ public class DockerManager : IContainerManager
         }
 
         var parameters = GetCreateContainerParameters(config);
+        var containerName = parameters.Name ?? DockerMetadata.GetName(config);
+        parameters.Name = containerName;
         await ApplyStorageQuotaAsync(parameters, config, token);
 
         if (_meta.ExposePort)
         {
+            parameters.HostConfig ??= new();
             parameters.ExposedPorts = new Dictionary<string, EmptyStruct> { [config.ExposedPort.ToString()] = new() };
             parameters.HostConfig.PortBindings = new Dictionary<string, IList<PortBinding>>
             {
@@ -167,7 +171,7 @@ public class DockerManager : IContainerManager
             {
                 _logger.SystemLog(
                     StaticLocalizer[nameof(Resources.Program.ContainerManager_ContainerCreationFailed),
-                        parameters.Name], TaskStatus.Failed, LogLevel.Information);
+                        containerName], TaskStatus.Failed, LogLevel.Information);
                 return null;
             }
 
@@ -196,35 +200,35 @@ public class DockerManager : IContainerManager
             {
                 _logger.SystemLog(
                     StaticLocalizer[nameof(Resources.Program.ContainerManager_ContainerExisted),
-                        parameters.Name],
+                        containerName],
                     TaskStatus.Duplicate,
                     LogLevel.Warning);
 
                 // the container already exists, remove it and retry
                 try
                 {
-                    await _client.Containers.RemoveContainerAsync(parameters.Name,
+                    await _client.Containers.RemoveContainerAsync(containerName,
                         new() { Force = true }, token);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogErrorMessage(ex,
                         StaticLocalizer[nameof(Resources.Program.ContainerManager_ContainerDeletionFailed),
-                            parameters.Name]);
+                            containerName]);
                     return null;
                 }
 
                 goto CreateDockerContainer;
             }
 
-            _logger.LogCreationFailedWithHttpContext(parameters.Name, e.StatusCode, e.ResponseBody);
+            _logger.LogCreationFailedWithHttpContext(containerName, e.StatusCode, e.ResponseBody ?? string.Empty);
             return null;
         }
         catch (Exception e)
         {
             _logger.LogErrorMessage(e,
                 StaticLocalizer[nameof(Resources.Program.ContainerManager_ContainerCreationFailed),
-                    parameters.Name]);
+                    containerName]);
             return null;
         }
 
@@ -260,10 +264,23 @@ public class DockerManager : IContainerManager
         }
 
         var info = await _client.Containers.InspectContainerAsync(container.ContainerId, token);
+        var state = info.State;
 
-        container.Status = info.State.Dead || info.State.OOMKilled || info.State.Restarting
+        if (state is null)
+        {
+            _logger.SystemLog(
+                StaticLocalizer[
+                    nameof(Resources.Program.ContainerManager_ContainerInstanceCreationFailedWithError),
+                    config.Image.Split("/").LastOrDefault() ?? "", string.Empty],
+                TaskStatus.Failed, LogLevel.Warning);
+
+            await DestroyContainerAsync(container, token);
+            return null;
+        }
+
+        container.Status = state.Dead || state.OOMKilled || state.Restarting
             ? ContainerStatus.Destroyed
-            : info.State.Running
+            : state.Running
                 ? ContainerStatus.Running
                 : ContainerStatus.Pending;
 
@@ -273,7 +290,7 @@ public class DockerManager : IContainerManager
             _logger.SystemLog(
                 StaticLocalizer[
                     nameof(Resources.Program.ContainerManager_ContainerInstanceCreationFailedWithError),
-                    config.Image.Split("/").LastOrDefault() ?? "", info.State.Error],
+                    config.Image.Split("/").LastOrDefault() ?? "", state.Error],
                 TaskStatus.Failed, LogLevel.Warning);
             // Append the exit code + last stdout/stderr lines so the admin
             // can see WHY (vs. just "creation failed"). Containers that
@@ -281,27 +298,26 @@ public class DockerManager : IContainerManager
             // OOM and SIGSEGV show up here too. Without this, the operator
             // has to ssh and `docker logs` to figure out what went wrong.
             _logger.SystemLog(
-                $"Exit {info.State.ExitCode}: {info.State.Error ?? "(no error)"}; logs: {tail}",
+                $"Exit {state.ExitCode}: {state.Error ?? "(no error)"}; logs: {tail}",
                 TaskStatus.Failed, LogLevel.Warning);
 
             await DestroyContainerAsync(container, token);
             return null;
         }
 
-        container.StartedAt = DateTimeOffset.Parse(info.State.StartedAt);
+        container.StartedAt = DateTimeOffset.Parse(state.StartedAt);
         container.ExpectStopAt = container.StartedAt + TimeSpan.FromHours(2);
-        container.IP = info.NetworkSettings.Networks.FirstOrDefault().Value.IPAddress;
+        var networkSettings = info.NetworkSettings;
+        container.IP = networkSettings?.Networks?.FirstOrDefault().Value?.IPAddress ?? string.Empty;
         container.Port = config.ExposedPort;
         container.IsProxy = !_meta.ExposePort;
 
         if (!_meta.ExposePort)
             return container;
 
-        var portString = config.ExposedPort.ToString();
-        var bindings = info.NetworkSettings.Ports.Where(kv => kv.Key.StartsWith(portString)).Select(kv => kv.Value)
-            .SingleOrDefault();
+        var bindings = GetPublishedPortBindings(networkSettings?.Ports, config.ExposedPort);
 
-        if (bindings is not { Count: > 0 })
+        if (bindings is [])
         {
             _logger.SystemLog(
                 StaticLocalizer[
@@ -327,6 +343,30 @@ public class DockerManager : IContainerManager
             container.PublicIP = _meta.PublicEntry;
 
         return container;
+    }
+
+    internal static IList<PortBinding> GetPublishedPortBindings(
+        IDictionary<string, IList<PortBinding>>? ports, int exposedPort)
+    {
+        if (ports is not { Count: > 0 })
+            return [];
+
+        var port = exposedPort.ToString();
+        var portPrefix = $"{port}/";
+        var matchedPorts = ports
+            .Where(kv => kv.Value is { Count: > 0 }
+                && kv.Key.StartsWith(portPrefix, StringComparison.Ordinal))
+            .ToArray();
+
+        return matchedPorts switch
+        {
+            [] => [],
+            [{ Value: var bindings }] => bindings,
+            _ => matchedPorts.FirstOrDefault(kv =>
+                     kv.Key.EndsWith("/tcp", StringComparison.OrdinalIgnoreCase))
+                 .Value
+                 ?? matchedPorts[0].Value
+        };
     }
 
     private CreateContainerParameters GetCreateContainerParameters(GZCTF.Models.Internal.ContainerConfig config) =>
@@ -417,16 +457,16 @@ public class DockerManager : IContainerManager
         // CPU %: classic Docker formula. Guard against the first read where
         // both deltas are zero (returns 0 instead of NaN).
         double cpu = 0;
-        ulong cpuDelta = resp.CPUStats.CPUUsage.TotalUsage - resp.PreCPUStats.CPUUsage.TotalUsage;
-        ulong sysDelta = resp.CPUStats.SystemUsage - resp.PreCPUStats.SystemUsage;
-        uint onlineCpus = resp.CPUStats.OnlineCPUs;
-        if (onlineCpus == 0 && resp.CPUStats.CPUUsage.PercpuUsage is { Count: > 0 } perc)
+        ulong cpuDelta = (resp.CPUStats?.CPUUsage?.TotalUsage ?? 0) - (resp.PreCPUStats?.CPUUsage?.TotalUsage ?? 0);
+        ulong sysDelta = (resp.CPUStats?.SystemUsage ?? 0) - (resp.PreCPUStats?.SystemUsage ?? 0);
+        uint onlineCpus = resp.CPUStats?.OnlineCPUs ?? 0;
+        if (onlineCpus == 0 && resp.CPUStats?.CPUUsage?.PercpuUsage is { Count: > 0 } perc)
             onlineCpus = (uint)perc.Count;
         if (sysDelta > 0 && onlineCpus > 0)
             cpu = (double)cpuDelta / sysDelta * onlineCpus * 100.0;
 
-        long memUsed = (long)resp.MemoryStats.Usage;
-        long memLimit = (long)resp.MemoryStats.Limit;
+        long memUsed = (long)(resp.MemoryStats?.Usage ?? 0);
+        long memLimit = (long)(resp.MemoryStats?.Limit ?? 0);
 
         long rx = 0, tx = 0;
         if (resp.Networks is { } nets)
@@ -461,7 +501,8 @@ public class DockerManager : IContainerManager
         {
             var info = await _client.Containers.InspectContainerAsync(containerId, token);
             var tail = await SafeFetchLogTailAsync(containerId, token);
-            return $"start failed: exit {info.State.ExitCode}, dead={info.State.Dead}, oom={info.State.OOMKilled}, error='{info.State.Error}'; logs: {tail}";
+            var state = info.State;
+            return $"start failed: exit {state?.ExitCode}, dead={state?.Dead}, oom={state?.OOMKilled}, error='{state?.Error}'; logs: {tail}";
         }
         catch (Exception e)
         {

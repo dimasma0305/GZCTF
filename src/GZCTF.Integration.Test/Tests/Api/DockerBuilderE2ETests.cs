@@ -177,7 +177,7 @@ public class DockerBuilderE2ETests(GZCTFApplicationFactory factory, ITestOutputH
         // Pre-seed a "stale" sibling tag in that real repository — simulates a
         // previous edit's leftover build tag that the next build should scoop.
         var staleTag = $"{repository}:deadbeef0000";
-        using (var docker = new DockerClientConfiguration().CreateClient())
+        using (var docker = new DockerClientBuilder().Build())
         {
             // alpine:3.20 is already on the daemon from the first build; tag it again
             // under the challenge repository so we have a real sibling image to prune.
@@ -194,7 +194,7 @@ public class DockerBuilderE2ETests(GZCTFApplicationFactory factory, ITestOutputH
             await PollChallengeStatusAsync(game.Id, slug, BuildPollTimeout));
 
         // Verify the stale tag is gone.
-        using (var docker = new DockerClientConfiguration().CreateClient())
+        using (var docker = new DockerClientBuilder().Build())
         {
             var images = await docker.Images.ListImagesAsync(new ImagesListParameters { All = false });
             var staleStillThere = images.Any(i =>
