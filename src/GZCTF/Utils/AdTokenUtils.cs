@@ -69,4 +69,16 @@ public static class AdTokenUtils
     /// </summary>
     public static string ByocAgentToken(int participationId, int challengeId, byte[] key) =>
         Convert.ToHexString(Hash($"adbyocagent:{participationId}:{challengeId}", key));
+
+    /// <summary>
+    /// Per-(participation, challenge) secret authenticating GZCTF to a BYOC relay's
+    /// control + flag ports. Those ports live on the shared challenge bridge, which
+    /// jeopardy containers (a compromised solve target) also sit on, so network
+    /// position alone is NOT sufficient: GZCTF presents this secret on every relay
+    /// connection and the relay rejects any peer that doesn't. Injected into the
+    /// relay at launch (env <c>GZCTF_BYOC_SECRET</c>) and re-derived by the agent
+    /// WS bridge + the per-tick flag push. NEVER given to the team (gzctf↔relay only).
+    /// </summary>
+    public static string ByocRelaySecret(int participationId, int challengeId, byte[] key) =>
+        Convert.ToHexString(Hash($"adbyocrelay:{participationId}:{challengeId}", key));
 }

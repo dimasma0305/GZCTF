@@ -30,7 +30,9 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"io"
 	"log"
@@ -75,6 +77,7 @@ func main() {
 // read it under the mutex; a new control connection replaces (and tears down)
 // the previous session so a reconnecting agent always wins.
 type relay struct {
+	secret  string // shared with GZCTF; presented on the control + flag ports
 	mu      sync.Mutex
 	session *yamux.Session
 	flag    []byte // most recent flag, replayed to a freshly connected agent
@@ -85,10 +88,43 @@ func runRelay() {
 	ctlPort := env("GZCTF_BYOC_CTL_PORT", "47000")
 	flagPort := env("GZCTF_BYOC_FLAG_PORT", "47001")
 
-	r := &relay{}
+	// The control + flag ports sit on the shared challenge bridge, which a
+	// compromised jeopardy container can also reach — so they are NOT trusted by
+	// network position. GZCTF presents this secret (gzctf↔relay only, never the
+	// team) as the first line on every connection; we reject anything else.
+	r := &relay{secret: os.Getenv("GZCTF_BYOC_SECRET")}
 	go r.serve(ctlPort, r.handleControl, "control")
 	go r.serve(flagPort, r.handleFlagPush, "flag-push")
 	r.serve(svcPort, r.handleService, "service") // blocks
+}
+
+// bufConn is a net.Conn whose reads come from a buffered reader (which may hold
+// bytes already pulled past the secret line), while writes/close go to the raw
+// connection. Lets yamux run over the post-handshake byte stream cleanly.
+type bufConn struct {
+	net.Conn
+	r io.Reader
+}
+
+func (b *bufConn) Read(p []byte) (int, error) { return b.r.Read(p) }
+
+// authenticate reads the leading secret line and constant-time compares it to
+// the relay's secret. Returns a reader positioned at the first post-secret byte
+// (preserving anything the bufio reader already buffered), or false on mismatch.
+func (r *relay) authenticate(c net.Conn) (*bufio.Reader, bool) {
+	_ = c.SetReadDeadline(time.Now().Add(10 * time.Second))
+	br := bufio.NewReader(c)
+	line, err := br.ReadString('\n')
+	_ = c.SetReadDeadline(time.Time{})
+	if err != nil {
+		return nil, false
+	}
+	got := strings.TrimRight(line, "\r\n")
+	if subtle.ConstantTimeCompare([]byte(got), []byte(r.secret)) != 1 {
+		log.Printf("rejected %s: bad secret", c.RemoteAddr())
+		return nil, false
+	}
+	return br, true
 }
 
 // serve accepts connections on the given port forever, dispatching each to fn.
@@ -113,7 +149,12 @@ func (r *relay) serve(port string, fn func(net.Conn), name string) {
 // session, makes it the live session, and replays the current flag so the team
 // is never stuck a full tick without one after a reconnect.
 func (r *relay) handleControl(c net.Conn) {
-	session, err := yamux.Server(c, yamuxConfig())
+	br, ok := r.authenticate(c)
+	if !ok {
+		_ = c.Close()
+		return
+	}
+	session, err := yamux.Server(&bufConn{Conn: c, r: br}, yamuxConfig())
 	if err != nil {
 		log.Printf("control: yamux server: %v", err)
 		_ = c.Close()
@@ -171,7 +212,11 @@ func (r *relay) handleService(c net.Conn) {
 // control plane — challenge-bridge egress isolation blocks other teams.
 func (r *relay) handleFlagPush(c net.Conn) {
 	defer c.Close()
-	flag, err := io.ReadAll(io.LimitReader(c, 4096))
+	br, ok := r.authenticate(c)
+	if !ok {
+		return
+	}
+	flag, err := io.ReadAll(io.LimitReader(br, 4096))
 	if err != nil || len(flag) == 0 {
 		return
 	}

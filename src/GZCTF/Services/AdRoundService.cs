@@ -198,14 +198,19 @@ public sealed class AdRoundService(
             .Where(c => c.GameId == gameId && c.AdSelfHosted)
             .Select(c => c.Id)
             .ToListAsync(token)).ToHashSet();
-        var byocPush = new List<(string Ip, string Flag, int Pid, int Cid)>();
+        var byocKey = byocChallengeIds.Count == 0
+            ? []
+            : serviceProvider.GetService<Config.IConfigService>()?.GetXorKey() ?? [];
+        var byocPush = new List<(string Ip, string Secret, string Flag, int Pid, int Cid)>();
 
         foreach (var (ts, flag) in toInject)
         {
             if (byocChallengeIds.Contains(ts.ChallengeId))
             {
                 if (ts.Container?.IP is { Length: > 0 } relayIp)
-                    byocPush.Add((relayIp, flag, ts.ParticipationId, ts.ChallengeId));
+                    byocPush.Add((relayIp,
+                        AdTokenUtils.ByocRelaySecret(ts.ParticipationId, ts.ChallengeId, byocKey),
+                        flag, ts.ParticipationId, ts.ChallengeId));
                 continue;
             }
 
@@ -264,7 +269,7 @@ public sealed class AdRoundService(
                 await gate.WaitAsync(token);
                 try
                 {
-                    await PushFlagToRelayAsync(item.Ip, item.Flag, token);
+                    await PushFlagToRelayAsync(item.Ip, item.Secret, item.Flag, token);
                     Interlocked.Increment(ref pushed);
                 }
                 catch (Exception e)
@@ -297,14 +302,17 @@ public sealed class AdRoundService(
     /// the relay reads as the new flag. Short connect+write timeout so an offline
     /// or wedged relay can't stall round-advance.
     /// </summary>
-    private static async Task PushFlagToRelayAsync(string ip, string flag, CancellationToken token)
+    private static async Task PushFlagToRelayAsync(string ip, string secret, string flag, CancellationToken token)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
         cts.CancelAfter(TimeSpan.FromSeconds(5));
         using var client = new TcpClient();
         await client.ConnectAsync(IPAddress.Parse(ip), AdContainerManager.ByocFlagPort, cts.Token);
         await using var stream = client.GetStream();
-        await stream.WriteAsync(Encoding.ASCII.GetBytes(flag), cts.Token);
+        // Authenticate (secret line), then the flag — the relay validates the
+        // secret before accepting the flag (the flag port shares the bridge with
+        // jeopardy containers, so it trusts the secret, not the source).
+        await stream.WriteAsync(Encoding.ASCII.GetBytes($"{secret}\n{flag}"), cts.Token);
     }
 
     /// <summary>

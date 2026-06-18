@@ -212,6 +212,7 @@ public class AdGameController(
     /// </summary>
     [HttpGet("Byoc/Agent/{participationId:int}/{challengeId:int}/{token}")]
     [AllowAnonymous]
+    [EnableRateLimiting(nameof(RateLimiter.LimitPolicy.Concurrency))]
     [ProducesResponseType(StatusCodes.Status101SwitchingProtocols)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> ByocAgent(int id, int participationId, int challengeId, string token,
@@ -253,6 +254,21 @@ public class AdGameController(
         {
             logger.LogWarning(e, "BYOC agent: cannot reach relay {Ip}:{Port} for team={Tid} challenge={Cid}",
                 relayIpStr, AdContainerManager.ByocCtlPort, participationId, challengeId);
+            return NotFound();
+        }
+
+        // Authenticate to the relay's control port (it shares the challenge bridge
+        // with jeopardy containers, so it trusts the secret, not the source IP).
+        var relaySecret = AdTokenUtils.ByocRelaySecret(participationId, challengeId, configService.GetXorKey());
+        try
+        {
+            await socket.SendAsync(
+                System.Text.Encoding.ASCII.GetBytes(relaySecret + "\n"), SocketFlags.None, cancelToken);
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(e, "BYOC agent: relay handshake failed for team={Tid} challenge={Cid}",
+                participationId, challengeId);
             return NotFound();
         }
 

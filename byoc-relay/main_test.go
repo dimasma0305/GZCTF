@@ -101,6 +101,45 @@ func TestFlagStreamWritesFile(t *testing.T) {
 	t.Fatal("flag file was not written within deadline")
 }
 
+// TestAuthenticate proves the relay's control/flag ports require GZCTF's secret:
+// a good secret is accepted and leaves trailing bytes intact for yamux; a bad
+// secret is rejected; an empty configured secret expects an empty leading line.
+// This is the boundary that stops a compromised jeopardy container (which shares
+// the challenge bridge) from hijacking a relay or griefing its flag.
+func TestAuthenticate(t *testing.T) {
+	r := &relay{secret: "topsecret"}
+
+	// good secret, with a trailing payload that must survive for yamux
+	good, gc := net.Pipe()
+	go func() { _, _ = gc.Write([]byte("topsecret\nHELLO")) }()
+	br, ok := r.authenticate(good)
+	if !ok {
+		t.Fatal("good secret was rejected")
+	}
+	buf := make([]byte, 5)
+	if _, err := io.ReadFull(br, buf); err != nil || string(buf) != "HELLO" {
+		t.Fatalf("trailing bytes after secret lost: %q (err=%v)", buf, err)
+	}
+	_ = good.Close()
+
+	// wrong secret is rejected
+	bad, bc := net.Pipe()
+	go func() { _, _ = bc.Write([]byte("wrongsecret\n")); _ = bc.Close() }()
+	if _, ok := r.authenticate(bad); ok {
+		t.Fatal("bad secret was accepted")
+	}
+	_ = bad.Close()
+
+	// empty configured secret (dev) expects an empty leading line
+	r2 := &relay{secret: ""}
+	e, ec := net.Pipe()
+	go func() { _, _ = ec.Write([]byte("\n")) }()
+	if _, ok := r2.authenticate(e); !ok {
+		t.Fatal("empty secret line rejected for empty configured secret")
+	}
+	_ = e.Close()
+}
+
 // TestServiceStreamNoAgentClosed proves the relay closes inbound service
 // connections when no agent is attached (so the SLA checker reads "down").
 func TestServiceStreamNoAgentClosed(t *testing.T) {

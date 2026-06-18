@@ -1865,6 +1865,12 @@ public sealed class AdContainerManager(
             // rotating flag is PUSHED to its flag port each tick (AdRoundService),
             // not bind-mounted (the real container is off-platform).
             var svcPort = challenge.ExposePort ?? 80;
+            // Secret authenticating GZCTF to the relay's control + flag ports —
+            // those sit on the shared challenge bridge a compromised jeopardy
+            // container can also reach, so they aren't trusted by network position.
+            using var byocScope = scopeFactory.CreateScope();
+            var byocKey = byocScope.ServiceProvider.GetService<IConfigService>()?.GetXorKey() ?? [];
+            var relaySecret = AdTokenUtils.ByocRelaySecret(participationId, challenge.Id, byocKey);
             config = new ContainerConfig
             {
                 Image = ByocRelayImage,
@@ -1883,7 +1889,8 @@ public sealed class AdContainerManager(
                     ["GZCTF_BYOC_MODE"] = "relay",
                     ["GZCTF_BYOC_SVC_PORT"] = svcPort.ToString(),
                     ["GZCTF_BYOC_CTL_PORT"] = ByocCtlPort.ToString(),
-                    ["GZCTF_BYOC_FLAG_PORT"] = ByocFlagPort.ToString()
+                    ["GZCTF_BYOC_FLAG_PORT"] = ByocFlagPort.ToString(),
+                    ["GZCTF_BYOC_SECRET"] = relaySecret
                 }
             };
         }
