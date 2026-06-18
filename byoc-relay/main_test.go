@@ -28,13 +28,14 @@ func linkSessions(t *testing.T, service, flagFile string) *yamux.Session {
 	}
 	t.Cleanup(func() { _ = server.Close(); _ = client.Close() })
 
+	sink := &flagSink{}
 	go func() {
 		for {
 			st, err := client.AcceptStream()
 			if err != nil {
 				return
 			}
-			go handleAgentStream(st, service, flagFile)
+			go handleAgentStream(st, service, flagFile, sink)
 		}
 	}()
 	return server
@@ -89,7 +90,7 @@ func TestFlagStreamWritesFile(t *testing.T) {
 	flagFile := filepath.Join(t.TempDir(), "nested", "flag")
 	server := linkSessions(t, "127.0.0.1:1", flagFile)
 
-	(&relay{}).pushFlag(server, []byte("flag{byoc_works}"))
+	(&relay{}).pushFlag(server, 1, []byte("flag{byoc_works}"))
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -138,6 +139,29 @@ func TestAuthenticate(t *testing.T) {
 		t.Fatal("empty secret line rejected for empty configured secret")
 	}
 	_ = e.Close()
+}
+
+// TestFlagSeqDropsStale proves the agent ignores a lower-seq flag that arrives
+// after a higher one — the race the audit found (reconnect replay vs fresh push).
+func TestFlagSeqDropsStale(t *testing.T) {
+	flagFile := filepath.Join(t.TempDir(), "flag")
+	server := linkSessions(t, "127.0.0.1:1", flagFile)
+	r := &relay{}
+
+	r.pushFlag(server, 5, []byte("newflag"))
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if b, err := os.ReadFile(flagFile); err == nil && string(b) == "newflag" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	r.pushFlag(server, 3, []byte("staleflag")) // older seq → must be ignored
+	time.Sleep(300 * time.Millisecond)
+	if b, _ := os.ReadFile(flagFile); string(b) != "newflag" {
+		t.Fatalf("stale flag (seq 3) overwrote newer (seq 5): got %q", b)
+	}
 }
 
 // TestServiceStreamNoAgentClosed proves the relay closes inbound service

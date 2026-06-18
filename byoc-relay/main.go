@@ -33,6 +33,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/subtle"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
@@ -51,6 +52,15 @@ import (
 const (
 	streamService byte = 'S'
 	streamFlag    byte = 'F'
+)
+
+// Service-port hardening. The service port is necessarily reachable by attackers
+// (and, on a mixed bridge, by jeopardy containers), so cap concurrent forwards
+// and evict idle connections — a thin relay with a small memory limit must not
+// be slowloris'd into an OOM that takes the team's whole defense down.
+const (
+	maxServiceConns  = 256
+	serviceIdleLimit = 60 * time.Second
 )
 
 func main() {
@@ -77,10 +87,30 @@ func main() {
 // read it under the mutex; a new control connection replaces (and tears down)
 // the previous session so a reconnecting agent always wins.
 type relay struct {
-	secret  string // shared with GZCTF; presented on the control + flag ports
-	mu      sync.Mutex
-	session *yamux.Session
-	flag    []byte // most recent flag, replayed to a freshly connected agent
+	secret      string // shared with GZCTF; presented on the control + flag ports
+	mu          sync.Mutex
+	session     *yamux.Session
+	flag        []byte // most recent flag, replayed to a freshly connected agent
+	flagSeq     uint64 // monotonic; lets the agent ignore a stale/out-of-order flag
+	serviceSems chan struct{}
+}
+
+// idleConn evicts a connection that goes quiet: every read/write refreshes a
+// rolling deadline, so a slowloris peer that stops sending eventually trips the
+// deadline and io.Copy unwinds, freeing the goroutine + its slot.
+type idleConn struct {
+	net.Conn
+	idle time.Duration
+}
+
+func (c idleConn) Read(p []byte) (int, error) {
+	_ = c.Conn.SetReadDeadline(time.Now().Add(c.idle))
+	return c.Conn.Read(p)
+}
+
+func (c idleConn) Write(p []byte) (int, error) {
+	_ = c.Conn.SetWriteDeadline(time.Now().Add(c.idle))
+	return c.Conn.Write(p)
 }
 
 func runRelay() {
@@ -92,7 +122,10 @@ func runRelay() {
 	// compromised jeopardy container can also reach — so they are NOT trusted by
 	// network position. GZCTF presents this secret (gzctf↔relay only, never the
 	// team) as the first line on every connection; we reject anything else.
-	r := &relay{secret: os.Getenv("GZCTF_BYOC_SECRET")}
+	r := &relay{
+		secret:      os.Getenv("GZCTF_BYOC_SECRET"),
+		serviceSems: make(chan struct{}, maxServiceConns),
+	}
 	go r.serve(ctlPort, r.handleControl, "control")
 	go r.serve(flagPort, r.handleFlagPush, "flag-push")
 	r.serve(svcPort, r.handleService, "service") // blocks
@@ -168,10 +201,11 @@ func (r *relay) handleControl(c net.Conn) {
 	}
 	r.session = session
 	flag := r.flag
+	seq := r.flagSeq
 	r.mu.Unlock()
 
 	if len(flag) > 0 {
-		r.pushFlag(session, flag)
+		r.pushFlag(session, seq, flag)
 	}
 
 	// Block until the session dies so we can clear it (and stop accepting
@@ -190,6 +224,15 @@ func (r *relay) handleControl(c net.Conn) {
 // connection is closed immediately, which the SLA checker reads as "down".
 func (r *relay) handleService(c net.Conn) {
 	defer c.Close()
+	// Bound concurrent forwards so a flood can't exhaust the relay's memory; drop
+	// when full (the checker/attacker retries). Idle connections are evicted via
+	// idleConn below, so a slowloris peer can't pin a slot indefinitely.
+	select {
+	case r.serviceSems <- struct{}{}:
+		defer func() { <-r.serviceSems }()
+	default:
+		return
+	}
 	r.mu.Lock()
 	session := r.session
 	r.mu.Unlock()
@@ -204,7 +247,7 @@ func (r *relay) handleService(c net.Conn) {
 	if _, err := stream.Write([]byte{streamService}); err != nil {
 		return
 	}
-	pipe(c, stream)
+	pipe(idleConn{Conn: c, idle: serviceIdleLimit}, stream)
 }
 
 // handleFlagPush receives a rotating flag from GZCTF (one flag per connection,
@@ -221,22 +264,29 @@ func (r *relay) handleFlagPush(c net.Conn) {
 		return
 	}
 	r.mu.Lock()
+	r.flagSeq++
 	r.flag = flag
+	seq := r.flagSeq
 	session := r.session
 	r.mu.Unlock()
 	if session != nil {
-		r.pushFlag(session, flag)
+		r.pushFlag(session, seq, flag)
 	}
 }
 
-// pushFlag opens an 'F' stream and writes the flag bytes for the agent.
-func (r *relay) pushFlag(session *yamux.Session, flag []byte) {
+// pushFlag opens an 'F' stream and writes [type][8-byte big-endian seq][flag].
+// The monotonic seq lets the agent drop a stale flag that raced a fresh push
+// (e.g. a reconnect's replay arriving after the next tick's rotation).
+func (r *relay) pushFlag(session *yamux.Session, seq uint64, flag []byte) {
 	stream, err := session.OpenStream()
 	if err != nil {
 		return
 	}
 	defer stream.Close()
-	if _, err := stream.Write([]byte{streamFlag}); err != nil {
+	var hdr [9]byte
+	hdr[0] = streamFlag
+	binary.BigEndian.PutUint64(hdr[1:], seq)
+	if _, err := stream.Write(hdr[:]); err != nil {
 		return
 	}
 	_, _ = stream.Write(flag)
@@ -279,17 +329,28 @@ func connectOnce(tunnelURL, service, flagFile string) error {
 	defer session.Close()
 	log.Printf("tunnel up to %s, forwarding to %s", tunnelURL, service)
 
+	// Per-connection flag serializer: monotonic seq + a mutex so two flag streams
+	// (e.g. a reconnect replay racing a fresh push) can't let the older flag win
+	// the os.Rename. Reset per connection so a relay restart (seq back to 0) still
+	// delivers.
+	sink := &flagSink{}
 	for {
 		stream, err := session.AcceptStream()
 		if err != nil {
 			return fmt.Errorf("accept stream: %w", err)
 		}
-		go handleAgentStream(stream, service, flagFile)
+		go handleAgentStream(stream, service, flagFile, sink)
 	}
 }
 
+// flagSink serializes flag writes and drops stale (lower-seq) flags.
+type flagSink struct {
+	mu   sync.Mutex
+	last uint64
+}
+
 // handleAgentStream dispatches one forwarded stream by its leading type byte.
-func handleAgentStream(stream *yamux.Stream, service, flagFile string) {
+func handleAgentStream(stream *yamux.Stream, service, flagFile string, sink *flagSink) {
 	defer stream.Close()
 	var hdr [1]byte
 	if _, err := io.ReadFull(stream, hdr[:]); err != nil {
@@ -299,7 +360,7 @@ func handleAgentStream(stream *yamux.Stream, service, flagFile string) {
 	case streamService:
 		dialAndPipe(stream, service)
 	case streamFlag:
-		writeFlag(stream, flagFile)
+		writeFlag(stream, flagFile, sink)
 	default:
 		log.Printf("unknown stream type %q", hdr[0])
 	}
@@ -316,13 +377,27 @@ func dialAndPipe(stream *yamux.Stream, service string) {
 	pipe(c, stream)
 }
 
-// writeFlag reads the flag from the stream and writes it atomically to flagFile
-// (temp file + rename) so the service never observes a half-written flag.
-func writeFlag(stream *yamux.Stream, flagFile string) {
+// writeFlag reads [8-byte big-endian seq][flag] and, if seq is newer than any
+// flag already applied, writes it atomically to flagFile (temp file + rename).
+// The sink's mutex serializes the write+rename, so an older flag that raced a
+// newer one can never win the rename.
+func writeFlag(stream *yamux.Stream, flagFile string, sink *flagSink) {
+	var seqBuf [8]byte
+	if _, err := io.ReadFull(stream, seqBuf[:]); err != nil {
+		return
+	}
+	seq := binary.BigEndian.Uint64(seqBuf[:])
 	flag, err := io.ReadAll(io.LimitReader(stream, 4096))
 	if err != nil || len(flag) == 0 {
 		return
 	}
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if seq <= sink.last {
+		return // a newer flag already landed
+	}
+
 	tmp := flagFile + ".tmp"
 	if err := os.MkdirAll(filepath.Dir(flagFile), 0o755); err != nil {
 		log.Printf("flag dir: %v", err)
@@ -336,7 +411,8 @@ func writeFlag(stream *yamux.Stream, flagFile string) {
 		log.Printf("flag rename: %v", err)
 		return
 	}
-	log.Printf("flag updated (%d bytes)", len(flag))
+	sink.last = seq
+	log.Printf("flag updated (seq %d, %d bytes)", seq, len(flag))
 }
 
 // ---------------------------------------------------------------------------

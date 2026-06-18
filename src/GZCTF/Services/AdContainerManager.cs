@@ -1880,7 +1880,10 @@ public sealed class AdContainerManager(
                 UserId = participation.FirstUserId,
                 ExposedPort = svcPort,
                 CPUCount = 1,
-                MemoryLimit = 64,
+                // The relay forwards attacker/checker traffic, so give it headroom
+                // (the Go binary itself is tiny); the in-binary concurrency cap +
+                // idle eviction are the real anti-OOM defense.
+                MemoryLimit = 128,
                 StorageLimit = 64,
                 NetworkMode = networkMode,
                 EnableTrafficCapture = false,
