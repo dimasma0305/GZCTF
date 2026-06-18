@@ -1,0 +1,55 @@
+# Publishes the A&D "bring your own container" relay/agent image (multi-arch) to
+# Docker Hub, so teams can `docker compose up` and pull it without any build or
+# registry setup — the "one click" agent image.
+#
+# No-ops unless the DOCKERHUB_USERNAME / DOCKERHUB_TOKEN repo secrets are set, so
+# it's safe to ship in a fork that hasn't configured them. The image name follows
+# DOCKERHUB_USERNAME (default repo: <user>/gzctf-byoc-relay).
+name: byoc-relay
+
+on:
+  push:
+    branches: [develop]
+    paths: ['byoc-relay/**', '.github/workflows/byoc-relay.yml']
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    if: ${{ github.repository_owner != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Docker Hub credentials
+        id: creds
+        run: |
+          if [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ] && [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ]; then
+            echo "have=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::DOCKERHUB_USERNAME / DOCKERHUB_TOKEN secrets not set — skipping publish."
+          fi
+
+      - name: Set up QEMU
+        if: steps.creds.outputs.have == 'true'
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Buildx
+        if: steps.creds.outputs.have == 'true'
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to Docker Hub
+        if: steps.creds.outputs.have == 'true'
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push (amd64 + arm64)
+        if: steps.creds.outputs.have == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: ./byoc-relay
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/gzctf-byoc-relay:latest

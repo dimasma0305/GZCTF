@@ -67,11 +67,13 @@ public sealed class AdContainerManager(
     // Bring-your-own-container (self-hosted) relay. The image GZCTF launches on
     // the challenge bridge as a team's service endpoint; it tunnels checker /
     // attacker traffic to the team's self-hosted service and receives the
-    // rotating flag on ByocFlagPort. Built locally as gzctf/byoc-relay (see
-    // byoc-relay/). The control port is what the team's agent connects to
-    // (bridged from GZCTF's public WS ingress); the flag port is control-plane
-    // only (GZCTF pushes the flag there each tick).
-    internal const string ByocRelayImage = "gzctf/byoc-relay:latest";
+    // rotating flag on ByocFlagPort. Published multi-arch on Docker Hub (and
+    // built locally by docker compose under the same tag) — the SAME image is
+    // what teams pull as the agent, so one click works without a registry setup.
+    // Override with Ad:Byoc:RelayImage. The control port is what the team's agent
+    // connects to (bridged from GZCTF's public WS ingress); the flag port is
+    // control-plane only (GZCTF pushes the flag there each tick).
+    internal const string ByocRelayImage = "dimasmaualana/gzctf-byoc-relay:latest";
     internal const int ByocCtlPort = 47000;
     internal const int ByocFlagPort = 47001;
 
@@ -1871,9 +1873,12 @@ public sealed class AdContainerManager(
             using var byocScope = scopeFactory.CreateScope();
             var byocKey = byocScope.ServiceProvider.GetService<IConfigService>()?.GetXorKey() ?? [];
             var relaySecret = AdTokenUtils.ByocRelaySecret(participationId, challenge.Id, byocKey);
+            var relayImage = byocScope.ServiceProvider.GetService<IConfiguration>()?["Ad:Byoc:RelayImage"];
+            if (string.IsNullOrWhiteSpace(relayImage))
+                relayImage = ByocRelayImage;
             config = new ContainerConfig
             {
-                Image = ByocRelayImage,
+                Image = relayImage,
                 TeamId = participation.TeamId.ToString(),
                 ChallengeId = challenge.Id,
                 GameId = participation.GameId,

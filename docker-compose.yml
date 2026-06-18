@@ -220,16 +220,17 @@ services:
       - wg-bootstrap
     restart: unless-stopped
 
-  # Builds the A&D "bring your own container" relay/agent image so GZCTF can
-  # launch it as per-team relays (it is referenced by image name, not run from
-  # compose). Not a long-running service — /bin/true builds the image and exits;
+  # Builds the A&D "bring your own container" relay/agent image locally under the
+  # same tag GZCTF launches per-team relays from, so relay starts hit a local copy
+  # (no registry pull). Not a long-running service — /bin/true builds and exits;
   # `docker compose up` leaves an exited container behind, which is expected.
-  # The same image is what teams pull/run as the agent (configurable via
-  # Ad__Byoc__AgentImage; publish it to a registry teams can reach).
+  # The SAME image is published multi-arch on Docker Hub as the team agent, so a
+  # team's `docker compose up` just pulls it (one click, no registry setup).
+  # Override both with Ad__Byoc__RelayImage / Ad__Byoc__AgentImage.
   byoc-relay:
     build:
       context: ./byoc-relay
-    image: gzctf/byoc-relay:latest
+    image: dimasmaualana/gzctf-byoc-relay:latest
     entrypoint: ["/bin/true"]
     restart: "no"
 

@@ -250,7 +250,7 @@ export const AdChallengePanel: FC<AdChallengePanelProps> = ({ gameId, challengeI
             <Text size="xs">
               {t(
                 'game.content.ad.byoc.description',
-                'Self-hosted challenge — run the service on your own machine and connect it to the game. Download the compose, drop in your service (it must listen on the target port and read /shared/flag), then run `docker compose up`. Your status goes green once the agent connects.'
+                'Self-hosted challenge — run it on your own machine. Download the compose and run `docker compose up` — it works out of the box (your status goes green), then swap in your real service. One outbound connection; no public IP, inbound firewall, or VPN needed.'
               )}
             </Text>
             <Button

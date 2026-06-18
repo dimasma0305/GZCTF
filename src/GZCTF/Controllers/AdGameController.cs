@@ -377,7 +377,13 @@ public class AdGameController(
         return File(System.Text.Encoding.UTF8.GetBytes(compose), "application/yaml", "docker-compose.yml");
     }
 
-    /// <summary>Render the team-facing docker-compose for a BYOC challenge.</summary>
+    /// <summary>
+    /// Render the team-facing docker-compose for a BYOC challenge. It runs
+    /// out-of-the-box: a placeholder service serves the rotating flag so the very
+    /// first `docker compose up` goes green, and the team then swaps in their own
+    /// vulnerable service. The agent image is public (Docker Hub), so nothing is
+    /// built or configured — one click.
+    /// </summary>
     private static string BuildByocCompose(string title, int svcPort, string tunnelUrl, string agentImage)
     {
         var safeTitle = title.Replace('\n', ' ').Replace('\r', ' ');
@@ -385,23 +391,26 @@ public class AdGameController(
         {
             $"# GZCTF Attack & Defense — self-hosted service for \"{safeTitle}\"",
             "#",
-            "# 1. Put your vulnerable service in the `service` block (build or image).",
-            $"#    It must listen on port {svcPort} and read its flag from /shared/flag.",
-            "# 2. Run:  docker compose up -d",
+            "#   docker compose up -d        # that's it — works out of the box.",
             "#",
-            "# The gzctf-agent makes ONE outbound connection to the game and tunnels your",
-            "# service in — no public IP, inbound firewall rule, or VPN needed. The",
-            "# rotating flag is delivered to /shared/flag each round.",
+            "# This runs immediately: the gzctf-agent makes ONE outbound connection to",
+            "# the game (no public IP / inbound firewall / VPN), and the placeholder",
+            "# 'service' serves the rotating flag so your status goes GREEN right away.",
+            "# Then replace the 'service' block with your real vulnerable service — it",
+            $"# only has to listen on port {svcPort} and read its flag from /shared/flag.",
             "services:",
+            "  # ───────────────────────────────────────────────────────────────────",
+            "  # >>> REPLACE THIS with your service (build: ./yourdir  OR  image: you/img).",
+            "  #     Keep the flag volume; your service must listen on the port below.",
+            "  # The default just serves /shared/flag so the connection works on day one.",
             "  service:",
-            "    # >>> REPLACE with your service. Examples:",
-            "    #   build: ./service",
-            "    #   image: your-registry/your-service:tag",
-            "    build: ./service",
+            "    image: alpine/socat",
+            $"    command: [\"TCP-LISTEN:{svcPort},fork,reuseaddr\", \"SYSTEM:cat /shared/flag 2>/dev/null\"]",
             "    restart: unless-stopped",
             "    volumes:",
             "      - flag:/shared:ro        # rotating flag at /shared/flag (read-only to you)",
             "",
+            "  # The tunnel agent — public image, token baked in. Don't edit this.",
             "  gzctf-agent:",
             $"    image: {agentImage}",
             "    restart: unless-stopped",
