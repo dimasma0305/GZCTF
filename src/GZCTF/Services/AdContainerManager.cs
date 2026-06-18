@@ -64,6 +64,17 @@ public sealed class AdContainerManager(
     private static string KothCooldownChain(int challengeId) =>
         $"{KothCooldownChainPrefix}{challengeId}";
 
+    // Bring-your-own-container (self-hosted) relay. The image GZCTF launches on
+    // the challenge bridge as a team's service endpoint; it tunnels checker /
+    // attacker traffic to the team's self-hosted service and receives the
+    // rotating flag on ByocFlagPort. Built locally as gzctf/byoc-relay (see
+    // byoc-relay/). The control port is what the team's agent connects to
+    // (bridged from GZCTF's public WS ingress); the flag port is control-plane
+    // only (GZCTF pushes the flag there each tick).
+    internal const string ByocRelayImage = "gzctf/byoc-relay:latest";
+    internal const int ByocCtlPort = 47000;
+    internal const int ByocFlagPort = 47001;
+
     // Per-(participation, challenge) lock serializing all create/move/destroy
     // for a single service, so the reconcile loop, the accept-time ensure, and
     // self-reset/force-restart can't race into double-launches or orphans.
@@ -1804,7 +1815,21 @@ public sealed class AdContainerManager(
         bool isK8s,
         CancellationToken token)
     {
-        if (string.IsNullOrWhiteSpace(challenge.ContainerImage))
+        // BYOC (self-hosted): GZCTF launches a relay (the team's endpoint on the
+        // bridge) instead of a platform-hosted challenge image, so ContainerImage
+        // is not required. The relay model relies on the challenge bridge + the
+        // WS<->TCP agent bridge, so it is Docker-only; skip on K8s.
+        if (challenge.AdSelfHosted)
+        {
+            if (isK8s)
+            {
+                logger.SystemLog(
+                    $"A&D challenge {challenge.Id} is self-hosted (BYOC) but the provider is Kubernetes; BYOC is Docker-only, skipping launch",
+                    TaskStatus.Failed, LogLevel.Warning);
+                return;
+            }
+        }
+        else if (string.IsNullOrWhiteSpace(challenge.ContainerImage))
         {
             logger.SystemLog(
                 $"A&D challenge {challenge.Id} has no ContainerImage; skipping launch",
@@ -1831,67 +1856,101 @@ public sealed class AdContainerManager(
         // we lean on the existing Open/Isolated knob.
         var networkMode = challenge.AdAllowEgress ? NetworkMode.Open : NetworkMode.Isolated;
 
-        // A&D flags rotate every tick and live at FlagFilePath (/flag), written
-        // by AdRoundService via docker exec. We deliberately do NOT set the
-        // GZCTF_FLAG env var: an env baked at container creation is frozen for
-        // the container's life, so it would go stale after the first rotation
-        // and mislead challenge code. Only GZCTF_FLAG_FILE is surfaced (below);
-        // read the live flag from that path.
-        // Flag delivery differs by provider:
-        //   Docker → read-only host-backed /flag bind mount (undeletable);
-        //            warmup the host file first (docker bind-mounts a missing
-        //            source as an empty *directory*, which would break /flag).
-        //   K8s    → PULL model: the flag-writer sidecar polls FlagPullUrl and
-        //            writes /gzctf-flag/flag (no exec; RO-enforced on real nodes).
-        var flagFilePath = "/flag";
-        string? flagBindSource = null;
-        string? flagPullUrl = null;
-
-        if (isK8s)
+        ContainerConfig config;
+        if (challenge.AdSelfHosted)
         {
-            flagFilePath = "/gzctf-flag/flag";
-            using var cfgScope = scopeFactory.CreateScope();
-            var baseUrl = cfgScope.ServiceProvider.GetRequiredService<IConfiguration>()["Ad:FlagPullBaseUrl"]
-                ?.TrimEnd('/');
-            var xorKey = cfgScope.ServiceProvider.GetService<IConfigService>()?.GetXorKey();
-            if (!string.IsNullOrEmpty(baseUrl) && xorKey is not null)
+            // BYOC: launch the relay — the team's endpoint on the bridge — instead
+            // of the challenge image. The relay forwards checker/attacker traffic
+            // to the team's self-hosted service over the agent tunnel, and the
+            // rotating flag is PUSHED to its flag port each tick (AdRoundService),
+            // not bind-mounted (the real container is off-platform).
+            var svcPort = challenge.ExposePort ?? 80;
+            config = new ContainerConfig
             {
-                var podToken = AdTokenUtils.PodFlagToken(participationId, challenge.Id, xorKey);
-                flagPullUrl =
-                    $"{baseUrl}/api/Game/{participation.GameId}/Ad/PodFlag/{participationId}/{challenge.Id}/{podToken}";
-            }
-            else
-                logger.SystemLog(
-                    "A&D on K8s: Ad:FlagPullBaseUrl not configured — flags can't be delivered to team pods",
-                    TaskStatus.Failed, LogLevel.Warning);
+                Image = ByocRelayImage,
+                TeamId = participation.TeamId.ToString(),
+                ChallengeId = challenge.Id,
+                GameId = participation.GameId,
+                UserId = participation.FirstUserId,
+                ExposedPort = svcPort,
+                CPUCount = 1,
+                MemoryLimit = 64,
+                StorageLimit = 64,
+                NetworkMode = networkMode,
+                EnableTrafficCapture = false,
+                ExtraEnv = new Dictionary<string, string>
+                {
+                    ["GZCTF_BYOC_MODE"] = "relay",
+                    ["GZCTF_BYOC_SVC_PORT"] = svcPort.ToString(),
+                    ["GZCTF_BYOC_CTL_PORT"] = ByocCtlPort.ToString(),
+                    ["GZCTF_BYOC_FLAG_PORT"] = ByocFlagPort.ToString()
+                }
+            };
         }
         else
         {
-            if (flagMount.Available)
-            {
-                flagMount.EnsureWarmup(participationId, challenge.Id);
-                flagBindSource = flagMount.BindSource(participationId, challenge.Id);
-            }
-        }
+            // A&D flags rotate every tick and live at FlagFilePath (/flag), written
+            // by AdRoundService via docker exec. We deliberately do NOT set the
+            // GZCTF_FLAG env var: an env baked at container creation is frozen for
+            // the container's life, so it would go stale after the first rotation
+            // and mislead challenge code. Only GZCTF_FLAG_FILE is surfaced (below);
+            // read the live flag from that path.
+            // Flag delivery differs by provider:
+            //   Docker → read-only host-backed /flag bind mount (undeletable);
+            //            warmup the host file first (docker bind-mounts a missing
+            //            source as an empty *directory*, which would break /flag).
+            //   K8s    → PULL model: the flag-writer sidecar polls FlagPullUrl and
+            //            writes /gzctf-flag/flag (no exec; RO-enforced on real nodes).
+            var flagFilePath = "/flag";
+            string? flagBindSource = null;
+            string? flagPullUrl = null;
 
-        var config = new ContainerConfig
-        {
-            Image = challenge.ContainerImage,
-            TeamId = participation.TeamId.ToString(),
-            ChallengeId = challenge.Id,
-            GameId = participation.GameId,
-            UserId = participation.FirstUserId,
-            ExposedPort = challenge.ExposePort ?? 80,
-            // Flag intentionally unset for A&D — see note above; the flag file is the source of truth.
-            FlagFilePath = flagFilePath,
-            FlagBindSource = flagBindSource,
-            FlagPullUrl = flagPullUrl,
-            CPUCount = challenge.CPUCount ?? 1,
-            MemoryLimit = challenge.MemoryLimit ?? 128,
-            StorageLimit = challenge.StorageLimit ?? 256,
-            NetworkMode = networkMode,
-            EnableTrafficCapture = false
-        };
+            if (isK8s)
+            {
+                flagFilePath = "/gzctf-flag/flag";
+                using var cfgScope = scopeFactory.CreateScope();
+                var baseUrl = cfgScope.ServiceProvider.GetRequiredService<IConfiguration>()["Ad:FlagPullBaseUrl"]
+                    ?.TrimEnd('/');
+                var xorKey = cfgScope.ServiceProvider.GetService<IConfigService>()?.GetXorKey();
+                if (!string.IsNullOrEmpty(baseUrl) && xorKey is not null)
+                {
+                    var podToken = AdTokenUtils.PodFlagToken(participationId, challenge.Id, xorKey);
+                    flagPullUrl =
+                        $"{baseUrl}/api/Game/{participation.GameId}/Ad/PodFlag/{participationId}/{challenge.Id}/{podToken}";
+                }
+                else
+                    logger.SystemLog(
+                        "A&D on K8s: Ad:FlagPullBaseUrl not configured — flags can't be delivered to team pods",
+                        TaskStatus.Failed, LogLevel.Warning);
+            }
+            else
+            {
+                if (flagMount.Available)
+                {
+                    flagMount.EnsureWarmup(participationId, challenge.Id);
+                    flagBindSource = flagMount.BindSource(participationId, challenge.Id);
+                }
+            }
+
+            config = new ContainerConfig
+            {
+                Image = challenge.ContainerImage,
+                TeamId = participation.TeamId.ToString(),
+                ChallengeId = challenge.Id,
+                GameId = participation.GameId,
+                UserId = participation.FirstUserId,
+                ExposedPort = challenge.ExposePort ?? 80,
+                // Flag intentionally unset for A&D — see note above; the flag file is the source of truth.
+                FlagFilePath = flagFilePath,
+                FlagBindSource = flagBindSource,
+                FlagPullUrl = flagPullUrl,
+                CPUCount = challenge.CPUCount ?? 1,
+                MemoryLimit = challenge.MemoryLimit ?? 128,
+                StorageLimit = challenge.StorageLimit ?? 256,
+                NetworkMode = networkMode,
+                EnableTrafficCapture = false
+            };
+        }
 
         Models.Data.Container? container;
         try

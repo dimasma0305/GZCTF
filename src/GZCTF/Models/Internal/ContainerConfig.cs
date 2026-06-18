@@ -92,4 +92,13 @@ public class ContainerConfig
     /// Container network mode
     /// </summary>
     public NetworkMode NetworkMode { get; set; } = NetworkMode.Open;
+
+    /// <summary>
+    /// Extra environment variables to inject into the container, on top of the
+    /// platform-managed <c>GZCTF_*</c> set. Used by infrastructure containers
+    /// GZCTF launches itself (e.g. the A&amp;D bring-your-own-container relay,
+    /// which needs its mode + service/control/flag ports). Null/empty for normal
+    /// challenge containers. Keys are env names; values are their values.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? ExtraEnv { get; set; }
 }

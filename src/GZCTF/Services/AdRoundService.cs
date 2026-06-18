@@ -1,4 +1,7 @@
+using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Text;
 using Docker.DotNet;
 using Docker.DotNet.Models;
 using GZCTF.Models;
@@ -186,8 +189,26 @@ public sealed class AdRoundService(
         // these stay inline (fast); collect the slow legacy docker-exec ones to
         // run in parallel afterward.
         var legacy = new List<(string ContainerId, string Flag, int Pid, int Cid)>();
+
+        // BYOC (self-hosted) services have no platform /flag to write or exec —
+        // GZCTF pushes the rotating flag to the relay's flag port, which forwards
+        // it over the agent tunnel to the team's own service. Collected so the
+        // TCP pushes run in parallel after the loop.
+        var byocChallengeIds = (await db.GameChallenges
+            .Where(c => c.GameId == gameId && c.AdSelfHosted)
+            .Select(c => c.Id)
+            .ToListAsync(token)).ToHashSet();
+        var byocPush = new List<(string Ip, string Flag, int Pid, int Cid)>();
+
         foreach (var (ts, flag) in toInject)
         {
+            if (byocChallengeIds.Contains(ts.ChallengeId))
+            {
+                if (ts.Container?.IP is { Length: > 0 } relayIp)
+                    byocPush.Add((relayIp, flag, ts.ParticipationId, ts.ChallengeId));
+                continue;
+            }
+
             if (flagMount.IsBindMounted(ts.ParticipationId, ts.ChallengeId))
             {
                 try { flagMount.Write(ts.ParticipationId, ts.ChallengeId, flag); injected++; }
@@ -231,6 +252,31 @@ public sealed class AdRoundService(
             injected += injectedLegacy;
         }
 
+        // BYOC relays: push the flag in parallel (bounded). Best-effort — an
+        // offline team simply doesn't receive it (and the SLA checker already
+        // reports them down), so a failed push never blocks round-advance.
+        if (byocPush.Count > 0)
+        {
+            var pushed = 0;
+            using var gate = new SemaphoreSlim(10, 10);
+            await Task.WhenAll(byocPush.Select(async item =>
+            {
+                await gate.WaitAsync(token);
+                try
+                {
+                    await PushFlagToRelayAsync(item.Ip, item.Flag, token);
+                    Interlocked.Increment(ref pushed);
+                }
+                catch (Exception e)
+                {
+                    logger.LogWarning(e, "A&D BYOC flag push failed for team={Tid} challenge={Cid}",
+                        item.Pid, item.Cid);
+                }
+                finally { gate.Release(); }
+            }));
+            injected += pushed;
+        }
+
         logger.SystemLog(
             $"A&D round advanced: game={gameId} round={nextNumber} flags_planted={toInject.Count} flags_injected={injected} koth_tokens={kothTokensMinted}",
             TaskStatus.Success, LogLevel.Information);
@@ -241,6 +287,24 @@ public sealed class AdRoundService(
             .FlushAdScoreboardCache(gameId, token);
 
         return new Result(round, toInject.Count);
+    }
+
+    /// <summary>
+    /// Push the round's flag to a BYOC relay's flag port (see
+    /// <see cref="AdContainerManager.ByocFlagPort"/>). The relay forwards it over
+    /// the agent tunnel to the team's self-hosted service, which writes its own
+    /// <c>/flag</c>. One flag per connection — raw bytes then close (EOF), which
+    /// the relay reads as the new flag. Short connect+write timeout so an offline
+    /// or wedged relay can't stall round-advance.
+    /// </summary>
+    private static async Task PushFlagToRelayAsync(string ip, string flag, CancellationToken token)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
+        cts.CancelAfter(TimeSpan.FromSeconds(5));
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Parse(ip), AdContainerManager.ByocFlagPort, cts.Token);
+        await using var stream = client.GetStream();
+        await stream.WriteAsync(Encoding.ASCII.GetBytes(flag), cts.Token);
     }
 
     /// <summary>

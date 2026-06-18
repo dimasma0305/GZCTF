@@ -561,6 +561,12 @@ public class DockerManager : IContainerManager
         if (!string.IsNullOrWhiteSpace(config.FlagFilePath))
             env.Add($"GZCTF_FLAG_FILE={config.FlagFilePath}");
 
+        // Infrastructure containers GZCTF launches itself (e.g. the BYOC relay)
+        // carry extra config via ExtraEnv.
+        if (config.ExtraEnv is { Count: > 0 } extra)
+            foreach (var (key, value) in extra)
+                env.Add($"{key}={value}");
+
         return env;
     }
 }
