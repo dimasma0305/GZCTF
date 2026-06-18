@@ -2010,6 +2010,8 @@ export interface AdTeamServiceStateModel {
   resetCooldownSecondsRemaining?: number | null;
   /** True once a post-game snapshot exists for this service — team can download their own box. */
   snapshotAvailable: boolean;
+  /** True when the challenge is self-hosted (BYOC): show the setup bundle instead of a hosted container. */
+  selfHosted?: boolean;
 }
 
 /** A&D — GET /api/Game/{id}/Ad/State response. */

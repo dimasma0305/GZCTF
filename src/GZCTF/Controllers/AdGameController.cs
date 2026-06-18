@@ -333,7 +333,7 @@ public class AdGameController(
     /// </summary>
     [HttpGet("Byoc/Setup/{challengeId:int}")]
     [RequireUser]
-    [ProducesResponseType(typeof(Models.Response.Game.ByocSetupModel), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> ByocSetup(int id, int challengeId, CancellationToken cancelToken)
     {
         var part = await ResolveUserParticipationAsync(id, cancelToken);
@@ -357,13 +357,8 @@ public class AdGameController(
         if (string.IsNullOrWhiteSpace(agentImage))
             agentImage = AdContainerManager.ByocRelayImage;
 
-        return Ok(new Models.Response.Game.ByocSetupModel
-        {
-            Compose = BuildByocCompose(chal.Title, svcPort, tunnelUrl, agentImage),
-            TunnelUrl = tunnelUrl,
-            ServicePort = svcPort,
-            AgentImage = agentImage
-        });
+        var compose = BuildByocCompose(chal.Title, svcPort, tunnelUrl, agentImage);
+        return File(System.Text.Encoding.UTF8.GetBytes(compose), "application/yaml", "docker-compose.yml");
     }
 
     /// <summary>Render the team-facing docker-compose for a BYOC challenge.</summary>
@@ -1168,7 +1163,8 @@ public class AdGameController(
                 CanReset = s.Challenge.AdAllowSelfReset && cooldownRemaining == 0,
                 ResetCooldownSecondsRemaining = cooldownRemaining > 0 ? cooldownRemaining : null,
                 // Post-game only: never surface the snapshot while the game runs.
-                SnapshotAvailable = gameEnded && !string.IsNullOrEmpty(s.SnapshotBlobKey)
+                SnapshotAvailable = gameEnded && !string.IsNullOrEmpty(s.SnapshotBlobKey),
+                SelfHosted = s.Challenge.AdSelfHosted
             };
         }).ToList();
 

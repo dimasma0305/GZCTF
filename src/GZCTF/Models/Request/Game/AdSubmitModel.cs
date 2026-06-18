@@ -211,6 +211,14 @@ public class AdTeamServiceStateModel
 
     /// <summary>True once a post-game snapshot tarball exists for this service — the team can download their own box.</summary>
     public bool SnapshotAvailable { get; set; }
+
+    /// <summary>
+    /// True when this challenge is self-hosted (bring your own container): the
+    /// team runs the service themselves and connects it via the GZCTF relay. The
+    /// UI shows the setup bundle (docker-compose download) instead of a hosted
+    /// container's reset button.
+    /// </summary>
+    public bool SelfHosted { get; set; }
 }
 
 /// <summary>

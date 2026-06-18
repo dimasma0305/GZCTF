@@ -10,7 +10,7 @@ import {
   Tooltip,
 } from '@mantine/core'
 import { showNotification } from '@mantine/notifications'
-import { mdiAlertCircleOutline, mdiConsole, mdiDownload, mdiRestart } from '@mdi/js'
+import { mdiAlertCircleOutline, mdiConsole, mdiDownload, mdiRestart, mdiServerNetwork } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import { FC, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -209,30 +209,64 @@ export const AdChallengePanel: FC<AdChallengePanelProps> = ({ gameId, challengeI
             {service.lastCheckStatus ?? t('game.content.ad.no_checks_yet', 'no checks yet')}
           </Badge>
         </Group>
-        <Tooltip
-          label={
-            !service.canReset && service.resetCooldownSecondsRemaining
-              ? t('game.tooltip.ad.reset_cooldown', {
-                  seconds: service.resetCooldownSecondsRemaining,
-                  defaultValue: 'On cooldown — {{seconds}}s remaining',
-                })
-              : t('game.tooltip.ad.reset', 'Rebuild this container to baseline (you lose SLA during the rebuild)')
-          }
-        >
-          <Button
-            size="compact-xs"
-            variant="default"
-            leftSection={<Icon path={mdiRestart} size={0.7} />}
-            loading={resetting}
-            disabled={!service.canReset}
-            onClick={onReset}
+        {/* Reset rebuilds a GZCTF-hosted container. For self-hosted (BYOC) the
+            real container lives on the team's machine — they reset it there — so
+            the relay reset would only confuse; hide it. */}
+        {!service.selfHosted && (
+          <Tooltip
+            label={
+              !service.canReset && service.resetCooldownSecondsRemaining
+                ? t('game.tooltip.ad.reset_cooldown', {
+                    seconds: service.resetCooldownSecondsRemaining,
+                    defaultValue: 'On cooldown — {{seconds}}s remaining',
+                  })
+                : t('game.tooltip.ad.reset', 'Rebuild this container to baseline (you lose SLA during the rebuild)')
+            }
           >
-            {!service.canReset && service.resetCooldownSecondsRemaining
-              ? `${service.resetCooldownSecondsRemaining}s`
-              : t('game.button.ad.reset', 'Reset')}
-          </Button>
-        </Tooltip>
+            <Button
+              size="compact-xs"
+              variant="default"
+              leftSection={<Icon path={mdiRestart} size={0.7} />}
+              loading={resetting}
+              disabled={!service.canReset}
+              onClick={onReset}
+            >
+              {!service.canReset && service.resetCooldownSecondsRemaining
+                ? `${service.resetCooldownSecondsRemaining}s`
+                : t('game.button.ad.reset', 'Reset')}
+            </Button>
+          </Tooltip>
+        )}
       </Group>
+
+      {service.selfHosted && (
+        <Alert
+          icon={<Icon path={mdiServerNetwork} size={1} />}
+          color="blue"
+          variant="light"
+          p="xs"
+        >
+          <Stack gap={6}>
+            <Text size="xs">
+              {t(
+                'game.content.ad.byoc.description',
+                'Self-hosted challenge — run the service on your own machine and connect it to the game. Download the compose, drop in your service (it must listen on the target port and read /shared/flag), then run `docker compose up`. Your status goes green once the agent connects.'
+              )}
+            </Text>
+            <Button
+              component="a"
+              href={`/api/Game/${gameId}/Ad/Byoc/Setup/${challengeId}`}
+              download
+              size="compact-xs"
+              variant="light"
+              w="fit-content"
+              leftSection={<Icon path={mdiDownload} size={0.7} />}
+            >
+              {t('game.button.ad.byoc.download', 'Download docker-compose.yml')}
+            </Button>
+          </Stack>
+        </Alert>
+      )}
 
       {service.containerIp && (
         <Group gap={6} align="center" wrap="nowrap">
