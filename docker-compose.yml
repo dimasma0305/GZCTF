@@ -220,6 +220,19 @@ services:
       - wg-bootstrap
     restart: unless-stopped
 
+  # Builds the A&D "bring your own container" relay/agent image so GZCTF can
+  # launch it as per-team relays (it is referenced by image name, not run from
+  # compose). Not a long-running service — /bin/true builds the image and exits;
+  # `docker compose up` leaves an exited container behind, which is expected.
+  # The same image is what teams pull/run as the agent (configurable via
+  # Ad__Byoc__AgentImage; publish it to a registry teams can reach).
+  byoc-relay:
+    build:
+      context: ./byoc-relay
+    image: gzctf/byoc-relay:latest
+    entrypoint: ["/bin/true"]
+    restart: "no"
+
   postgres:
     image: postgres:16-alpine
     # TEMP (bottleneck investigation): load pg_stat_statements so we can rank the

@@ -49,6 +49,7 @@ public class AdGameController(
     Services.AttackStreamService attackStream,
     CacheHelper cacheHelper,
     IAdScoreboardRepository adScoreboard,
+    IConfiguration configuration,
     IStringLocalizer<Program> localizer,
     ILogger<AdGameController> logger) : ControllerBase
 {
@@ -321,6 +322,92 @@ public class AdGameController(
                 await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None);
         }
         catch { /* best effort */ }
+    }
+
+    /// <summary>
+    /// Self-hosted ("bring your own container") setup bundle for the calling team
+    /// and a self-hosted challenge: a ready-to-run docker-compose.yml with the
+    /// agent image, tunnel URL, and team-scoped token baked in. The team drops it
+    /// next to their own service and runs <c>docker compose up</c> — one outbound
+    /// connection joins their service to the game (no public IP / inbound rule).
+    /// </summary>
+    [HttpGet("Byoc/Setup/{challengeId:int}")]
+    [RequireUser]
+    [ProducesResponseType(typeof(Models.Response.Game.ByocSetupModel), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ByocSetup(int id, int challengeId, CancellationToken cancelToken)
+    {
+        var part = await ResolveUserParticipationAsync(id, cancelToken);
+        if (part is null)
+            return Unauthorized(new RequestResponse(
+                "not an accepted member of this game", StatusCodes.Status401Unauthorized));
+
+        var chal = await db.GameChallenges
+            .Where(c => c.Id == challengeId && c.GameId == id && c.AdSelfHosted && c.IsEnabled)
+            .Select(c => new { c.Title, c.ExposePort })
+            .FirstOrDefaultAsync(cancelToken);
+        if (chal is null)
+            return NotFound(new RequestResponse("no such self-hosted challenge in this game"));
+
+        var svcPort = chal.ExposePort ?? 80;
+        var tokenStr = AdTokenUtils.ByocAgentToken(part.Id, challengeId, configService.GetXorKey());
+        var scheme = Request.IsHttps ? "wss" : "ws";
+        var tunnelUrl =
+            $"{scheme}://{Request.Host}/api/Game/{id}/Ad/Byoc/Agent/{part.Id}/{challengeId}/{tokenStr}";
+        var agentImage = configuration["Ad:Byoc:AgentImage"];
+        if (string.IsNullOrWhiteSpace(agentImage))
+            agentImage = AdContainerManager.ByocRelayImage;
+
+        return Ok(new Models.Response.Game.ByocSetupModel
+        {
+            Compose = BuildByocCompose(chal.Title, svcPort, tunnelUrl, agentImage),
+            TunnelUrl = tunnelUrl,
+            ServicePort = svcPort,
+            AgentImage = agentImage
+        });
+    }
+
+    /// <summary>Render the team-facing docker-compose for a BYOC challenge.</summary>
+    private static string BuildByocCompose(string title, int svcPort, string tunnelUrl, string agentImage)
+    {
+        var safeTitle = title.Replace('\n', ' ').Replace('\r', ' ');
+        return string.Join('\n', new[]
+        {
+            $"# GZCTF Attack & Defense — self-hosted service for \"{safeTitle}\"",
+            "#",
+            "# 1. Put your vulnerable service in the `service` block (build or image).",
+            $"#    It must listen on port {svcPort} and read its flag from /shared/flag.",
+            "# 2. Run:  docker compose up -d",
+            "#",
+            "# The gzctf-agent makes ONE outbound connection to the game and tunnels your",
+            "# service in — no public IP, inbound firewall rule, or VPN needed. The",
+            "# rotating flag is delivered to /shared/flag each round.",
+            "services:",
+            "  service:",
+            "    # >>> REPLACE with your service. Examples:",
+            "    #   build: ./service",
+            "    #   image: your-registry/your-service:tag",
+            "    build: ./service",
+            "    restart: unless-stopped",
+            "    volumes:",
+            "      - flag:/shared:ro        # rotating flag at /shared/flag (read-only to you)",
+            "",
+            "  gzctf-agent:",
+            $"    image: {agentImage}",
+            "    restart: unless-stopped",
+            "    environment:",
+            "      GZCTF_BYOC_MODE: agent",
+            $"      GZCTF_BYOC_TUNNEL_URL: \"{tunnelUrl}\"",
+            $"      GZCTF_BYOC_SERVICE: \"service:{svcPort}\"",
+            "      GZCTF_BYOC_FLAG_FILE: /shared/flag",
+            "    volumes:",
+            "      - flag:/shared",
+            "    depends_on:",
+            "      - service",
+            "",
+            "volumes:",
+            "  flag:",
+            ""
+        });
     }
 
     private async Task<AdSubmitResultModel> ProcessSingleFlagAsync(
