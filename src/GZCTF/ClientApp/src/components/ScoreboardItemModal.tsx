@@ -24,6 +24,7 @@ import { MemberContributionPieProps } from '@Components/charts/MemberContributio
 import { TeamRadarMap, TeamRadarMapProps } from '@Components/charts/TeamRadarMap'
 import { useLanguage } from '@Utils/I18n'
 import { BloodsTypes, BonusLabel } from '@Utils/Shared'
+import { filterJeopardyChallenges } from '@Utils/scoreboard'
 import { ChallengeInfo, ScoreboardItem, ScoreboardModel, SubmissionType } from '@Api'
 import modalClasses from '@Styles/ScoreboardItemModal.module.css'
 import tableClasses from '@Styles/Table.module.css'
@@ -81,7 +82,12 @@ export const ScoreboardItemModal: FC<ScoreboardItemModalProps> = (props) => {
   const { locale } = useLanguage()
   const theme = useMantineTheme()
 
-  const challenges = scoreboard?.challenges
+  // Jeopardy detail view — drop A&D/KotH so the radar, category list and the
+  // solved-ratio denominator below all reflect jeopardy challenges only.
+  const challenges = filterJeopardyChallenges(scoreboard?.challenges)
+  const challengeCount = challenges
+    ? Object.values(challenges).reduce((sum, list) => sum + list.length, 0)
+    : (scoreboard?.challengeCount ?? 0)
   const challengeIdMap =
     challenges &&
     Object.keys(challenges).reduce((map, key) => {
@@ -117,8 +123,8 @@ export const ScoreboardItemModal: FC<ScoreboardItemModalProps> = (props) => {
     [selectedUser, item, userChallenges]
   )
 
-  const teamSolveRatio = (item?.solvedCount ?? 0) / (scoreboard?.challengeCount ?? 1)
-  const userSolveRatio = userChallenges.length / (scoreboard?.challengeCount ?? 1)
+  const teamSolveRatio = (item?.solvedCount ?? 0) / (challengeCount || 1)
+  const userSolveRatio = userChallenges.length / (challengeCount || 1)
 
   const radarData = useMemo(() => {
     if (!valid) return null

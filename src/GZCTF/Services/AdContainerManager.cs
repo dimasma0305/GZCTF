@@ -77,6 +77,15 @@ public sealed class AdContainerManager(
     internal const int ByocCtlPort = 47000;
     internal const int ByocFlagPort = 47001;
 
+    /// <summary>
+    /// True when a recorded container image is a BYOC relay (the default constant
+    /// or any <c>Ad:Byoc:RelayImage</c> override — both carry the "byoc-relay"
+    /// name). Used to detect a self-hosted toggle drifting away from whatever
+    /// container is currently running for a team service.
+    /// </summary>
+    private static bool IsRelayImage(string? image) =>
+        image is not null && image.Contains("byoc-relay", StringComparison.OrdinalIgnoreCase);
+
     // Per-image lock for the BYOC service-image download cache, so a 200-300 MB
     // `docker save` runs once per image (immutable digest tag), not once per team
     // request, against the daemon that is also running the live game.
@@ -1261,13 +1270,18 @@ public sealed class AdContainerManager(
                     var maybeDead = runningDockerIds is not null && cid is { Length: > 0 }
                                     && !runningDockerIds.Contains(cid);
                     var maybeDrift = ts?.LaunchedWithEgress is { } le && le != challenge.AdAllowEgress;
+                    // Self-hosted toggled since launch → the running container is the
+                    // wrong kind (relay vs real image); take the lock and recreate.
+                    var maybeSelfHostedDrift = ts?.Container is { Image.Length: > 0 } c
+                                               && challenge.AdSelfHosted != IsRelayImage(c.Image);
 
                     var needsAction = ts is null
                                       || ts.ContainerId is null
                                       || ts.Container is null
                                       || ts.Container.Status == ContainerStatus.Destroyed
                                       || maybeDead
-                                      || maybeDrift;
+                                      || maybeDrift
+                                      || maybeSelfHostedDrift;
 
                     if (!needsAction)
                         continue;
@@ -1680,6 +1694,18 @@ public sealed class AdContainerManager(
         bool isK8s,
         CancellationToken token)
     {
+        // Self-hosted (BYOC) is a per-team relay model; a KotH "hill" is one shared
+        // container, so BYOC doesn't apply. The challenge-edit UI hides the toggle for
+        // KotH — this guards a hand-written YAML that set it anyway, so we don't
+        // silently launch a real hill image for a challenge marked self-hosted.
+        if (challenge.AdSelfHosted)
+        {
+            logger.SystemLog(
+                $"KotH challenge {challenge.Id} is marked self-hosted (BYOC), which isn't supported for a shared hill; skipping launch",
+                TaskStatus.Failed, LogLevel.Warning);
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(challenge.ContainerImage))
         {
             logger.SystemLog($"KotH challenge {challenge.Id} has no ContainerImage; skipping launch",
@@ -1796,6 +1822,28 @@ public sealed class AdContainerManager(
                                && !await IsContainerRunningAsync(dockerProvider, k8sProvider, cid, token);
 
             var networkDrift = ts?.LaunchedWithEgress is { } le && le != challenge.AdAllowEgress;
+
+            // Self-hosted (BYOC) drift: the running container is the wrong KIND for
+            // the current setting — a real challenge image is up but AdSelfHosted was
+            // just turned ON (a relay should run instead), or a leftover relay is up
+            // after it was turned OFF. An in-place network move can't fix a different
+            // image, so tear the container down and relaunch as the correct kind.
+            // Without this, toggling self-hosted leaves the old container running and
+            // the platform keeps managing a real A&D container despite BYOC being on.
+            var selfHostedDrift = ts?.Container is { Image.Length: > 0 } sc
+                                  && challenge.AdSelfHosted != IsRelayImage(sc.Image);
+            if (selfHostedDrift && ts?.Container is not null)
+            {
+                logger.SystemLog(
+                    $"A&D self-hosted setting changed — rebuilding as {(challenge.AdSelfHosted ? "BYOC relay" : "hosted container")}: team={participationId} challenge={challenge.Id}",
+                    TaskStatus.Success, LogLevel.Information);
+                ts.Container.Status = ContainerStatus.Destroyed;
+                try { await containerManager.DestroyContainerAsync(ts.Container, token); }
+                catch { /* already gone / raced — relaunch below regardless */ }
+                await LaunchOneAsync(db, containerManager, participationId, challenge, ts,
+                    dockerProvider is null, token);
+                return;
+            }
 
             // Network drift on a LIVE container → move it between networks in
             // place so the team keeps its patches. Recreate only if the move

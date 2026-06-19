@@ -134,8 +134,11 @@ public class ExcelHelper(IStringLocalizer<Program> localizer)
             cell.CellStyle = style;
         }
 
+        // Jeopardy scoreboard export — exclude A&D/KotH challenges (they have their
+        // own boards and carry no jeopardy score), matching the on-screen board.
         foreach (var type in scoreboard.Challenges)
-            foreach (var chall in type.Value)
+            foreach (var chall in type.Value.Where(c =>
+                         c.Type is not (ChallengeType.AttackDefense or ChallengeType.KingOfTheHill)))
             {
                 var cell = row.CreateCell(colIndex++);
                 cell.SetCellValue(chall.Title);

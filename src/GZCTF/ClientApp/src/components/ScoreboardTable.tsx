@@ -37,6 +37,7 @@ import {
   PartialIconProps,
 } from '@Utils/Shared'
 import { useGame, useGameScoreboard, useGameTeamInfo } from '@Hooks/useGame'
+import { filterJeopardyChallenges } from '@Utils/scoreboard'
 import { ChallengeInfo, ChallengeCategory, ScoreboardItem, SubmissionType } from '@Api'
 import misc from '@Styles/Misc.module.css'
 import classes from '@Styles/ScoreboardTable.module.css'
@@ -282,6 +283,12 @@ export const ScoreboardTable: FC<ScoreboardProps> = ({ divisionId, setDivisionId
   const [debouncedKeyword] = useDebouncedValue(keyword, 400)
 
   const { scoreboard } = useGameScoreboard(numId)
+  // A&D / KotH challenges live on their own boards — keep them out of the jeopardy
+  // columns (the shared payload includes them so the challenge list still works).
+  const jeopardyChallenges = useMemo(
+    () => filterJeopardyChallenges(scoreboard?.challenges),
+    [scoreboard?.challenges]
+  )
   const { game } = useGame(numId)
   const myTeamName = game?.teamName ?? null
   // When a "find my team" click lands on a row we highlight it for 2.5s.
@@ -417,7 +424,7 @@ export const ScoreboardTable: FC<ScoreboardProps> = ({ divisionId, setDivisionId
             }}
           >
             <Table className={classes.table}>
-              <TableHeader {...scoreboard?.challenges} />
+              <TableHeader {...jeopardyChallenges} />
               <Table.Tbody>
                 {scoreboard &&
                   currentItems?.map((item, idx) => (
@@ -430,7 +437,7 @@ export const ScoreboardTable: FC<ScoreboardProps> = ({ divisionId, setDivisionId
                         setCurrentItem(item)
                         setItemDetailOpened(true)
                       }}
-                      challenges={scoreboard.challenges}
+                      challenges={jeopardyChallenges}
                       iconMap={iconMap}
                       divisionMap={divisionMap}
                       highlighted={highlightedTeam === item.name}

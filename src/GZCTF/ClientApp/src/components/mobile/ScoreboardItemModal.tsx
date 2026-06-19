@@ -20,6 +20,7 @@ import { ScoreboardItemModalProps } from '@Components/ScoreboardItemModal'
 import { ScrollingText } from '@Components/ScrollingText'
 import { TeamRadarMap } from '@Components/charts/TeamRadarMap'
 import { useLanguage } from '@Utils/I18n'
+import { filterJeopardyChallenges } from '@Utils/scoreboard'
 import { ChallengeInfo } from '@Api'
 import modalClasses from '@Styles/ScoreboardItemModal.module.css'
 import tableClasses from '@Styles/Table.module.css'
@@ -29,7 +30,8 @@ export const MobileScoreboardItemModal: FC<ScoreboardItemModalProps> = React.mem
   const { t } = useTranslation()
   const { locale } = useLanguage()
 
-  const challenges = scoreboard?.challenges
+  // Jeopardy detail — exclude A&D/KotH (they have their own boards).
+  const challenges = filterJeopardyChallenges(scoreboard?.challenges)
   const challengeIdMap = useMemo(() => {
     if (!challenges) return new Map<number, ChallengeInfo>()
     return Object.keys(challenges).reduce((map, key) => {
@@ -40,7 +42,10 @@ export const MobileScoreboardItemModal: FC<ScoreboardItemModalProps> = React.mem
     }, new Map<number, ChallengeInfo>())
   }, [challenges])
 
-  const solved = (item?.solvedCount ?? 0) / (scoreboard?.challengeCount ?? 1)
+  const challengeCount = challenges
+    ? Object.values(challenges).reduce((sum, list) => sum + list.length, 0)
+    : (scoreboard?.challengeCount ?? 0)
+  const solved = (item?.solvedCount ?? 0) / (challengeCount || 1)
 
   const indicator = useMemo(() => {
     if (!challenges) return []
