@@ -384,11 +384,13 @@ public class AdGameController(
                 AdTokenUtils.ByocImageToken(part.Id, challengeId, key);
             var script = BuildByocSetupScript(
                 id, challengeId, chal.Title, chal.ContainerImage, svcPort, imageUrl, tunnelUrl, agentImage);
-            return File(System.Text.Encoding.UTF8.GetBytes(script), "application/x-sh", "setup.sh");
+            return File(System.Text.Encoding.UTF8.GetBytes(script), "application/x-sh",
+                $"setup-{Slugify(chal.Title, challengeId)}.sh");
         }
 
-        var compose = BuildByocCompose(chal.Title, svcPort, tunnelUrl, agentImage);
-        return File(System.Text.Encoding.UTF8.GetBytes(compose), "application/yaml", "docker-compose.yml");
+        var compose = BuildByocCompose(id, challengeId, chal.Title, svcPort, tunnelUrl, agentImage);
+        return File(System.Text.Encoding.UTF8.GetBytes(compose), "application/yaml",
+            $"docker-compose-{Slugify(chal.Title, challengeId)}.yml");
     }
 
     /// <summary>
@@ -458,8 +460,28 @@ public class AdGameController(
         if (string.IsNullOrWhiteSpace(agentImage))
             agentImage = AdContainerManager.ByocRelayImage;
 
-        var compose = BuildByocCompose(chal.Title, svcPort, tunnelUrl, agentImage);
-        return File(System.Text.Encoding.UTF8.GetBytes(compose), "application/yaml", "docker-compose.yml");
+        var compose = BuildByocCompose(id, challengeId, chal.Title, svcPort, tunnelUrl, agentImage);
+        return File(System.Text.Encoding.UTF8.GetBytes(compose), "application/yaml",
+            $"docker-compose-{Slugify(chal.Title, challengeId)}.yml");
+    }
+
+    /// <summary>
+    /// A filesystem-safe, unique-per-challenge slug from the title + id, so a team
+    /// doing several BYOC challenges gets distinct download filenames (one doesn't
+    /// overwrite another) — e.g. "pwn-armory-272".
+    /// </summary>
+    private static string Slugify(string title, int challengeId)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var ch in title.ToLowerInvariant())
+        {
+            if (ch is (>= 'a' and <= 'z') or (>= '0' and <= '9'))
+                sb.Append(ch);
+            else if (sb.Length > 0 && sb[^1] != '-')
+                sb.Append('-');
+        }
+        var slug = sb.ToString().Trim('-');
+        return string.IsNullOrEmpty(slug) ? $"challenge-{challengeId}" : $"{slug}-{challengeId}";
     }
 
     /// <summary>
@@ -483,6 +505,7 @@ public class AdGameController(
             $"curl -fSL \"{imageUrl}\" | docker load",
             "echo '[2/3] Writing docker-compose.yml...'",
             "cat > docker-compose.yml <<'COMPOSE'",
+            $"name: gzctf-byoc-{gameId}-{challengeId}",
             "services:",
             "  # The real vulnerable service (just downloaded). Patch it to defend;",
             "  # it reads its rotating flag from GZCTF_FLAG_FILE (we deliver it there).",
@@ -523,12 +546,15 @@ public class AdGameController(
     /// vulnerable service. The agent image is public (Docker Hub), so nothing is
     /// built or configured — one click.
     /// </summary>
-    private static string BuildByocCompose(string title, int svcPort, string tunnelUrl, string agentImage)
+    private static string BuildByocCompose(int gameId, int challengeId, string title, int svcPort,
+        string tunnelUrl, string agentImage)
     {
         var safeTitle = title.Replace('\n', ' ').Replace('\r', ' ');
         return string.Join('\n', new[]
         {
             $"# GZCTF Attack & Defense — self-hosted service for \"{safeTitle}\"",
+            "# Unique per challenge, so you can run several BYOC challenges side by side.",
+            $"name: gzctf-byoc-{gameId}-{challengeId}",
             "#",
             "#   docker compose up -d        # that's it — works out of the box.",
             "#",
