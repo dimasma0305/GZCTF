@@ -80,7 +80,9 @@ public sealed class CloudflareTurnstile(IOptionsSnapshot<CaptchaConfig> options,
         {
             Secret = DecryptSecretKey(Config.SecretKey, _xorKey),
             Response = model.Challenge,
-            RemoteIp = ip.ToString()
+            // Send Cloudflare the canonical IPv4 (not ::ffff:a.b.c.d) for consistency
+            // with the rest of the IP handling.
+            RemoteIp = (ip.IsIPv4MappedToIPv6 ? ip.MapToIPv4() : ip).ToString()
         };
 
         const string api = "https://challenges.cloudflare.com/turnstile/v0/siteverify";

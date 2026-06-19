@@ -434,11 +434,14 @@ public class AdminController(
         // bad secret from a good secret + bad token.
         // https://developers.cloudflare.com/turnstile/get-started/server-side-validation/#error-codes
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        var adminIp = HttpContext.Connection.RemoteIpAddress;
+        if (adminIp is { IsIPv4MappedToIPv6: true })
+            adminIp = adminIp.MapToIPv4();
         var req = new TurnstileRequestModel
         {
             Secret = secretPlain,
             Response = "test-token-from-admin-settings",
-            RemoteIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? string.Empty
+            RemoteIp = adminIp?.ToString() ?? string.Empty
         };
 
         try
