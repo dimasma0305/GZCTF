@@ -81,6 +81,8 @@
     <PackageReference Include="Microsoft.Extensions.Http.Resilience" />
     <PackageReference Include="Microsoft.Extensions.ServiceDiscovery" />
     <PackageReference Include="MemoryPack" />
+    <!-- Direct ref pins the patched MessagePack over the vulnerable transitive 2.5.187. -->
+    <PackageReference Include="MessagePack" />
     <PackageReference Include="Serilog.Sinks.Grafana.Loki" />
     <PackageReference Include="Serilog.Sinks.OpenTelemetry" />
     <PackageReference Include="SixLabors.ImageSharp" />

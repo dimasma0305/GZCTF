@@ -17,6 +17,9 @@
     <PackageVersion Include="KubernetesClient" Version="19.0.2" />
     <PackageVersion Include="MailKit" Version="4.17.0" />
     <PackageVersion Include="MemoryPack" Version="1.21.4" />
+    <!-- Pinned to override the transitive 2.5.187 (via MemoryPack + SignalR.StackExchangeRedis).
+         GHSA-hv8m-jj95-wg3x (LZ4-decompression AccessViolation on bad input) is patched in 2.5.301. -->
+    <PackageVersion Include="MessagePack" Version="2.5.302" />
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.Google" Version="10.0.8" />
     <PackageVersion Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" Version="10.0.8" />
     <PackageVersion Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.8" />
