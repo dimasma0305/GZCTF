@@ -142,6 +142,12 @@ public sealed class HashPow(IOptionsSnapshot<CaptchaConfig> options, IDistribute
         var ans = parts[1];
         if (ans.Length != AnswerLength * 2)
             return false;
+        // Reject a non-hex answer up front: Convert.FromHexString below throws
+        // FormatException on a bad char, which (the verify body has only a finally,
+        // no catch) would surface as an uncaught 500 on this unauthenticated path.
+        foreach (var ch in ans)
+            if (!Uri.IsHexDigit(ch))
+                return false;
 
         var key = CacheKey.HashPow(id);
         var sem = _verifyLocks[(int)(unchecked((uint)id.GetHashCode()) % LockStripes)];

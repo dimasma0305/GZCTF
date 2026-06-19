@@ -43,8 +43,21 @@ public class HoneypotService(
         // HardSignal) on an innocent logged-in team. Only trust the authenticated
         // principal when the browser reports a same-origin fetch; otherwise
         // attribute by IP only (the IP fallback in ResolveAttribution).
+        // Same-origin alone is NOT enough to prove a deliberate probe: an organizer
+        // (EventManager) can embed a bait URL as a same-origin subresource in
+        // sanitized markdown — e.g. `![](/.git/config)` in challenge content/notices —
+        // and a viewer's browser then auto-fetches it same-origin WITH their auth
+        // cookie, FRAMING an innocent team (and, via the chain detector, a
+        // HardSignal). Only attribute a DELIBERATE same-origin request — a top-level
+        // navigation or an explicit fetch/XHR (Sec-Fetch-Dest: document|empty) —
+        // never a passive subresource (image/script/style/font…), which is all an
+        // attacker can inject through sanitized markdown.
+        var fetchDest = context.Request.Headers["Sec-Fetch-Dest"].ToString();
         var sameOrigin = string.Equals(
-            context.Request.Headers["Sec-Fetch-Site"].ToString(), "same-origin", StringComparison.Ordinal);
+                             context.Request.Headers["Sec-Fetch-Site"].ToString(), "same-origin",
+                             StringComparison.Ordinal)
+                         && (string.Equals(fetchDest, "document", StringComparison.Ordinal)
+                             || string.Equals(fetchDest, "empty", StringComparison.Ordinal));
         // No IP fallback for HTTP baits: a GET is browser-forgeable cross-site
         // (an attacker embeds the bait URL as an <img>/fetch/redirect in a page or
         // a Discord message), so the victim's own browser fetches it from the

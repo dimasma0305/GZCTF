@@ -62,6 +62,19 @@ public sealed class StartupSecurityAudit(
                 findings.Add(
                     "Ad:FlagPullBaseUrl is unset or not an IP — A&D flags can't be delivered to challenge pods " +
                     "on Kubernetes. Set it to an IP:port the pods can reach.");
+
+            // 3b. On Kubernetes, only the Open/Isolated NetworkModes get a built-in
+            //     egress NetworkPolicy. A challenge set to NetworkMode.Custom gets
+            //     ONLY a pod label (an operator extension point) and NO egress policy,
+            //     so it is uncontained by default — it can reach cloud metadata,
+            //     the cluster control plane, and other teams' pods. If you use Custom
+            //     mode, supply your own NetworkPolicy (selector
+            //     gzctf.gzti.me/NetworkMode=custom) with the egress restrictions you want.
+            findings.Add(
+                "Kubernetes provider: NetworkMode.Custom challenges get NO built-in egress NetworkPolicy " +
+                "(only a pod label). Such a challenge is uncontained (can reach cloud metadata / the control " +
+                "plane / other pods) unless YOU add a NetworkPolicy for selector gzctf.gzti.me/NetworkMode=custom. " +
+                "Avoid Custom mode for untrusted challenges, or pin a policy.");
         }
 
         // 4. AllowedHosts unset / "*" → Host-header injection. Email links (password

@@ -1319,7 +1319,20 @@ public class GameController(
         if (context.Result is not null)
             return context.Result;
 
-        var scoreboard = await gameRepository.GetScoreboard(context.Game!, token);
+        // Honor the ICPC freeze: during [FreezeTimeUtc, EndTimeUtc) a non-monitor
+        // must see the FROZEN board, otherwise this endpoint would leak post-freeze
+        // solves (team/solver names + times) the main scoreboard intentionally hides.
+        var game = context.Game!;
+        var now = DateTimeOffset.UtcNow;
+        var isMonitor = await ContextHelper.HasMonitor(HttpContext);
+        var isFrozenView = !isMonitor
+                           && game.FreezeTimeUtc is { } freeze
+                           && now >= freeze
+                           && now < game.EndTimeUtc;
+
+        var scoreboard = isFrozenView
+            ? await gameRepository.GetFrozenScoreboard(game, token)
+            : await gameRepository.GetScoreboard(game, token);
 
         var solvers = scoreboard.Items.Values
             .Select(team =>

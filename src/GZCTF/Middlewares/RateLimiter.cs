@@ -77,6 +77,13 @@ public static class RateLimiter
 
             var address = context.Connection.RemoteIpAddress;
 
+            // Normalize IPv4-mapped IPv6 (::ffff:a.b.c.d) to the bare IPv4 form so a
+            // dual-stack client can't get two separate buckets (e.g. 192.168.1.1 vs
+            // ::ffff:192.168.1.1) and double an IP-keyed limit (register/recovery).
+            // Matches the normalization already done in the IP-attribution helpers.
+            if (address is not null && address.IsIPv4MappedToIPv6)
+                address = address.MapToIPv4();
+
             if (address is null || IPAddress.IsLoopback(address))
                 return RateLimitPartition.GetNoLimiter(IPAddress.Loopback.ToString());
 

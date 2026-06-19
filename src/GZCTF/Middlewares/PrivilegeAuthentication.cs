@@ -126,6 +126,19 @@ public class RequireGameAdminAttribute : Attribute, IAsyncAuthorizationFilter
             await dbContext.SaveChangesAsync(); // avoid to update ConcurrencyStamp
         }
 
+        // Role floor: a Banned (or otherwise sub-User) account must never pass, even
+        // if it still holds an EventManager delegation. A ban doesn't invalidate the
+        // session cookie and the EventManager row survives a ban, so without this a
+        // banned organizer keeps full game-admin via the EventManager branch below.
+        // (RequirePrivilegeAttribute already floors via role >= privilege; this
+        // attribute had only an Admin-OR-EventManager check.)
+        if (user.Role < Role.User)
+        {
+            context.Result = RequestResponse.Result(localizer[nameof(Resources.Program.Auth_AccessForbidden)],
+                StatusCodes.Status403Forbidden);
+            return;
+        }
+
         if (user.Role == Role.Admin)
             return;
 

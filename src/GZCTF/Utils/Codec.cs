@@ -133,7 +133,15 @@ public static partial class Codec
             if (str is null)
                 return [];
 
-            Span<byte> buffer = stackalloc byte[str.Length * 3 / 4 + 8];
+            // `str` is attacker-controlled at unauthenticated endpoints (e.g.
+            // /api/team/Verify). stackalloc'ing str.Length*3/4 unbounded would let a
+            // large base64 body blow the thread stack → an UNCATCHABLE
+            // StackOverflowException that crashes the process. Cap the stack buffer
+            // and spill larger inputs to the heap (the conditional's stackalloc branch
+            // only evaluates when size <= the cap, so it never over-allocates).
+            var size = str.Length * 3 / 4 + 8;
+            const int StackCap = 1024;
+            Span<byte> buffer = size <= StackCap ? stackalloc byte[StackCap] : new byte[size];
 
             return Convert.TryFromBase64String(str, buffer, out var bytesWritten)
                 ? buffer[..bytesWritten].ToArray()
