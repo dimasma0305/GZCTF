@@ -509,6 +509,24 @@ public class GameInstanceRepository(
                 var bloodEligibleCount = await CountBloodEligibleSolves(submission.ChallengeId, time.StartTimeUtc,
                     time.EndTimeUtc, token);
 
+                // The advisory lock above is per (participation, challenge) — it stops
+                // ONE team double-submitting, but two DIFFERENT teams racing both read
+                // the same count (e.g. 0) before either commits its FirstSolve, so both
+                // would be announced FirstBlood (the scoreboard later corrects the tier,
+                // but the live notice/return diverges). When a blood slot may still be
+                // open (<3 taken), take a challenge-GLOBAL advisory lock — namespace 0,
+                // never a real ParticipationId, so it can't collide with the per-team
+                // lock or deadlock (every txn takes per-team then global) — and re-count
+                // under it, so each racer sees the prior committed FirstSolve. Held to
+                // commit (xact lock); skipped once blood is gone, so no hot-path contention.
+                if (bloodEligibleCount < 3)
+                {
+                    await Context.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock({0}, {1})",
+                        [0, submission.ChallengeId], cancellationToken: token);
+                    bloodEligibleCount = await CountBloodEligibleSolves(submission.ChallengeId, time.StartTimeUtc,
+                        time.EndTimeUtc, token);
+                }
+
                 submissionType = bloodEligibleCount switch
                 {
                     0 => SubmissionType.FirstBlood,

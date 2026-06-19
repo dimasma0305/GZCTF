@@ -8,6 +8,22 @@ namespace GZCTF.Utils;
 
 public static class TarHelper
 {
+    /// <summary>
+    /// Strip path traversal from a tar entry name: normalize separators and drop
+    /// leading slashes / drive roots and any "."/".." segments, while keeping
+    /// legitimate subdirectories. A blob/LocalFile.Name is partly user-controlled
+    /// (e.g. an upload filename), so without this a crafted name like
+    /// "../../etc/cron.d/x" would place an entry outside the archive root on extract.
+    /// </summary>
+    private static string SafeEntryName(string name)
+    {
+        var parts = name.Replace('\\', '/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Where(p => p != "." && p != "..");
+        var joined = string.Join('/', parts);
+        return joined.Length == 0 ? "file" : joined;
+    }
+
     private static void SetHeaders(HttpContext context, string fileName)
     {
         var downloadFilename = fileName.EndsWith(".tar.gz") ? fileName : $"{fileName}.tar.gz";
@@ -41,7 +57,7 @@ public static class TarHelper
         foreach (var file in files)
         {
             var filePath = StoragePath.Combine(basePath, file.Location, file.Hash);
-            var entryPath = $"{fileName}/{file.Name}";
+            var entryPath = $"{fileName}/{SafeEntryName(file.Name)}";
             var blob = await storage.GetBlobAsync(filePath, token);
             await using var stream = await GetFileStream(storage, blob, token);
             var entry = new PaxTarEntry(TarEntryType.RegularFile, entryPath)
@@ -76,7 +92,7 @@ public static class TarHelper
         var files = await storage.ListAsync(directory, cancellationToken: token);
         foreach (var blob in files)
         {
-            var entryPath = $"{fileName}/{blob.Name}";
+            var entryPath = $"{fileName}/{SafeEntryName(blob.Name)}";
 
             await using var stream = await GetFileStream(storage, blob, token);
             var entry = new PaxTarEntry(TarEntryType.RegularFile, entryPath)

@@ -148,9 +148,11 @@ public sealed class AdSnapshotService(
         var changes = await manager.ComputeLiveChangesAsync(sp, ts, token);
         if (changes is null) return; // no live container / provider error — retry next round
 
-        // Mark scanned for this round even when the dedupe below writes nothing,
-        // so the find doesn't re-run on the next poll within the same round.
-        _lastRoundByService[ts.Id] = roundNumber;
+        // NOTE: we mark this service scanned for the round only on a DURABLE outcome
+        // (manifest unchanged, or after the row is persisted below) — never before
+        // the save. Marking up-front meant a transient DB error on SaveChangesAsync
+        // left the round flagged scanned with no row, so the next poll skipped it and
+        // the snapshot was lost for good.
 
         // Canonical manifest so dedupe compares stably regardless of scan order.
         var manifest = JsonSerializer.Serialize(
@@ -177,7 +179,11 @@ public sealed class AdSnapshotService(
             .ThenByDescending(s => s.Id)
             .Select(s => s.ManifestJson)
             .FirstOrDefaultAsync(token);
-        if (last == manifest) return; // unchanged since last capture
+        if (last == manifest)
+        {
+            _lastRoundByService[ts.Id] = roundNumber; // unchanged — nothing to persist, round done
+            return;
+        }
 
         db.AdServiceSnapshots.Add(new AdServiceSnapshot
         {
@@ -187,6 +193,7 @@ public sealed class AdSnapshotService(
             ManifestJson = manifest
         });
         await db.SaveChangesAsync(token);
+        _lastRoundByService[ts.Id] = roundNumber; // only after a durable save (see note above)
 
         // A new, non-empty manifest means the team actually changed files on their
         // service since the last snapshot — i.e. they patched. Broadcast it to the
