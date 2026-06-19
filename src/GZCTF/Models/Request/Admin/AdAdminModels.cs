@@ -112,6 +112,13 @@ public class AdTeamCellModel
 
     /// <summary>Number of files the team changed vs the baseline image (docker diff), if captured.</summary>
     public int? ChangedFileCount { get; set; }
+
+    /// <summary>
+    /// True for self-hosted (BYOC) challenges: the team runs the service on their
+    /// own machine, so there's no GZCTF-side container to shell into, snapshot, or
+    /// read files from — only the SLA check status is meaningful here.
+    /// </summary>
+    public bool SelfHosted { get; set; }
 }
 
 /// <summary>One filesystem change in a team's container vs the baseline image.</summary>

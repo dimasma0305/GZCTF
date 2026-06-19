@@ -1238,6 +1238,14 @@ public class AdGameController(
                 && p.Members.Any(m => m.UserId == user.Id), token);
         if (!isMember) return Forbid();
 
+        // BYOC (self-hosted): there is no GZCTF-hosted container to reset — the
+        // team's real service runs on their own machine. "Reset" would only restart
+        // the tunnel relay (dropping the connection + burning the cooldown), so
+        // refuse; the team resets their own service from their own docker compose.
+        if (ts.Challenge.AdSelfHosted)
+            return BadRequest(new RequestResponse(
+                "Self-hosted challenge — reset your service on your own machine; GZCTF only runs the relay here."));
+
         if (!ts.Challenge.AdAllowSelfReset)
             return BadRequest(new RequestResponse("Self-reset is disabled for this challenge by the operator"));
 
@@ -1350,10 +1358,16 @@ public class AdGameController(
                 CurrentFlag = currentFlags.GetValueOrDefault(s.Id),
                 LastCheckStatus = lastChecksByService.GetValueOrDefault(s.Id)?.Status.ToString(),
                 LastResetAt = s.LastResetAt,
-                CanReset = s.Challenge.AdAllowSelfReset && cooldownRemaining == 0,
+                // Self-hosted: nothing on our side to reset (the team owns the
+                // service) — keep CanReset false so the UI never offers it.
+                CanReset = s.Challenge.AdAllowSelfReset && cooldownRemaining == 0
+                    && !s.Challenge.AdSelfHosted,
                 ResetCooldownSecondsRemaining = cooldownRemaining > 0 ? cooldownRemaining : null,
                 // Post-game only: never surface the snapshot while the game runs.
-                SnapshotAvailable = gameEnded && !string.IsNullOrEmpty(s.SnapshotBlobKey),
+                // Self-hosted: we don't snapshot the relay (it'd leak the BYOC
+                // secret + isn't the team's service), so never offer a download.
+                SnapshotAvailable = gameEnded && !string.IsNullOrEmpty(s.SnapshotBlobKey)
+                    && !s.Challenge.AdSelfHosted,
                 SelfHosted = s.Challenge.AdSelfHosted
             };
         }).ToList();

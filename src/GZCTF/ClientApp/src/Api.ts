@@ -2163,6 +2163,8 @@ export interface AdTeamCellModel {
   snapshotAvailable: boolean;
   /** Number of files the team changed vs the baseline image (docker diff), if captured. */
   changedFileCount?: number | null;
+  /** True for self-hosted (BYOC) challenges — no GZCTF-side container to shell/snapshot/inspect; only SLA status is meaningful. */
+  selfHosted?: boolean;
 }
 
 /** A&D admin — one filesystem change in a team's container vs the baseline image. */

@@ -83,6 +83,21 @@ public sealed class AdContainerManager(
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> _byocImageLocks = new();
 
     /// <summary>
+    /// True when the challenge is self-hosted (BYOC). Its AdTeamService.Container
+    /// is then the tunnel relay, NOT the team's real service — so snapshot, diff,
+    /// exec/shell, file-read and reset must all refuse rather than act on the relay.
+    /// </summary>
+    private static async Task<bool> IsSelfHostedAsync(
+        IServiceProvider scopeServices, int challengeId, CancellationToken token)
+    {
+        var db = scopeServices.GetRequiredService<AppDbContext>();
+        return await db.GameChallenges
+            .Where(c => c.Id == challengeId)
+            .Select(c => c.AdSelfHosted)
+            .FirstOrDefaultAsync(token);
+    }
+
+    /// <summary>
     /// Stream the challenge's service image (the real vulnerable container) to a
     /// cached <c>docker save</c> tarball on disk and return its path, so a BYOC
     /// team can <c>docker load</c> it instead of building anything. Cached by image
@@ -482,6 +497,18 @@ public sealed class AdContainerManager(
     {
         if (ts.Container is null) return null;
 
+        // BYOC (self-hosted): ts.Container is the tunnel relay, not the team's
+        // service (which runs off-platform). A snapshot of the relay is meaningless
+        // AND would bake GZCTF_BYOC_SECRET (a control-plane credential) into a
+        // tarball the team can download as "your backup". Never snapshot a relay.
+        if (await IsSelfHostedAsync(scopeServices, ts.ChallengeId, token))
+        {
+            logger.SystemLog(
+                $"A&D snapshot skipped: challenge {ts.ChallengeId} is self-hosted (BYOC) — service is off-platform.",
+                TaskStatus.Pending, LogLevel.Debug);
+            return null;
+        }
+
         var dockerProvider = scopeServices.GetService<IContainerProvider<DockerClient, DockerMetadata>>();
         if (dockerProvider is null)
         {
@@ -653,6 +680,13 @@ public sealed class AdContainerManager(
         IServiceProvider scopeServices, AdTeamService ts, CancellationToken token)
     {
         if (ts.Container?.ContainerId is not { Length: > 0 } cid)
+            return null;
+
+        // BYOC (self-hosted): the container is the relay, not the team's service.
+        // A filesystem diff of the relay is meaningless and gets surfaced as "what
+        // the team changed" (operator forensics) and broadcast as "team patched" to
+        // the public arena feed. Skip it for self-hosted challenges.
+        if (await IsSelfHostedAsync(scopeServices, ts.ChallengeId, token))
             return null;
 
         const int maxEntries = 3000;

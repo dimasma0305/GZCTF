@@ -360,7 +360,9 @@ export const AdChallengePanel: FC<AdChallengePanelProps> = ({ gameId, challengeI
         </Group>
       )}
 
-      {renderSshHint()}
+      {/* SSH-jump reaches the GZCTF-hosted container; for self-hosted (BYOC) there
+          is none (the team's service is on their own machine), so hide the hint. */}
+      {!service.selfHosted && renderSshHint()}
 
       {snapshotDownload}
     </Stack>

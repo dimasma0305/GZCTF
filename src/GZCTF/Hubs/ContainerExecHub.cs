@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
+using GZCTF.Models;
 using GZCTF.Repositories.Interface;
 using GZCTF.Services.Container.Exec;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 
 namespace GZCTF.Hubs;
 
@@ -24,6 +26,7 @@ namespace GZCTF.Hubs;
 public class ContainerExecHub(
     IContainerRepository containerRepository,
     IContainerExecChannel execChannel,
+    AppDbContext db,
     ILogger<ContainerExecHub> logger) : Hub
 {
     static readonly ConcurrentDictionary<string, ConnectionSessions> _byConnection = new();
@@ -64,6 +67,19 @@ public class ContainerExecHub(
         var container = await containerRepository.GetContainerById(containerGuid, default);
         if (container is null)
             throw new HubException("Container not found.");
+
+        // BYOC (self-hosted): this container is the tunnel relay, not the team's
+        // real service (which runs on their own machine). A shell into the relay is
+        // meaningless and exposes its env (GZCTF_BYOC_SECRET), and it "works" even
+        // while the real service is Offline. Refuse — same posture as SSH-jump.
+        var isSelfHosted = await db.AdTeamServices
+            .Where(s => s.ContainerId == containerGuid)
+            .Select(s => s.Challenge.AdSelfHosted)
+            .FirstOrDefaultAsync();
+        if (isSelfHosted)
+            throw new HubException(
+                "Self-hosted (BYOC) challenge — the team runs the service on their own machine; " +
+                "there is no GZCTF-side service to shell into (this is just the tunnel relay).");
 
         IExecSession session;
         try

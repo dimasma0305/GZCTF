@@ -80,9 +80,23 @@ public class InternalAdSshController(
 
         var challengeRow = await db.GameChallenges
             .Where(c => c.Id == challenge && c.Type == ChallengeType.AttackDefense && c.IsEnabled)
-            .Select(c => new { c.Id, c.GameId, c.Title })
+            .Select(c => new { c.Id, c.GameId, c.Title, c.AdSelfHosted })
             .FirstOrDefaultAsync(token);
         if (challengeRow is null) return NotFound();
+
+        // BYOC (self-hosted): the team's real service runs on THEIR machine —
+        // GZCTF only hosts the tunnel relay (recorded as AdTeamService.Container).
+        // SSH-jump would docker-exec into that relay, which is meaningless (it's
+        // not the service, has no /shared/flag), leaks the relay's env
+        // (GZCTF_BYOC_SECRET), and "works" even while the real service is Offline.
+        // There is nothing on our side to SSH into, so reject for everyone.
+        if (challengeRow.AdSelfHosted)
+        {
+            logger.LogInformation(
+                "InternalAdSsh: rejected SSH on self-hosted (BYOC) challenge {Cid} — the team's service is off-platform; nothing to SSH into here",
+                challenge);
+            return NotFound();
+        }
 
         // Take(2) to distinguish "exactly one" from "ambiguous": if two
         // participations in this game registered the same key fingerprint we

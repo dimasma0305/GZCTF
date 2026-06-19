@@ -156,22 +156,34 @@ public class AdAdminController(
             return n > 0 ? n : null;
         }
 
+        // Self-hosted (BYOC) challenges: the AdTeamService.Container is the tunnel
+        // relay, not the team's service. Don't surface its IP/port (unreachable,
+        // not the service), its container guid (would open a shell INTO the relay),
+        // or relay file-diffs — only the SLA check status is meaningful. The relay
+        // is always up, so it must not count as a "live service" or offer a snapshot.
+        var byocChallengeIds = adChallenges.Where(c => c.AdSelfHosted).Select(c => c.Id).ToHashSet();
+
         var rows = participations.Select(p => new AdTeamRowModel
         {
             ParticipationId = p.Id,
             TeamName = p.Team.Name,
-            Services = services.Where(s => s.ParticipationId == p.Id).Select(s => new AdTeamCellModel
+            Services = services.Where(s => s.ParticipationId == p.Id).Select(s =>
             {
-                AdTeamServiceId = s.Id,
-                ChallengeId = s.ChallengeId,
-                ContainerIp = s.Container?.IP,
-                ContainerPort = s.Container?.Port,
-                ContainerGuid = s.ContainerId,
-                LastCheckStatus = lastChecksByService.GetValueOrDefault(s.Id)?.Status.ToString(),
-                LastCheckId = lastChecksByService.GetValueOrDefault(s.Id)?.Id,
-                CurrentFlag = currentFlags.GetValueOrDefault(s.Id),
-                SnapshotAvailable = !string.IsNullOrEmpty(s.SnapshotBlobKey),
-                ChangedFileCount = ChangedCount(s)
+                var byoc = byocChallengeIds.Contains(s.ChallengeId);
+                return new AdTeamCellModel
+                {
+                    AdTeamServiceId = s.Id,
+                    ChallengeId = s.ChallengeId,
+                    ContainerIp = byoc ? null : s.Container?.IP,
+                    ContainerPort = byoc ? null : s.Container?.Port,
+                    ContainerGuid = byoc ? null : s.ContainerId,
+                    LastCheckStatus = lastChecksByService.GetValueOrDefault(s.Id)?.Status.ToString(),
+                    LastCheckId = lastChecksByService.GetValueOrDefault(s.Id)?.Id,
+                    CurrentFlag = currentFlags.GetValueOrDefault(s.Id),
+                    SnapshotAvailable = !byoc && !string.IsNullOrEmpty(s.SnapshotBlobKey),
+                    ChangedFileCount = byoc ? null : ChangedCount(s),
+                    SelfHosted = byoc
+                };
             }).ToList()
         }).ToList();
 
@@ -185,7 +197,11 @@ public class AdAdminController(
             IsEnabled = c.IsEnabled,
             TickSeconds = gameTickSeconds,
             FlagLifetimeTicks = gameFlagLifetimeTicks,
-            TeamsWithLiveContainer = services.Count(s => s.ChallengeId == c.Id && s.ContainerId is not null)
+            // Self-hosted relays are always up, so they aren't a "live service"
+            // signal — exclude them; the per-cell SLA status is the real indicator.
+            TeamsWithLiveContainer = c.AdSelfHosted
+                ? 0
+                : services.Count(s => s.ChallengeId == c.Id && s.ContainerId is not null)
         }).ToList();
 
         return Ok(new AdGameStateModel
@@ -632,6 +648,13 @@ public class AdAdminController(
             .Include(t => t.Container)
             .FirstOrDefaultAsync(t => t.Id == adTeamServiceId, token);
         if (ts is null || ts.Participation.GameId != id) return NotFound();
+
+        // BYOC (self-hosted): ts.Container is the tunnel relay, not the team's
+        // service (off-platform). Reading files from the relay returns relay
+        // internals (and could expose its env) labelled as the service's — refuse.
+        if (ts.Challenge.AdSelfHosted)
+            return BadRequest(new RequestResponse(
+                "Self-hosted (BYOC) challenge — the team's service runs off-platform; only the relay is here, so its files aren't viewable."));
 
         var sp = HttpContext.RequestServices;
         var current = await adContainerManager.ReadCurrentFileBytesAsync(sp, ts, path, token);

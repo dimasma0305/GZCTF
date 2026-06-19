@@ -1724,6 +1724,16 @@ const AdOps: FC = () => {
                                     )}
                                   </Group>
                                 </Group>
+                                {cell.selfHosted && (
+                                  <Tooltip
+                                    label={t('admin.tooltip.ad_ops.self_hosted',
+                                      'Self-hosted (BYOC): the team runs the service on their own machine. There is no GZCTF container to shell into, snapshot, or read files from — only the SLA status is meaningful.')}
+                                  >
+                                    <Badge size="xs" color="grape" variant="light" style={{ width: 'fit-content' }}>
+                                      {t('admin.content.ad_ops.self_hosted', 'self-hosted')}
+                                    </Badge>
+                                  </Tooltip>
+                                )}
                                 {cell.containerIp && (
                                   <CopyButton value={`${cell.containerIp}:${cell.containerPort ?? ''}`}>
                                     {({ copied, copy }) => (
