@@ -2001,6 +2001,19 @@ public sealed class AdContainerManager(
             // rotating flag is PUSHED to its flag port each tick (AdRoundService),
             // not bind-mounted (the real container is off-platform).
             var svcPort = challenge.ExposePort ?? 80;
+            // The relay binds the service port AND the control/flag ports inside the
+            // same container. If the challenge's service port collides with one of
+            // those, the relay's second bind hits "address in use" and the process
+            // exits (log.Fatalf) — the reconciler then relaunches it every tick, i.e.
+            // a self-hosted container that "keeps spawning". Refuse instead so the
+            // operator sees the misconfig instead of a silent crash-loop.
+            if (svcPort is ByocCtlPort or ByocFlagPort)
+            {
+                logger.SystemLog(
+                    $"A&D self-hosted challenge {challenge.Id}: service port {svcPort} collides with the BYOC relay's control/flag port ({ByocCtlPort}/{ByocFlagPort}); pick a different ExposePort. Skipping relay launch.",
+                    TaskStatus.Failed, LogLevel.Warning);
+                return;
+            }
             // Secret authenticating GZCTF to the relay's control + flag ports —
             // those sit on the shared challenge bridge a compromised jeopardy
             // container can also reach, so they aren't trusted by network position.
