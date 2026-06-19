@@ -334,9 +334,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) :
                 .HasConversion<byte>()
                 .HasDefaultValue(NetworkMode.Open);
 
+            // Flags belong to the challenge — delete them with it. Without an explicit
+            // OnDelete, EF leaves this optional FK at NO ACTION, so any delete path that
+            // doesn't first remove the flags (only RemoveChallenge's LoadFlags+RemoveRange
+            // currently does) hits Postgres 23503. Cascade makes the DB enforce it,
+            // matching FirstSolves below + the SuspicionEvents fix (documented FK gotcha).
             entity.HasMany(e => e.Flags)
                 .WithOne(e => e.Challenge)
-                .HasForeignKey(e => e.ChallengeId);
+                .HasForeignKey(e => e.ChallengeId)
+                .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasMany(e => e.Submissions)
                 .WithOne(e => e.GameChallenge)
@@ -397,7 +403,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) :
 
             entity.HasMany(e => e.Flags)
                 .WithOne(e => e.Exercise)
-                .HasForeignKey(e => e.ExerciseId);
+                .HasForeignKey(e => e.ExerciseId)
+                .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasOne(e => e.TestContainer)
                 .WithMany()

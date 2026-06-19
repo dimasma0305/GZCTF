@@ -81,6 +81,7 @@ const About: FC = () => {
                 <Anchor
                   href="https://gzctf.gzti.me"
                   target="_blank"
+                  rel="noreferrer"
                   c={theme.primaryColor}
                   size="md"
                   fw={500}
@@ -95,6 +96,7 @@ const About: FC = () => {
                 <Anchor
                   href={repo}
                   target="_blank"
+                  rel="noreferrer"
                   c={theme.primaryColor}
                   size="md"
                   fw={500}
@@ -112,6 +114,7 @@ const About: FC = () => {
                   <Anchor
                     href="https://www.gnu.org/licenses/agpl-3.0.html"
                     target="_blank"
+                    rel="noreferrer"
                     c={theme.primaryColor}
                     size="md"
                     fw={500}
@@ -130,6 +133,7 @@ const About: FC = () => {
                   <Anchor
                     href="https://github.com/GZTimeWalker/GZCTF/blob/develop/license/LicenseRef-GZCTF-Restricted.txt"
                     target="_blank"
+                    rel="noreferrer"
                     c={theme.primaryColor}
                     size="sm"
                     fw={500}
@@ -165,6 +169,7 @@ const About: FC = () => {
                           <Anchor
                             href={contributor.html_url}
                             target="_blank"
+                            rel="noreferrer"
                             c={theme.primaryColor}
                             size="sm"
                             fw={500}
@@ -212,6 +217,7 @@ const About: FC = () => {
             <Anchor
               href="https://github.com/GZTimeWalker"
               target="_blank"
+              rel="noreferrer"
               c="dimmed"
               size="sm"
               fw={500}
