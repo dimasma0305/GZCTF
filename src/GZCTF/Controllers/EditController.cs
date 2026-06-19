@@ -1834,7 +1834,14 @@ public class EditController(
         {
             attachmentBlobSrcPath = GZCTF.Storage.Interface.StoragePath.Combine(
                 GZCTF.Utils.PathHelper.Uploads, lf.Location, lf.Hash);
-            attachmentRelPath = $"{relDir}/{lf.Name}";
+            // LocalFile.Name is partly user-controlled (e.g. the AssetsController
+            // ?filename= upload param stores it raw), and this path is written with
+            // File.Create(Path.Combine(repoDir, attachmentRelPath)) below — so a name
+            // like "../../../x" would escape the repo. Flatten it to a bare filename.
+            var safeName = System.IO.Path.GetFileName(lf.Name);
+            if (string.IsNullOrWhiteSpace(safeName))
+                safeName = "attachment";
+            attachmentRelPath = $"{relDir}/{safeName}";
         }
 
         var commitMsg = $"feat(submit): approve user-submitted challenge {ch.Title}";
