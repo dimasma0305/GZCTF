@@ -1,4 +1,5 @@
-﻿using System.Security.Cryptography;
+﻿using System.Collections.Concurrent;
+using System.Security.Cryptography;
 using System.Text;
 using GZCTF.Extensions;
 using GZCTF.Models.Internal;
@@ -116,6 +117,12 @@ public sealed class HashPow(IOptionsSnapshot<CaptchaConfig> options, IDistribute
 {
     private const int AnswerLength = 8;
 
+    // Serialize verify-and-consume per challenge id so a single solved PoW can't be
+    // reused by N concurrent requests (get-then-remove on IDistributedCache isn't
+    // atomic). In-process — sufficient for a single instance; a multi-instance
+    // deployment would also want an atomic Redis GETDEL / distributed lock.
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> _verifyLocks = new();
+
     public override async Task<bool> VerifyAsync(ModelWithCaptcha model, HttpContext context,
         CancellationToken token = default)
     {
@@ -132,21 +139,30 @@ public sealed class HashPow(IOptionsSnapshot<CaptchaConfig> options, IDistribute
             return false;
 
         var key = CacheKey.HashPow(id);
-        var challenge = await cache.GetAsync(key, token);
-        if (challenge is null)
-            return false;
+        var sem = _verifyLocks.GetOrAdd(id, _ => new SemaphoreSlim(1, 1));
+        await sem.WaitAsync(token);
+        try
+        {
+            var challenge = await cache.GetAsync(key, token);
+            if (challenge is null)
+                return false; // already consumed (or expired) — single-use enforced
 
-        Span<byte> span = stackalloc byte[challenge.Length + AnswerLength];
-        challenge.CopyTo(span);
-        Convert.FromHexString(ans).CopyTo(span[challenge.Length..]);
+            Span<byte> span = stackalloc byte[challenge.Length + AnswerLength];
+            challenge.CopyTo(span);
+            Convert.FromHexString(ans).CopyTo(span[challenge.Length..]);
 
-        var leadingZeros = SHA256.HashData(span).LeadingZeros();
+            var leadingZeros = SHA256.HashData(span).LeadingZeros();
+            var result = leadingZeros >= Config.HashPow.Difficulty;
+            if (result)
+                await cache.RemoveAsync(key, token); // consume so it can't be replayed
 
-        var result = leadingZeros >= Config.HashPow.Difficulty;
-        if (result)
-            await cache.RemoveAsync(key, token);
-
-        return result;
+            return result;
+        }
+        finally
+        {
+            sem.Release();
+            _verifyLocks.TryRemove(id, out _);
+        }
     }
 }
 

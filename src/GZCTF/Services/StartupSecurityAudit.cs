@@ -64,6 +64,21 @@ public sealed class StartupSecurityAudit(
                     "on Kubernetes. Set it to an IP:port the pods can reach.");
         }
 
+        // 4. AllowedHosts unset / "*" → Host-header injection. Email links (password
+        //    reset / verification) and the BYOC setup script use the request Host, so
+        //    a spoofed Host header can phish users or mis-point a team's agent. Behind
+        //    a Host-routing reverse proxy (which only forwards your domain) this is
+        //    already moot; a DIRECT-facing server should pin AllowedHosts.
+        var allowedHosts = configuration["AllowedHosts"];
+        if (string.IsNullOrWhiteSpace(allowedHosts)
+            || allowedHosts.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Any(h => h == "*"))
+            findings.Add(
+                "AllowedHosts is unset or \"*\" — email links and the BYOC setup script trust the request Host, so " +
+                "a spoofed Host header can phish users / mis-point team agents. If this server is directly " +
+                "internet-facing (not behind a Host-routing reverse proxy), set AllowedHosts to your public " +
+                "host(s), e.g. AllowedHosts=ctf.example.com.");
+
         if (findings.Count == 0)
         {
             logger.SystemLog("Startup security audit: no config issues detected.", TaskStatus.Success, LogLevel.Information);

@@ -29,6 +29,13 @@ services:
       # behind a TLS-terminating proxy. X-Forwarded-Proto is honoured if the proxy sends
       # it; this is the fallback when it doesn't. Set to http only for a plain-HTTP host.
       - PublicScheme=https
+      # Host-header allowlist (ASP.NET Core host filtering). Email links + the BYOC
+      # setup script trust the request Host, so a direct-facing server should pin
+      # this to its public host(s) to block Host-header injection / phishing, e.g.
+      # ALLOWED_HOSTS=ctf.example.com. Default "*" is safe ONLY behind a reverse
+      # proxy that routes by Host (it already drops spoofed Hosts). Semicolon list;
+      # include the internal name (e.g. gzctf) if other containers call this over HTTP.
+      - AllowedHosts=${ALLOWED_HOSTS:-*}
       # --- External OAuth login (Google / Discord) ---
       # Primary path: configure these in the admin UI at /admin/settings -> OAuth
       # (DB-backed, secrets obfuscated, applies live without a restart). A provider's

@@ -257,14 +257,28 @@ public class AdAdminController(
             .ToDictionary(t => t.ChallengeId);
 
         // Latest persisted control result per hill → current king + functional verdict.
+        // Batched: one query for the max round per hill, one to fetch those rows —
+        // not a query per hill (was N+1 over the KotH challenge count).
+        var maxRoundByHill = await db.KothControlResults
+            .Where(r => hillIds.Contains(r.ChallengeId))
+            .GroupBy(r => r.ChallengeId)
+            .Select(g => new { ChallengeId = g.Key, MaxRound = g.Max(r => r.AdRoundId) })
+            .ToDictionaryAsync(g => g.ChallengeId, g => g.MaxRound, token);
+
+        var maxRoundIds = maxRoundByHill.Values.Distinct().ToList();
+        var latestRows = maxRoundIds.Count == 0
+            ? []
+            : await db.KothControlResults
+                .Where(r => hillIds.Contains(r.ChallengeId) && maxRoundIds.Contains(r.AdRoundId))
+                .Select(r => new { r.ChallengeId, r.AdRoundId, r.ControllingParticipationId, r.Status })
+                .ToListAsync(token);
+
         var latestByHill = new Dictionary<int, (int? Holder, AdCheckStatus? Status)>();
         foreach (var hid in hillIds)
         {
-            var row = await db.KothControlResults
-                .Where(r => r.ChallengeId == hid)
-                .OrderByDescending(r => r.AdRoundId)
-                .Select(r => new { r.ControllingParticipationId, r.Status })
-                .FirstOrDefaultAsync(token);
+            var row = maxRoundByHill.TryGetValue(hid, out var mr)
+                ? latestRows.FirstOrDefault(r => r.ChallengeId == hid && r.AdRoundId == mr)
+                : null;
             latestByHill[hid] = (row?.ControllingParticipationId, (AdCheckStatus?)row?.Status);
         }
 
