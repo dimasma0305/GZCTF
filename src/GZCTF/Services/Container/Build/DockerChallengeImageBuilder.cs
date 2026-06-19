@@ -146,7 +146,7 @@ public sealed class DockerChallengeImageBuilder(
                 if (lastError is not null)
                 {
                     logger.LogWarning("BuildAsync: build failed for {Tag}: {Err}", tag, lastError);
-                    return new ChallengeBuildResult(false, null, null, logTail.ToString(), lastError);
+                    return new ChallengeBuildResult(false, null, null, Snapshot(logTail), lastError);
                 }
 
                 // Confirm the image actually exists and grab a digest.
@@ -183,7 +183,7 @@ public sealed class DockerChallengeImageBuilder(
                     // TryPushAsync wrote the failure into logTail before
                     // returning null; surface it as a build failure so the
                     // operator sees what went wrong.
-                    return new ChallengeBuildResult(false, null, null, logTail.ToString(),
+                    return new ChallengeBuildResult(false, null, null, Snapshot(logTail),
                         "Registry push failed — see build log for details.");
                 }
                 returnedTag = pushed;
@@ -200,7 +200,7 @@ public sealed class DockerChallengeImageBuilder(
             // later gets pruned out from under a running game (self-heal).
             PersistBuildContext(req.GameId, slug, digest[..12], contextTar, req.Dockerfile);
 
-            return new ChallengeBuildResult(true, returnedTag, imageId, logTail.ToString(), null);
+            return new ChallengeBuildResult(true, returnedTag, imageId, Snapshot(logTail), null);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
@@ -314,7 +314,7 @@ public sealed class DockerChallengeImageBuilder(
             logger.SystemLog($"Self-heal: restored image {imageTag}", TaskStatus.Success, LogLevel.Information);
         else
             logger.LogWarning("Self-heal: rebuild of {Tag} failed: {Log}", imageTag,
-                logTail.Length > 0 ? logTail.ToString() : "(no output)");
+                Snapshot(logTail) is { Length: > 0 } tail ? tail : "(no output)");
         return ok;
     }
 
@@ -700,9 +700,26 @@ public sealed class DockerChallengeImageBuilder(
     static void AppendTail(StringBuilder sb, string line)
     {
         line = ScrubSecrets(line);
-        sb.Append(line);
-        if (sb.Length > LogTailBytes)
-            sb.Remove(0, sb.Length - LogTailBytes);
+        // Docker's Progress<JSONMessage> dispatches callbacks on the thread pool with
+        // no ordering or mutual exclusion, so a fast build/push streams many messages
+        // that hit this same StringBuilder concurrently. StringBuilder is NOT
+        // thread-safe — overlapping Append/Remove corrupts its internal chunk state
+        // and throws "Destination is too short", crashing the whole process (it
+        // surfaces as a flaky test-host crash in CI). Serialize mutations per builder.
+        lock (sb)
+        {
+            sb.Append(line);
+            if (sb.Length > LogTailBytes)
+                sb.Remove(0, sb.Length - LogTailBytes);
+        }
+    }
+
+    // Read the accumulated tail under the same lock AppendTail takes, so a Progress
+    // callback still in flight right after the build await can't tear it mid-ToString.
+    static string Snapshot(StringBuilder sb)
+    {
+        lock (sb)
+            return sb.ToString();
     }
 
     internal static string NormalizeSlug(string s)
