@@ -4,6 +4,7 @@ import { Marked } from 'marked'
 import { forwardRef, useMemo, Suspense, FC } from 'react'
 import { KatexExtension } from '@Utils/marked/KatexExtension'
 import { ShikiExtension } from '@Utils/marked/ShikiExtension'
+import { sanitizeMarkdownHtml } from '@Utils/sanitize'
 import classes from '@Styles/Typography.module.css'
 
 export interface MarkdownProps extends React.ComponentPropsWithoutRef<'div'> {
@@ -29,7 +30,7 @@ export const InlineMarkdown = forwardRef<HTMLParagraphElement, InlineMarkdownPro
       {...others}
       className={classes.inline}
       dangerouslySetInnerHTML={{
-        __html: inlineMarked.parseInline(source) ?? '',
+        __html: sanitizeMarkdownHtml((inlineMarked.parseInline(source) as string) ?? ''),
       }}
     />
   )
@@ -57,9 +58,12 @@ const MarkdownRenderer: FC<Pick<MarkdownProps, 'source'>> = (props) => {
     return instance
   }, [])
 
-  const html = useMemo(() => marked.parse(source), [marked, source])
+  const html = useMemo(
+    () => sanitizeMarkdownHtml((marked.parse(source) as string) ?? ''),
+    [marked, source]
+  )
 
-  return <div className={classes.root} dangerouslySetInnerHTML={{ __html: html ?? '' }} />
+  return <div className={classes.root} dangerouslySetInnerHTML={{ __html: html }} />
 }
 
 export const Markdown = forwardRef<HTMLDivElement, MarkdownProps>((props, ref) => {
