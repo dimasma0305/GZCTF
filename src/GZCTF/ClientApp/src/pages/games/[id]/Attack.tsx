@@ -1485,7 +1485,12 @@ function runArena(root: ShadowRoot, gameId: string, preview: boolean): () => voi
     const ch = (jp && jp.challenges) || {}
     const out: JeopCategory[] = []
     Object.keys(ch).forEach((catName) => {
-      const list = (ch[catName] || []).filter((c: any) => !adIds.has(c.id))
+      // Jeopardy stars only: drop A&D + KotH challenges. The jeopardy scoreboard
+      // payload carries every enabled challenge, so without the type filter KotH
+      // hills (which aren't in the A&D-board adIds set) leak in as jeopardy stars.
+      const list = (ch[catName] || []).filter(
+        (c: any) => !adIds.has(c.id) && c.type !== 'AttackDefense' && c.type !== 'KingOfTheHill'
+      )
       if (!list.length) return
       out.push({
         id: catName, name: catName.toUpperCase(), color: CATEGORY_COLOR[catName] || '#7fd7ff',
