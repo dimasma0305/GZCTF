@@ -358,6 +358,12 @@ public partial class AccountController
             return null;
 
         var currentIp = HttpContext.Connection.RemoteIpAddress;
+        // Normalize IPv4-mapped IPv6 so the uniqueness check can't be evaded by a
+        // dual-stack client (192.168.1.1 vs ::ffff:192.168.1.1 are the same host);
+        // both sides of the compare below are normalized. Matches the IP handling
+        // in the cheat detectors / proxy / rate limiter.
+        if (currentIp is { IsIPv4MappedToIPv6: true })
+            currentIp = currentIp.MapToIPv4();
         var since = DateTimeOffset.UtcNow.AddHours(-24);
         var anyGlobal = policy.RequireUniqueIpGlobal || policy.RequireUniqueFingerprintGlobal;
         var candidates = await userManager.Users
@@ -375,7 +381,8 @@ public partial class AccountController
         {
             // Global → any user with this IP; per-team only → restrict to teammates.
             var conflict = candidates.FirstOrDefault(t =>
-                t.IP is not null && t.IP.Equals(currentIp)
+                t.IP is not null
+                && (t.IP.IsIPv4MappedToIPv6 ? t.IP.MapToIPv4() : t.IP).Equals(currentIp)
                 && (policy.RequireUniqueIpGlobal || t.IsTeammate));
             if (conflict is not null)
             {

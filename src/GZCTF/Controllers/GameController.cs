@@ -1139,23 +1139,39 @@ public class GameController(
             return BadRequest(
                 new RequestResponse(localizer[nameof(Resources.Program.Game_Ended)], ErrorCodes.GameEnded));
 
-        var scoreboard = await gameRepository.TryGetScoreboard(id, token);
-        string eTag;
-        if (scoreboard is not null)
-        {
-            eTag = GameETag(id, scoreboard.UpdateTimeUtc);
-            if (ContextHelper.IsNotModified(Request, Response, eTag, scoreboard.UpdateTimeUtc, true))
-                return StatusCode(StatusCodes.Status304NotModified);
-        }
-
+        // Context first so we can honor the ICPC freeze for non-monitors (sibling of
+        // the Scoreboard + GetChallengeSolvers gates): the live board this endpoint
+        // returns includes post-freeze SolvedCount + bloods that the frozen board hides.
         var context = await GetContextInfo(id, token: token);
 
         if (context.Result is not null)
             return context.Result;
 
-        scoreboard ??= await gameRepository.GetScoreboard(context.Game!, token);
+        var game = context.Game!;
+        var now = DateTimeOffset.UtcNow;
+        var isMonitor = await ContextHelper.HasMonitor(HttpContext);
+        var isFrozenView = !isMonitor
+                           && game.FreezeTimeUtc is { } freeze
+                           && now >= freeze
+                           && now < game.EndTimeUtc;
+        Response.Headers.Append("Vary", "Cookie");
+
+        var scoreboard = isFrozenView
+            ? await gameRepository.TryGetFrozenScoreboard(id, token)
+            : await gameRepository.TryGetScoreboard(id, token);
+        string eTag;
+        if (scoreboard is not null)
+        {
+            eTag = GameETag(id, scoreboard.UpdateTimeUtc, isFrozenView);
+            if (ContextHelper.IsNotModified(Request, Response, eTag, scoreboard.UpdateTimeUtc, true))
+                return StatusCode(StatusCodes.Status304NotModified);
+        }
+
+        scoreboard ??= isFrozenView
+            ? await gameRepository.GetFrozenScoreboard(game, token)
+            : await gameRepository.GetScoreboard(game, token);
         var lastModified = scoreboard.UpdateTimeUtc;
-        eTag = GameETag(context.Game!.Id, lastModified);
+        eTag = GameETag(game.Id, lastModified, isFrozenView);
         ContextHelper.SetCacheHeaders(Response, eTag, lastModified, true);
 
         var challenges = scoreboard.Challenges;
