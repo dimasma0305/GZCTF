@@ -77,6 +77,58 @@ public sealed class AdContainerManager(
     internal const int ByocCtlPort = 47000;
     internal const int ByocFlagPort = 47001;
 
+    // Per-image lock for the BYOC service-image download cache, so a 200-300 MB
+    // `docker save` runs once per image (immutable digest tag), not once per team
+    // request, against the daemon that is also running the live game.
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> _byocImageLocks = new();
+
+    /// <summary>
+    /// Stream the challenge's service image (the real vulnerable container) to a
+    /// cached <c>docker save</c> tarball on disk and return its path, so a BYOC
+    /// team can <c>docker load</c> it instead of building anything. Cached by image
+    /// ref (digest-tagged, immutable); a per-image lock serializes the first save.
+    /// Returns null on K8s / no Docker provider or if the image is missing.
+    /// </summary>
+    public async Task<string?> GetChallengeImageTarballAsync(string imageRef, CancellationToken token)
+    {
+        var hash = Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(imageRef)))[..32];
+        var path = Path.Combine(Path.GetTempPath(), $"byoc-img-{hash}.tar");
+        if (File.Exists(path) && new FileInfo(path).Length > 0)
+            return path;
+
+        var sem = _byocImageLocks.GetOrAdd(imageRef, _ => new SemaphoreSlim(1, 1));
+        await sem.WaitAsync(token);
+        try
+        {
+            if (File.Exists(path) && new FileInfo(path).Length > 0)
+                return path;
+
+            using var scope = scopeFactory.CreateScope();
+            var dockerProvider = scope.ServiceProvider.GetService<IContainerProvider<DockerClient, DockerMetadata>>();
+            if (dockerProvider is null)
+                return null; // K8s — no local docker save
+
+            var tmp = path + ".tmp";
+            try
+            {
+                await using var imageStream = await dockerProvider.GetProvider().Images.SaveImageAsync(imageRef, token);
+                await using (var f = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None,
+                                 81920, useAsync: true))
+                    await imageStream.CopyToAsync(f, token);
+                File.Move(tmp, path, overwrite: true);
+                return path;
+            }
+            catch (Exception e)
+            {
+                logger.LogWarning(e, "BYOC image export failed for {Image}", imageRef);
+                try { if (File.Exists(tmp)) File.Delete(tmp); } catch { /* best effort */ }
+                return null;
+            }
+        }
+        finally { sem.Release(); }
+    }
+
     // Per-(participation, challenge) lock serializing all create/move/destroy
     // for a single service, so the reconcile loop, the accept-time ensure, and
     // self-reset/force-restart can't race into double-launches or orphans.

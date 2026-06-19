@@ -250,20 +250,36 @@ export const AdChallengePanel: FC<AdChallengePanelProps> = ({ gameId, challengeI
             <Text size="xs">
               {t(
                 'game.content.ad.byoc.description',
-                'Self-hosted challenge — run it on your own machine. Download the compose and run `docker compose up` — it works out of the box (your status goes green), then swap in your real service. One outbound connection; no public IP, inbound firewall, or VPN needed.'
+                'Self-hosted challenge — run it on your own machine, one command. Download setup.sh and run `sh setup.sh`: it pulls the real service from the game server and connects it. No build, no public IP, inbound firewall, or VPN needed — just one outbound connection.'
               )}
             </Text>
-            <Button
-              component="a"
-              href={`/api/Game/${gameId}/Ad/Byoc/Setup/${challengeId}`}
-              download
-              size="compact-xs"
-              variant="light"
-              w="fit-content"
-              leftSection={<Icon path={mdiDownload} size={0.7} />}
-            >
-              {t('game.button.ad.byoc.download', 'Download docker-compose.yml')}
-            </Button>
+            <Group gap="xs">
+              <Button
+                component="a"
+                href={`/api/Game/${gameId}/Ad/Byoc/Setup/${challengeId}`}
+                download
+                size="compact-xs"
+                variant="light"
+                leftSection={<Icon path={mdiDownload} size={0.7} />}
+              >
+                {t('game.button.ad.byoc.download', 'Download setup.sh')}
+              </Button>
+              <Tooltip
+                label={t('game.tooltip.ad.byoc.byo',
+                  'Prefer to run your own modified service instead of the one we ship? Get a docker-compose to fill in.')}
+              >
+                <Button
+                  component="a"
+                  href={`/api/Game/${gameId}/Ad/Byoc/Compose/${challengeId}`}
+                  download
+                  size="compact-xs"
+                  variant="subtle"
+                  color="gray"
+                >
+                  {t('game.button.ad.byoc.byo', 'Bring your own service')}
+                </Button>
+              </Tooltip>
+            </Group>
           </Stack>
         </Alert>
       )}

@@ -359,22 +359,161 @@ public class AdGameController(
 
         var chal = await db.GameChallenges
             .Where(c => c.Id == challengeId && c.GameId == id && c.AdSelfHosted && c.IsEnabled)
+            .Select(c => new { c.Title, c.ExposePort, c.ContainerImage })
+            .FirstOrDefaultAsync(cancelToken);
+        if (chal is null)
+            return NotFound(new RequestResponse("no such self-hosted challenge in this game"));
+
+        var key = configService.GetXorKey();
+        var svcPort = chal.ExposePort ?? 80;
+        var wsScheme = Request.IsHttps ? "wss" : "ws";
+        var httpScheme = Request.IsHttps ? "https" : "http";
+        var tunnelUrl = $"{wsScheme}://{Request.Host}/api/Game/{id}/Ad/Byoc/Agent/{part.Id}/{challengeId}/" +
+            AdTokenUtils.ByocAgentToken(part.Id, challengeId, key);
+        var agentImage = configuration["Ad:Byoc:AgentImage"];
+        if (string.IsNullOrWhiteSpace(agentImage))
+            agentImage = AdContainerManager.ByocRelayImage;
+
+        // If the challenge ships a service image, hand the team a one-command
+        // setup.sh that pulls THAT real image from us and runs it — no placeholder,
+        // no build. If there's no image (pure bring-your-own), fall back to the
+        // out-of-the-box compose with a placeholder service.
+        if (!string.IsNullOrWhiteSpace(chal.ContainerImage))
+        {
+            var imageUrl = $"{httpScheme}://{Request.Host}/api/Game/{id}/Ad/Byoc/Image/{part.Id}/{challengeId}/" +
+                AdTokenUtils.ByocImageToken(part.Id, challengeId, key);
+            var script = BuildByocSetupScript(
+                id, challengeId, chal.Title, chal.ContainerImage, svcPort, imageUrl, tunnelUrl, agentImage);
+            return File(System.Text.Encoding.UTF8.GetBytes(script), "application/x-sh", "setup.sh");
+        }
+
+        var compose = BuildByocCompose(chal.Title, svcPort, tunnelUrl, agentImage);
+        return File(System.Text.Encoding.UTF8.GetBytes(compose), "application/yaml", "docker-compose.yml");
+    }
+
+    /// <summary>
+    /// Stream the challenge's real service image (a <c>docker save</c> tarball) to
+    /// the team's setup script, so they <c>docker load</c> the exact vulnerable
+    /// service instead of building one. Token-authed (no flags are in the image —
+    /// they're delivered at runtime), validated BEFORE the export starts.
+    /// </summary>
+    [HttpGet("Byoc/Image/{participationId:int}/{challengeId:int}/{token}")]
+    [AllowAnonymous]
+    [EnableRateLimiting(nameof(RateLimiter.LimitPolicy.Concurrency))]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> ByocImage(int id, int participationId, int challengeId, string token,
+        CancellationToken cancelToken)
+    {
+        var expected = AdTokenUtils.Hash($"adbyocimage:{participationId}:{challengeId}", configService.GetXorKey());
+        byte[] presented;
+        try { presented = Convert.FromHexString(token); }
+        catch { return Unauthorized(); }
+        if (!CryptographicOperations.FixedTimeEquals(expected, presented))
+            return Unauthorized();
+
+        var partInGame = await db.Participations.AnyAsync(p => p.Id == participationId && p.GameId == id, cancelToken);
+        if (!partInGame)
+            return NotFound();
+
+        var image = await db.GameChallenges
+            .Where(c => c.Id == challengeId && c.GameId == id && c.AdSelfHosted && c.IsEnabled)
+            .Select(c => c.ContainerImage)
+            .FirstOrDefaultAsync(cancelToken);
+        if (string.IsNullOrWhiteSpace(image))
+            return NotFound();
+
+        var path = await adContainerManager.GetChallengeImageTarballAsync(image, cancelToken);
+        if (path is null)
+            return NotFound(new RequestResponse("service image is not available for download"));
+        return PhysicalFile(path, "application/x-tar", "service-image.tar", enableRangeProcessing: true);
+    }
+
+    /// <summary>
+    /// The bring-your-own-service compose (placeholder service that works out of
+    /// the box). For teams who want to run their OWN modified service rather than
+    /// the image we ship.
+    /// </summary>
+    [HttpGet("Byoc/Compose/{challengeId:int}")]
+    [RequireUser]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> ByocComposeBringYourOwn(int id, int challengeId, CancellationToken cancelToken)
+    {
+        var part = await ResolveUserParticipationAsync(id, cancelToken);
+        if (part is null)
+            return Unauthorized(new RequestResponse(
+                "not an accepted member of this game", StatusCodes.Status401Unauthorized));
+
+        var chal = await db.GameChallenges
+            .Where(c => c.Id == challengeId && c.GameId == id && c.AdSelfHosted && c.IsEnabled)
             .Select(c => new { c.Title, c.ExposePort })
             .FirstOrDefaultAsync(cancelToken);
         if (chal is null)
             return NotFound(new RequestResponse("no such self-hosted challenge in this game"));
 
         var svcPort = chal.ExposePort ?? 80;
-        var tokenStr = AdTokenUtils.ByocAgentToken(part.Id, challengeId, configService.GetXorKey());
-        var scheme = Request.IsHttps ? "wss" : "ws";
-        var tunnelUrl =
-            $"{scheme}://{Request.Host}/api/Game/{id}/Ad/Byoc/Agent/{part.Id}/{challengeId}/{tokenStr}";
+        var wsScheme = Request.IsHttps ? "wss" : "ws";
+        var tunnelUrl = $"{wsScheme}://{Request.Host}/api/Game/{id}/Ad/Byoc/Agent/{part.Id}/{challengeId}/" +
+            AdTokenUtils.ByocAgentToken(part.Id, challengeId, configService.GetXorKey());
         var agentImage = configuration["Ad:Byoc:AgentImage"];
         if (string.IsNullOrWhiteSpace(agentImage))
             agentImage = AdContainerManager.ByocRelayImage;
 
         var compose = BuildByocCompose(chal.Title, svcPort, tunnelUrl, agentImage);
         return File(System.Text.Encoding.UTF8.GetBytes(compose), "application/yaml", "docker-compose.yml");
+    }
+
+    /// <summary>
+    /// One-command installer: pull the real service image from us, write the
+    /// compose (service + tunnel agent, flag delivered to GZCTF_FLAG_FILE), and
+    /// start. No placeholder, no build — the team gets the exact vulnerable service.
+    /// </summary>
+    private static string BuildByocSetupScript(int gameId, int challengeId, string title, string containerImage,
+        int svcPort, string imageUrl, string tunnelUrl, string agentImage)
+    {
+        var safeTitle = title.Replace('\n', ' ').Replace('\r', ' ').Replace("'", "");
+        return string.Join('\n', new[]
+        {
+            "#!/bin/sh",
+            $"# GZCTF Attack & Defense — self-hosted setup for \"{safeTitle}\"",
+            "# Run it:  sh setup.sh        (needs docker + docker compose)",
+            "set -e",
+            $"DIR=\"gzctf-byoc-{gameId}-{challengeId}\"",
+            "mkdir -p \"$DIR\" && cd \"$DIR\"",
+            "echo '[1/3] Downloading your service image from the game server...'",
+            $"curl -fSL \"{imageUrl}\" | docker load",
+            "echo '[2/3] Writing docker-compose.yml...'",
+            "cat > docker-compose.yml <<'COMPOSE'",
+            "services:",
+            "  # The real vulnerable service (just downloaded). Patch it to defend;",
+            "  # it reads its rotating flag from GZCTF_FLAG_FILE (we deliver it there).",
+            "  service:",
+            $"    image: {containerImage}",
+            "    restart: unless-stopped",
+            "    environment:",
+            "      GZCTF_FLAG_FILE: /shared/flag",
+            "    volumes:",
+            "      - flag:/shared:ro",
+            "  # The tunnel agent — public image, token baked in. Don't edit.",
+            "  gzctf-agent:",
+            $"    image: {agentImage}",
+            "    restart: unless-stopped",
+            "    environment:",
+            "      GZCTF_BYOC_MODE: agent",
+            $"      GZCTF_BYOC_TUNNEL_URL: \"{tunnelUrl}\"",
+            $"      GZCTF_BYOC_SERVICE: \"service:{svcPort}\"",
+            "      GZCTF_BYOC_FLAG_FILE: /shared/flag",
+            "    volumes:",
+            "      - flag:/shared",
+            "    depends_on:",
+            "      - service",
+            "volumes:",
+            "  flag:",
+            "COMPOSE",
+            "echo '[3/3] Starting...'",
+            "docker compose up -d",
+            "echo 'Done — your service is running and connected. Watch the platform; your status should go green within a tick.'",
+            ""
+        });
     }
 
     /// <summary>

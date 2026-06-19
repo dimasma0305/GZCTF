@@ -81,4 +81,14 @@ public static class AdTokenUtils
     /// </summary>
     public static string ByocRelaySecret(int participationId, int challengeId, byte[] key) =>
         Convert.ToHexString(Hash($"adbyocrelay:{participationId}:{challengeId}", key));
+
+    /// <summary>
+    /// Per-(participation, challenge) token for the BYOC service-image download
+    /// (<c>GET …/Ad/Byoc/Image/{pid}/{cid}/{token}</c>) — the team's headless
+    /// setup script fetches the real challenge image with it. Domain-separated
+    /// from the agent/tunnel token so a leaked image token can't hijack the
+    /// tunnel and vice versa.
+    /// </summary>
+    public static string ByocImageToken(int participationId, int challengeId, byte[] key) =>
+        Convert.ToHexString(Hash($"adbyocimage:{participationId}:{challengeId}", key));
 }
