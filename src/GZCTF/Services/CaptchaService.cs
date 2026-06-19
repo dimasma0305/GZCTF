@@ -1,5 +1,4 @@
-﻿using System.Collections.Concurrent;
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using GZCTF.Extensions;
 using GZCTF.Models.Internal;
@@ -117,11 +116,17 @@ public sealed class HashPow(IOptionsSnapshot<CaptchaConfig> options, IDistribute
 {
     private const int AnswerLength = 8;
 
-    // Serialize verify-and-consume per challenge id so a single solved PoW can't be
-    // reused by N concurrent requests (get-then-remove on IDistributedCache isn't
-    // atomic). In-process — sufficient for a single instance; a multi-instance
-    // deployment would also want an atomic Redis GETDEL / distributed lock.
-    private static readonly ConcurrentDictionary<string, SemaphoreSlim> _verifyLocks = new();
+    // Fixed striped locks serialize verify-and-consume per challenge id so a single
+    // solved PoW can't be reused by N concurrent requests (get-then-remove on
+    // IDistributedCache isn't atomic). Striping (vs a per-id dictionary) keeps memory
+    // bounded — an attacker can't grow it by spraying unique ids — and removes the
+    // dict-cleanup race entirely (same id → same stripe; unrelated ids may share a
+    // stripe, which only adds harmless extra serialization). The cache removal stays
+    // the single-use source of truth. In-process: sufficient for one instance; a
+    // multi-instance deployment would also want an atomic Redis GETDEL.
+    private const int LockStripes = 256;
+    private static readonly SemaphoreSlim[] _verifyLocks =
+        Enumerable.Range(0, LockStripes).Select(_ => new SemaphoreSlim(1, 1)).ToArray();
 
     public override async Task<bool> VerifyAsync(ModelWithCaptcha model, HttpContext context,
         CancellationToken token = default)
@@ -139,7 +144,7 @@ public sealed class HashPow(IOptionsSnapshot<CaptchaConfig> options, IDistribute
             return false;
 
         var key = CacheKey.HashPow(id);
-        var sem = _verifyLocks.GetOrAdd(id, _ => new SemaphoreSlim(1, 1));
+        var sem = _verifyLocks[(int)(unchecked((uint)id.GetHashCode()) % LockStripes)];
         await sem.WaitAsync(token);
         try
         {
@@ -161,7 +166,6 @@ public sealed class HashPow(IOptionsSnapshot<CaptchaConfig> options, IDistribute
         finally
         {
             sem.Release();
-            _verifyLocks.TryRemove(id, out _);
         }
     }
 }

@@ -41,6 +41,27 @@ func linkSessions(t *testing.T, service, flagFile string) *yamux.Session {
 	return server
 }
 
+// TestAuthenticateBoundedRead proves a pre-auth newline-flood (a long line with no
+// '\n') is rejected at the buffer budget instead of growing memory unbounded —
+// the relay can't be OOM'd by a peer on the shared bridge before the secret check.
+func TestAuthenticateBoundedRead(t *testing.T) {
+	r := &relay{secret: "s3cret"}
+	server, client := net.Pipe()
+	go func() {
+		buf := make([]byte, authLineBudget*4) // no newline anywhere
+		for i := range buf {
+			buf[i] = 'A'
+		}
+		_ = client.SetWriteDeadline(time.Now().Add(2 * time.Second))
+		_, _ = client.Write(buf)
+		_ = client.Close()
+	}()
+	if _, ok := r.authenticate(server); ok {
+		t.Fatal("newline-flood (no '\\n', > buffer budget) was accepted")
+	}
+	_ = server.Close()
+}
+
 // TestServiceStreamForwarding proves a relay 'S' stream reaches the team's local
 // service: the relay opens a service stream, the agent dials a local echo server,
 // and bytes round-trip.

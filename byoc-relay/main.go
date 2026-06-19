@@ -63,6 +63,18 @@ const (
 	serviceIdleLimit = 60 * time.Second
 )
 
+// Pre-auth hardening for the control + flag ports. They sit on the shared bridge,
+// so cap concurrent UNAUTHENTICATED handshakes and bound the secret line — a peer
+// can't OOM the thin relay with a connection storm or a newline-flood (a line with
+// no '\n') before the secret check. authLineBudget is far above the ~64-128 hex
+// secret; the slot is released as soon as the handshake completes.
+const (
+	maxAuthConns   = 128
+	authLineBudget = 512
+)
+
+var authSlots = make(chan struct{}, maxAuthConns)
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
 	mode := strings.ToLower(env("GZCTF_BYOC_MODE", ""))
@@ -145,14 +157,26 @@ func (b *bufConn) Read(p []byte) (int, error) { return b.r.Read(p) }
 // the relay's secret. Returns a reader positioned at the first post-secret byte
 // (preserving anything the bufio reader already buffered), or false on mismatch.
 func (r *relay) authenticate(c net.Conn) (*bufio.Reader, bool) {
+	// Bound concurrent unauthenticated handshakes; drop the excess immediately.
+	// The slot covers only the handshake (released on return), not the live tunnel.
+	select {
+	case authSlots <- struct{}{}:
+		defer func() { <-authSlots }()
+	default:
+		return nil, false
+	}
+
 	_ = c.SetReadDeadline(time.Now().Add(10 * time.Second))
-	br := bufio.NewReader(c)
-	line, err := br.ReadString('\n')
+	// Bounded buffer: ReadSlice returns ErrBufferFull (→ reject) once the secret
+	// line exceeds authLineBudget, so a no-newline flood can't grow memory unbounded
+	// (ReadString would chain fragments without limit).
+	br := bufio.NewReaderSize(c, authLineBudget)
+	line, err := br.ReadSlice('\n')
 	_ = c.SetReadDeadline(time.Time{})
 	if err != nil {
 		return nil, false
 	}
-	got := strings.TrimRight(line, "\r\n")
+	got := strings.TrimRight(string(line), "\r\n")
 	if subtle.ConstantTimeCompare([]byte(got), []byte(r.secret)) != 1 {
 		log.Printf("rejected %s: bad secret", c.RemoteAddr())
 		return nil, false
