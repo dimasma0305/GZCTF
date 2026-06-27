@@ -117,7 +117,11 @@ public sealed class AdContainerManager(
     {
         var hash = Convert.ToHexString(
             System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(imageRef)))[..32];
-        var path = Path.Combine(Path.GetTempPath(), $"byoc-img-{hash}.tar");
+        // .tar.gz, not .tar: `docker save` emits UNCOMPRESSED layer tars, which gzip
+        // ~2.5x (a 308MB image → ~120MB), so every team's download transfers less
+        // than half the bytes. `docker load` auto-detects the gzip magic, so the
+        // setup script's `curl … | docker load` is unchanged.
+        var path = Path.Combine(Path.GetTempPath(), $"byoc-img-{hash}.tar.gz");
         if (File.Exists(path) && new FileInfo(path).Length > 0)
             return path;
 
@@ -139,7 +143,9 @@ public sealed class AdContainerManager(
                 await using var imageStream = await dockerProvider.GetProvider().Images.SaveImageAsync(imageRef, token);
                 await using (var f = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None,
                                  81920, useAsync: true))
-                    await imageStream.CopyToAsync(f, token);
+                await using (var gz = new System.IO.Compression.GZipStream(f,
+                                 System.IO.Compression.CompressionLevel.Fastest))
+                    await imageStream.CopyToAsync(gz, token);
                 File.Move(tmp, path, overwrite: true);
                 return path;
             }

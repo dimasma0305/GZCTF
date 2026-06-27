@@ -440,7 +440,8 @@ public class AdGameController(
         var path = await adContainerManager.GetChallengeImageTarballAsync(image, cancelToken);
         if (path is null)
             return NotFound(new RequestResponse("service image is not available for download"));
-        return PhysicalFile(path, "application/x-tar", "service-image.tar", enableRangeProcessing: true);
+        // gzipped docker-save tar (~2.5x smaller); `docker load` auto-decompresses.
+        return PhysicalFile(path, "application/gzip", "service-image.tar.gz", enableRangeProcessing: true);
     }
 
     /// <summary>
