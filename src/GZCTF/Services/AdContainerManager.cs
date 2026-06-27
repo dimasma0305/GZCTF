@@ -128,6 +128,7 @@ public sealed class AdContainerManager(
             return path;
 
         var sem = _byocImageLocks.GetOrAdd(imageRef, _ => new SemaphoreSlim(1, 1));
+        logger.LogInformation("BYOC tarball: cache miss for {Image}, awaiting build lock", imageRef);
         await sem.WaitAsync(token);
         try
         {
@@ -139,6 +140,8 @@ public sealed class AdContainerManager(
             if (dockerProvider is null)
                 return null; // K8s — no local docker save
 
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            logger.LogInformation("BYOC tarball: building (export+gzip) for {Image}", imageRef);
             var tmp = path + ".tmp";
             try
             {
@@ -147,6 +150,8 @@ public sealed class AdContainerManager(
                 await using (var gz = new GZipStream(f, CompressionLevel.Fastest))
                     await StreamImageExportAsync(imageRef, gz, token);
                 File.Move(tmp, path, overwrite: true);
+                logger.LogInformation("BYOC tarball: built {Image} ({Bytes} bytes) in {Ms}ms",
+                    imageRef, new FileInfo(path).Length, sw.ElapsedMilliseconds);
                 return path;
             }
             catch (Exception e)
@@ -195,14 +200,33 @@ public sealed class AdContainerManager(
             requestUri = new Uri(new Uri(dockerUri!), $"/images/{imageRef}/get");
         }
 
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        logger.LogInformation("BYOC export: GET {Uri} (isUnix={IsUnix})", requestUri, isUnix);
         using (handler)
         using (var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan })
         using (var resp = await client.GetAsync(requestUri, HttpCompletionOption.ResponseHeadersRead, token))
         {
+            logger.LogInformation("BYOC export: {Code} headers in {Ms}ms for {Image}",
+                (int)resp.StatusCode, sw.ElapsedMilliseconds, imageRef);
             resp.EnsureSuccessStatusCode();
             await using var src = await resp.Content.ReadAsStreamAsync(token);
-            await src.CopyToAsync(destination, 1 << 20, token);
+            var copied = await CopyCountingAsync(src, destination, token);
+            logger.LogInformation("BYOC export: copied {Bytes} bytes in {Ms}ms for {Image}",
+                copied, sw.ElapsedMilliseconds, imageRef);
         }
+    }
+
+    private static async Task<long> CopyCountingAsync(Stream src, Stream dst, CancellationToken token)
+    {
+        var buf = new byte[1 << 20];
+        long total = 0;
+        int n;
+        while ((n = await src.ReadAsync(buf, token)) > 0)
+        {
+            await dst.WriteAsync(buf.AsMemory(0, n), token);
+            total += n;
+        }
+        return total;
     }
 
     // Per-(participation, challenge) lock serializing all create/move/destroy
