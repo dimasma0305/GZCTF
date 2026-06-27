@@ -212,7 +212,11 @@ public class AdGameController(
     /// </summary>
     [HttpGet("Byoc/Agent/{participationId:int}/{challengeId:int}/{token}")]
     [AllowAnonymous]
-    [EnableRateLimiting(nameof(RateLimiter.LimitPolicy.Concurrency))]
+    // NB: NO Concurrency limiter here. This is a long-lived tunnel WebSocket that
+    // holds its slot for the whole game, and the Concurrency policy is a SINGLE
+    // global permit (PermitLimit=1) — so one connected agent would block every other
+    // agent AND every Byoc image download (same policy) for the entire event. The
+    // token + per-relay secret already gate it.
     [ProducesResponseType(StatusCodes.Status101SwitchingProtocols)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> ByocAgent(int id, int participationId, int challengeId, string token,
@@ -414,7 +418,10 @@ public class AdGameController(
     /// </summary>
     [HttpGet("Byoc/Image/{participationId:int}/{challengeId:int}/{token}")]
     [AllowAnonymous]
-    [EnableRateLimiting(nameof(RateLimiter.LimitPolicy.Concurrency))]
+    // NO Concurrency limiter: it's a single global permit (PermitLimit=1) shared with
+    // the long-lived Byoc agent WebSocket, so a connected agent made every image
+    // download queue+hang for the whole game. The per-image save lock already
+    // serializes the heavy work; the token gates access; streaming is cheap.
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> ByocImage(int id, int participationId, int challengeId, string token,
         CancellationToken cancelToken)
