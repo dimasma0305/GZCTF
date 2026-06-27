@@ -1995,6 +1995,21 @@ public sealed class AdContainerManager(
         ContainerConfig config;
         if (challenge.AdSelfHosted)
         {
+            // Pre-warm the docker-save tarball cache as soon as the relay launches
+            // (game start / team accepted), so by the time a team runs its setup.sh
+            // the `curl … | docker load` streams a ready file instead of blocking
+            // while we save the (hundreds-of-MB) image cold. Idempotent + per-image
+            // lock-guarded; fire-and-forget so it never delays the relay launch.
+            if (!string.IsNullOrWhiteSpace(challenge.ContainerImage))
+            {
+                var imageRef = challenge.ContainerImage;
+                _ = Task.Run(async () =>
+                {
+                    try { await GetChallengeImageTarballAsync(imageRef, CancellationToken.None); }
+                    catch { /* best-effort warm; the download endpoint builds it on demand */ }
+                });
+            }
+
             // BYOC: launch the relay — the team's endpoint on the bridge — instead
             // of the challenge image. The relay forwards checker/attacker traffic
             // to the team's self-hosted service over the agent tunnel, and the

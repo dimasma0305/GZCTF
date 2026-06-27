@@ -380,6 +380,19 @@ public class AdGameController(
         // out-of-the-box compose with a placeholder service.
         if (!string.IsNullOrWhiteSpace(chal.ContainerImage))
         {
+            // Pre-warm the docker-save tarball cache in the background so the team's
+            // `curl … | docker load` in the setup script below hits a ready file and
+            // streams immediately, instead of blocking with 0 bytes while we save the
+            // (hundreds-of-MB) image cold. Idempotent + per-image-lock-guarded, and it
+            // creates its own scope, so it's safe to outlive this request (don't pass
+            // the request's cancelToken — that's cancelled when the response completes).
+            var imageRef = chal.ContainerImage;
+            _ = Task.Run(async () =>
+            {
+                try { await adContainerManager.GetChallengeImageTarballAsync(imageRef, CancellationToken.None); }
+                catch { /* best-effort warm; the download endpoint still builds it on demand */ }
+            });
+
             var imageUrl = $"{httpScheme}://{Request.Host}/api/Game/{id}/Ad/Byoc/Image/{part.Id}/{challengeId}/" +
                 AdTokenUtils.ByocImageToken(part.Id, challengeId, key);
             var script = BuildByocSetupScript(
