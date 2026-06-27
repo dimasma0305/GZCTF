@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Formats.Tar;
 using System.IO.Compression;
+using System.Net.Http;
+using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
@@ -140,12 +142,10 @@ public sealed class AdContainerManager(
             var tmp = path + ".tmp";
             try
             {
-                await using var imageStream = await dockerProvider.GetProvider().Images.SaveImageAsync(imageRef, token);
                 await using (var f = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None,
                                  81920, useAsync: true))
-                await using (var gz = new System.IO.Compression.GZipStream(f,
-                                 System.IO.Compression.CompressionLevel.Fastest))
-                    await imageStream.CopyToAsync(gz, token);
+                await using (var gz = new GZipStream(f, CompressionLevel.Fastest))
+                    await StreamImageExportAsync(imageRef, gz, token);
                 File.Move(tmp, path, overwrite: true);
                 return path;
             }
@@ -157,6 +157,52 @@ public sealed class AdContainerManager(
             }
         }
         finally { sem.Release(); }
+    }
+
+    /// <summary>
+    /// Stream a <c>docker save</c> of <paramref name="imageRef"/> into
+    /// <paramref name="destination"/> via a raw <c>GET /images/{ref}/get</c> against
+    /// the Docker endpoint. Docker.DotNet's <c>SaveImageAsync</c> is pathologically
+    /// slow for large images (a ~200MB image took MINUTES, streaming ~nothing, vs
+    /// ~2s for the raw API), which made the BYOC image download crawl — so we bypass
+    /// the SDK and stream the export ourselves (ResponseHeadersRead, so bytes flow
+    /// immediately). Local unix socket by default; honors a tcp:// DockerConfig.Uri.
+    /// </summary>
+    private async Task StreamImageExportAsync(string imageRef, Stream destination, CancellationToken token)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var dockerUri = scope.ServiceProvider.GetService<IConfiguration>()?["ContainerProvider:DockerConfig:Uri"];
+
+        var handler = new SocketsHttpHandler();
+        Uri requestUri;
+        var isUnix = string.IsNullOrEmpty(dockerUri) ||
+                     Uri.TryCreate(dockerUri, UriKind.Absolute, out var du) && du.Scheme == "unix";
+        if (isUnix)
+        {
+            var socketPath = string.IsNullOrEmpty(dockerUri)
+                ? "/var/run/docker.sock"
+                : new Uri(dockerUri).LocalPath;
+            handler.ConnectCallback = async (_, ct) =>
+            {
+                var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+                await socket.ConnectAsync(new UnixDomainSocketEndPoint(socketPath), ct);
+                return new NetworkStream(socket, ownsSocket: true);
+            };
+            requestUri = new Uri($"http://localhost/images/{imageRef}/get");
+        }
+        else
+        {
+            requestUri = new Uri(new Uri(dockerUri!), $"/images/{imageRef}/get");
+        }
+
+        using (handler)
+        using (var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan })
+        using (var resp = await client.GetAsync(requestUri, HttpCompletionOption.ResponseHeadersRead, token))
+        {
+            resp.EnsureSuccessStatusCode();
+            await using var src = await resp.Content.ReadAsStreamAsync(token);
+            await src.CopyToAsync(destination, 1 << 20, token);
+        }
     }
 
     // Per-(participation, challenge) lock serializing all create/move/destroy
