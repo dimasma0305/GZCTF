@@ -4,6 +4,10 @@ services:
     build:
       context: ./src
       dockerfile: GZCTF/Dockerfile.local
+    # Self-heal: the .NET process can take a rare native SIGSEGV in musl libc
+    # (Alpine base) on a thread-pool worker; without a restart policy a single
+    # crash takes the whole platform down until someone notices (it sat down ~55m).
+    restart: unless-stopped
     ports:
       - "8080:8080"
       # - "3306:3306"
