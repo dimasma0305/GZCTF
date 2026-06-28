@@ -274,3 +274,4 @@ kube-config.k3d.yaml
 
 # Claude Code session artifacts (scheduled-task lock written by ScheduleWakeup, etc.)
 .claude/
+dumps/

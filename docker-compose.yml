@@ -25,6 +25,13 @@ services:
       # sent via SMTP; with no mailer configured here, self-registration (which
       # requires email confirmation) is effectively closed — acceptable for this host.
       - ASPNETCORE_ENVIRONMENT=Production
+      # Capture a crash dump + report on the next native SIGSEGV (musl/vfscanf) so
+      # we get a real native+managed stack. Heap dump → /dumps (host-mounted).
+      - DOTNET_DbgEnableMiniDump=1
+      - DOTNET_DbgMiniDumpType=2
+      - DOTNET_DbgMiniDumpName=/dumps/gzctf.%p.%t.dmp
+      - DOTNET_EnableCrashReport=1
+      - DOTNET_CreateDumpVerboseDiagnostics=1
       - ADMIN_PASSWORD=${GZCTF_ADMIN_PASSWORD:-Admin@2022}
       - ConnectionStrings__Database=Host=postgres;Database=gzctf;Username=gzctf;Password=gzctf
       - ConnectionStrings__Redis=redis:6379,password=gzctf
@@ -157,6 +164,9 @@ services:
       - "ad-flags:/app/ad-flags"
       # Kubeconfig for the Kubernetes container backend (read-only).
       - "./kube-config.k3d.yaml:/app/kube-config.yaml:ro"
+      # Crash dumps: on a native SIGSEGV the runtime writes a minidump +
+      # .crashreport.json here so the next musl/vfscanf crash gives a real stack.
+      - "./dumps:/dumps"
     depends_on:
       - postgres
       - redis
