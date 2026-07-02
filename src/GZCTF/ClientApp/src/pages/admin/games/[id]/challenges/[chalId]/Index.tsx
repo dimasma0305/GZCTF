@@ -635,6 +635,7 @@ const GameChallengeEdit: FC = () => {
                   originalScore={challengeInfo.originalScore ?? 500}
                   minScoreRate={minRate / 100}
                   difficulty={challengeInfo.difficulty ?? 30}
+                  curve={challengeInfo?.scoreCurve ?? ScoreCurve.Standard}
                 />
               </Grid.Col>
             </>
