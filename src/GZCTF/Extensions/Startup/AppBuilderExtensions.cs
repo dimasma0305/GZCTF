@@ -81,6 +81,18 @@ internal static class AppBuilderExtensions
                     options.Configuration = connectionString;
                 });
 
+                // IDistributedCache doesn't expose the underlying connection, so a few
+                // call sites (single-use-token consume, distributed lock, rate limiter)
+                // need their own multiplexer to run a single atomic Redis command
+                // instead of a non-atomic get-then-set pair. Registered only when Redis
+                // is configured — those call sites resolve it as IConnectionMultiplexer?
+                // via GetService and fall back to an in-process-only-safe path when it's
+                // null (single-instance deployments with no Redis configured at all).
+                // Lazy: StackExchange.Redis connects on first use of this singleton, not
+                // at DI-container-build time.
+                builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
+                    ConnectionMultiplexer.Connect(connectionString));
+
                 signalrBuilder.AddStackExchangeRedis(connectionString, options =>
                 {
                     options.Configuration.ChannelPrefix = new RedisChannel("GZCTF", RedisChannel.PatternMode.Literal);
