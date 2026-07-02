@@ -1382,7 +1382,13 @@ public class EditController(
     [ProducesResponseType(typeof(int), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status500InternalServerError)]
+    // Pair RequestSizeLimit with RequestFormLimits: the latter governs multipart parsing
+    // only, not Kestrel's 30 MB MaxRequestBodySize default — without this a >~28.6 MB game
+    // ZIP was rejected by Kestrel before MVC, making the `case > 512MB` check below dead
+    // code and any game with large embedded attachments un-importable. 512 MB matches that
+    // intended cap (the sibling Challenges/Submit + /Import endpoints already do this).
     [RequestFormLimits(ValueLengthLimit = int.MaxValue, MultipartBodyLengthLimit = long.MaxValue)]
+    [RequestSizeLimit(512L * 1024 * 1024)]
     public async Task<IActionResult> ImportGame(IFormFile file, CancellationToken token = default)
     {
         switch (file.Length)

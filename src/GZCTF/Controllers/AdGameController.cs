@@ -829,7 +829,7 @@ public class AdGameController(
         var hash = AdTokenUtils.Hash(presented, configService.GetXorKey());
 
         var row = await db.AdTeamApiTokens
-            .Include(t => t.Participation).ThenInclude(p => p.Members)
+            .Include(t => t.Participation).ThenInclude(p => p.Members).ThenInclude(m => m.User)
             .FirstOrDefaultAsync(t => t.TokenHash == hash, token);
 
         if (row is null
@@ -837,11 +837,15 @@ public class AdGameController(
             || row.Participation.Status != ParticipationStatus.Accepted)
             return null;
 
-        // Verify the user this token belongs to is *still* on the team. This
-        // is what makes member-kick an instant revocation: even if the kicked
-        // member kept their token, their UserParticipation row was removed by
-        // the kick flow and this lookup fails.
-        var stillAMember = row.Participation.Members.Any(m => m.UserId == row.UserId);
+        // Verify the user this token belongs to is *still* on the team AND not
+        // banned. Roster membership makes member-kick an instant revocation (the
+        // kicked member's UserParticipation row is gone, so this lookup fails).
+        // The Role != Banned clause closes a separate hole: an admin ban sets
+        // Role = Banned but does NOT remove them from the roster, so without it a
+        // banned cheater keeps a live Bearer token against the arena until they're
+        // also manually kicked (same reasoning as the VPN + SSH gates).
+        var stillAMember = row.Participation.Members.Any(m =>
+            m.UserId == row.UserId && m.User.Role != Role.Banned);
         if (!stillAMember) return null;
 
         // Throttle the LastUsedAt write (mirrors the LastVisitedUtc throttle in

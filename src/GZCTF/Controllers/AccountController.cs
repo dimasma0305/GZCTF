@@ -134,7 +134,8 @@ public partial class AccountController(
     [EnableRateLimiting(nameof(RateLimiter.LimitPolicy.Register))]
     [ProducesResponseType(typeof(RequestResponse<RegisterStatus>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> Register([FromBody] RegisterModel model, CancellationToken token = default)
+    public async Task<IActionResult> Register([FromBody] RegisterModel model,
+        [FromServices] IMailRateLimiter mailThrottle, CancellationToken token = default)
     {
         if (!accountPolicy.Value.AllowRegister)
             return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Account_RegisterNotEnabled)]));
@@ -232,7 +233,9 @@ public partial class AccountController(
             logger.Log(StaticLocalizer[nameof(Resources.Program.Account_SendEmailVerification)],
                 user, TaskStatus.Pending, LogLevel.Debug);
         }
-        else
+        // Over the per-recipient cap → skip the send but still report the account as
+        // pending email verification (defense-in-depth; a given email registers once).
+        else if (await mailThrottle.TryAcquireAsync(user.Email, token))
         {
             if (!mailSender.SendConfirmEmailUrl(user.UserName, user.Email, link, localizer, globalConfig))
                 return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Account_EmailSendFailed)]));
@@ -413,7 +416,8 @@ public partial class AccountController(
     [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> Recovery([FromBody] RecoveryModel model, CancellationToken token = default)
+    public async Task<IActionResult> Recovery([FromBody] RecoveryModel model,
+        [FromServices] IMailRateLimiter mailThrottle, CancellationToken token = default)
     {
         if (accountPolicy.Value.UseCaptcha && !await captcha.VerifyAsync(model, HttpContext, token))
             return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Account_TokenValidationFailed)]));
@@ -441,7 +445,10 @@ public partial class AccountController(
             logger.Log(StaticLocalizer[nameof(Resources.Program.Account_SendEmailVerification)],
                 user, TaskStatus.Pending, LogLevel.Debug);
         }
-        else
+        // Over the per-recipient cap → silently skip the send and fall through to the same
+        // "email sent" response, so an attacker email-bombing this address can't distinguish
+        // a throttled victim from a real send (and learns nothing new about the address).
+        else if (await mailThrottle.TryAcquireAsync(user.Email, token))
         {
             if (!mailSender.SendResetPasswordUrl(user.UserName, user.Email, link, localizer, globalConfig))
                 return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Account_EmailSendFailed)]));
@@ -541,6 +548,7 @@ public partial class AccountController(
     /// <response code="400">Validation failed</response>
     /// <response code="401">Incorrect username or password</response>
     [HttpPost]
+    [EnableRateLimiting(nameof(RateLimiter.LimitPolicy.Login))]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status403Forbidden)]
@@ -715,7 +723,8 @@ public partial class AccountController(
     [ProducesResponseType(typeof(RequestResponse<bool>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status401Unauthorized)]
-    public async Task<IActionResult> ChangeEmail([FromBody] MailChangeModel model)
+    public async Task<IActionResult> ChangeEmail([FromBody] MailChangeModel model,
+        [FromServices] IMailRateLimiter mailThrottle, CancellationToken cancellationToken = default)
     {
         if (await userManager.FindByEmailAsync(model.NewMail) is not null)
             return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Account_EmailUsed)]));
@@ -741,7 +750,9 @@ public partial class AccountController(
             logger.Log(StaticLocalizer[nameof(Resources.Program.Account_SendEmailChange)],
                 user, TaskStatus.Pending, LogLevel.Debug);
         }
-        else
+        // Over the per-recipient cap → silently skip the send and fall through to the same
+        // "verification pending" response (caps email-bombing an arbitrary NewMail address).
+        else if (await mailThrottle.TryAcquireAsync(model.NewMail, cancellationToken))
         {
             if (!mailSender.SendChangeEmailUrl(user!.UserName, model.NewMail, link, localizer, globalConfig))
                 return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Account_EmailSendFailed)]));

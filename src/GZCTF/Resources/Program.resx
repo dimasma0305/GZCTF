@@ -218,6 +218,9 @@
   <data name="Account_UserUpdateFailed" xml:space="preserve">
     <value>User update failed</value>
   </data>
+  <data name="Admin_AdminMutationNotAllowed" xml:space="preserve">
+    <value>You cannot modify or delete another administrator account</value>
+  </data>
   <data name="Admin_CaptainDeletionNotAllowed" xml:space="preserve">
     <value>You cannot delete captain</value>
   </data>

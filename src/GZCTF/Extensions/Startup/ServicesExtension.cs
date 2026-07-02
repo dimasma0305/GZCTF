@@ -155,6 +155,7 @@ internal static class ServicesExtension
                 Services.Container.Build.ChallengeBuildQueue>();
             builder.Services.AddSingleton<CacheHelper>();
             builder.Services.AddSingleton<IMailSender, MailSender>();
+            builder.Services.AddSingleton<IMailRateLimiter, MailRateLimiter>();
             builder.Services.AddSingleton<FlagEgressService>();
             builder.Services.AddSingleton<TrafficRecorderRegistry>();
             builder.Services.AddScoped<IPcapFlowExtractor, PcapFlowExtractor>();

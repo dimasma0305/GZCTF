@@ -105,19 +105,20 @@ public sealed class AdWireGuardSyncService(
         var xorKey = configService.GetXorKey();
 
         // Authoritative membership gate: render a peer only while its
-        // participation is still Accepted AND the user is still on the roster.
-        // This makes member-kick / leave / suspend an automatic VPN revocation
-        // within one tick — the same "still a member" guarantee the API token
-        // (AdGameController) and SSH (InternalAdSshController) already enforce.
-        // Without it, a kicked member's tunnel stayed live (RevokedAt is never
-        // set on kick and the peer row isn't cascade-deleted), keeping full
-        // network reach to every team's box for the rest of the game.
+        // participation is still Accepted AND the user is still on the roster
+        // AND not banned. This makes member-kick / leave / suspend an automatic
+        // VPN revocation within one tick — the same guarantee the API token
+        // (AdGameController) and SSH (InternalAdSshController) enforce. Without
+        // the roster clause a kicked member's tunnel stayed live (RevokedAt is
+        // never set on kick and the peer row isn't cascade-deleted); without the
+        // Role != Banned clause an admin-banned cheater kept full network reach
+        // to every team's box (a ban sets Role but leaves the roster intact).
         var peers = await db.AdVpnPeers
             .Where(p => p.RevokedAt == null
                 && db.Participations.Any(part =>
                     part.Id == p.ParticipationId
                     && part.Status == ParticipationStatus.Accepted
-                    && part.Members.Any(m => m.UserId == p.UserId)))
+                    && part.Members.Any(m => m.UserId == p.UserId && m.User.Role != Role.Banned)))
             .OrderBy(p => p.Id)
             .ToListAsync(token);
 

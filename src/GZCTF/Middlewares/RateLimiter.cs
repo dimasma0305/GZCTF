@@ -47,11 +47,26 @@ public static class RateLimiter
         /// <summary>
         /// Pow challenge generation limit
         /// </summary>
-        PowChallenge
+        PowChallenge,
+
+        /// <summary>
+        /// Password-login brute-force limit. Unlike the other named policies this
+        /// one is per-IP partitioned (not a single global bucket) and Redis-backed
+        /// when available — see the Login registration below.
+        /// </summary>
+        Login
     }
 
     const int GlobalPermitLimit = 150;
     static readonly TimeSpan GlobalWindow = TimeSpan.FromMinutes(1);
+
+    // Tight per-IP throttle for POST /api/Account/LogIn. Identity's own
+    // lockoutOnFailure is intentionally left off (usernames are public on the
+    // scoreboard, so a per-account lock is a trivial mid-game DoS against rivals),
+    // so this per-IP cap is the actual brute-force ceiling against the 6-char-min
+    // password policy — far tighter than the 150/min global limiter.
+    const int LoginPermitLimit = 10;
+    static readonly TimeSpan LoginWindow = TimeSpan.FromMinutes(1);
 
     /// <summary>
     /// Configures ASP.NET Core's rate limiter. Scoped only to the GlobalLimiter
@@ -92,21 +107,24 @@ public static class RateLimiter
             var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
 
             if (userId is not null)
-                return GetGlobalPartition(userId, redis, logger);
+                return GetIpPartition(userId, redis, logger, GlobalPermitLimit, GlobalWindow, 60);
 
-            var address = context.Connection.RemoteIpAddress;
-
-            // Normalize IPv4-mapped IPv6 (::ffff:a.b.c.d) to the bare IPv4 form so a
-            // dual-stack client can't get two separate buckets (e.g. 192.168.1.1 vs
-            // ::ffff:192.168.1.1) and double an IP-keyed limit (register/recovery).
-            // Matches the normalization already done in the IP-attribution helpers.
-            if (address is not null && address.IsIPv4MappedToIPv6)
-                address = address.MapToIPv4();
-
-            if (address is null || IPAddress.IsLoopback(address))
+            var ipKey = NormalizedClientIpKey(context);
+            if (ipKey is null)
                 return RateLimitPartition.GetNoLimiter(IPAddress.Loopback.ToString());
 
-            return GetGlobalPartition(address.ToString(), redis, logger);
+            return GetIpPartition(ipKey, redis, logger, GlobalPermitLimit, GlobalWindow, 60);
+        });
+        // Per-IP brute-force throttle for the login endpoint (see LimitPolicy.Login).
+        // Distinct Redis key namespace ("login:") from the global limiter so the two
+        // counters don't share a bucket. Loopback is exempt (health probes / same-host
+        // tooling), matching the global limiter.
+        options.AddPolicy(nameof(LimitPolicy.Login), context =>
+        {
+            var ipKey = NormalizedClientIpKey(context);
+            return ipKey is null
+                ? RateLimitPartition.GetNoLimiter("login-loopback")
+                : GetIpPartition($"login:{ipKey}", redis, logger, LoginPermitLimit, LoginWindow, 0);
         });
         options.OnRejected = async (context, cancellationToken) =>
         {
@@ -166,27 +184,45 @@ public static class RateLimiter
     }
 
     /// <summary>
+    /// Normalizes the caller's IP into a partition key: IPv4-mapped IPv6
+    /// (::ffff:a.b.c.d) is folded to bare IPv4 so a dual-stack client can't get two
+    /// separate buckets and double an IP-keyed limit (matches the IP-attribution
+    /// helpers). Returns null for loopback / no address — the caller treats that as
+    /// "no limit" (health probes, same-host tooling).
+    /// </summary>
+    static string? NormalizedClientIpKey(HttpContext context)
+    {
+        var address = context.Connection.RemoteIpAddress;
+        if (address is not null && address.IsIPv4MappedToIPv6)
+            address = address.MapToIPv4();
+        if (address is null || IPAddress.IsLoopback(address))
+            return null;
+        return address.ToString();
+    }
+
+    /// <summary>
     /// Redis-backed when available (one shared counter per key across every
     /// replica); otherwise the original in-process sliding window. QueueLimit/
     /// QueueProcessingOrder/SegmentsPerWindow have no Redis equivalent here — the
     /// distributed path is a single atomic allow/deny check per request rather than
     /// a locally queued one, which is the correct shape for a shared counter.
     /// </summary>
-    static RateLimitPartition<string> GetGlobalPartition(string key, IConnectionMultiplexer? redis, ILogger logger) =>
+    static RateLimitPartition<string> GetIpPartition(string key, IConnectionMultiplexer? redis, ILogger logger,
+        int permitLimit, TimeSpan window, int fallbackQueueLimit) =>
         redis is not null
             ? RateLimitPartition.Get(key, k => new FailOpenRateLimiter(
                 new RedisSlidingWindowRateLimiter<string>(k, new RedisSlidingWindowRateLimiterOptions
                 {
-                    PermitLimit = GlobalPermitLimit,
-                    Window = GlobalWindow,
+                    PermitLimit = permitLimit,
+                    Window = window,
                     ConnectionMultiplexerFactory = () => redis
                 }), logger))
             : RateLimitPartition.GetSlidingWindowLimiter(key,
                 _ => new()
                 {
-                    QueueLimit = 60,
-                    PermitLimit = GlobalPermitLimit,
-                    Window = GlobalWindow,
+                    QueueLimit = fallbackQueueLimit,
+                    PermitLimit = permitLimit,
+                    Window = window,
                     QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                     SegmentsPerWindow = 6
                 });

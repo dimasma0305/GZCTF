@@ -1174,6 +1174,14 @@ public class AdminController(
             return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Admin_UserNotFound)],
                 StatusCodes.Status404NotFound));
 
+        // An admin may edit their own profile here, but not ban / demote / rename a
+        // *fellow* admin — otherwise one admin can unilaterally strip another's access
+        // (a hostile-takeover / privilege-war vector). Promotions are unaffected: the
+        // target is still Role.User at that point.
+        var caller = await userManager.GetUserAsync(User);
+        if (user.Role == Role.Admin && caller?.Id != user.Id)
+            return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Admin_AdminMutationNotAllowed)]));
+
         if (model.UserName is not null && model.UserName != user.UserName)
         {
             var result = await userManager.SetUserNameAsync(user, model.UserName);
@@ -1251,6 +1259,11 @@ public class AdminController(
         if (user is null)
             return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Admin_UserNotFound)],
                 StatusCodes.Status404NotFound));
+
+        // Never let one admin delete another (self-deletion is already rejected above).
+        // Same admin-war protection as UpdateUserInfo.
+        if (user.Role == Role.Admin)
+            return BadRequest(new RequestResponse(localizer[nameof(Resources.Program.Admin_AdminMutationNotAllowed)]));
 
         if (await teamRepository.CheckIsCaptain(user, token))
             return BadRequest(

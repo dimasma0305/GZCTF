@@ -211,7 +211,13 @@ public class AssetsController(
     [HttpPost("api/[controller]")]
     [ProducesResponseType(typeof(List<LocalFile>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status400BadRequest)]
+    // RequestFormLimits only governs multipart *parsing*; it does NOT raise Kestrel's
+    // MaxRequestBodySize (30 MB default), which is enforced before MVC binding. Without
+    // an explicit RequestSizeLimit a >~28.6 MB upload is rejected by Kestrel before this
+    // action ever runs — so attachments like memory dumps / pcaps silently fail. 512 MB
+    // matches the game-import cap; the sibling tarball endpoints already pair the two.
     [RequestFormLimits(ValueLengthLimit = int.MaxValue, MultipartBodyLengthLimit = long.MaxValue)]
+    [RequestSizeLimit(512L * 1024 * 1024)]
     public async Task<IActionResult> Upload(List<IFormFile> files, [FromQuery] string? filename,
         CancellationToken token)
     {

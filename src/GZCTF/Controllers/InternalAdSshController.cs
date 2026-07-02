@@ -103,7 +103,7 @@ public class InternalAdSshController(
         // cannot safely decide which team the SSH session belongs to, so fail
         // closed (reject) rather than authenticate the wrong team's box.
         var keyRows = await db.AdTeamSshKeys
-            .Include(k => k.Participation).ThenInclude(p => p.Members)
+            .Include(k => k.Participation).ThenInclude(p => p.Members).ThenInclude(m => m.User)
             .Where(k => k.Fingerprint == fingerprint
                 && k.RevokedAt == null
                 && k.Participation.GameId == challengeRow.GameId
@@ -113,9 +113,12 @@ public class InternalAdSshController(
         if (keyRows.Count != 1) return NotFound(); // 0 = unknown key; >1 = ambiguous → reject
         var keyRow = keyRows[0];
 
-        // Member-kick = instant revocation (same as the API-token path):
-        // the user is only valid if they're still on the team roster.
-        if (keyRow.Participation.Members.All(m => m.UserId != keyRow.UserId))
+        // Member-kick = instant revocation (same as the API-token path): the user
+        // is only valid while still on the roster AND not banned. The Role != Banned
+        // clause closes the same hole as the token/VPN gates — an admin ban sets
+        // Role but leaves the roster intact, so without it a banned player keeps
+        // SSH access to their box until they're also manually kicked.
+        if (!keyRow.Participation.Members.Any(m => m.UserId == keyRow.UserId && m.User.Role != Role.Banned))
             return NotFound();
 
         var service = await db.AdTeamServices
