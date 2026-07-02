@@ -2,6 +2,7 @@
 using Cronos;
 using GZCTF.Services.Cache;
 using Microsoft.Extensions.Caching.Distributed;
+using StackExchange.Redis;
 
 namespace GZCTF.Services.CronJob;
 
@@ -9,9 +10,11 @@ public delegate Task CronJob(AsyncServiceScope scope, ILogger<CronJobService> lo
 
 public record CronJobEntry(CronJob Job, CronExpression Expression);
 
-public class CronJobService(IDistributedCache cache, IServiceScopeFactory provider, ILogger<CronJobService> logger)
-    : IHostedService, IDisposable
+public class CronJobService(IDistributedCache cache, IServiceScopeFactory provider, ILogger<CronJobService> logger,
+    IConnectionMultiplexer? redis = null) : IHostedService, IDisposable
 {
+    private static readonly TimeSpan LockTtl = TimeSpan.FromMinutes(2);
+
     private readonly Dictionary<string, CronJobEntry> _jobs = [];
     private bool _disposed;
     private bool _holdLock;
@@ -107,19 +110,40 @@ public class CronJobService(IDistributedCache cache, IServiceScopeFactory provid
             LogLevel.Debug);
     }
 
+    /// <summary>
+    /// Elect this instance as the one that runs scheduled jobs. Redis-backed: a
+    /// single atomic SET-if-not-exists, so exactly one replica ever wins the
+    /// election regardless of how many are running concurrently — the previous
+    /// get-then-set pair (still used as the no-Redis fallback below) let two
+    /// replicas both observe "no leader" in the same window and both start
+    /// running every scheduled job. Every replica that loses re-attempts via
+    /// <see cref="LaunchWatchDog"/>, so a leader that dies is replaced once its
+    /// lock's TTL expires.
+    /// </summary>
     private async Task<bool> TryHoldLock()
     {
         if (_holdLock)
             return true;
 
-        var cronLock = await cache.GetAsync(CacheKey.CronJobLock);
-        if (cronLock is not null)
-            return false;
+        bool acquired;
+        if (redis is not null)
+        {
+            acquired = await redis.GetDatabase().StringSetAsync(
+                CacheKey.CronJobLock, RedisValue.EmptyString, LockTtl, When.NotExists);
+        }
+        else
+        {
+            var cronLock = await cache.GetAsync(CacheKey.CronJobLock);
+            if (cronLock is not null)
+                return false;
 
-        await cache.SetAsync(CacheKey.CronJobLock, [],
-            new DistributedCacheEntryOptions { SlidingExpiration = TimeSpan.FromMinutes(2) });
-        _holdLock = true;
-        return true;
+            await cache.SetAsync(CacheKey.CronJobLock, [],
+                new DistributedCacheEntryOptions { SlidingExpiration = LockTtl });
+            acquired = true;
+        }
+
+        _holdLock = acquired;
+        return acquired;
     }
 
     private async Task DropLock()
@@ -163,7 +187,15 @@ public class CronJobService(IDistributedCache cache, IServiceScopeFactory provid
         var last = now - TimeSpan.FromSeconds(30);
         List<Task> handles = [];
 
-        await cache.RefreshAsync(CacheKey.CronJobLock);
+        // Renew the leader lock's TTL so it doesn't expire out from under a live
+        // leader. Can't go through IDistributedCache.RefreshAsync when the lock was
+        // acquired via the raw-Redis path above (TryHoldLock writes it as a plain
+        // STRING; RefreshAsync assumes the HASH format IDistributedCache's own
+        // Set/Get use) — same type-mismatch reasoning as the acquire itself.
+        if (redis is not null)
+            await redis.GetDatabase().KeyExpireAsync(CacheKey.CronJobLock, LockTtl);
+        else
+            await cache.RefreshAsync(CacheKey.CronJobLock);
 
         lock (_jobs)
         {

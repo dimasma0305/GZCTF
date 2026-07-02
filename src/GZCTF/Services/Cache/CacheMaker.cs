@@ -34,7 +34,8 @@ public class CacheMaker(
     IDistributedCache cache,
     IMemoryCache memoryCache,
     ChannelReader<CacheRequest> channelReader,
-    IServiceScopeFactory serviceScopeFactory) : IHostedService
+    IServiceScopeFactory serviceScopeFactory,
+    CacheHelper cacheHelper) : IHostedService
 {
     private readonly Dictionary<string, ICacheRequestHandler> _cacheHandlers = new();
     private CancellationTokenSource TokenSource { get; set; } = new();
@@ -104,36 +105,39 @@ public class CacheMaker(
 
                 var updateLock = CacheKey.UpdateLock(key);
 
-                if (await cache.GetAsync(updateLock, token) is not null)
+                // Shares CacheHelper's atomic acquire (a single SET-if-not-exists when
+                // Redis is configured) rather than its own separate get-then-set: the two
+                // used to race each other too, since both write the SAME lock key — and
+                // after CacheHelper's fix moved that key to a raw Redis STRING, a
+                // still-HASH-based acquire here would've been a straight-up type mismatch,
+                // not just a race.
+                if (!await cacheHelper.TryAcquireLockAsync(updateLock, token))
                 {
-                    // only one GZCTF instance will never encounter this
+                    // Someone else (this instance or another replica) is already
+                    // rebuilding this key — skip rather than duplicate the work.
                     logger.SystemLog(StaticLocalizer[nameof(Resources.Program.Cache_InvalidUpdateRequest), key],
                         TaskStatus.Pending,
                         LogLevel.Debug);
                     continue;
                 }
 
-                var lastUpdateKey = CacheKey.LastUpdateTime(key);
-                var lastUpdateBytes = await cache.GetAsync(lastUpdateKey, token);
-                if (lastUpdateBytes is not null && lastUpdateBytes.Length > 0)
-                {
-                    var lastUpdate = MemoryPackSerializer.Deserialize<DateTimeOffset>(lastUpdateBytes);
-                    // if the cache is updated after the request, skip
-                    // this will de-bounced the slow cache update request
-                    if (lastUpdate > item.Time)
-                        continue;
-                }
-
-                lastUpdateBytes = MemoryPackSerializer.Serialize(DateTimeOffset.UtcNow);
-                await cache.SetAsync(lastUpdateKey, lastUpdateBytes, new(), token);
-
-                await using var scope = serviceScopeFactory.CreateAsyncScope();
-
                 try
                 {
-                    await cache.SetAsync(updateLock, [],
-                        new DistributedCacheEntryOptions { SlidingExpiration = TimeSpan.FromMinutes(1) },
-                        token);
+                    var lastUpdateKey = CacheKey.LastUpdateTime(key);
+                    var lastUpdateBytes = await cache.GetAsync(lastUpdateKey, token);
+                    if (lastUpdateBytes is not null && lastUpdateBytes.Length > 0)
+                    {
+                        var lastUpdate = MemoryPackSerializer.Deserialize<DateTimeOffset>(lastUpdateBytes);
+                        // if the cache is updated after the request, skip
+                        // this will de-bounced the slow cache update request
+                        if (lastUpdate > item.Time)
+                            continue;
+                    }
+
+                    lastUpdateBytes = MemoryPackSerializer.Serialize(DateTimeOffset.UtcNow);
+                    await cache.SetAsync(lastUpdateKey, lastUpdateBytes, new(), token);
+
+                    await using var scope = serviceScopeFactory.CreateAsyncScope();
 
                     var bytes = await handler.Handle(scope, item, token);
 
@@ -165,7 +169,7 @@ public class CacheMaker(
                 }
                 finally
                 {
-                    await cache.RemoveAsync(updateLock, token);
+                    await cacheHelper.ReleaseLockAsync(updateLock, token);
                 }
 
                 token.ThrowIfCancellationRequested();

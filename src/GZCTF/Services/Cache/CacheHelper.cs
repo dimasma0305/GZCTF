@@ -232,7 +232,7 @@ public class CacheHelper(
     /// narrow double-acquire just means a harmless redundant rebuild, not
     /// corruption, so this is an acceptable, unchanged-from-before fallback.
     /// </summary>
-    private async Task<bool> TryAcquireLockAsync(string lockKey, CancellationToken token)
+    internal async Task<bool> TryAcquireLockAsync(string lockKey, CancellationToken token)
     {
         if (redis is not null)
             return await redis.GetDatabase().StringSetAsync(
@@ -273,7 +273,7 @@ public class CacheHelper(
         return await distributedCache.GetAsync(key, token);
     }
 
-    private Task ReleaseLockAsync(string lockKey, CancellationToken token = default) =>
+    internal Task ReleaseLockAsync(string lockKey, CancellationToken token = default) =>
         distributedCache.RemoveAsync(lockKey, token);
 }
 
