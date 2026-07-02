@@ -62,7 +62,13 @@ internal static class AppBuilderExtensions
                 options.PayloadSerializerOptions.ConfigCustomSerializerOptions();
             });
 
-            var connectionString = builder.Configuration.GetConnectionString("RedisCache");
+            // Key is "Redis", matching GZCTF.AppHost's AddRedis("redis") (WithReference
+            // with no name override injects ConnectionStrings__redis) and this fork's
+            // docker-compose.yml / docs (ConnectionStrings__Redis). Was "RedisCache" here
+            // — a stale key nothing else ever produced, so Redis silently never activated
+            // and the app ran on AddDistributedMemoryCache() (in-process only, no SignalR
+            // backplane) on every deployment regardless of a configured Redis.
+            var connectionString = builder.Configuration.GetConnectionString("Redis");
 
             if (string.IsNullOrWhiteSpace(connectionString))
             {
