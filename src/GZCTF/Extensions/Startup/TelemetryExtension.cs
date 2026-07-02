@@ -1,6 +1,7 @@
 ﻿using Azure.Monitor.OpenTelemetry.AspNetCore;
 using GZCTF.Models.Internal;
 using GZCTF.Services.HealthCheck;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Npgsql;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
@@ -93,12 +94,33 @@ public static class TelemetryExtension
 
     extension(WebApplication app)
     {
-        public void MapHealthCheck() =>
-            app.MapHealthChecks("/healthz").DisableHttpMetrics()
-                .AddEndpointFilter(async (context, next)
-                    => context.HttpContext.Connection.LocalPort == MetricPort
-                        ? await next(context)
-                        : Results.NotFound());
+        public void MapHealthCheck()
+        {
+            // Liveness: run NO checks — a 200 just means the process is up and serving
+            // requests. A dependency being down (Postgres/Redis/storage) must NOT fail
+            // liveness, or an orchestrator would kill+restart a pod that a restart can't
+            // fix, turning a transient DB blip into a crash loop. (Kept at "/healthz" for
+            // backward compatibility with existing liveness probes / the compose healthcheck.)
+            app.MapHealthChecks("/healthz",
+                    new HealthCheckOptions { Predicate = _ => false })
+                .DisableHttpMetrics()
+                .AddEndpointFilter(MetricPortOnly);
+
+            // Readiness: run every check (app-lifecycle + Storage + Cache + Database) so a
+            // dependency outage or a graceful-shutdown drain takes this instance out of the
+            // load-balancer rotation WITHOUT killing it. Point k8s readinessProbe here.
+            app.MapHealthChecks("/readyz")
+                .DisableHttpMetrics()
+                .AddEndpointFilter(MetricPortOnly);
+        }
+
+        // Both health endpoints are exposed only on the internal metrics port (never the
+        // public web port), so probe/scrape traffic can't be reached by participants.
+        private static async ValueTask<object?> MetricPortOnly(
+            EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+            => context.HttpContext.Connection.LocalPort == MetricPort
+                ? await next(context)
+                : Results.NotFound();
     }
 
     extension(IApplicationBuilder appBuilder)

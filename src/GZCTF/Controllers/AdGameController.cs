@@ -1597,6 +1597,91 @@ public class AdGameController(
     }
 
     /// <summary>
+    /// Download the A&amp;D / KotH scoreboard as an XLSX. Monitor-only, always the live
+    /// (non-frozen) board. Fills the gap where the jeopardy ScoreboardSheet excludes
+    /// A&amp;D/KotH challenges, so the fork's flagship modes had no downloadable standings.
+    /// </summary>
+    [RequireMonitor]
+    [HttpGet("Scoreboard/Sheet")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ScoreboardSheet(int id, [FromServices] ExcelHelper excelHelper,
+        CancellationToken token)
+    {
+        var game = await db.Games.FirstOrDefaultAsync(g => g.Id == id, token);
+        if (game is null) return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Game_NotFound)]));
+
+        var board = await adScoreboard.TryGetScoreboardAsync(id, false, token)
+                    ?? await adScoreboard.GetScoreboardAsync(id, null, token);
+
+        var stream = excelHelper.GetAdScoreboardExcel(board);
+        stream.Seek(0, SeekOrigin.Begin);
+        return File(stream,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"{game.Title}-AD-Scoreboard-{DateTimeOffset.Now:yyyyMMdd-HH.mm.ssZ}.xlsx");
+    }
+
+    /// <summary>
+    /// Download the A&amp;D / KotH activity log as an XLSX (an "Attacks" sheet of every
+    /// accepted flag capture and a "Checks" sheet of SLA verdicts). Monitor-only. This
+    /// activity lives in AdAttack / AdCheckResult, not the jeopardy Submissions set, so
+    /// it appeared in no export before. Checks are capped (a long game accumulates
+    /// teams × services × rounds of them) to keep the file bounded.
+    /// </summary>
+    [RequireMonitor]
+    [HttpGet("AttackLog/Sheet")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RequestResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> AttackLogSheet(int id, [FromServices] ExcelHelper excelHelper,
+        CancellationToken token)
+    {
+        var game = await db.Games.FirstOrDefaultAsync(g => g.Id == id, token);
+        if (game is null) return NotFound(new RequestResponse(localizer[nameof(Resources.Program.Game_NotFound)]));
+
+        // Accepted captures — bounded by actual successful attacks, export them all.
+        var attacks = await db.AdAttacks
+            .Where(a => a.AttackerParticipation.GameId == id)
+            .OrderBy(a => a.SubmittedAt)
+            .Select(a => new AdAttackLogRow(
+                a.SubmittedAt, a.SubmittedAtRound,
+                a.AttackerParticipation.Team.Name,
+                a.VictimParticipation.Team.Name,
+                a.Challenge.Title,
+                a.Points))
+            .ToListAsync(token);
+
+        // Checker verdicts explode with (teams × services × rounds), so cap to the most
+        // recent CheckCap and render oldest-first. Full forensics stay queryable in the DB.
+        const int CheckCap = 50000;
+        var recentChecks = await db.AdCheckResults
+            .Where(c => c.AdTeamService.Participation.GameId == id)
+            .OrderByDescending(c => c.CheckedAt)
+            .Take(CheckCap)
+            .Select(c => new
+            {
+                c.CheckedAt,
+                Round = c.AdRound.Number,
+                Team = c.AdTeamService.Participation.Team.Name,
+                Challenge = c.AdTeamService.Challenge.Title,
+                c.Status,
+                c.SlaCredit,
+                c.ErrorMessage
+            })
+            .ToListAsync(token);
+        var checks = recentChecks
+            .OrderBy(c => c.CheckedAt)
+            .Select(c => new AdCheckLogRow(
+                c.CheckedAt, c.Round, c.Team, c.Challenge, c.Status.ToString(), c.SlaCredit, c.ErrorMessage))
+            .ToList();
+
+        var stream = excelHelper.GetAdActivityExcel(attacks, checks);
+        stream.Seek(0, SeekOrigin.Begin);
+        return File(stream,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"{game.Title}-AD-ActivityLog-{DateTimeOffset.Now:yyyyMMdd-HH.mm.ssZ}.xlsx");
+    }
+
+    /// <summary>
     /// KotH-only scoreboard for this game — one column per enabled King of the
     /// Hill challenge, one row per team, ranked by total hold points. Strips
     /// A&amp;D services so the dedicated KotH page isn't padded with empty

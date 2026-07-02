@@ -7,6 +7,7 @@ using System.Threading.Channels;
 using GZCTF.Models.Request.Game;
 using GZCTF.Repositories.Interface;
 using GZCTF.Utils;
+using StackExchange.Redis;
 
 namespace GZCTF.Services;
 
@@ -38,6 +39,50 @@ public sealed class AttackStreamService
     private static readonly JsonSerializerOptions JsonOpts =
         new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
 
+    // When Redis is configured, every published frame is fanned out over this pub/sub
+    // channel so a raw-WS client connected to replica B still sees an attack processed on
+    // replica A. Null (and everything falls back to direct local dispatch) on a single
+    // instance / when Redis isn't configured.
+    private readonly IConnectionMultiplexer? _redis;
+    private static readonly RedisChannel StreamChannel =
+        RedisChannel.Literal("gzctf:attackstream");
+
+    public AttackStreamService(IConnectionMultiplexer? redis = null)
+    {
+        _redis = redis;
+        if (_redis is null)
+            return;
+
+        // Subscribe once; StackExchange.Redis re-establishes the subscription automatically
+        // across reconnects. EVERY replica (the publisher included) receives each frame here
+        // and dispatches to its OWN local sockets exactly once — dispatch is done solely in
+        // this handler, never also inline in Publish, so the origin replica doesn't
+        // double-deliver its own frames.
+        try
+        {
+            _redis.GetSubscriber().Subscribe(StreamChannel, (_, value) =>
+            {
+                if (value.IsNullOrEmpty)
+                    return;
+                try
+                {
+                    var env = JsonSerializer.Deserialize<StreamEnvelope>((string)value!, JsonOpts);
+                    if (env is not null)
+                        DispatchLocal(env.GameId, env.Frame);
+                }
+                catch
+                {
+                    // Malformed cross-replica frame — ignore rather than fault the subscriber.
+                }
+            });
+        }
+        catch
+        {
+            // Redis unreachable at startup — the multiplexer will retry the subscription on
+            // reconnect. Local publishes still work (see Publish's fallback).
+        }
+    }
+
     /// <summary>Fan a flag-submission event out to this game's raw-WS subscribers.</summary>
     public void PublishAttack(int gameId, AttackEvent evt) => Publish(gameId, "attack", evt);
 
@@ -49,18 +94,46 @@ public sealed class AttackStreamService
 
     private void Publish(int gameId, string kind, object payload)
     {
-        if (!_subs.TryGetValue(gameId, out var conns) || conns.IsEmpty)
-            return;
-
         // Serialize once; send the same string to every subscriber. The "kind" tag is
         // merged into the event object so a client reads one flat JSON per frame.
         var node = JsonSerializer.SerializeToNode(payload, JsonOpts)!.AsObject();
         node["kind"] = kind;
         var json = node.ToJsonString(JsonOpts);
 
+        if (_redis is not null)
+        {
+            // Fan out via Redis; the subscription handler on every replica (this one included)
+            // does the actual local dispatch, so we do NOT also dispatch inline here. Note we
+            // can't early-out on an empty *local* bucket like the direct path below — another
+            // replica may have subscribers even when this one doesn't. Fire-and-forget: a raw-WS
+            // feed frame isn't worth blocking the caller (a submission / KotH broadcast) on.
+            try
+            {
+                var envelope = JsonSerializer.Serialize(new StreamEnvelope(gameId, json), JsonOpts);
+                _ = _redis.GetSubscriber().PublishAsync(StreamChannel, envelope, CommandFlags.FireAndForget);
+            }
+            catch
+            {
+                // Redis blip — fall back to at least serving this replica's own subscribers so a
+                // single-instance-shaped outage degrades gracefully rather than dropping frames.
+                DispatchLocal(gameId, json);
+            }
+            return;
+        }
+
+        DispatchLocal(gameId, json);
+    }
+
+    private void DispatchLocal(int gameId, string json)
+    {
+        if (!_subs.TryGetValue(gameId, out var conns) || conns.IsEmpty)
+            return;
+
         foreach (var ch in conns.Values)
             ch.Writer.TryWrite(json); // never blocks the broadcaster — DropOldest on a full queue
     }
+
+    private sealed record StreamEnvelope(int GameId, string Frame);
 
     /// <summary>
     /// Endpoint handler for <c>GET /hub/attack/ws?game={id}</c>. Validates the upgrade +
