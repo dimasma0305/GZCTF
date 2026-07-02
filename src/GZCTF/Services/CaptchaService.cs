@@ -7,6 +7,7 @@ using GZCTF.Services.Cache;
 using GZCTF.Utils;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
+using StackExchange.Redis;
 
 namespace GZCTF.Services;
 
@@ -113,8 +114,8 @@ public sealed class CloudflareTurnstile(IOptionsSnapshot<CaptchaConfig> options,
     }
 }
 
-public sealed class HashPow(IOptionsSnapshot<CaptchaConfig> options, IDistributedCache cache) :
-    CaptchaServiceBase(options)
+public sealed class HashPow(IOptionsSnapshot<CaptchaConfig> options, IDistributedCache cache,
+    IConnectionMultiplexer? redis = null) : CaptchaServiceBase(options)
 {
     private const int AnswerLength = 8;
 
@@ -123,9 +124,9 @@ public sealed class HashPow(IOptionsSnapshot<CaptchaConfig> options, IDistribute
     // IDistributedCache isn't atomic). Striping (vs a per-id dictionary) keeps memory
     // bounded — an attacker can't grow it by spraying unique ids — and removes the
     // dict-cleanup race entirely (same id → same stripe; unrelated ids may share a
-    // stripe, which only adds harmless extra serialization). The cache removal stays
-    // the single-use source of truth. In-process: sufficient for one instance; a
-    // multi-instance deployment would also want an atomic Redis GETDEL.
+    // stripe, which only adds harmless extra serialization). Only used as the
+    // fallback path below (no Redis configured — single instance, in-process lock
+    // is sufficient and correct).
     private const int LockStripes = 256;
     private static readonly SemaphoreSlim[] _verifyLocks =
         Enumerable.Range(0, LockStripes).Select(_ => new SemaphoreSlim(1, 1)).ToArray();
@@ -152,7 +153,57 @@ public sealed class HashPow(IOptionsSnapshot<CaptchaConfig> options, IDistribute
                 return false;
 
         var key = CacheKey.HashPow(id);
-        var sem = _verifyLocks[(int)(unchecked((uint)id.GetHashCode()) % LockStripes)];
+
+        return redis is not null
+            ? await VerifyAtomicAsync(key, ans, token)
+            : await VerifyStripedLockAsync(key, ans, token);
+    }
+
+    /// <summary>
+    /// Correct across any number of replicas: reads are unsynchronized (races here
+    /// only cause harmless duplicate work, not duplicate success), and a solved
+    /// challenge is consumed via a single atomic Redis DEL — its own true/false
+    /// return value (existed-and-was-removed vs already-gone) is the race-free
+    /// "did I win the race to consume this" signal, so only ever ONE concurrent
+    /// verify of the same id can succeed. A wrong answer never deletes the key
+    /// (same retry semantics as the striped-lock path — the challenge stays valid
+    /// until a correct answer consumes it or it expires).
+    /// </summary>
+    /// <remarks>
+    /// Reads the "data" field directly rather than going through
+    /// IDistributedCache.GetAsync: Microsoft.Extensions.Caching.StackExchangeRedis
+    /// stores entries as a Redis HASH (fields absexp/sldexp/data, verified directly
+    /// against a live instance of the exact pinned package version), not a plain
+    /// STRING, so a bare GETDEL wouldn't apply. This is an implementation detail of
+    /// that package, not a public contract — if a future upgrade changes the
+    /// storage format, HashGetAsync simply returns nothing and this fails closed
+    /// (denies the captcha) rather than misbehaving.
+    /// </remarks>
+    private async Task<bool> VerifyAtomicAsync(string key, string ans, CancellationToken token)
+    {
+        var db = redis!.GetDatabase();
+        RedisValue redisChallenge = await db.HashGetAsync(key, "data");
+        if (redisChallenge.IsNull)
+            return false; // already consumed (or expired) — single-use enforced
+
+        byte[] challenge = redisChallenge!;
+        Span<byte> span = stackalloc byte[challenge.Length + AnswerLength];
+        challenge.CopyTo(span);
+        Convert.FromHexString(ans).CopyTo(span[challenge.Length..]);
+
+        var leadingZeros = SHA256.HashData(span).LeadingZeros();
+        if (leadingZeros < Config.HashPow.Difficulty)
+            return false;
+
+        // Atomic: DEL's return is true only for whichever concurrent request
+        // actually removed the key. Every other concurrent request (or a replay
+        // after this one) sees the key already gone and is denied.
+        return await db.KeyDeleteAsync(key);
+    }
+
+    private async Task<bool> VerifyStripedLockAsync(string key, string ans, CancellationToken token)
+    {
+        var sem = _verifyLocks[(int)(unchecked((uint)key.GetHashCode()) % LockStripes)];
         await sem.WaitAsync(token);
         try
         {
