@@ -48,4 +48,7 @@ RUN apk add --update --no-cache wget libpcap icu-data-full icu-libs \
 
 COPY --from=build /app/publish .
 
+HEALTHCHECK --interval=5m --timeout=3s --start-period=10s --retries=1 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/healthz || exit 1
+
 ENTRYPOINT ["dotnet", "GZCTF.dll"]

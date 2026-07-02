@@ -8,6 +8,18 @@ services:
     # (Alpine base) on a thread-pool worker; without a restart policy a single
     # crash takes the whole platform down until someone notices (it sat down ~55m).
     restart: unless-stopped
+    # Covers the OTHER failure mode restart:unless-stopped doesn't: hung-but-alive
+    # (deadlock, thread-pool exhaustion) rather than a hard process exit. Compose
+    # picks this up from the image's own HEALTHCHECK too, but it's declared here
+    # explicitly so `docker compose ps`/`docker inspect` surface health without
+    # relying on that being unchanged, and so a future `depends_on: condition:
+    # service_healthy` on this service is possible without edits elsewhere.
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/healthz" ]
+      interval: 30s
+      timeout: 3s
+      start_period: 30s
+      retries: 3
     ports:
       - "8080:8080"
       # - "3306:3306"
