@@ -1,17 +1,27 @@
 name: Integration Tests
 
 on:
-  push:
-    branches: [ "work", "develop", "ci/*", "v*" ]
-    paths:
-      - "src/**"
-      - ".github/workflows/integration-tests.yml"
+  # `push` (develop/ci/*/v*/work) and `pull_request` (work) are NOT
+  # triggered here directly — ci.yml and work.yml embed this workflow via
+  # `workflow_call` on those events (which also gates their image build on
+  # it passing), so a standalone trigger would just duplicate the run.
+  # `pull_request` for develop is the exception: neither ci.yml nor work.yml
+  # trigger on pull_request against develop, so this is the only thing
+  # gating that path pre-merge.
   pull_request:
-    branches: [ "develop", "work" ]
+    branches: [ "develop" ]
     paths:
       - "src/**"
       - ".github/workflows/integration-tests.yml"
   workflow_dispatch:
+  workflow_call:
+    secrets:
+      TEST_GH_PAT:
+        required: false
+      TEST_GH_REPO:
+        required: false
+      CODECOV_TOKEN:
+        required: false
 
 jobs:
   test:
@@ -36,6 +46,8 @@ jobs:
         name: Install pnpm
         with:
           version: 11
+
+      - uses: ./.github/actions/setup-caches
 
       - name: Restore dependencies
         working-directory: src
@@ -129,6 +141,8 @@ jobs:
         name: Install pnpm
         with:
           version: 11
+
+      - uses: ./.github/actions/setup-caches
 
       - name: Restore dependencies
         working-directory: src

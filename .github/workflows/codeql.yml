@@ -46,6 +46,8 @@ jobs:
 
       - run: npm i -g pnpm
 
+      - uses: ./.github/actions/setup-caches
+
       - name: Build with dotnet
         run: |
           dotnet build "GZCTF.csproj" -c Release -o build

@@ -13,7 +13,13 @@ env:
     'patch') || !contains(github.ref, '-')) }}
 
 jobs:
+  test:
+    name: Test
+    uses: ./.github/workflows/integration-tests.yml
+    secrets: inherit
+
   build:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -39,6 +45,8 @@ jobs:
         name: Install pnpm
         with:
           version: 11
+
+      - uses: ./.github/actions/setup-caches
 
       - name: Get current date time
         id: datetime

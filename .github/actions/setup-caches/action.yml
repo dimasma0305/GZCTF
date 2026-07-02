@@ -1,0 +1,30 @@
+name: Setup NuGet + pnpm caches
+description: >
+  Restores NuGet package and pnpm store caches. Must run after
+  actions/setup-dotnet and after pnpm is available on PATH (via
+  pnpm/action-setup or `npm i -g pnpm`), since it shells out to `pnpm store
+  path`.
+
+runs:
+  using: composite
+  steps:
+    - name: Cache NuGet packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props', 'src/global.json') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+
+    - name: Get pnpm store directory
+      id: pnpm-cache
+      shell: bash
+      run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+    - name: Cache pnpm store
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+        key: ${{ runner.os }}-pnpm-${{ hashFiles('src/GZCTF/ClientApp/pnpm-lock.yaml') }}
+        restore-keys: |
+          ${{ runner.os }}-pnpm-
