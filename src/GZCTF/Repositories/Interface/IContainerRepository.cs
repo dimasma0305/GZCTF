@@ -43,6 +43,14 @@ public interface IContainerRepository : IRepository
     public Task<Container[]> GetDyingContainers(CancellationToken token = default);
 
     /// <summary>
+    /// Every non-destroyed container's provider-side ID (Docker container ID / K8s pod
+    /// &amp; service name). Used by <see cref="Services.Container.Manager.KubernetesDriftCheckService"/>
+    /// to spot K8s resources the platform lost track of (crash mid-teardown, a manual
+    /// <c>kubectl delete</c>, node eviction that skipped GZCTF's own cleanup path).
+    /// </summary>
+    public Task<HashSet<string>> GetLiveContainerIds(CancellationToken token = default);
+
+    /// <summary>
     /// Extend container lifetime
     /// </summary>
     /// <param name="container">container</param>

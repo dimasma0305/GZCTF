@@ -54,7 +54,8 @@ public static class ContainerServiceExtension
                     .AddSingleton<IContainerManager, KubernetesManager>()
                     .AddSingleton<Build.IChallengeImageBuilder, Build.K8sChallengeImageBuilder>()
                     .AddSingleton<Exec.IContainerExecChannel, Exec.K8sContainerExecChannel>()
-                    .AddScoped<IAdCheckRunner, K8sAdCheckRunner>(),
+                    .AddScoped<IAdCheckRunner, K8sAdCheckRunner>()
+                    .AddHostedService<KubernetesDriftCheckService>(),
                 _ => services
                     .AddSingleton<IContainerManager, DockerManager>()
                     .AddSingleton<Build.IChallengeImageBuilder, Build.DockerChallengeImageBuilder>()

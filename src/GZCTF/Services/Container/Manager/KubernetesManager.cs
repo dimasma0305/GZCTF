@@ -224,7 +224,25 @@ public class KubernetesManager : IContainerManager
             {
                 Name = name,
                 NamespaceProperty = _meta.Config.Namespace,
-                Labels = new Dictionary<string, string> { ["gzctf.gzti.me/ResourceId"] = name }
+                Labels = new Dictionary<string, string> { ["gzctf.gzti.me/ResourceId"] = name },
+                // Owned by the pod so K8s's own garbage collector removes the service
+                // whenever the pod goes away by ANY path — not just DestroyContainerAsync.
+                // Without this, a manual `kubectl delete pod`, node eviction, or a crash
+                // between the two DeleteNamespaced* calls in DestroyContainerAsync leaves
+                // an orphaned service (dangling selector, nothing backing it) forever.
+                // BlockOwnerDeletion is deliberately omitted: default background GC already
+                // deletes the service once the pod is gone, which is the entire goal here;
+                // the flag only affects foreground-deletion ordering (never used) and would
+                // additionally require `update` on the pod's `finalizers` subresource under
+                // OwnerReferencesPermissionEnforcement — a permission this service account
+                // may not have, turning every container create into a 403 for no benefit.
+                OwnerReferences =
+                [
+                    new V1OwnerReference
+                    {
+                        ApiVersion = "v1", Kind = "Pod", Name = pod.Metadata.Name, Uid = pod.Metadata.Uid
+                    }
+                ]
             },
             Spec = new V1ServiceSpec
             {

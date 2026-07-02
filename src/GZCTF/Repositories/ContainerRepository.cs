@@ -91,6 +91,13 @@ public class ContainerRepository(
                         && !Context.KothTargets.Any(t => t.ContainerId == c.Id))
             .ToArrayAsync(token);
 
+    public async Task<HashSet<string>> GetLiveContainerIds(CancellationToken token = default) =>
+        (await Context.Containers
+            .Where(c => c.Status != ContainerStatus.Destroyed)
+            .Select(c => c.ContainerId)
+            .ToArrayAsync(token))
+        .ToHashSet();
+
     public Task ExtendLifetime(Container container, TimeSpan time, CancellationToken token = default)
     {
         container.ExpectStopAt += time;
