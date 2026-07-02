@@ -63,6 +63,13 @@ export enum NetworkMode {
   Custom = "Custom",
 }
 
+/** Dynamic-scoring decay curve shape */
+export enum ScoreCurve {
+  Standard = "Standard",
+  Linear = "Linear",
+  Logarithmic = "Logarithmic",
+}
+
 /** Container status */
 export enum ContainerStatus {
   Pending = "Pending",
@@ -1624,6 +1631,8 @@ export interface ChallengeEditDetailModel {
    * @format double
    */
   difficulty: number;
+  /** Dynamic-scoring decay curve shape (Standard / Linear / Logarithmic). */
+  scoreCurve: ScoreCurve;
   /** A&D — Docker image for the per-challenge checker container. */
   adCheckerImage?: string | null;
   /** A&D — When true, team containers can reach the public internet. */
@@ -1913,6 +1922,8 @@ export interface ChallengeUpdateModel {
    * @format double
    */
   difficulty?: number | null;
+  /** Dynamic-scoring decay curve shape (Standard / Linear / Logarithmic). */
+  scoreCurve?: ScoreCurve | null;
   /** A&D — Docker image for the per-challenge checker container. */
   adCheckerImage?: string | null;
   /** A&D — When true, team containers can reach the public internet. */

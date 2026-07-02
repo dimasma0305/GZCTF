@@ -274,6 +274,13 @@
           "description": "Min score: {{min_score}}pts",
           "label": "Minimum Score Ratio"
         },
+        "score_curve": {
+          "description": "How the score decays as more teams solve",
+          "label": "Score Curve",
+          "standard": "Standard (exponential)",
+          "linear": "Linear",
+          "logarithmic": "Logarithmic (gentle)"
+        },
         "network_mode": {
           "description": "Public network access",
           "label": "Network Mode",

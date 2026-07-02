@@ -44,6 +44,13 @@ public class GameChallenge : Challenge
     public double Difficulty { get; set; } = 5;
 
     /// <summary>
+    /// Shape of the score-vs-solves decay curve. Defaults to <see cref="ScoreCurve.Standard"/>
+    /// (the historical exponential decay), so every existing challenge is unchanged.
+    /// </summary>
+    [Required]
+    public ScoreCurve ScoreCurve { get; set; } = ScoreCurve.Standard;
+
+    /// <summary>
     /// Current score of the challenge
     /// </summary>
     [NotMapped]
@@ -51,18 +58,32 @@ public class GameChallenge : Challenge
         OriginalScore,
         MinScoreRate,
         Difficulty,
-        FirstSolves?.Count ?? 0);
+        FirstSolves?.Count ?? 0,
+        ScoreCurve);
 
 
     internal static int CalculateChallengeScore(int originalScore, double minScoreRate, double difficulty,
-        int acceptedCount)
+        int acceptedCount, ScoreCurve curve = ScoreCurve.Standard)
     {
         if (acceptedCount <= 1)
             return originalScore;
 
-        return (int)Math.Floor(
-            originalScore *
-            (minScoreRate + (1.0 - minScoreRate) * Math.Exp((1 - acceptedCount) / difficulty)));
+        // Fraction of OriginalScore this challenge is worth at `acceptedCount` solves,
+        // in [minScoreRate, 1]. Each curve interpolates from 1 (at 1 solve) down toward
+        // the minScoreRate floor differently; Standard is byte-for-byte the original.
+        var factor = curve switch
+        {
+            // Straight-line drop, clamped at the floor; reaches it near `difficulty` solves.
+            ScoreCurve.Linear =>
+                Math.Max(minScoreRate, 1.0 - (1.0 - minScoreRate) * ((acceptedCount - 1) / difficulty)),
+            // Concave: denominator grows with ln(solves), so value tapers slowly.
+            ScoreCurve.Logarithmic =>
+                minScoreRate + (1.0 - minScoreRate) / (1.0 + Math.Log(acceptedCount) / difficulty),
+            // Standard (default): the historical exponential decay — unchanged.
+            _ => minScoreRate + (1.0 - minScoreRate) * Math.Exp((1 - acceptedCount) / difficulty)
+        };
+
+        return (int)Math.Floor(originalScore * factor);
     }
 
     internal void Update(ChallengeUpdateModel model)
@@ -80,6 +101,7 @@ public class GameChallenge : Challenge
         OriginalScore = model.OriginalScore ?? OriginalScore;
         MinScoreRate = model.MinScoreRate ?? MinScoreRate;
         Difficulty = model.Difficulty ?? Difficulty;
+        ScoreCurve = model.ScoreCurve ?? ScoreCurve;
         FileName = model.FileName ?? FileName;
         DisableBloodBonus = model.DisableBloodBonus ?? DisableBloodBonus;
         SubmissionLimit = model.SubmissionLimit ?? SubmissionLimit;

@@ -45,7 +45,14 @@ import {
 } from '@Utils/Shared'
 import { useEditChallenge, useEditChallenges } from '@Hooks/useEdit'
 import { useGame } from '@Hooks/useGame'
-import api, { ChallengeBuildStatus, ChallengeCategory, ChallengeType, ChallengeUpdateModel, NetworkMode } from '@Api'
+import api, {
+  ChallengeBuildStatus,
+  ChallengeCategory,
+  ChallengeType,
+  ChallengeUpdateModel,
+  NetworkMode,
+  ScoreCurve,
+} from '@Api'
 import misc from '@Styles/Misc.module.css'
 
 /**
@@ -575,6 +582,24 @@ const GameChallengeEdit: FC = () => {
                       }}
                     />
                   </Group>
+                  <Select
+                    label={t('admin.content.games.challenges.score_curve.label')}
+                    description={t('admin.content.games.challenges.score_curve.description')}
+                    disabled={disabled}
+                    allowDeselect={false}
+                    value={challengeInfo?.scoreCurve ?? ScoreCurve.Standard}
+                    data={[
+                      { value: ScoreCurve.Standard, label: t('admin.content.games.challenges.score_curve.standard') },
+                      { value: ScoreCurve.Linear, label: t('admin.content.games.challenges.score_curve.linear') },
+                      {
+                        value: ScoreCurve.Logarithmic,
+                        label: t('admin.content.games.challenges.score_curve.logarithmic'),
+                      },
+                    ]}
+                    onChange={(e) =>
+                      setChallengeInfo({ ...challengeInfo, scoreCurve: (e as ScoreCurve) ?? ScoreCurve.Standard })
+                    }
+                  />
                   <Input.Wrapper label={t('admin.content.games.challenges.min_score_radio.label')} h="3.8rem" required>
                     <Slider
                       label={(value) =>

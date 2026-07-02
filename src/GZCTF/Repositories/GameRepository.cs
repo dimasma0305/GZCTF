@@ -405,7 +405,8 @@ public class GameRepository(
                     new ChallengeScoreMeta(
                         c.OriginalScore,
                         c.MinScoreRate,
-                        c.Difficulty),
+                        c.Difficulty,
+                        c.ScoreCurve),
                     new ChallengeInfo
                     {
                         Id = c.Id,
@@ -518,7 +519,7 @@ public class GameRepository(
             if (info.Type is ChallengeType.AttackDefense or ChallengeType.KingOfTheHill)
                 continue;
             info.Score = GameChallenge.CalculateChallengeScore(meta.OriginalScore,
-                meta.MinScoreRate, meta.Difficulty, solvedCount);
+                meta.MinScoreRate, meta.Difficulty, solvedCount, meta.ScoreCurve);
         }
 
         // 5. sort challenge items by submit time, and update the Score and Type fields
@@ -704,7 +705,8 @@ public class GameRepository(
     private readonly record struct ChallengeScoreMeta(
         int OriginalScore,
         double MinScoreRate,
-        double Difficulty);
+        double Difficulty,
+        ScoreCurve ScoreCurve);
 
     private readonly record struct SolveSnapshot(
         int ChallengeId,

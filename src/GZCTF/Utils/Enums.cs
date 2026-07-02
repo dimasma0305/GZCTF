@@ -46,6 +46,29 @@ public enum ChallengeReviewStatus : byte
 }
 
 /// <summary>
+/// Shape of a dynamic-scoring challenge's score-vs-solves decay curve. All three use
+/// the same knobs (<c>OriginalScore</c>, <c>MinScoreRate</c>, <c>Difficulty</c>) and
+/// return <c>OriginalScore</c> at ≤1 solve — they differ only in how the score falls
+/// toward the <c>MinScoreRate</c> floor as more teams solve. Score is computed live at
+/// render, so switching a challenge's curve mid-game needs no recompute/backfill.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<ScoreCurve>))]
+public enum ScoreCurve : byte
+{
+    /// <summary>The historical GZCTF curve — exponential decay (convex; drops fast then
+    /// flattens). Default; unchanged behavior for every existing challenge.</summary>
+    Standard = 0,
+
+    /// <summary>Straight-line decay: the score steps down by an equal amount per solve,
+    /// reaching the floor after roughly <c>Difficulty</c> solves.</summary>
+    Linear = 1,
+
+    /// <summary>Gentle (concave) decay — holds most of its value for the early solves
+    /// and only tapers toward the floor slowly. Rewards breadth over first-blood speed.</summary>
+    Logarithmic = 2
+}
+
+/// <summary>
 /// Lifecycle of the auto-build pipeline that turns a local
 /// <c>Dockerfile</c> declared in a challenge.yaml into a usable image
 /// reference. The expanded set distinguishes "no build needed" from

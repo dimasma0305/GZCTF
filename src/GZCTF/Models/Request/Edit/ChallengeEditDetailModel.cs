@@ -160,6 +160,12 @@ public class ChallengeEditDetailModel
     [Required]
     public double Difficulty { get; set; } = 3;
 
+    /// <summary>
+    /// Dynamic-scoring decay curve shape (Standard / Linear / Logarithmic).
+    /// </summary>
+    [Required]
+    public ScoreCurve ScoreCurve { get; set; } = ScoreCurve.Standard;
+
     #region Attack & Defense (per-challenge)
 
     /// <summary>A&amp;D — Docker image for the per-challenge checker container.</summary>
@@ -219,6 +225,7 @@ public class ChallengeEditDetailModel
             OriginalScore = chal.OriginalScore,
             MinScoreRate = chal.MinScoreRate,
             Difficulty = chal.Difficulty,
+            ScoreCurve = chal.ScoreCurve,
             FileName = chal.FileName,
             Attachment = chal.Attachment,
             SubmissionLimit = chal.SubmissionLimit,

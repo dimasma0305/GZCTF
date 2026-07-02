@@ -128,6 +128,11 @@ public class ChallengeUpdateModel
     [Range(0.01, double.MaxValue)]
     public double? Difficulty { get; set; }
 
+    /// <summary>
+    /// Dynamic-scoring decay curve shape (Standard / Linear / Logarithmic).
+    /// </summary>
+    public ScoreCurve? ScoreCurve { get; set; }
+
     #region Attack & Defense (per-challenge)
 
     /// <summary>A&amp;D — Docker image for the per-challenge checker container (empty = TCP-reachability fallback).</summary>
