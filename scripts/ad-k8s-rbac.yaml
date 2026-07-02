@@ -1,0 +1,74 @@
+# Least-privilege RBAC for the GZCTF Kubernetes container provider.
+#
+# GZCTF talks to the cluster with the kubeconfig you point
+# ContainerProvider.KubernetesConfig.KubeConfig at. These are the exact
+# permissions its code paths need — nothing more. Apply with:
+#
+#   kubectl apply -f ad-k8s-rbac.yaml
+#
+# then generate a kubeconfig for the `gzctf` ServiceAccount below and mount it
+# into the platform. A ClusterRole (not a namespaced Role) is required because
+# two operations are cluster-scoped:
+#   • namespaces: create/get/list — the provider ensures its challenge namespace
+#     exists (KubernetesConfig.Namespace).
+#   • nodes: list — best-effort auto-detection of node IPs so the challenge egress
+#     policy can deny reaching the control plane (KubernetesProvider; degrades
+#     gracefully to hand-configured AllowCidr if this verb is withheld).
+#
+# Everything else is namespaced, but the binding is cluster-wide for simplicity;
+# scope the ClusterRoleBinding down to a RoleBinding in the challenge namespace if
+# you prefer (you must still keep namespaces/nodes in a ClusterRole).
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gzctf
+  namespace: gzctf-challenges
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gzctf-container-provider
+rules:
+  # Challenge pods: CreateContainerAsync / DestroyContainerAsync / KubernetesDriftCheckService.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "create", "delete"]
+  # Interactive container console (ContainerExecHub → WebSocketNamespacedPodExec).
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  # Per-pod Service for port mapping (created with an OwnerReference to the pod so
+  # K8s GCs it when the pod goes away).
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "create", "delete"]
+  # Registry auth secrets for private challenge images (imagePullSecrets).
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update"]
+  # A&D egress/isolation NetworkPolicies the provider maintains.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "create", "update"]
+  # Cluster-scoped: ensure the challenge namespace exists.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "create"]
+  # Cluster-scoped, best-effort: auto-detect node IPs for the egress control-plane deny.
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gzctf-container-provider
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gzctf-container-provider
+subjects:
+  - kind: ServiceAccount
+    name: gzctf
+    namespace: gzctf-challenges

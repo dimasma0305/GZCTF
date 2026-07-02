@@ -28,11 +28,13 @@ metadata:
   # Set this to whatever your appsettings.ContainerProvider.KubernetesConfig.Namespace is.
   namespace: gzctf-challenges
 spec:
-  # Apply to pods labeled with the challenge type. The GZCTF Kubernetes
-  # provider labels challenge pods; A&D pods inherit those labels.
+  # Apply only to A&D / KotH pods. KubernetesManager tags exactly those pods
+  # (the ones that get the flag-pull sidecar) with gzctf.gzti.me/AdEngine=true.
+  # Jeopardy pods carry no such label, so their baked-in egress isolation
+  # (RFC1918-deny) is left intact — only A&D gameplay traffic is re-permitted here.
   podSelector:
     matchLabels:
-      gzctf/category: attack-defense
+      gzctf.gzti.me/AdEngine: "true"
   policyTypes:
     - Ingress
     - Egress

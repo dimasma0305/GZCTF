@@ -15,17 +15,27 @@ container launch + destroy + restart + resource caps all work on the
 
 ## K8s-only operator steps
 
-1. **Apply the sample NetworkPolicy** in `ad-k8s-networkpolicy.yaml`. It
-   enforces L4 isolation: A&D pods can talk to each other in the
-   configured namespace but can't reach the gzctf control plane or
-   external networks. Edit the `namespace:` field to match your
+1. **Apply the RBAC** in `ad-k8s-rbac.yaml` and point the platform's
+   kubeconfig at the `gzctf` ServiceAccount it creates. It grants exactly
+   the verbs the provider's code paths use (pods incl. `pods/exec`,
+   services, secrets, networkpolicies, plus cluster-scoped namespaces +
+   `nodes:list`). Edit the namespace to match your
    `appsettings.ContainerProvider.KubernetesConfig.Namespace`.
 
-2. **Tag your A&D challenge pods** with `gzctf/category: attack-defense`
-   so the NetworkPolicy selector matches. The KubernetesManager already
-   applies category labels based on `Challenge.Category` — if your
-   challenge's category isn't "AttackDefense" in the dropdown, this
-   label won't match and the policy won't apply.
+2. **Apply the sample NetworkPolicy** in `ad-k8s-networkpolicy.yaml`. It
+   enforces L4 isolation: A&D pods can talk to each other in the
+   configured namespace but can't reach the gzctf control plane or
+   external networks. Edit the `namespace:` field to match the same
+   `KubernetesConfig.Namespace`.
+
+   No manual pod labeling is needed: `KubernetesManager` automatically
+   tags A&D / KotH pods (the ones delivered a flag via the pull sidecar)
+   with `gzctf.gzti.me/AdEngine=true`, which is exactly what the sample
+   policy's `podSelector` matches. Jeopardy pods are deliberately left
+   unlabeled so their tighter egress isolation stays intact. (Earlier
+   revisions of this file selected `gzctf/category: attack-defense`, a
+   label the provider never set — the policy matched nothing and A&D
+   traffic was silently blocked; that is fixed.)
 
 ## Known limitations vs the Docker provider
 

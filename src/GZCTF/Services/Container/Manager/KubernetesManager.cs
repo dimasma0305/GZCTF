@@ -154,21 +154,33 @@ public class KubernetesManager : IContainerManager
                 }
             });
 
+        var podLabels = new Dictionary<string, string>
+        {
+            ["gzctf.gzti.me/ResourceId"] = name,
+            ["gzctf.gzti.me/Image"] = chalImage,
+            ["gzctf.gzti.me/TeamId"] = config.TeamId,
+            ["gzctf.gzti.me/UserId"] = config.UserId.ToString(),
+            ["gzctf.gzti.me/ChallengeId"] = config.ChallengeId.ToString(),
+            ["gzctf.gzti.me/NetworkMode"] = config.NetworkMode.ToString().ToLowerInvariant()
+        };
+        // A&D / KotH pods are exactly the ones delivered a flag via the pull sidecar
+        // (pullFlag) — a reliable, exclusive marker of the A&D engine on K8s. Tag them so
+        // the ad-isolation NetworkPolicy (scripts/ad-k8s-networkpolicy.yaml) can select
+        // precisely these pods to re-permit team-to-team gameplay traffic, WITHOUT
+        // loosening the egress isolation on jeopardy pods (which carry no such label).
+        // Previously the sample policy selected `gzctf/category: attack-defense`, a label
+        // this manager never set — so the policy matched nothing and A&D traffic on K8s
+        // was silently blocked by the baked-in RFC1918-deny egress policy.
+        if (pullFlag)
+            podLabels["gzctf.gzti.me/AdEngine"] = "true";
+
         var pod = new V1Pod
         {
             Metadata = new V1ObjectMeta
             {
                 Name = name,
                 NamespaceProperty = options.Namespace,
-                Labels = new Dictionary<string, string>
-                {
-                    ["gzctf.gzti.me/ResourceId"] = name,
-                    ["gzctf.gzti.me/Image"] = chalImage,
-                    ["gzctf.gzti.me/TeamId"] = config.TeamId,
-                    ["gzctf.gzti.me/UserId"] = config.UserId.ToString(),
-                    ["gzctf.gzti.me/ChallengeId"] = config.ChallengeId.ToString(),
-                    ["gzctf.gzti.me/NetworkMode"] = config.NetworkMode.ToString().ToLowerInvariant()
-                }
+                Labels = podLabels
             },
             Spec = new V1PodSpec
             {
