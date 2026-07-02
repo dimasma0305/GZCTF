@@ -77,6 +77,22 @@ public sealed class StartupSecurityAudit(
                 "Avoid Custom mode for untrusted challenges, or pin a policy.");
         }
 
+        // 3c. Ad:Ssh:InternalSecret gates the internal SSH lookup/relay endpoints
+        //     (InternalAdSshController already fails closed at request time if this
+        //     is unset or the shipped placeholder — see AuthInternalValue — but that
+        //     only surfaces as a per-request LogError once someone tries to use it).
+        //     Surface it here too so an operator sees "SSH jump-host is disabled"
+        //     immediately at boot, not after a confused support ticket.
+        var sshSecret = configuration["Ad:Ssh:InternalSecret"];
+        if (string.IsNullOrEmpty(sshSecret))
+            findings.Add(
+                "Ad:Ssh:InternalSecret is unset — the internal A&D SSH lookup/relay endpoints are DISABLED " +
+                "(fail closed). Set AD_SSH_INTERNAL_SECRET to a real secret if you use the SSH jump-host feature.");
+        else if (sshSecret == "dev-only-rotate-me-before-prod")
+            findings.Add(
+                "Ad:Ssh:InternalSecret is still the shipped placeholder — the internal A&D SSH lookup/relay " +
+                "endpoints are DISABLED (fail closed). Set AD_SSH_INTERNAL_SECRET to a real secret.");
+
         // 4. AllowedHosts unset / "*" → Host-header injection. Email links (password
         //    reset / verification) and the BYOC setup script use the request Host, so
         //    a spoofed Host header can phish users or mis-point a team's agent. Behind

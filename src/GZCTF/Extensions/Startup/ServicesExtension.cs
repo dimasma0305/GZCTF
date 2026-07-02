@@ -24,7 +24,13 @@ internal static class ServicesExtension
     {
         private void AddConfig<TConfig>()
             where TConfig : class
-            => builder.Services.Configure<TConfig>(builder.Configuration.GetSection(typeof(TConfig).Name));
+            // ValidateOnStart makes a misconfigured value (out of [Range], over
+            // [MaxLength], etc.) a boot-time crash naming the exact bad field,
+            // instead of a value that silently binds anyway and misbehaves later.
+            => builder.Services.AddOptions<TConfig>()
+                .Bind(builder.Configuration.GetSection(typeof(TConfig).Name))
+                .ValidateDataAnnotations()
+                .ValidateOnStart();
 
         internal void AddServiceConfigurations()
         {
