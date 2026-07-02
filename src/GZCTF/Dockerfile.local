@@ -35,16 +35,23 @@ COPY . .
 WORKDIR /src/GZCTF
 RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine AS final
+# Debian/glibc, not Alpine/musl: this process P/Invokes into native libpcap
+# (SharpPcap, A&D traffic capture — ContainerProvider:EnableTrafficCapture),
+# ICU, libgdiplus and krb5, and a native SIGSEGV inside musl's vfscanf took
+# the platform down for ~55min with no stack trace to go on. glibc's libc is
+# far more battle-tested for this kind of native interop. ICU and tzdata are
+# already bundled in this base image, unlike the Alpine variant.
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 EXPOSE 8080
 
 ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false \
     LC_ALL=en_US.UTF-8
 
-RUN apk add --update --no-cache wget libpcap icu-data-full icu-libs \
-    ca-certificates libgdiplus tzdata krb5-libs git openssh-client && \
-    update-ca-certificates
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget libpcap0.8t64 ca-certificates libgdiplus libkrb5-3 git openssh-client && \
+    update-ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/publish .
 
