@@ -5,13 +5,15 @@ using GZCTF.Services.Cache.Handlers;
 using MemoryPack;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
+using StackExchange.Redis;
 
 namespace GZCTF.Services.Cache;
 
 public class CacheHelper(
     IDistributedCache distributedCache,
     IMemoryCache memoryCache,
-    ChannelWriter<CacheRequest> channelWriter)
+    ChannelWriter<CacheRequest> channelWriter,
+    IConnectionMultiplexer? redis = null)
 {
     /// <summary>
     /// Per-cache-key, in-process single-flight gate. The L1 <see cref="IMemoryCache"/> entry
@@ -163,14 +165,18 @@ public class CacheHelper(
         if (TryDeserialize(value, ref result))
             return result;
 
-        // wait if the cache is updating
-        value = await WaitLockAsync(key, token);
-
-        if (TryDeserialize(value, ref result))
-            return result;
-
         var lockKey = CacheKey.UpdateLock(key);
-        await SetLockAsync(lockKey, token);
+
+        // Become the sole builder, or find out someone else already is. On a
+        // failed acquire, wait for the current holder to finish and re-check —
+        // if they didn't produce a usable value (failed build), loop back and
+        // race for the lock ourselves rather than serving nothing.
+        while (!await TryAcquireLockAsync(lockKey, token))
+        {
+            value = await WaitForLockReleaseAsync(key, lockKey, token);
+            if (TryDeserialize(value, ref result))
+                return result;
+        }
 
         int byteCount;
         try
@@ -216,27 +222,56 @@ public class CacheHelper(
         }
     }
 
-    private async Task<byte[]?> WaitLockAsync(string key, CancellationToken token = default)
+    /// <summary>
+    /// Try to become the sole builder for lockKey. Redis-backed: a single atomic
+    /// SET-if-not-exists, so exactly one concurrent caller across any number of
+    /// replicas ever wins — closes the cross-replica stampede window the old
+    /// get-then-set pair left open. No Redis configured (single-instance
+    /// deployment): a best-effort check-then-set — IDistributedCache has no
+    /// atomic "set if absent" primitive to fall back on, but for one process a
+    /// narrow double-acquire just means a harmless redundant rebuild, not
+    /// corruption, so this is an acceptable, unchanged-from-before fallback.
+    /// </summary>
+    private async Task<bool> TryAcquireLockAsync(string lockKey, CancellationToken token)
     {
-        var lockKey = CacheKey.UpdateLock(key);
-        var lockValue = await distributedCache.GetAsync(lockKey, token);
+        if (redis is not null)
+            return await redis.GetDatabase().StringSetAsync(
+                lockKey, RedisValue.EmptyString, TimeSpan.FromMinutes(1), When.NotExists);
 
-        if (lockValue is null)
-            return null;
+        var existing = await distributedCache.GetAsync(lockKey, token);
+        if (existing is not null)
+            return false;
 
-        while (lockValue is not null)
-        {
-            await Task.Delay(100, token);
-            lockValue = await distributedCache.GetAsync(lockKey, token);
-        }
-
-        // if we wait for the lock, we should try to get the value again
-        return await distributedCache.GetAsync(key, token);
+        await distributedCache.SetAsync(lockKey, [],
+            new DistributedCacheEntryOptions { SlidingExpiration = TimeSpan.FromMinutes(1) }, token);
+        return true;
     }
 
-    private Task SetLockAsync(string lockKey, CancellationToken token = default)
-        => distributedCache.SetAsync(lockKey, [],
-            new DistributedCacheEntryOptions { SlidingExpiration = TimeSpan.FromMinutes(1) }, token);
+    /// <summary>
+    /// Poll until lockKey is released, then return the (hopefully now populated)
+    /// value key. Detection has to match how TryAcquireLockAsync wrote the lock:
+    /// when Redis is configured the lock is a raw Redis STRING (written via
+    /// StringSetAsync), which IDistributedCache can't read back — it stores its
+    /// OWN entries as a Redis HASH (absexp/sldexp/data fields), a different type
+    /// at the same key name. Checking existence via the matching raw path avoids
+    /// that mismatch.
+    /// </summary>
+    private async Task<byte[]?> WaitForLockReleaseAsync(string key, string lockKey, CancellationToken token)
+    {
+        if (redis is not null)
+        {
+            var db = redis.GetDatabase();
+            while (await db.KeyExistsAsync(lockKey))
+                await Task.Delay(100, token);
+        }
+        else
+        {
+            while (await distributedCache.GetAsync(lockKey, token) is not null)
+                await Task.Delay(100, token);
+        }
+
+        return await distributedCache.GetAsync(key, token);
+    }
 
     private Task ReleaseLockAsync(string lockKey, CancellationToken token = default) =>
         distributedCache.RemoveAsync(lockKey, token);
