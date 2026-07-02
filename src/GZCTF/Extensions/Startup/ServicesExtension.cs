@@ -15,6 +15,7 @@ using GZCTF.Services.Transfer;
 using GZCTF.Services.Webhook;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.ResponseCompression;
+using StackExchange.Redis;
 
 namespace GZCTF.Extensions.Startup;
 
@@ -196,7 +197,19 @@ internal static class ServicesExtension
         {
             builder.Services.AddHttpContextAccessor();
             builder.Services.AddRouting(options => options.LowercaseUrls = true);
-            builder.Services.AddRateLimiter(RateLimiter.ConfigureRateLimiter);
+            // AddRateLimiter's single-Action overload runs eagerly with no DI access, so the
+            // GlobalLimiter can't see IConnectionMultiplexer (registered by
+            // ConfigureCacheAndSignalR, only when Redis is configured) that way. Registering
+            // the options config separately via Configure<TDep> resolves it lazily — by the
+            // time RateLimiterOptions is actually built (first middleware/request), all
+            // services are registered regardless of call order, and GetService (not
+            // GetRequiredService) keeps this optional when Redis isn't configured at all.
+            builder.Services.AddRateLimiter();
+            builder.Services.AddOptions<Microsoft.AspNetCore.RateLimiting.RateLimiterOptions>()
+                .Configure<IServiceProvider>((options, sp) => Middlewares.RateLimiter.ConfigureRateLimiter(
+                    options,
+                    sp.GetService<IConnectionMultiplexer>(),
+                    sp.GetRequiredService<ILoggerFactory>().CreateLogger("GZCTF.Middlewares.RateLimiter")));
             builder.Services.AddResponseCompression(options =>
             {
                 options.Providers.Add<ZStandardCompressionProvider>();
