@@ -22,6 +22,7 @@ public static class HandlerExtension
                                              "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
                                              "img-src * 'self' data: blob:; " +
                                              "font-src * 'self' data:; object-src 'none'; frame-src * https:; " +
+                                             "manifest-src 'self'; " +
                                              "connect-src 'self' http://127.0.0.1:*; base-uri 'none';";
 
     private static readonly int CspHeaderLength = CspTemplatePrefix.Length + 12 + CspTemplateSuffix.Length;

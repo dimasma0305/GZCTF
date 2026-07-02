@@ -5,8 +5,20 @@
     <meta content="width=device-width, initial-scale=1.0" name="viewport" />
     <meta content="%description%" name="description" />
     <meta content="%title%, GZCTF" name="keywords" />
+    <meta name="theme-color" content="#0c0d0e" />
+    <!-- Open Graph / Twitter cards so links shared to Discord/Slack/Twitter render a
+         rich preview instead of a bare URL. %title%/%description% are server-substituted
+         (HTML-encoded) per deployment by HandlerExtension.IndexHandler. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="%title%" />
+    <meta property="og:description" content="%description%" />
     <meta property="og:image" content="/favicon.webp" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="%title%" />
+    <meta name="twitter:description" content="%description%" />
+    <meta name="twitter:image" content="/favicon.webp" />
     <link href="/favicon.webp" rel="icon" type="image/webp" />
+    <link href="/manifest.webmanifest" rel="manifest" />
     <title>%title%</title>
   </head>
   <body>

@@ -25,7 +25,7 @@ import { showNotification } from '@mantine/notifications'
 import { mdiCheck, mdiContentSaveOutline, mdiDatabaseEditOutline, mdiDeleteOutline, mdiEyeOutline, mdiHammerWrench } from '@mdi/js'
 import { Icon } from '@mdi/react'
 import dayjs from 'dayjs'
-import { FC, useEffect, useState } from 'react'
+import { FC, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate, useParams } from 'react-router'
 import { HintList } from '@Components/HintList'
@@ -127,17 +127,62 @@ const GameChallengeEdit: FC = () => {
 
   const { t } = useTranslation()
 
+  // Unsaved-changes guard. A stable serialization of the editable state is captured as
+  // the "saved" baseline whenever the challenge (re)loads — including right after a save,
+  // since onUpdate mutate()s `challenge`, re-running this effect and clearing dirty.
+  const savedSnapshotRef = useRef<string>('')
+  const [dirty, setDirty] = useState(false)
+  const makeSnapshot = (
+    info: ChallengeUpdateModel,
+    dl: dayjs.Dayjs | null,
+    mr: number,
+    cat: string | null,
+    ty: string | null,
+    nm: string | null
+  ) => JSON.stringify({ info, dl: dl ? dl.valueOf() : null, mr, cat, ty, nm })
+
   useEffect(() => {
     if (challenge) {
-      setChallengeInfo({ ...challenge })
+      const info = { ...challenge }
+      const dl = challenge.deadlineUtc ? dayjs(challenge.deadlineUtc) : null
+      const mr = (challenge?.minScoreRate ?? 0.25) * 100
+      setChallengeInfo(info)
       setCategory(challenge.category)
       setType(challenge.type)
-      setMinRate((challenge?.minScoreRate ?? 0.25) * 100)
+      setMinRate(mr)
       setCurrentAcceptCount(challenge.acceptedCount)
-      setDeadline(challenge.deadlineUtc ? dayjs(challenge.deadlineUtc) : null)
+      setDeadline(dl)
       setNetworkMode(challenge.networkMode ?? NetworkMode.Open)
+      savedSnapshotRef.current = makeSnapshot(
+        info,
+        dl,
+        mr,
+        challenge.category,
+        challenge.type,
+        challenge.networkMode ?? NetworkMode.Open
+      )
+      setDirty(false)
     }
   }, [challenge])
+
+  // Recompute dirty against the saved baseline whenever any tracked edit state changes.
+  useEffect(() => {
+    setDirty(makeSnapshot(challengeInfo, deadline, minRate, category, type, networkMode) !== savedSnapshotRef.current)
+  }, [challengeInfo, deadline, minRate, category, type, networkMode])
+
+  // Warn on tab-close / reload / navigating to an external URL while there are unsaved
+  // edits. NOTE: this can't intercept in-app SPA navigation — the app mounts a component
+  // <BrowserRouter> (not a data router), so react-router's useBlocker isn't available;
+  // beforeunload is the supported guard here and covers the common accidental-loss cases.
+  useEffect(() => {
+    if (!dirty) return
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [dirty])
 
   const onUpdate = async (challenge: ChallengeUpdateModel, noFeedback?: boolean) => {
     if (!challenge) return

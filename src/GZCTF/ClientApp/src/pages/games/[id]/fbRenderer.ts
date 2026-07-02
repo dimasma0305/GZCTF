@@ -15,6 +15,7 @@
  * KotH coronations use the purple CROWN palette instead of the red BLOOD one.
  */
 import { Application, Container, Graphics, Sprite, Texture } from 'pixi.js'
+import { prefersReducedMotion } from './reducedMotion'
 
 // Two palettes: BLOOD (FIRST BLOOD — A&D / Jeopardy, red) and CROWN (FIRST CROWN — KotH, purple).
 type Pal = { HOT: number[]; MID: number[]; COOL: number[]; DARK: number[]; RING: number[]; SMOKE: number }
@@ -182,6 +183,11 @@ export function createFbRenderer(mount: ShadowRoot | HTMLElement) {
     get ready() { return ready },
     play(durationMs = 5000, opts?: PlayOpts) {
       if (!ready || disposed) return
+      // Accessibility: the first-blood / crown cinematic is a full-screen particle burst —
+      // exactly the kind of motion a vestibular-sensitive user opts out of. Skip it entirely
+      // under prefers-reduced-motion (the underlying scoreboard/blood state updates elsewhere,
+      // so nothing functional is lost — only the celebratory animation).
+      if (prefersReducedMotion()) return
       dur = durationMs
       W = window.innerWidth || 1; H = window.innerHeight || 1
       app.renderer.resize(W, H)

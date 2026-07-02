@@ -21,6 +21,7 @@
  * identity each relayout — a reconcile-by-ref (like fxRenderer's) would leak.
  */
 import { Application, Graphics, ParticleContainer, Particle, Rectangle, Texture } from 'pixi.js'
+import { prefersReducedMotion } from './reducedMotion'
 
 export interface JeopRenderer {
   readonly ready: boolean
@@ -169,6 +170,11 @@ export function createJeopRenderer(wrapEl: HTMLElement, opts?: { onReady?: () =>
       if (!fxq.length && now - lastDraw < 33) return
       lastDraw = now
       glowG.clear(); overG.clear(); beamG.clear()
+      // Accessibility: under prefers-reduced-motion, pin the twinkle phase to its peak so
+      // stars render at a steady full alpha instead of oscillating. Everything else
+      // (positions, glows, crosshairs, solved rings, lasers) is unchanged — the board is
+      // fully drawn, it just doesn't pulse.
+      const reduceMotion = prefersReducedMotion()
       if (hasStars) {
         const sec = now / 1000
         for (const { o, star } of pairs) {
@@ -176,7 +182,7 @@ export function createJeopRenderer(wrapEl: HTMLElement, opts?: { onReady?: () =>
           const solved = o.solvers.length > 0, dim = solved ? 0.62 : 1
           const o1 = dim, o2 = dim * (solved ? 0.8 : 0.55)
           const dur = 2.4 + (o.i * 0.7) % 2.1, dly = -(o.i * 0.6)
-          const a01 = 0.5 + 0.5 * Math.cos(6.2832 * (sec - dly) / dur) // 1 at peak (--o), 0 at trough (--o2)
+          const a01 = reduceMotion ? 1 : 0.5 + 0.5 * Math.cos(6.2832 * (sec - dly) / dur) // 1 at peak (--o), 0 at trough (--o2)
           const g = o2 + (o1 - o2) * a01 // group opacity, matches the jtwk keyframe
           const col = colNum(o.catObj.color)
           star.alpha = g
