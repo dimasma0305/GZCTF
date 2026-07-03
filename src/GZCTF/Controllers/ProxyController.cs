@@ -16,6 +16,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Localization;
 using Microsoft.Extensions.Options;
+using StackExchange.Redis;
 
 namespace GZCTF.Controllers;
 
@@ -431,18 +432,37 @@ public class ProxyController(
     /// <param name="id">Container ID</param>
     /// <param name="token"></param>
     /// <returns></returns>
+    // A transient Redis blip on the cache calls below must NOT 500 a player's proxy connect.
+    // These gate live container access every time a team opens SSH/HTTP/TCP to their box, so
+    // they fail OPEN against the DB source of truth (validity) / the fairness cap (count).
+    private static bool IsTransientCacheFault(Exception e) => e is RedisException or TimeoutException;
+
     private async Task<bool> ValidateContainer(Guid id, CancellationToken token = default)
     {
         var key = CacheKey.ConnectionCount(id);
-        var bytes = await cache.GetAsync(key, token);
 
-        // avoid DoS attack with cache -1
-        if (bytes is not null)
-            return BitConverter.ToInt32(bytes) >= 0;
+        try
+        {
+            var bytes = await cache.GetAsync(key, token);
+            // avoid DoS attack with cache -1
+            if (bytes is not null)
+                return BitConverter.ToInt32(bytes) >= 0;
+        }
+        catch (Exception e) when (IsTransientCacheFault(e))
+        {
+            // Redis blip — skip the cache and validate against the DB directly.
+        }
 
         var valid = await containerRepository.ValidateContainer(id, token);
 
-        await cache.SetAsync(key, BitConverter.GetBytes(valid ? 0 : -1), ValidOption, token);
+        try
+        {
+            await cache.SetAsync(key, BitConverter.GetBytes(valid ? 0 : -1), ValidOption, token);
+        }
+        catch (Exception e) when (IsTransientCacheFault(e))
+        {
+            // Couldn't cache the verdict — return the DB result anyway.
+        }
 
         return valid;
     }
@@ -499,6 +519,14 @@ public class ProxyController(
 
             return true;
         }
+        catch (Exception e) when (IsTransientCacheFault(e))
+        {
+            // Redis blip: the connection cap is a fairness control, not a safety invariant, so
+            // fail OPEN (allow) rather than 500ing the player's proxy connect. Under-counting is
+            // the safe direction — Decrease floors at 0, so a missed increment can't lock anyone
+            // out (a missed DECREMENT could, which is why Decrease also swallows below).
+            return true;
+        }
         finally
         {
             gate.Release();
@@ -530,6 +558,13 @@ public class ProxyController(
                 await cache.SetAsync(key, BitConverter.GetBytes(count - 1), StoreOption);
             else
                 await cache.SetAsync(key, BitConverter.GetBytes(0), ValidOption);
+        }
+        catch (Exception e) when (IsTransientCacheFault(e))
+        {
+            // Best-effort decrement; a Redis blip here would otherwise leave the count
+            // permanently one too high (Increase refreshes the TTL on every connect, so it
+            // needn't ever expire), drifting the container toward its cap-lockout. Swallowing
+            // keeps the connect path alive; the count self-corrects once the key TTLs out.
         }
         finally
         {

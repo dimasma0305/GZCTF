@@ -46,7 +46,9 @@ services:
       - DOTNET_CreateDumpVerboseDiagnostics=1
       - ADMIN_PASSWORD=${GZCTF_ADMIN_PASSWORD:-Admin@2022}
       - ConnectionStrings__Database=Host=postgres;Database=gzctf;Username=gzctf;Password=gzctf
-      - ConnectionStrings__Redis=redis:6379,password=gzctf
+      # abortConnect=false: don't hard-throw at connect time if redis is momentarily
+      # unreachable (startup race / brief blip) — let the multiplexer retry in the background.
+      - ConnectionStrings__Redis=redis:6379,password=gzctf,abortConnect=false
       - XorKey=gzctf-xor-key
       # Public scheme for absolute-URL generation (OAuth redirect_uri, email links) when
       # behind a TLS-terminating proxy. X-Forwarded-Proto is honoured if the proxy sends
@@ -179,9 +181,13 @@ services:
       # Crash dumps: on a native SIGSEGV the runtime writes a minidump +
       # .crashreport.json here so the next musl/vfscanf crash gives a real stack.
       - "./dumps:/dumps"
+    # Wait for the data services to be HEALTHY (not just started) so a fresh `up` / host
+    # reboot can't race gzctf ahead of redis/postgres and throw during DI activation.
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     # No explicit challenge networks here either — DockerProvider's
     # EnsureNetworkCreated calls AttachSelfToNetwork on startup, so gzctf
     # auto-joins the platform-managed challenges-{open,isolated} bridges
@@ -285,12 +291,29 @@ services:
       - POSTGRES_PASSWORD=gzctf
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # The data services carried no restart policy while gzctf/ssh-jump/wireguard all use
+    # unless-stopped — so a postgres/redis crash or a host reboot left them down indefinitely
+    # (gzctf auto-restarts but then can't reach its DB/cache). Match the app's policy.
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gzctf -d gzctf"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
 
   redis:
     image: redis:alpine
     command: redis-server --requirepass gzctf
     volumes:
       - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "gzctf", "--no-auth-warning", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
   # TEMP (bottleneck investigation): Grafana's all-in-one OTLP backend — receives
   # OTLP push from gzctf and stores traces (Tempo) / metrics (Prometheus) / logs

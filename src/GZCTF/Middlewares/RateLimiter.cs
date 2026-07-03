@@ -60,13 +60,24 @@ public static class RateLimiter
     const int GlobalPermitLimit = 150;
     static readonly TimeSpan GlobalWindow = TimeSpan.FromMinutes(1);
 
-    // Tight per-IP throttle for POST /api/Account/LogIn. Identity's own
-    // lockoutOnFailure is intentionally left off (usernames are public on the
-    // scoreboard, so a per-account lock is a trivial mid-game DoS against rivals),
-    // so this per-IP cap is the actual brute-force ceiling against the 6-char-min
-    // password policy — far tighter than the 150/min global limiter.
-    const int LoginPermitLimit = 10;
+    // Per-IP throttle for POST /api/Account/LogIn. Identity's own lockoutOnFailure is
+    // intentionally left off (usernames are public on the scoreboard, so a per-account
+    // lock is a trivial mid-game DoS against rivals), so this per-IP cap is the actual
+    // brute-force ceiling against the 6-char-min password policy. Set to 50/min (not a
+    // tight 10): at a shared-NAT venue — campus LAN / conference WiFi / CGNAT — dozens of
+    // legitimate players share ONE public IP and all log in at kickoff, and a 10/min cap
+    // would 429-lock the venue. 50/min still shuts down an automated brute-forcer (which
+    // does thousands/min) while tolerating a real crowd. NOTE: this counts every attempt,
+    // not just failures; counting only failed logins would be the tighter-and-fairer fix.
+    const int LoginPermitLimit = 50;
     static readonly TimeSpan LoginWindow = TimeSpan.FromMinutes(1);
+
+    // Per-IP throttle for the mail-triggering endpoints (Register / Recovery / ChangeEmail).
+    // Per-recipient flooding is already covered independently by IMailRateLimiter, so this
+    // is purely per-IP abuse limiting — and per-IP (not one global bucket) so a signup rush
+    // from many players can't exhaust a single platform-wide allowance and lock everyone out.
+    const int RegisterPermitLimit = 20;
+    static readonly TimeSpan RegisterWindow = TimeSpan.FromMinutes(5);
 
     /// <summary>
     /// Configures ASP.NET Core's rate limiter. Scoped only to the GlobalLimiter
@@ -149,13 +160,15 @@ public static class RateLimiter
             o.PermitLimit = 1;
             o.QueueLimit = 20;
         });
-        options.AddSlidingWindowLimiter(nameof(LimitPolicy.Register), o =>
+        // Per-IP (was a single unpartitioned global bucket): otherwise a kickoff signup /
+        // forgot-password rush from many DIFFERENT players collectively exhausts one ~20/150s
+        // allowance and 429s every new registrant AND every password reset platform-wide.
+        options.AddPolicy(nameof(LimitPolicy.Register), context =>
         {
-            o.QueueLimit = 10;
-            o.PermitLimit = 20;
-            o.Window = TimeSpan.FromSeconds(150);
-            o.QueueProcessingOrder = QueueProcessingOrder.NewestFirst;
-            o.SegmentsPerWindow = 5;
+            var ipKey = NormalizedClientIpKey(context);
+            return ipKey is null
+                ? RateLimitPartition.GetNoLimiter("register-loopback")
+                : GetIpPartition($"register:{ipKey}", redis, logger, RegisterPermitLimit, RegisterWindow, 10);
         });
         options.AddTokenBucketLimiter(nameof(LimitPolicy.Query), o =>
         {

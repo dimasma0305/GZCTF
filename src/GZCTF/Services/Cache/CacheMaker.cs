@@ -83,96 +83,26 @@ public class CacheMaker(
         {
             await foreach (var item in channelReader.ReadAllAsync(token))
             {
-                if (!_cacheHandlers.TryGetValue(item.Key, out var handler))
-                {
-                    logger.SystemLog(
-                        StaticLocalizer[nameof(Resources.Program.Cache_NoMatchingRequest), item.Key],
-                        TaskStatus.NotFound,
-                        LogLevel.Warning);
-                    continue;
-                }
-
-                var key = handler.CacheKey(item);
-
-                if (key is null)
-                {
-                    logger.SystemLog(
-                        StaticLocalizer[nameof(Resources.Program.Cache_InvalidUpdateRequest), item.Key],
-                        TaskStatus.NotFound,
-                        LogLevel.Warning);
-                    continue;
-                }
-
-                var updateLock = CacheKey.UpdateLock(key);
-
-                // Shares CacheHelper's atomic acquire (a single SET-if-not-exists when
-                // Redis is configured) rather than its own separate get-then-set: the two
-                // used to race each other too, since both write the SAME lock key — and
-                // after CacheHelper's fix moved that key to a raw Redis STRING, a
-                // still-HASH-based acquire here would've been a straight-up type mismatch,
-                // not just a race.
-                if (!await cacheHelper.TryAcquireLockAsync(updateLock, token))
-                {
-                    // Someone else (this instance or another replica) is already
-                    // rebuilding this key — skip rather than duplicate the work.
-                    logger.SystemLog(StaticLocalizer[nameof(Resources.Program.Cache_InvalidUpdateRequest), key],
-                        TaskStatus.Pending,
-                        LogLevel.Debug);
-                    continue;
-                }
-
                 try
                 {
-                    var lastUpdateKey = CacheKey.LastUpdateTime(key);
-                    var lastUpdateBytes = await cache.GetAsync(lastUpdateKey, token);
-                    if (lastUpdateBytes is not null && lastUpdateBytes.Length > 0)
-                    {
-                        var lastUpdate = MemoryPackSerializer.Deserialize<DateTimeOffset>(lastUpdateBytes);
-                        // if the cache is updated after the request, skip
-                        // this will de-bounced the slow cache update request
-                        if (lastUpdate > item.Time)
-                            continue;
-                    }
-
-                    lastUpdateBytes = MemoryPackSerializer.Serialize(DateTimeOffset.UtcNow);
-                    await cache.SetAsync(lastUpdateKey, lastUpdateBytes, new(), token);
-
-                    await using var scope = serviceScopeFactory.CreateAsyncScope();
-
-                    var bytes = await handler.Handle(scope, item, token);
-
-                    if (bytes.Length > 0)
-                    {
-                        await cache.SetAsync(key, bytes, item.Options ?? new DistributedCacheEntryOptions(), token);
-                        logger.SystemLog(
-                            StaticLocalizer[
-                                nameof(Resources.Program.Cache_Updated),
-                                key, item.Time.ToString("HH:mm:ss.fff"), bytes.Length
-                            ], TaskStatus.Success, LogLevel.Debug);
-
-                        // notify local memory cache
-                        memoryCache.Remove(key);
-                    }
-                    else
-                    {
-                        logger.SystemLog(StaticLocalizer[nameof(Resources.Program.Cache_GenerationFailed), key],
-                            TaskStatus.Failed,
-                            LogLevel.Warning);
-                    }
+                    await ProcessCacheRequestAsync(item, token);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw; // shutdown — exit the worker loop
                 }
                 catch (Exception e)
                 {
+                    // A transient fault in ONE request (notably a Redis blip in the lock
+                    // acquire/release that sits outside the inner try) must skip only that
+                    // request, NOT kill the worker. Before this guard such a throw escaped the
+                    // OperationCanceledException-only catch below and terminated the loop
+                    // permanently — every scoreboard froze at its last snapshot until a process
+                    // restart while scoring kept advancing in Postgres. Log and keep going.
                     logger.SystemLog(
-                        StaticLocalizer[nameof(Resources.Program.Cache_UpdateWorkerFailed), key, e.Message],
-                        TaskStatus.Failed,
-                        LogLevel.Error);
+                        StaticLocalizer[nameof(Resources.Program.Cache_UpdateWorkerFailed), item.Key, e.Message],
+                        TaskStatus.Failed, LogLevel.Error);
                 }
-                finally
-                {
-                    await cacheHelper.ReleaseLockAsync(updateLock, token);
-                }
-
-                token.ThrowIfCancellationRequested();
             }
         }
         catch (OperationCanceledException)
@@ -185,5 +115,97 @@ public class CacheMaker(
             logger.SystemLog(StaticLocalizer[nameof(Resources.Program.Cache_WorkerStopped)], TaskStatus.Exit,
                 LogLevel.Debug);
         }
+    }
+
+    /// <summary>
+    /// Rebuild the cache for a single request. Any exception it throws is caught by the
+    /// caller loop (so it skips only this request, never kills the worker). Returns early
+    /// on an unroutable request, a null key, or a lost lock race.
+    /// </summary>
+    private async Task ProcessCacheRequestAsync(CacheRequest item, CancellationToken token)
+    {
+        if (!_cacheHandlers.TryGetValue(item.Key, out var handler))
+        {
+            logger.SystemLog(
+                StaticLocalizer[nameof(Resources.Program.Cache_NoMatchingRequest), item.Key],
+                TaskStatus.NotFound,
+                LogLevel.Warning);
+            return;
+        }
+
+        var key = handler.CacheKey(item);
+
+        if (key is null)
+        {
+            logger.SystemLog(
+                StaticLocalizer[nameof(Resources.Program.Cache_InvalidUpdateRequest), item.Key],
+                TaskStatus.NotFound,
+                LogLevel.Warning);
+            return;
+        }
+
+        var updateLock = CacheKey.UpdateLock(key);
+
+        // Shares CacheHelper's atomic acquire (a single SET-if-not-exists when
+        // Redis is configured) rather than its own separate get-then-set: the two
+        // used to race each other too, since both write the SAME lock key — and
+        // after CacheHelper's fix moved that key to a raw Redis STRING, a
+        // still-HASH-based acquire here would've been a straight-up type mismatch,
+        // not just a race.
+        if (!await cacheHelper.TryAcquireLockAsync(updateLock, token))
+        {
+            // Someone else (this instance or another replica) is already
+            // rebuilding this key — skip rather than duplicate the work.
+            logger.SystemLog(StaticLocalizer[nameof(Resources.Program.Cache_InvalidUpdateRequest), key],
+                TaskStatus.Pending,
+                LogLevel.Debug);
+            return;
+        }
+
+        try
+        {
+            var lastUpdateKey = CacheKey.LastUpdateTime(key);
+            var lastUpdateBytes = await cache.GetAsync(lastUpdateKey, token);
+            if (lastUpdateBytes is not null && lastUpdateBytes.Length > 0)
+            {
+                var lastUpdate = MemoryPackSerializer.Deserialize<DateTimeOffset>(lastUpdateBytes);
+                // if the cache is updated after the request, skip
+                // this will de-bounced the slow cache update request
+                if (lastUpdate > item.Time)
+                    return;
+            }
+
+            lastUpdateBytes = MemoryPackSerializer.Serialize(DateTimeOffset.UtcNow);
+            await cache.SetAsync(lastUpdateKey, lastUpdateBytes, new(), token);
+
+            await using var scope = serviceScopeFactory.CreateAsyncScope();
+
+            var bytes = await handler.Handle(scope, item, token);
+
+            if (bytes.Length > 0)
+            {
+                await cache.SetAsync(key, bytes, item.Options ?? new DistributedCacheEntryOptions(), token);
+                logger.SystemLog(
+                    StaticLocalizer[
+                        nameof(Resources.Program.Cache_Updated),
+                        key, item.Time.ToString("HH:mm:ss.fff"), bytes.Length
+                    ], TaskStatus.Success, LogLevel.Debug);
+
+                // notify local memory cache
+                memoryCache.Remove(key);
+            }
+            else
+            {
+                logger.SystemLog(StaticLocalizer[nameof(Resources.Program.Cache_GenerationFailed), key],
+                    TaskStatus.Failed,
+                    LogLevel.Warning);
+            }
+        }
+        finally
+        {
+            await cacheHelper.ReleaseLockAsync(updateLock, token);
+        }
+
+        token.ThrowIfCancellationRequested();
     }
 }

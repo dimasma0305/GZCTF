@@ -28,6 +28,32 @@ public class CacheHelper(
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> SingleFlight = new();
 
     /// <summary>
+    /// A transient Redis connectivity/timeout/server fault (a blip), as opposed to a real
+    /// programming error. Cache operations fail OPEN on these — serve from the source of
+    /// truth (Postgres) rather than 500ing the whole platform, and keep the CacheMaker
+    /// rebuild worker alive rather than letting it die permanently. Same philosophy as
+    /// <c>FailOpenRateLimiter</c>. Redis became a live dependency once the connection string
+    /// was wired, so every hot-path cache touch needs this guard.
+    /// </summary>
+    private static bool IsTransientCacheFault(Exception e) => e is RedisException or TimeoutException;
+
+    /// <summary>
+    /// <c>distributedCache.GetAsync</c> that fails OPEN: a Redis blip is treated as a cache
+    /// miss (returns null) so the caller rebuilds from the source instead of throwing a 500.
+    /// </summary>
+    private async Task<byte[]?> SafeDistributedGetAsync(string key, CancellationToken token)
+    {
+        try
+        {
+            return await distributedCache.GetAsync(key, token);
+        }
+        catch (Exception e) when (IsTransientCacheFault(e))
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Get or create cache, if cache not exists will block.
     /// Use local memory cache first to reduce the pressure on distributed cache.
     /// Use CacheMaker and CacheRequest to replace handling longer time operation
@@ -71,7 +97,7 @@ public class CacheHelper(
         if (memoryCache.TryGetValue(key, out TResult? value) && value is not null)
             return value;
 
-        var bytes = await distributedCache.GetAsync(key, token);
+        var bytes = await SafeDistributedGetAsync(key, token);
         if (TryDeserialize(bytes, ref value))
             memoryCache.Set(key, value, CommonMemoryCacheOptions);
 
@@ -158,7 +184,7 @@ public class CacheHelper(
         CancellationToken token = default)
     {
         var cacheTime = DateTimeOffset.Now;
-        var value = await distributedCache.GetAsync(key, token);
+        var value = await SafeDistributedGetAsync(key, token);
         TResult? result = default;
 
         // most of the time, the cache is already been set
@@ -178,7 +204,7 @@ public class CacheHelper(
                 return result;
         }
 
-        int byteCount;
+        int byteCount = 0;
         try
         {
             // begin the update
@@ -188,7 +214,19 @@ public class CacheHelper(
             byteCount = bytes.Length;
 
             // finish the update
-            await distributedCache.SetAsync(key, bytes, cacheOptions, token);
+            try
+            {
+                await distributedCache.SetAsync(key, bytes, cacheOptions, token);
+            }
+            catch (Exception e) when (IsTransientCacheFault(e))
+            {
+                // Redis unavailable — serve the freshly-built value from the source anyway
+                // (uncached this round) instead of 500ing every player-facing read.
+                byteCount = 0;
+                logger.SystemLog(
+                    StaticLocalizer[nameof(Resources.Program.Cache_UpdateWorkerFailed), key, e.Message],
+                    TaskStatus.Failed, LogLevel.Warning);
+            }
         }
         finally
         {
@@ -234,17 +272,29 @@ public class CacheHelper(
     /// </summary>
     internal async Task<bool> TryAcquireLockAsync(string lockKey, CancellationToken token)
     {
-        if (redis is not null)
-            return await redis.GetDatabase().StringSetAsync(
-                lockKey, RedisValue.EmptyString, TimeSpan.FromMinutes(1), When.NotExists);
+        try
+        {
+            if (redis is not null)
+                return await redis.GetDatabase().StringSetAsync(
+                    lockKey, RedisValue.EmptyString, TimeSpan.FromMinutes(1), When.NotExists);
 
-        var existing = await distributedCache.GetAsync(lockKey, token);
-        if (existing is not null)
-            return false;
+            var existing = await distributedCache.GetAsync(lockKey, token);
+            if (existing is not null)
+                return false;
 
-        await distributedCache.SetAsync(lockKey, [],
-            new DistributedCacheEntryOptions { SlidingExpiration = TimeSpan.FromMinutes(1) }, token);
-        return true;
+            await distributedCache.SetAsync(lockKey, [],
+                new DistributedCacheEntryOptions { SlidingExpiration = TimeSpan.FromMinutes(1) }, token);
+            return true;
+        }
+        catch (Exception e) when (IsTransientCacheFault(e))
+        {
+            // Redis blip: we can't coordinate the lock, so fail OPEN — proceed as the sole
+            // builder. A redundant rebuild is harmless (the no-Redis fallback already
+            // tolerates a double-acquire). Critically, this must NOT throw: this call runs
+            // OUTSIDE the CacheMaker loop's inner try, so an escaping exception here would
+            // terminate the rebuild worker permanently and freeze every scoreboard.
+            return true;
+        }
     }
 
     /// <summary>
@@ -258,23 +308,46 @@ public class CacheHelper(
     /// </summary>
     private async Task<byte[]?> WaitForLockReleaseAsync(string key, string lockKey, CancellationToken token)
     {
-        if (redis is not null)
+        try
         {
-            var db = redis.GetDatabase();
-            while (await db.KeyExistsAsync(lockKey))
-                await Task.Delay(100, token);
+            if (redis is not null)
+            {
+                var db = redis.GetDatabase();
+                while (await db.KeyExistsAsync(lockKey))
+                    await Task.Delay(100, token);
+            }
+            else
+            {
+                while (await distributedCache.GetAsync(lockKey, token) is not null)
+                    await Task.Delay(100, token);
+            }
         }
-        else
+        catch (Exception e) when (IsTransientCacheFault(e))
         {
-            while (await distributedCache.GetAsync(lockKey, token) is not null)
-                await Task.Delay(100, token);
+            // Redis blipped while waiting on the holder — stop waiting and fall through to a
+            // source rebuild rather than throwing up into the caller.
         }
 
-        return await distributedCache.GetAsync(key, token);
+        return await SafeDistributedGetAsync(key, token);
     }
 
-    internal Task ReleaseLockAsync(string lockKey, CancellationToken token = default) =>
-        distributedCache.RemoveAsync(lockKey, token);
+    internal async Task ReleaseLockAsync(string lockKey, CancellationToken token = default)
+    {
+        try
+        {
+            // CancellationToken.None: releasing the lock is cleanup that must run even when the
+            // caller's token was cancelled (a redeploy). RemoveAsync throws on a pre-cancelled
+            // token BEFORE deleting, which would leak the lock until its 1-min TTL. The `token`
+            // param is kept for source-compat but intentionally not honoured for the delete.
+            _ = token;
+            await distributedCache.RemoveAsync(lockKey, CancellationToken.None);
+        }
+        catch (Exception e) when (IsTransientCacheFault(e))
+        {
+            // Redis down — the lock's 1-min TTL clears it. Never surface this: it runs in a
+            // finally, including inside the CacheMaker loop.
+        }
+    }
 }
 
 /// <summary>

@@ -192,10 +192,21 @@ public class CronJobService(IDistributedCache cache, IServiceScopeFactory provid
         // acquired via the raw-Redis path above (TryHoldLock writes it as a plain
         // STRING; RefreshAsync assumes the HASH format IDistributedCache's own
         // Set/Get use) — same type-mismatch reasoning as the acquire itself.
-        if (redis is not null)
-            await redis.GetDatabase().KeyExpireAsync(CacheKey.CronJobLock, LockTtl);
-        else
-            await cache.RefreshAsync(CacheKey.CronJobLock);
+        // Guard the renewal: a Redis blip here would otherwise throw BEFORE the job loop
+        // below and silently skip a whole tick of housekeeping (reaper, cache bootstrap,
+        // pruning). Leadership still holds (1-min renew vs 2-min TTL), so log and continue.
+        try
+        {
+            if (redis is not null)
+                await redis.GetDatabase().KeyExpireAsync(CacheKey.CronJobLock, LockTtl);
+            else
+                await cache.RefreshAsync(CacheKey.CronJobLock);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            logger.SystemLog(StaticLocalizer[nameof(Resources.Program.CronJob_ExecuteFailed),
+                "LockRenew", e.Message], TaskStatus.Failed, LogLevel.Warning);
+        }
 
         lock (_jobs)
         {
