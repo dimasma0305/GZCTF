@@ -64,6 +64,11 @@ public sealed class AdEgressIsolationService(
     // non-baked base still self-heals — but with this image it never runs.
     private const string HelperImage = "gzctf/egress-helper:latest";
 
+    // Pullable fallback when the baked image is missing (not built yet, or pruned — a
+    // local-only tag can't be pulled). Bare alpine + the script's runtime apk-add keeps
+    // egress containment applying rather than silently failing. See RunHelperAsync.
+    private const string HelperFallbackImage = "alpine:3.21";
+
     // On-demand re-apply trigger. Bounded(1)/drop-write: a launch only needs to
     // ensure one re-apply runs after it, and bursts coalesce into a single pass.
     private readonly Channel<byte> _trigger =
@@ -401,8 +406,15 @@ public sealed class AdEgressIsolationService(
             try { created = await docker.Containers.CreateContainerAsync(pars, token); }
             catch (DockerImageNotFoundException)
             {
-                await docker.Images.CreateImageAsync(new ImagesCreateParameters { FromImage = HelperImage }, null,
-                    new Progress<JSONMessage>(_ => { }), token);
+                // The baked helper image isn't present locally — never built, or PRUNED (a
+                // local-only tag isn't pullable, and `docker image prune -a` reaps unused
+                // images). Fall back to bare, pullable alpine and let the script's defensive
+                // `apk add iptables ipset` install the tools at runtime, so egress CONTAINMENT
+                // still applies instead of silently stopping (matches the old always-alpine
+                // behavior). Once `compose build` re-creates the baked image, the fast path resumes.
+                await docker.Images.CreateImageAsync(new ImagesCreateParameters { FromImage = HelperFallbackImage },
+                    null, new Progress<JSONMessage>(_ => { }), token);
+                pars.Image = HelperFallbackImage;
                 created = await docker.Containers.CreateContainerAsync(pars, token);
             }
             id = created.ID;
