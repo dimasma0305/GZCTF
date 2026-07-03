@@ -83,15 +83,23 @@ public class SubmissionRepository(
         // and suppress once the game has ended so post-game practice solves (which now
         // produce real Accepted submissions via the practice FlagContext) aren't
         // broadcast/attributed to teams. Mirrors the REST AttackFeed + scoreboard gates.
-        var gate = await Context.Games.AsNoTracking()
-            .Where(g => g.Id == submission.GameId)
-            .Select(g => new { g.Hidden, g.FreezeTimeUtc, g.EndTimeUtc })
-            .SingleOrDefaultAsync();
-        if (gate is null || gate.Hidden)
+        // The gate fields live on the Game the caller already loaded (FlagChecker reads
+        // item.Game.EndTimeUtc/FreezeTimeUtc on the lines right before it calls here), so
+        // use that navigation directly instead of re-querying Games on EVERY flag check
+        // (correct or wrong). Fall back to a load only if the navigation is somehow absent.
+        var game = submission.Game;
+        if (game is null)
+        {
+            game = await Context.Games.AsNoTracking().FirstOrDefaultAsync(g => g.Id == submission.GameId);
+            if (game is null)
+                return;
+        }
+
+        if (game.Hidden)
             return;
         var nowUtc = DateTimeOffset.UtcNow;
-        if (nowUtc >= gate.EndTimeUtc ||
-            (gate.FreezeTimeUtc is { } freeze && nowUtc >= freeze && nowUtc < gate.EndTimeUtc))
+        if (nowUtc >= game.EndTimeUtc ||
+            (game.FreezeTimeUtc is { } freeze && nowUtc >= freeze && nowUtc < game.EndTimeUtc))
             return;
 
         // Prefer navigation-loaded data; fall back to projection if missing.

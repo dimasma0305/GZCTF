@@ -22,10 +22,7 @@ public static class PrelaunchHelper
             if (app.Configuration["xorKey"] is not { Length: > 0 })
                 ExitWithFatalMessage(StaticLocalizer[nameof(Resources.Program.Init_XorKeyNotSet)]);
 
-            if (context.Database.GetMigrations().Any())
-                await context.Database.MigrateAsync();
-
-            await context.Database.EnsureCreatedAsync();
+            await MigrateUnderAdvisoryLockAsync(context);
 
             if (!await context.Posts.AnyAsync())
             {
@@ -104,6 +101,57 @@ public static class PrelaunchHelper
             if (app.Environment.IsDevelopment())
                 await DevDataSeeder.SeedAsync(serviceScope.ServiceProvider, logger, CancellationToken.None);
         }
+    }
+
+    /// <summary>
+    /// Run EF migrations under a Postgres <b>session</b> advisory lock so two replicas
+    /// starting together can't race the DDL. Every replica takes the SAME lock before
+    /// migrating: exactly one runs the migration while the others block, then acquire, find
+    /// it already applied (no-op), and release. The lock is held on one explicitly-opened
+    /// connection for the whole critical section (EF reuses an already-open connection and
+    /// won't close it). Postgres-only; a non-Npgsql provider (unit tests) just migrates.
+    /// </summary>
+    private static async Task MigrateUnderAdvisoryLockAsync(AppDbContext context)
+    {
+        if (!context.Database.IsNpgsql())
+        {
+            if (context.Database.GetMigrations().Any())
+                await context.Database.MigrateAsync();
+            await context.Database.EnsureCreatedAsync();
+            return;
+        }
+
+        var conn = context.Database.GetDbConnection();
+        var wasOpen = conn.State == System.Data.ConnectionState.Open;
+        if (!wasOpen)
+            await conn.OpenAsync();
+
+        var locked = false;
+        try
+        {
+            await ExecScalarAsync(conn, "SELECT pg_advisory_lock(hashtext('gzctf_migration'))");
+            locked = true;
+
+            if (context.Database.GetMigrations().Any())
+                await context.Database.MigrateAsync();
+
+            await context.Database.EnsureCreatedAsync();
+        }
+        finally
+        {
+            if (locked)
+                try { await ExecScalarAsync(conn, "SELECT pg_advisory_unlock(hashtext('gzctf_migration'))"); }
+                catch { /* the lock auto-releases when this session/connection closes anyway */ }
+            if (!wasOpen)
+                await conn.CloseAsync();
+        }
+    }
+
+    private static async Task ExecScalarAsync(System.Data.Common.DbConnection conn, string sql)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        await cmd.ExecuteNonQueryAsync();
     }
 
     extension(IDistributedCache cache)

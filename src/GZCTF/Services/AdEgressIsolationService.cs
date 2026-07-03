@@ -58,7 +58,11 @@ public sealed class AdEgressIsolationService(
     //                     attacking the hill (a valid play) reaches it.
     internal const string Set = "gzctf_chal";
     internal const string SetKoth = "gzctf_chal_koth";
-    private const string HelperImage = "alpine:3.21";
+    // Prebuilt locally by the `egress-helper` docker-compose service (alpine + iptables +
+    // ipset baked in) so the per-pass rule apply is dependency-free. The script below keeps
+    // a defensive `apk add` that simply no-ops when the tools are already present, so a
+    // non-baked base still self-heals — but with this image it never runs.
+    private const string HelperImage = "gzctf/egress-helper:latest";
 
     // On-demand re-apply trigger. Bounded(1)/drop-write: a launch only needs to
     // ensure one re-apply runs after it, and bursts coalesce into a single pass.

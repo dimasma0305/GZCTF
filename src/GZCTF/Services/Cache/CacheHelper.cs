@@ -147,6 +147,23 @@ public class CacheHelper(
     }
 
     /// <summary>
+    /// Flush ONLY the live standings boards (A&amp;D + KotH scoreboards), NOT the timelines.
+    /// For the high-frequency checker-tick path: SLA and KotH hold points change every tick
+    /// so the standings must refresh, but the score-over-time TIMELINES are downsampled
+    /// per-round series whose points are finalized at round-advance — rebuilding them on
+    /// every ~10s checker tick (each a full attack-history reload, O(teams×rounds)) is pure
+    /// waste that grows across a long game. The timelines are flushed by the full
+    /// <see cref="FlushAdScoreboardCache"/> on round-advance (their natural cadence) and on
+    /// config edits, so this trims the redundant per-tick rebuild without changing any score
+    /// or the standings' freshness (scoreboard generation + flush frequency are unchanged).
+    /// </summary>
+    public async Task FlushAdScoreboardsOnly(int gameId, CancellationToken token)
+    {
+        await channelWriter.WriteAsync(AdScoreboardCacheHandler.MakeCacheRequest(gameId), token);
+        await channelWriter.WriteAsync(KothScoreboardCacheHandler.MakeCacheRequest(gameId), token);
+    }
+
+    /// <summary>
     /// Flush the LIVE A&amp;D/KotH boards AND drop the four FROZEN variants. Call
     /// whenever a challenge's <c>IsEnabled</c> (or another scoring input the frozen
     /// build filters on) changes mid-game: the live boards self-heal on the next

@@ -49,6 +49,11 @@ services:
       # abortConnect=false: don't hard-throw at connect time if redis is momentarily
       # unreachable (startup race / brief blip) — let the multiplexer retry in the background.
       - ConnectionStrings__Redis=redis:6379,password=gzctf,abortConnect=false
+      # This deployment is a SINGLE instance, so opt out of Redis and use the faster
+      # in-process cache / rate limiter / locks (no network hop on the request hot path).
+      # The Redis string above is kept for a trivial flip to clustered mode: remove this
+      # line (or set false) and scale gzctf to >1 replica. See ConfigureCacheAndSignalR.
+      - SingleInstance=true
       - XorKey=gzctf-xor-key
       # Public scheme for absolute-URL generation (OAuth redirect_uri, email links) when
       # behind a TLS-terminating proxy. X-Forwarded-Proto is honoured if the proxy sends
@@ -266,6 +271,16 @@ services:
   # The SAME image is published multi-arch on Docker Hub as the team agent, so a
   # team's `docker compose up` just pulls it (one click, no registry setup).
   # Override both with Ad__Byoc__RelayImage / Ad__Byoc__AgentImage.
+  # Builds the A&D egress-isolation helper image locally (iptables + ipset baked in) under
+  # the tag AdEgressIsolationService launches every ~30s, so the per-pass rule apply no longer
+  # runs `apk add` over the network. Build-only, like byoc-relay (/bin/true builds and exits).
+  egress-helper:
+    build:
+      context: ./egress-helper
+    image: gzctf/egress-helper:latest
+    entrypoint: ["/bin/true"]
+    restart: "no"
+
   byoc-relay:
     build:
       context: ./byoc-relay

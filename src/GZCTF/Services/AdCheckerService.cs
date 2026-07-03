@@ -210,7 +210,9 @@ public sealed class AdCheckerService(
         {
             // No A&D services this game, but it may still have KotH hills to check.
             await CheckKothChallengesAsync(db, runner, gameId, latest, token);
-            await cacheHelper.FlushAdScoreboardCache(gameId, token);
+            // Scoreboards only — the timelines are per-round and refresh on round-advance,
+            // so rebuilding them every checker tick is redundant (see FlushAdScoreboardsOnly).
+            await cacheHelper.FlushAdScoreboardsOnly(gameId, token);
             return;
         }
 
@@ -287,9 +289,10 @@ public sealed class AdCheckerService(
         // KotH hills in this game (independent of the A&D per-team checks above).
         await CheckKothChallengesAsync(db, runner, gameId, latest, token);
 
-        // New verdicts persisted → SLA changed; refresh the cached board
-        // (background regen, de-bounced by CacheMaker so frequent ticks collapse).
-        await cacheHelper.FlushAdScoreboardCache(gameId, token);
+        // New verdicts persisted → SLA changed; refresh the cached STANDINGS boards only
+        // (background regen, de-bounced by CacheMaker so frequent ticks collapse). The
+        // per-round timelines are left to the round-advance flush — see FlushAdScoreboardsOnly.
+        await cacheHelper.FlushAdScoreboardsOnly(gameId, token);
     }
 
     /// <summary>
